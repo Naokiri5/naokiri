@@ -197,14 +197,14 @@ export function cancelPendingEntries(actor: string) {
   audit(actor, 'orders.cancelPendingEntries', { count: Number(r.changes) }); journal('INTERVENTION', `${r.changes} pending entries cancelled by ${actor}`);
   return { state: 'CONFIRMED', cancelled: Number(r.changes) };
 }
-export function protectPositions() {
+export function protectPositions(log = false) {
   const res = openPositions().map((p) => {
     const stop = get<any>("SELECT * FROM orders WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", p.id);
     const px = market.price(p.instrument);
     const ok = !!stop && Math.abs(stop.qty - p.qty) < 1e-9 && stop.stop_price === p.stop_price && !!px && Date.now() - px.ts < 120_000;
     return { positionId: p.id, instrument: p.instrument, protected: ok, stop: p.stop_price, qty: p.qty, issue: ok ? null : !stop ? 'no active protective stop' : !px ? 'no price' : 'stop/qty mismatch or stale price' };
   });
-  journal('RISK', `Protection reconciliation: ${res.filter((r) => r.protected).length}/${res.length} verified`);
+  if (log) journal('RISK', `Protection reconciliation: ${res.filter((r) => r.protected).length}/${res.length} verified`);
   return { state: res.every((r) => r.protected) ? 'CONFIRMED' : 'PARTIALLY_COMPLETED', positions: res };
 }
 export function closeAllPositions(actor: string, confirm: string) {
@@ -224,7 +224,7 @@ export function closePosition(actor: string, positionId: string) {
 }
 export function emergencyStop(actor: string) {
   updateControl(actor, { emergency: true, pausedNewOrders: true });
-  const c = cancelPendingEntries(actor); const p = protectPositions();
+  const c = cancelPendingEntries(actor); const p = protectPositions(true);
   notify('CRITICAL', 'EMERGENCY STOP engaged', `new orders blocked, ${c.cancelled} pending entries cancelled, protection ${p.state}. Positions NOT auto-closed (policy).`, 'risk');
   return { pause: 'CONFIRMED', cancel: c, protect: p, close: 'NOT_REQUESTED' };
 }

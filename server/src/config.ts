@@ -15,7 +15,7 @@ export const config = {
   scanIntervalMs: Number(env.MIA_SCAN_INTERVAL_MS ?? 60_000),
   tickerIntervalMs: Number(env.MIA_TICKER_INTERVAL_MS ?? 15_000),
   anthropicApiKey: env.ANTHROPIC_API_KEY ?? '',
-  joeModel: env.MIA_JOE_MODEL ?? 'claude-sonnet-5-5',
+  joeModel: env.MIA_JOE_MODEL ?? 'claude-opus-5-5',
   telegramBotToken: env.TELEGRAM_BOT_TOKEN ?? '',
   telegramChatId: env.TELEGRAM_CHAT_ID ?? '',
   /** Per-process secret used to authenticate worker evidence packets. Never logged. */

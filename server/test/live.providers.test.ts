@@ -25,3 +25,32 @@ describe.skipIf(!LIVE)('live providers (read-only)', () => {
     const n = await news.searchNews('bitcoin'); expect(n.length).toBeGreaterThan(0);
   }, 90_000);
 });
+
+describe.skipIf(!LIVE)('live paper execution (real order book, simulated fills)', () => {
+  it('enters and exits BTCUSDT against the live Binance book and reconciles', async () => {
+    const { config } = await import('../src/config.js'); (config as any).offline = false;
+    const { freshDb } = await import('./helpers.js'); freshDb();
+    const { market } = await import('../src/market/store.js'); market.reset();
+    const fabric = await import('../src/market/fabric.js');
+    await fabric.refreshRules(); await fabric.refreshTickers(); await fabric.refreshDeep(['crypto:binance:BTCUSDT']);
+    const { acceptPolicy, DEFAULT_POLICY } = await import('../src/risk/policy.js');
+    const { updateControl } = await import('../src/core/mode.js');
+    const { ledger, PAPER_ACCOUNT, openPositions } = await import('../src/portfolio/ledger.js');
+    const oms = await import('../src/exec/oms.js'); const { reconcile } = await import('../src/portfolio/calendar.js');
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const px = market.price('crypto:binance:BTCUSDT')!;
+    const stop = px.price * 0.98;
+    const r: any = { id: 'dec_live', candidateId: 'cand_live', traceId: 't', asset: 'BTCUSDT', instrumentId: 'crypto:binance:BTCUSDT', market: 'crypto', venue: 'binance', strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',
+      entryRef: px.price, stopLoss: stop, takeProfit: [{ price: px.price * 1.03, fraction: 1, r: 1.5 }], decision: 'PAPER_TRADE', opportunity: { score: 70 },
+      consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 0.6, opposition: 0.1, expiresAt: new Date(Date.now() + 60_000).toISOString() } };
+    const res = oms.submitEntry(r, 'bot');
+    expect(res.ok, res.reason).toBe(true);
+    const pos = openPositions()[0];
+    expect(Math.abs(pos.entry_price / px.ask - 1)).toBeLessThan(0.001); // filled near the real ask
+    expect(oms.protectPositions().state).toBe('CONFIRMED');
+    oms.closePosition('owner', pos.id);
+    const rec = reconcile(); expect(rec.ok).toBe(true);
+    expect(rec.positionsRealized).toBeLessThan(0); // round trip costs fees + spread
+    console.log('live round trip', { entry: pos.entry_price, qty: pos.qty, realized: rec.positionsRealized });
+  }, 90_000);
+});

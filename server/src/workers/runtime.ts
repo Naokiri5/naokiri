@@ -3,7 +3,7 @@ import type { WorkerContext, WorkerDef, WorkerResult } from './types.js';
 import { EVIDENCE_SCHEMA_VERSION, type SignedPacket } from '../qci/schemas.js';
 import { sign } from '../core/signing.js';
 import { uid, iso, withDeadline } from '../core/util.js';
-import { run, get } from '../db/db.js';
+import { run, get, tx } from '../db/db.js';
 import { record } from '../core/latency.js';
 
 /** Bounded elastic worker pool (Part 29.2): fixed concurrency, per-worker deadline, failures ⇒ ABSTAIN. */
@@ -18,10 +18,9 @@ export function isApplicable(w: WorkerDef, ctx: WorkerContext) {
 }
 
 async function runOne(w: WorkerDef, ctx: WorkerContext): Promise<SignedPacket | { failed: string; worker_id: string }> {
-  const t0 = performance.now();
-  let res: WorkerResult;
+  let res: WorkerResult; let ms = 0;
   try {
-    res = await withDeadline(Promise.resolve().then(() => w.evaluate(ctx)), POOL.deadlineMs);
+    res = await withDeadline(Promise.resolve().then(() => { const t0 = performance.now(); const r = w.evaluate(ctx); ms = performance.now() - t0; return r; }), POOL.deadlineMs);
     failures.set(w.id, 0);
   } catch (e: any) {
     const n = (failures.get(w.id) ?? 0) + 1; failures.set(w.id, n);
@@ -29,8 +28,7 @@ async function runOne(w: WorkerDef, ctx: WorkerContext): Promise<SignedPacket | 
     bumpStat(w.id, 'failed');
     return { failed: e?.message === 'DEADLINE' ? 'DEADLINE' : 'EXCEPTION', worker_id: w.id };
   }
-  const ms = performance.now() - t0;
-  record('qci.worker', ms);
+  record('qci.worker.compute', ms);
   const ageMs = ctx.quality.quoteAgeMs;
   const packet = {
     schema_version: EVIDENCE_SCHEMA_VERSION as '1.0', packet_id: uid('ev'), event_id: ctx.candidate.eventId, candidate_id: ctx.candidate.id,
@@ -61,10 +59,20 @@ export async function dispatch(ctx: WorkerContext) {
   return { eligible: eligible.length, quarantined: eligible.length - active.length, results };
 }
 
-function bumpStat(id: string, col: 'support' | 'oppose' | 'abstain' | 'failed') {
+type Col = 'support' | 'oppose' | 'abstain' | 'failed';
+const pendingStats = new Map<string, Record<Col, number>>();
+function bumpStat(id: string, col: Col) {
+  const s = pendingStats.get(id) ?? { support: 0, oppose: 0, abstain: 0, failed: 0 }; s[col]++; pendingStats.set(id, s);
+}
+/** Flushed off the hot path (Part 33: no DB waits inside worker evaluation). */
+export function flushWorkerStats() {
+  if (!pendingStats.size) return;
   try {
-    if (!get('SELECT 1 FROM worker_stats WHERE worker_id=?', id)) run('INSERT INTO worker_stats(worker_id, updated_at) VALUES (?,?)', id, Date.now());
-    run(`UPDATE worker_stats SET ${col}=${col}+1, updated_at=? WHERE worker_id=?`, Date.now(), id);
-  } catch { /* stats are best-effort; never block evaluation */ }
+    tx(() => { for (const [id, s] of pendingStats) {
+      if (!get('SELECT 1 FROM worker_stats WHERE worker_id=?', id)) run('INSERT INTO worker_stats(worker_id, updated_at) VALUES (?,?)', id, Date.now());
+      run('UPDATE worker_stats SET support=support+?, oppose=oppose+?, abstain=abstain+?, failed=failed+?, updated_at=? WHERE worker_id=?', s.support, s.oppose, s.abstain, s.failed, Date.now(), id);
+    } });
+    pendingStats.clear();
+  } catch { /* best-effort stats */ }
 }
 export function releaseQuarantine(id: string) { quarantined.delete(id); failures.set(id, 0); }

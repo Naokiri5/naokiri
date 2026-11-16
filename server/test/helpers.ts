@@ -14,9 +14,13 @@ export function synthCandles(n: number, opts: { start?: number; drift?: number; 
 }
 
 import { market } from '../src/market/store.js';
-import { closeDb, openDb } from '../src/db/db.js';
+import { closeDb, openDb, run } from '../src/db/db.js';
+import { seedStrategies } from '../src/lab/lab.js';
 import type { Instrument } from '../src/market/types.js';
-export function freshDb() { closeDb(); openDb(':memory:'); }
+export function freshDb(promote = true) {
+  closeDb(); openDb(':memory:'); seedStrategies();
+  if (promote) run("UPDATE strategies SET status='PAPER'");
+}
 /** Seed an instrument with synthetic candles on all intervals plus a deep book and cross-venue quote. */
 export function seedInstrument(symbol: string, opts: { drift?: number; vol?: number; seed?: number; quoteVolume?: number; nowTs?: number; spreadBps?: number } = {}) {
   const nowTs = opts.nowTs ?? Date.now();

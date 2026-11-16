@@ -14,6 +14,8 @@ import { strategyStats } from '../lab/lab.js';
 import { readIndicators } from '../workers/indicators.js';
 import { getControl } from '../core/mode.js';
 import { uid } from '../core/util.js';
+import { get } from '../db/db.js';
+import { INTERVAL_MS } from './types.js';
 import { timed, record } from '../core/latency.js';
 import { bus } from '../core/bus.js';
 import type { Candidate, WorkerContext } from '../workers/types.js';
@@ -83,6 +85,8 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
       const key = `${id}:${s.id}:${f1.t}`;
       if (processed.has(key)) { continue; }
       processed.add(key);
+      // survive restarts: a decision for this instrument/strategy after this candle closed already exists
+      if (get('SELECT 1 FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? LIMIT 1', id, s.id, f1.t + INTERVAL_MS[s.interval])) continue;
       if (!s.suitableRegimes.includes(reg.regime)) continue;
       const sig = s.generate(f1);
       if (!sig) continue;
@@ -96,7 +100,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
       const qci = await runConsensus(ctx);
       const correlatedOpen = openPositions().filter((p) => { const c = correlation(p.instrument, id); return c == null || c >= (currentPolicy()?.policy ?? DEFAULT_POLICY).correlationThreshold; }).length;
       const rep = decide(cand, ctx, qci, ctx.strategyStats, correlatedOpen);
-      record('pipeline.candidate_to_decision', performance.now() - cand.createdAt + 0);
+      record('pipeline.candidate_to_decision', Date.now() - cand.createdAt);
       row.lastDecision = { id: rep.id, decision: rep.decision, score: rep.opportunity.score, at: Date.now() };
       if (rep.decision === 'REJECTED' || rep.decision === 'INSUFFICIENT_DATA') rejectLog(inst.symbol, 'decision', `${s.id}: ${rep.decision} — ${[...qci.reason_codes, ...(rep.risk?.reasonCodes ?? [])].slice(0, 3).join('; ')}`);
       lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();

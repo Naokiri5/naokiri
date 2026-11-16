@@ -34,21 +34,26 @@ export function accountState(account = PAPER_ACCOUNT, nowTs = Date.now()): Accou
     openRisk += Math.max(0, p.qty * (Math.min(m, p.entry_price) - p.stop_price));
   }
   const equity = cash + value;
-  const marks = getSetting<{ day: string; sod: number; week: string; sow: number; hwm: number }>(`marks:${account}`, { day: '', sod: equity, week: '', sow: equity, hwm: equity });
+  const deposits = totalDeposits(account);
+  // Deposit-invariant marks: track cumulative performance (equity − net deposits) so funding
+  // changes never look like profit/loss and never disable a breaker (Part 17.7).
+  const perf = equity - deposits;
+  const marks = getSetting<{ day: string; sodPerf: number; week: string; sowPerf: number; hwmPerf: number }>(`marks2:${account}`, { day: '', sodPerf: perf, week: '', sowPerf: perf, hwmPerf: perf });
   let changed = false;
-  if (marks.day !== dayKey(nowTs)) { marks.day = dayKey(nowTs); marks.sod = equity; changed = true; }
-  if (marks.week !== weekKey(nowTs)) { marks.week = weekKey(nowTs); marks.sow = equity; changed = true; }
-  if (equity > marks.hwm) { marks.hwm = equity; changed = true; }
-  if (changed && !missing.length) setSetting(`marks:${account}`, marks);
+  if (marks.day !== dayKey(nowTs)) { marks.day = dayKey(nowTs); marks.sodPerf = perf; changed = true; }
+  if (marks.week !== weekKey(nowTs)) { marks.week = weekKey(nowTs); marks.sowPerf = perf; changed = true; }
+  if (perf > marks.hwmPerf) { marks.hwmPerf = perf; changed = true; }
+  if (changed && !missing.length) setSetting(`marks2:${account}`, marks);
+  const sod = deposits + marks.sodPerf, sow = deposits + marks.sowPerf, hwm = deposits + marks.hwmPerf;
   const closed = all<{ realized_pnl: number }>("SELECT realized_pnl FROM positions WHERE account=? AND status='CLOSED' ORDER BY closed_at DESC LIMIT 20", account);
   let streak = 0; for (const c of closed) { if (c.realized_pnl < 0) streak++; else break; }
   const dayStart = Date.parse(`${dayKey(nowTs)}T00:00:00Z`);
   const realizedToday = get<{ s: number }>("SELECT COALESCE(SUM(realized_pnl),0) s FROM positions WHERE account=? AND status='CLOSED' AND closed_at>=?", account, dayStart)!.s;
   return {
-    account, cash, positionsValue: value, equity, unrealizedPnl: unreal, deposits: totalDeposits(account),
-    startOfDayEquity: marks.sod, startOfWeekEquity: marks.sow, highWaterMark: marks.hwm,
-    dailyPnlPct: marks.sod ? ((equity - marks.sod) / marks.sod) * 100 : 0, weeklyPnlPct: marks.sow ? ((equity - marks.sow) / marks.sow) * 100 : 0,
-    drawdownPct: marks.hwm ? ((marks.hwm - equity) / marks.hwm) * 100 : 0, consecutiveLosses: streak,
+    account, cash, positionsValue: value, equity, unrealizedPnl: unreal, deposits,
+    startOfDayEquity: sod, startOfWeekEquity: sow, highWaterMark: hwm,
+    dailyPnlPct: sod > 0 ? ((perf - marks.sodPerf) / sod) * 100 : 0, weeklyPnlPct: sow > 0 ? ((perf - marks.sowPerf) / sow) * 100 : 0,
+    drawdownPct: hwm > 0 ? ((marks.hwmPerf - perf) / hwm) * 100 : 0, consecutiveLosses: streak,
     openRiskUsd: openRisk, openRiskPct: equity ? (openRisk / equity) * 100 : 0, openCount: pos.length, marksMissing: missing, realizedToday,
   };
 }

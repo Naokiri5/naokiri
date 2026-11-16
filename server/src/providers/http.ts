@@ -63,6 +63,10 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
   try {
     const res = await fetch(url, { signal: ctl.signal, redirect: 'follow', headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } });
+    if (res.status === 404) { // resource-level miss (e.g. product not listed) — provider itself is reachable
+      Object.assign(info, { lastOkAt: Date.now(), lastLatencyMs: Math.round(performance.now() - t0) });
+      throw Object.assign(new ProviderError(id, 'HTTP 404 (resource not found)', 404), { resourceMiss: true });
+    }
     if (!res.ok) throw new ProviderError(id, `HTTP ${res.status}`, res.status);
     const body = opts.as === 'text' ? await res.text() : await res.json();
     const ms = performance.now() - t0;
@@ -72,6 +76,7 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
     if (prev !== 'LIVE') bus.publish('health', { provider: id, status: 'LIVE' });
     return body;
   } catch (e: any) {
+    if (e?.resourceMiss) throw e;
     const msg = e?.name === 'AbortError' ? 'timeout' : String(e?.message ?? e).replace(/(key|token)=[^&\s]+/gi, '$1=***');
     info.errorCount++; info.lastErrorAt = Date.now(); info.lastError = msg;
     const recentOk = info.lastOkAt && Date.now() - info.lastOkAt < 120_000;

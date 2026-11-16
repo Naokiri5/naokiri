@@ -1,7 +1,7 @@
 import { SignedPacket, type EvidencePacket, type ConsensusRecord, type ConsensusState } from './schemas.js';
 import { verify } from '../core/signing.js';
 import { DOMAINS, REQUIRED_DOMAINS } from '../workers/registry.js';
-import { dispatch } from '../workers/runtime.js';
+import { dispatch, flushWorkerStats } from '../workers/runtime.js';
 import { challengePanel } from './challenge.js';
 import type { WorkerContext } from '../workers/types.js';
 import { uid, iso } from '../core/util.js';
@@ -96,6 +96,7 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     reasons.push(`weighted support ${agg.weightedSupport.toFixed(3)}, opposition ${agg.weightedOpposition.toFixed(3)}`);
   }
   const ms = performance.now() - t0; record('qci.consensus', ms);
+  flushWorkerStats();
   const created = Date.now();
   const rec: ConsensusRecord = {
     schema_version: '1.0', consensus_id: uid('qci'), candidate_id: ctx.candidate.id, event_id: ctx.candidate.eventId, instrument_id: ctx.candidate.instrumentId,

@@ -4,7 +4,7 @@ import { market } from '../src/market/store.js';
 import { evaluateRisk } from '../src/risk/gate.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
-import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
+import { ledger, PAPER_ACCOUNT, accountState } from '../src/portfolio/ledger.js';
 import { setSetting } from '../src/core/settings.js';
 
 const prop = (id: string, last: number, extra: any = {}) => ({ instrumentId: id, strategyId: 'trend_pullback', side: 'buy' as const, entryPrice: last, stopPrice: last * 0.97, idempotencyKey: `k${Math.random()}`, traceId: 't', ...extra });
@@ -34,13 +34,30 @@ describe('Risk gate (Part 17)', () => {
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     evaluateRisk(prop(id, last)); // establishes start-of-day mark
     const day = new Date().toISOString().slice(0, 10);
-    setSetting(`marks:${PAPER_ACCOUNT}`, { day, sod: 10_500, week: '', sow: 10_000, hwm: 10_500 });
+    const week = (() => { const d = new Date(); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); })();
+    setSetting(`marks2:${PAPER_ACCOUNT}`, { day, sodPerf: 500, week, sowPerf: 0, hwmPerf: 500 }); // was +$500 at day start → now −4.8%
     expect(evaluateRisk(prop(id, last)).reasonCodes.join()).toMatch(/DAILY_LOSS_BREAKER/);
-    setSetting(`marks:${PAPER_ACCOUNT}`, { day, sod: 10_000, week: '', sow: 10_000, hwm: 10_000 });
+    setSetting(`marks2:${PAPER_ACCOUNT}`, { day, sodPerf: 0, week, sowPerf: 0, hwmPerf: 0 });
     expect(evaluateRisk(prop(id, last, { stopPrice: last * 1.01 })).reasonCodes.join()).toMatch(/STOP_DIRECTION_INVALID/);
     expect(evaluateRisk(prop(id, last, { entryPrice: last * 1.05 })).reasonCodes.join()).toMatch(/PRICE_DEVIATION/);
     updateControl('owner', { pausedNewOrders: true }); expect(evaluateRisk(prop(id, last)).reasonCodes).toContain('NEW_ORDERS_PAUSED');
     updateControl('owner', { pausedNewOrders: false, emergency: true }); expect(evaluateRisk(prop(id, last)).reasonCodes).toContain('EMERGENCY_STOP_ACTIVE');
+  });
+  it('deposits never register as PnL and never disarm breakers', () => {
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' });
+    accountState(); // day mark taken while unfunded
+    ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const a = accountState(); expect(a.startOfDayEquity).toBe(10_000); expect(a.dailyPnlPct).toBe(0); expect(a.drawdownPct).toBe(0);
+    ledger(PAPER_ACCOUNT, 'FEE', -300); // simulate a $300 loss
+    expect(accountState().dailyPnlPct).toBeCloseTo(-3, 6);
+    expect(evaluateRisk(prop(id, last)).reasonCodes.join()).toMatch(/DAILY_LOSS_BREAKER/);
+    ledger(PAPER_ACCOUNT, 'DEPOSIT', 5_000); // topping up does not reset the breaker
+    expect(evaluateRisk(prop(id, last)).reasonCodes.join()).toMatch(/DAILY_LOSS_BREAKER/);
+  });
+  it('denies strategies not promoted to PAPER', () => {
+    freshDb(false); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    expect(evaluateRisk(prop(id, last)).reasonCodes.join()).toMatch(/STRATEGY_NOT_PROMOTED/);
   });
   it('fails closed on internal errors and unknown instruments', () => {
     acceptPolicy('owner', DEFAULT_POLICY);

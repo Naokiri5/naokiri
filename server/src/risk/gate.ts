@@ -5,7 +5,7 @@ import { market } from '../market/store.js';
 import { assessQuality, bookImpact } from '../market/quality.js';
 import { assessCexAsset } from '../safety/safety.js';
 import { correlation } from '../portfolio/correlation.js';
-import { all } from '../db/db.js';
+import { all, get } from '../db/db.js';
 import { iso } from '../core/util.js';
 import { getSetting } from '../core/settings.js';
 
@@ -36,6 +36,10 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
   const suspended = getSetting<string[]>('suspendedStrategies', []);
   if (suspended.includes(p.strategyId)) deny.push(`STRATEGY_SUSPENDED:${p.strategyId}`);
+  // Part 18 lifecycle: only strategies the owner promoted (after reviewing a backtest) may trade.
+  const st = get<{ status: string }>('SELECT status FROM strategies WHERE id=?', p.strategyId);
+  if (!st) deny.push(`STRATEGY_NOT_REGISTERED:${p.strategyId}`);
+  else if (!['PAPER', 'LIVE_CANDIDATE'].includes(st.status)) deny.push(`STRATEGY_NOT_PROMOTED:${p.strategyId} is ${st.status} (promote to PAPER in Strategy Lab)`);
 
   const inst = market.instruments.get(p.instrumentId);
   if (!inst) { deny.push('INSTRUMENT_UNKNOWN'); return out(); }
