@@ -3,7 +3,7 @@
 The repository includes a shared Claude Code setup:
 - CLAUDE.md: project-wide engineering rules and definition of done.
 - .claude/rules/: path-specific backend, frontend, trading-safety, database and test guidance.
-- .claude/agents/: focused specialist subagents, including read-only safety reviewers.
+- .claude/agents/: a primary full-stack implementation engineer plus focused specialists, including read-only safety reviewers.
 - .claude/skills/: reusable slash-command workflows.
 - .github/workflows/claude.yml: optional, explicit @claude assistance on PR comments.
 
