@@ -50,8 +50,9 @@ Paste this into Claude Code after opening the repository:
 1. Install the official Claude GitHub App on this repository.
 2. Add a repository Actions secret named ANTHROPIC_API_KEY (or configure the supported Claude Code OAuth token instead).
 3. Ensure GitHub Actions are enabled.
-4. Comment @claude on a pull request to request code changes or CI investigation. Only repository write collaborators should trigger it. The workflow is comment-triggered, not automatically invoked on every PR event.
-5. Review every resulting commit and CI run. Claude's changes must remain in a branch/PR and must not be merged automatically.
+4. Merge this workflow to the repository's default branch before expecting @claude comments to trigger it. GitHub's issue-comment workflow events are loaded from the default branch; a copy present only in an open feature-branch PR is not active yet.
+5. After activation, comment @claude on a pull request to request code changes or CI investigation. Only repository write collaborators should trigger it. The workflow is comment-triggered, not automatically invoked on every PR event.
+6. Review every resulting commit and CI run. Claude's changes must remain in a branch/PR and must not be merged automatically.
 
 The optional GitHub Action runs on GitHub-hosted runners and may consume Anthropic API usage. Repository files cannot install the GitHub App or add repository secrets for you.
 
