@@ -80,3 +80,38 @@ The specification's 110 specialists, 50 indicator specialists, 100 market worker
 `OBSERVE` (read-only) → `PAPER` → `APPROVAL` → `BOUNDED_LIVE`, plus `PAUSED` and `EMERGENCY`.
 `APPROVAL` in this build prepares **paper** orders for confirmation. `BOUNDED_LIVE` is refused by the
 release gate.
+
+## Technology choices, in plain language (Phase 0 assessment)
+
+| Piece | What we use | Why it fits MIA | Verdict |
+|---|---|---|---|
+| Language | **TypeScript** everywhere | One language for screen and server; types catch mistakes before they run. | Keep |
+| Server | **Node.js 22 + Fastify** | Fast, small, good at many simultaneous network requests (market feeds). | Keep |
+| Database | **SQLite** (built into Node) | A single file, nothing to install or run separately, easy to back up. Enough for one owner. | Keep. Revisit (PostgreSQL) only for multi-user hosting. |
+| Screen | **React + Vite** | Industry standard; fast reloads while developing. | Keep |
+| Charts | **lightweight-charts** (TradingView, open source) | Built for financial candlesticks; very light. | Keep |
+| Workers | Plain deterministic functions in a bounded pool | 100 checks finish in ~14 ms with no AI cost; results are repeatable and testable. LLMs would be slow, costly and non-deterministic for this job. | Keep |
+| Assistant | **Claude API** (Trader Joe) | Only place an LLM adds value; isolated from trading authority. | Keep |
+| Message transport | In-process event bus | Measured: internal work is ~40 ms; data-provider round trips dominate. NATS or Aeron would add complexity for no gain. | Keep |
+
+## Dependencies (direct)
+
+| Package | Version | Purpose | Notes |
+|---|---|---|---|
+| fastify | 5.12.8 | HTTP server | |
+| @fastify/static | 8.3.0 | serves the built UI | **SEC-01: high-severity advisory, upgrade to 10.x** |
+| zod | 4.6.7 | schema validation (evidence packets, API input) | |
+| @anthropic-ai/sdk | 1.8.0 | Trader Joe | |
+| fast-xml-parser | 5.12.1 | news RSS parsing | |
+| tsx · typescript · vitest · cross-env | 4.23.15 · 7.0.2 · 5.1.0 · 10.1.0 | run TS, typecheck, tests, cross-platform env | dev only |
+| react · react-dom · react-router-dom | 19.3.1 · 19.3.1 · 7.18.5 | UI | |
+| lightweight-charts · d3-hierarchy | 5.3.0 · 3.1.3 | charts, bubble packing | |
+| vite · @vitejs/plugin-react · concurrently | 8.3.8 · 6.3.0 · 10.0.7 | build & dev tooling | dev only |
+
+Runtime requirement: Node.js ≥ 22.13 (enforced at startup).
+
+## Code size (Phase 0)
+~4,800 lines of TypeScript across 23 server modules, 12 UI files and 10 test files. The largest modules are the market
+fabric (411 lines), providers (312), workers (297) and the strategy lab (271).
+
+Measured latency baseline: `QHEF_LATENCY_BASELINE.md`.

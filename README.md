@@ -26,7 +26,7 @@ executes **paper trades against live order books**. Built from the MIA 4.1 Unifi
 ## Quick start
 
 Requirements: **Node.js ≥ 22.13** (uses the built-in `node:sqlite`; `.nvmrc` pins 22), npm, outbound HTTPS to the hosts in
-`docs/02-integrations.md`. Works on macOS, Linux and Windows (cmd/PowerShell); all scripts are cross-platform.
+`docs/API_INTEGRATIONS.md`. Works on macOS, Linux and Windows (cmd/PowerShell); all scripts are cross-platform.
 
 ```bash
 npm install
@@ -80,9 +80,19 @@ npm run qa -w server             # records evidence used by the Release Gates pa
 
 ## Documentation
 
-- `docs/00-repository-audit.md`: Part 22.1 audit
-- `docs/01-architecture.md`: topology, trust boundaries, roles vs runtime processes
-- `docs/02-integrations.md`: provider/licensing matrix and pending integrations
-- `docs/03-traceability.md`: spec part → implementation → tests → status
-- `docs/04-runbook.md`: operations, incidents, backup/restore, rollback
-- `docs/05-latency-baseline.md`: measured QHEF baseline and bottlenecks
+Start with `docs/PROJECT_STATUS.md` (plain-language status) and `docs/SETUP_GUIDE_BEGINNER.md`.
+
+| File | Contents |
+|---|---|
+| `docs/PROJECT_STATUS.md` | where the project stands, what needs you |
+| `docs/ARCHITECTURE.md` | design, trust boundaries, technology choices, dependencies |
+| `docs/REQUIREMENTS_TRACEABILITY.md` | every spec part (1–33) → code → status |
+| `docs/IMPLEMENTATION_ROADMAP.md` | phases and prioritized backlog |
+| `docs/SETUP_GUIDE_BEGINNER.md` | step-by-step install and first use |
+| `docs/API_INTEGRATIONS.md` | data providers, licences, credentials |
+| `docs/SECURITY.md` | security audit and controls |
+| `docs/TEST_REPORT.md` | test evidence |
+| `docs/DEPLOYMENT_GUIDE.md` | running, backups, incidents, rollback |
+| `docs/KNOWN_LIMITATIONS.md` | what does not work yet and why |
+| `docs/QHEF_LATENCY_BASELINE.md` | measured performance |
+| `docs/CHANGELOG.md` | history |
