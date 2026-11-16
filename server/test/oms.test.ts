@@ -4,7 +4,7 @@ import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, getControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState, openPositions } from '../src/portfolio/ledger.js';
-import { submitEntry, monitorPositions, emergencyStop, closeAllPositions, queueForApproval, decideApproval, listOrders } from '../src/exec/oms.js';
+import { submitEntry, monitorPositions, emergencyStop, closeAllPositions, queueForApproval, decideApproval, listOrders, executeExit } from '../src/exec/oms.js';
 import { reconcile, calendar } from '../src/portfolio/calendar.js';
 import { verifyAuditChain } from '../src/core/audit.js';
 import { run, J } from '../src/db/db.js';
@@ -44,6 +44,15 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     setBook(id, last * 1.0); monitorPositions();
     expect(openPositions()).toHaveLength(0);
     expect(reconcile().ok).toBe(true);
+  });
+  it('does not record a full exit when executable order-book depth is unavailable', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    market.deep.get(id)!.book = null;
+    expect(executeExit(pos.id, pos.qty, 'TEST')).toBeNull();
+    expect(openPositions()).toHaveLength(1);
+    expect(openPositions()[0].qty).toBeCloseTo(pos.qty, 10);
+    expect(listOrders().filter((o: any) => o.purpose === 'EXIT_TEST')).toHaveLength(0);
   });
   it('rejects expired consensus and bot entries outside PAPER mode', () => {
     expect(submitEntry(report(id, last, { consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 1, opposition: 0, expiresAt: new Date(Date.now() - 1).toISOString() } }), 'bot').reason).toMatch(/EXPIRED/);
