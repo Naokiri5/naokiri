@@ -150,8 +150,10 @@ export function executeExit(positionId: string, qty: number, reason: string, fr 
   if (!p || p.status !== 'OPEN') return null;
   qty = Math.min(qty, p.qty);
   const fill = simulateFill(p.instrument, 'SELL', qty);
-  const px = fill?.price ?? market.price(p.instrument)?.bid;
-  if (!px) { flagUnprotected(p, 'no executable price for exit'); return null; }
+  // Never book a synthetic full fill at the ticker bid when executable book depth is unavailable.
+  // Keep the position open and raise an operator-visible protection warning instead.
+  if (!fill) { flagUnprotected(p, 'no executable order-book depth for exit'); return null; }
+  const px = fill.price;
   const fee = px * qty * fr; const pnl = (px - p.entry_price) * qty - fee;
   const remaining = p.qty - qty; const closed = remaining <= 1e-12;
   tx(() => {
