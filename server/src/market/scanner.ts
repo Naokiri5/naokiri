@@ -1,0 +1,133 @@
+import { market } from './store.js';
+import { assessQuality, bookImpact } from './quality.js';
+import { assessCexAsset, assessDexPair, type SafetyResult } from '../safety/safety.js';
+import { classifyRegime, type Regime } from '../regime/regime.js';
+import { STRATEGIES } from '../lab/strategies.js';
+import { runConsensus } from '../qci/coordinator.js';
+import { decide, type DecisionReport } from '../decision/engine.js';
+import { newsContext } from '../news/news.js';
+import { printContext } from '../whales/prints.js';
+import { correlation } from '../portfolio/correlation.js';
+import { accountState, openPositions } from '../portfolio/ledger.js';
+import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
+import { strategyStats } from '../lab/lab.js';
+import { readIndicators } from '../workers/indicators.js';
+import { getControl } from '../core/mode.js';
+import { uid } from '../core/util.js';
+import { timed, record } from '../core/latency.js';
+import { bus } from '../core/bus.js';
+import type { Candidate, WorkerContext } from '../workers/types.js';
+
+/** Part 1 universal scanner + Part 16.8 rejection intelligence. One scanner; QHEF only schedules it. */
+export interface BoardRow {
+  instrumentId: string; symbol: string; base: string; price: number; changePct: number; quoteVolume: number;
+  regime: Regime; safety: SafetyResult['status']; quality: string; qualityIssues: string[]; spreadBps: number | null;
+  rsi1h: number | null; trend1h: string; signals: string[]; lastDecision?: { id: string; decision: string; score: number; at: number };
+  bullish: number; bearish: number;
+}
+export const board = new Map<string, BoardRow>();
+export const rejections: { at: number; symbol: string; stage: string; reason: string }[] = [];
+const processed = new Set<string>();
+const lastDecisions: DecisionReport[] = [];
+export const recentDecisions = () => lastDecisions.slice(-100).reverse();
+
+function rejectLog(symbol: string, stage: string, reason: string) {
+  rejections.push({ at: Date.now(), symbol, stage, reason }); if (rejections.length > 500) rejections.splice(0, rejections.length - 500);
+}
+
+export function buildContext(cand: Candidate): WorkerContext {
+  const d = market.deep.get(cand.instrumentId)!; const t = market.tickers.get(cand.instrumentId);
+  const btc = market.deep.get('crypto:binance:BTCUSDT');
+  const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
+  const acct = accountState();
+  const stopPct = (cand.signal.entryRef - cand.signal.stop) / cand.signal.entryRef;
+  const equity = acct.equity > 0 ? acct.equity : 10_000;
+  const intended = Math.min((equity * pol.riskPerTradePct) / 100 / stopPct, equity * pol.maxPositionNotionalPct / 100);
+  const imp = bookImpact(d.book, 'buy', Math.max(intended, 10));
+  const ss = strategyStats(cand.strategyId);
+  return {
+    candidate: cand,
+    f: { '15m': d.engines['15m'].last, '1h': d.engines['1h'].last, '4h': d.engines['4h'].last },
+    btc1h: btc?.engines['1h'].last ?? null, btc4h: btc?.engines['4h'].last ?? null,
+    ticker: t ? { last: t.last, changePct: t.changePct, quoteVolume: t.quoteVolume, trades: t.trades, high: t.high, low: t.low } : null,
+    impact: imp ? { spreadBps: imp.spreadBps, impactBps: imp.impactBps, depth1pct: imp.depth1pct, filledFully: imp.filledFully, bookImbalance: imp.bookImbalance } : null,
+    intendedNotional: intended, feeRate: pol.feeRate,
+    quality: assessQuality(cand.instrumentId), safety: assessCexAsset(cand.instrumentId),
+    news: newsContext(cand.base), prints: printContext(cand.instrumentId),
+    corrToBtc: cand.instrumentId.endsWith('BTCUSDT') ? null : correlation(cand.instrumentId, 'crypto:binance:BTCUSDT'),
+    strategyStats: ss ? { trades: ss.trades, expectancyR: ss.expectancyR, profitFactor: ss.profitFactor } : null,
+  };
+}
+
+export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
+  const t0 = performance.now();
+  const ctl = getControl();
+  let candidates = 0;
+  for (const id of market.universe) {
+    const inst = market.instruments.get(id); const d = market.deep.get(id); const t = market.tickers.get(id);
+    if (!inst || !d || !t) continue;
+    const f1 = d.engines['1h'].last;
+    const q = assessQuality(id); const safety = assessCexAsset(id); const reg = classifyRegime(f1);
+    const imp = bookImpact(d.book, 'buy', 1000);
+    const ind = readIndicators({ '15m': d.engines['15m'].last, '1h': f1, '4h': d.engines['4h'].last });
+    const row: BoardRow = {
+      instrumentId: id, symbol: inst.symbol, base: inst.base, price: t.last, changePct: t.changePct, quoteVolume: t.quoteVolume, regime: reg.regime,
+      safety: safety.status, quality: q.status, qualityIssues: q.issues, spreadBps: imp?.spreadBps ?? null, rsi1h: f1?.rsi14 ?? null,
+      trend1h: !f1 ? 'n/a' : f1.ema20 > f1.ema50 ? 'up' : 'down', signals: [], lastDecision: board.get(id)?.lastDecision,
+      bullish: ind.filter((x) => (x.signal ?? 0) > 0.25).length, bearish: ind.filter((x) => (x.signal ?? 0) < -0.25).length,
+    };
+    board.set(id, row);
+    if (!f1) continue;
+    for (const s of STRATEGIES) {
+      if (ctl.disabledStrategies.includes(s.id)) continue;
+      const key = `${id}:${s.id}:${f1.t}`;
+      if (processed.has(key)) { continue; }
+      processed.add(key);
+      if (!s.suitableRegimes.includes(reg.regime)) continue;
+      const sig = s.generate(f1);
+      if (!sig) continue;
+      row.signals.push(s.id);
+      if (!safety.eligibleForAutomation) { rejectLog(inst.symbol, 'safety', `${s.id}: ${safety.status} — ${safety.reasons.join('; ')}`); continue; }
+      if (q.status === 'FAIL') { rejectLog(inst.symbol, 'data-quality', `${s.id}: ${q.issues.join('; ')}`); continue; }
+      candidates++;
+      const cand: Candidate = { id: uid('cand'), eventId: `${inst.symbol}:${s.interval}:${f1.t}`, traceId: uid('trace'), instrumentId: id, symbol: inst.symbol, base: inst.base, market: 'crypto', venue: 'binance',
+        strategyId: s.id, strategyVersion: s.version, interval: s.interval, signal: sig, regime: reg.regime, createdAt: Date.now() };
+      const ctx = buildContext(cand);
+      const qci = await runConsensus(ctx);
+      const correlatedOpen = openPositions().filter((p) => { const c = correlation(p.instrument, id); return c == null || c >= (currentPolicy()?.policy ?? DEFAULT_POLICY).correlationThreshold; }).length;
+      const rep = decide(cand, ctx, qci, ctx.strategyStats, correlatedOpen);
+      record('pipeline.candidate_to_decision', performance.now() - cand.createdAt + 0);
+      row.lastDecision = { id: rep.id, decision: rep.decision, score: rep.opportunity.score, at: Date.now() };
+      if (rep.decision === 'REJECTED' || rep.decision === 'INSUFFICIENT_DATA') rejectLog(inst.symbol, 'decision', `${s.id}: ${rep.decision} — ${[...qci.reason_codes, ...(rep.risk?.reasonCodes ?? [])].slice(0, 3).join('; ')}`);
+      lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
+      onDecision?.(rep);
+    }
+  }
+  if (processed.size > 50_000) processed.clear();
+  record('scan.cycle', performance.now() - t0);
+  market.lastScanAt = Date.now();
+  bus.publish('scan', { at: market.lastScanAt, universe: market.universe.length, candidates });
+  return { candidates, universe: market.universe.length };
+}
+
+/** Manual "analyze now" for any instrument & strategy (Trader Joe / Scanner button). Runs the full pipeline even with no live signal → evaluation only. */
+export async function analyzeInstrument(id: string, strategyId?: string): Promise<DecisionReport | { instrumentId: string; status: string; reason: string; indicators: ReturnType<typeof readIndicators>; regime: Regime; safety: SafetyResult; quality: ReturnType<typeof assessQuality> }> {
+  const inst = market.instruments.get(id); if (!inst) throw new Error('unknown instrument');
+  if (!market.deep.has(id) || !market.deep.get(id)!.engines['1h'].last) {
+    const { refreshDeep } = await import('./fabric.js'); await timed('analyze.ondemand', () => refreshDeep([id]));
+  }
+  const d = market.deep.get(id)!; const f1 = d.engines['1h'].last; const reg = classifyRegime(f1);
+  const ind = readIndicators({ '15m': d.engines['15m'].last, '1h': f1, '4h': d.engines['4h'].last });
+  const strategies = strategyId ? STRATEGIES.filter((s) => s.id === strategyId) : STRATEGIES;
+  for (const s of strategies) {
+    const sig = f1 && s.suitableRegimes.includes(reg.regime) ? s.generate(f1) : null;
+    if (!sig) continue;
+    const cand: Candidate = { id: uid('cand'), eventId: `${inst.symbol}:manual:${Date.now()}`, traceId: uid('trace'), instrumentId: id, symbol: inst.symbol, base: inst.base, market: 'crypto', venue: 'binance', strategyId: s.id, strategyVersion: s.version, interval: s.interval, signal: sig, regime: reg.regime, createdAt: Date.now() };
+    const ctx = buildContext(cand); const qci = await runConsensus(ctx);
+    const rep = decide(cand, ctx, qci, ctx.strategyStats, 0);
+    lastDecisions.push(rep);
+    return rep;
+  }
+  return { instrumentId: id, status: 'NO_SIGNAL', reason: `No strategy entry condition is met (regime ${reg.regime}). Nothing to trade — monitoring.`, indicators: ind, regime: reg.regime, safety: assessCexAsset(id), quality: assessQuality(id) };
+}
+export function dexBoard() { return market.dex.map((p) => ({ ...p, safety: assessDexPair(p) })).sort((a, b) => b.volume24h - a.volume24h); }
