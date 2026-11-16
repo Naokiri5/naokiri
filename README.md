@@ -86,7 +86,7 @@ and pull request.
 
 ## Documentation
 
-Start with `docs/PROJECT_STATUS.md` (plain-language status) and `docs/SETUP_GUIDE_BEGINNER.md`.
+Start with `docs/PROJECT_STATUS.md` (plain-language status) and `docs/SETUP_GUIDE_BEGINNER.md`. For AI-assisted development, read `docs/CLAUDE_CODE_WORKFLOW.md` and `docs/REFACTORING_BACKLOG.md`.
 
 | File | Contents |
 |---|---|
@@ -102,3 +102,5 @@ Start with `docs/PROJECT_STATUS.md` (plain-language status) and `docs/SETUP_GUID
 | `docs/KNOWN_LIMITATIONS.md` | what does not work yet and why |
 | `docs/QHEF_LATENCY_BASELINE.md` | measured performance |
 | `docs/CHANGELOG.md` | history |
+| `docs/CLAUDE_CODE_WORKFLOW.md` | Claude Code setup, specialist agents, slash skills and optional GitHub @claude workflow |
+| `docs/REFACTORING_BACKLOG.md` | evidence-based code-organization and duplication-removal plan |
