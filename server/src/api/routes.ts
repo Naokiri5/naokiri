@@ -44,6 +44,7 @@ import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js
 import { provider } from '../providers/http.js';
 
 const COOKIE = 'mia_session';
+const secureCookie = process.env.NODE_ENV === 'production' ? '; Secure' : '';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 const bad = (reply: FastifyReply, code: number, msg: string) => reply.code(code).send({ error: msg });
 const stepUp = (body: any) => { if (!auth.checkPassword(body?.password)) throw Object.assign(new Error('step-up authentication failed: passphrase required for this action'), { statusCode: 403 }); };
@@ -66,9 +67,9 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/auth/state', async (req) => ({ setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)) }));
   app.post('/api/auth/setup', async (req, reply) => { const { password } = z.object({ password: z.string() }).parse(req.body); auth.setupOwner(password); return issue(reply, auth.login(password, req.ip)); });
   app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: z.string() }).parse(req.body); return issue(reply, auth.login(password, req.ip)); });
-  app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`); return { ok: true }; });
+  app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Strict${secureCookie}; Max-Age=0`); return { ok: true }; });
   app.post('/api/settings/password', async (req) => { const b = z.object({ current: z.string(), next: z.string() }).parse(req.body); auth.changePassword(b.current, b.next); return { ok: true }; });
-  function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`); return { ok: true }; }
+  function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict${secureCookie}; Max-Age=43200`); return { ok: true }; }
 
   // ── live stream (SSE) ──
   app.get('/api/stream', (req, reply) => {
