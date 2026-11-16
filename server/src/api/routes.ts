@@ -98,7 +98,8 @@ export async function routes(app: FastifyInstance) {
     const i = market.bySymbol((req.params as any).symbol);
     if (!i) return reply.code(200).send({ unavailable: true, reason: market.instruments.size ? 'Symbol is not a listed Binance spot pair.' : config.offline ? 'Market data is disabled (offline mode).' : 'Market data is still loading — try again in a few seconds.' });
     if (!market.deep.has(i.id) && !config.offline) { const { refreshDeep } = await import('../market/fabric.js'); await refreshDeep([i.id]); }
-    const d = market.deep.get(i.id); const iv = ((req.query as any).interval ?? '1h') as '15m' | '1h' | '4h';
+    const d = market.deep.get(i.id);
+    const { interval: iv } = z.object({ interval: z.enum(['15m', '1h', '4h']).default('1h') }).parse(req.query);
     const f = d ? { '15m': d.engines['15m'].last, '1h': d.engines['1h'].last, '4h': d.engines['4h'].last } : {};
     return { instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
