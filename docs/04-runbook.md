@@ -1,8 +1,10 @@
 # Operations Runbook
 
 ## Deploy
-- Single process: `npm run build && npm start`. Bind to loopback (`MIA_HOST=127.0.0.1`) and front it with a TLS reverse proxy
-  if you expose it remotely. The session cookie is `HttpOnly; SameSite=Strict`; state-changing requests require the
+- Single process: `npm start` (entry `server/src/main.ts` via the cross-platform launcher `server/scripts/run.mjs`;
+  `prestart` builds the UI if `web/dist` is missing). Default bind is loopback on a desktop and `0.0.0.0` inside detected
+  containers so forwarded ports work; override with `MIA_HOST`. Front it with a TLS reverse proxy if you expose it remotely.
+- Paths (`data/`, `web/dist`) resolve from the repository location, not the shell's working directory. The session cookie is `HttpOnly; SameSite=Strict`; state-changing requests require the
   `x-mia-csrf` header.
 - Secrets only via environment variables (`.env.example`). They never reach the browser, logs (redacted), or LLM prompts.
 

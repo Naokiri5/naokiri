@@ -25,27 +25,56 @@ executes **paper trades against live order books**. Built from the MIA 4.1 Unifi
 
 ## Quick start
 
-Requirements: Node.js ≥ 22.13 (uses built-in `node:sqlite`), outbound HTTPS to the hosts in `docs/02-integrations.md`.
+Requirements: **Node.js ≥ 22.13** (uses the built-in `node:sqlite`; `.nvmrc` pins 22), npm, outbound HTTPS to the hosts in
+`docs/02-integrations.md`. Works on macOS, Linux and Windows (cmd/PowerShell); all scripts are cross-platform.
 
 ```bash
 npm install
-npm run build          # builds the web UI into web/dist
-npm start              # serves API + UI on http://127.0.0.1:8787
+npm start              # builds the UI on first run if needed, then serves API + UI on port 8787
 ```
 
-Open the UI, create the **owner passphrase**, then:
+Open **http://localhost:8787/**. The terminal prints the exact URLs:
+
+```
+  ➜ Local:     http://localhost:8787/
+  ➜ Network:   http://<container-ip>:8787/      (only when bound to all interfaces)
+```
+
+Then create the **owner passphrase**, and:
 
 1. **Risk Center**: review and accept the risk policy (step-up passphrase).
 2. **Strategy Lab**: run backtests, then **promote** a strategy to PAPER only if you accept its out-of-sample record.
 3. **Bot Account**: allocate paper capital and switch the mode to **Paper** (or **Approval** to confirm each order).
 
-Development: run `npm run dev -w server` and `npm run dev -w web`; Vite proxies `/api` to port 8787.
+Development with hot reload: `npm run dev` starts the backend (8787) and Vite (http://localhost:5173/, proxies `/api`).
+
+### Host binding and forwarded ports
+
+| Where you run MIA | Default bind | Open |
+|---|---|---|
+| Your own computer | `127.0.0.1` (not exposed to your network) | http://localhost:8787/ |
+| Docker, dev container, Codespaces, Gitpod, Claude Code cloud session | `0.0.0.0` (auto-detected) | the forwarded URL for port **8787** |
+| WSL2, a VM, or another device on your LAN | set `MIA_HOST=0.0.0.0` | `http://<machine-ip>:8787/` |
+
+`MIA_HOST` and `MIA_PORT` always override the defaults. Binding `0.0.0.0` exposes the login page to the network; MIA
+requires the owner passphrase for every API call, but put it behind TLS before exposing it beyond a trusted network.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `✖ Port 8787 is already in use` | another MIA instance or program | stop it, or `MIA_PORT=8788 npm start` (PowerShell: `$env:MIA_PORT=8788; npm start`) |
+| Browser shows "connection refused" via a forwarded port | server bound to loopback only | `MIA_HOST=0.0.0.0 npm start` |
+| Page says "MIA API is running … UI not built" | `web/dist` missing | `npm run build` |
+| `✖ MIA requires Node.js 22.13 or newer` | old Node | install Node 22 LTS+ (`nvm use`) |
+| `✖ Dependencies are not installed` | skipped `npm install` | run `npm install` in the repository root |
+| Market data never loads behind a corporate proxy | proxy env | set `HTTPS_PROXY`; the launcher enables `NODE_USE_ENV_PROXY` for Node's fetch |
 
 ## Tests & QA evidence
 
 ```bash
 npm test                         # 43 unit/integration tests (offline, deterministic)
-npm run test:live -w server      # opt-in: real providers + real-order-book paper round trip
+npm run test:live -w server      # opt-in: real providers + real-order-book paper round trip (network)
 npm run qa -w server             # records evidence used by the Release Gates page
 ```
 

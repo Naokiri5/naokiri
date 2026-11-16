@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx watch src/index.ts",
-    "start": "NODE_USE_ENV_PROXY=1 NODE_OPTIONS=--disable-warning=ExperimentalWarning tsx src/index.ts",
+    "dev": "node scripts/run.mjs dev",
+    "start": "node scripts/run.mjs start",
     "build": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run",
-    "qa": "mkdir -p ../data/qa && NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run --reporter=default --reporter=json --outputFile.json=../data/qa/test-results.json",
-    "test:live": "NODE_USE_ENV_PROXY=1 MIA_LIVE_TESTS=1 vitest run test/live"
+    "test": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run",
+    "qa": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run --reporter=default --reporter=json --outputFile.json=../data/qa/test-results.json",
+    "test:live": "cross-env NODE_USE_ENV_PROXY=1 MIA_LIVE_TESTS=1 NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run test/live"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
@@ -21,8 +21,12 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "cross-env": "^10.1.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

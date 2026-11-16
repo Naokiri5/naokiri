@@ -1,13 +1,26 @@
-import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 
 const env = process.env;
+/** Repository root, derived from this file's location (NOT the shell's cwd), so any launch directory works. */
+export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+/**
+ * Inside containers / Codespaces / dev containers / WSL-forwarded or cloud sessions, a port forwarder connects to the
+ * container's network interface, so a loopback-only bind is unreachable. Bind all interfaces there; stay on loopback
+ * on a normal desktop. MIA_HOST always wins.
+ */
+export function inContainer() {
+  return !!(env.CODESPACES || env.REMOTE_CONTAINERS || env.DEVCONTAINER || env.GITPOD_WORKSPACE_ID || env.CLAUDE_CODE_REMOTE || env.KUBERNETES_SERVICE_HOST
+    || existsSync('/.dockerenv') || existsSync('/run/.containerenv'));
+}
 
 export const config = {
   port: Number(env.MIA_PORT ?? 8787),
-  host: env.MIA_HOST ?? '127.0.0.1',
-  dataDir: resolve(env.MIA_DATA_DIR ?? resolve(process.cwd(), '..', 'data')),
+  host: env.MIA_HOST ?? (inContainer() ? '0.0.0.0' : '127.0.0.1'),
+  dataDir: env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data'),
   /** Disable all outbound polling (tests / offline). */
   offline: env.MIA_OFFLINE === '1',
   /** Number of deep-tier (T2) instruments to analyze with candles + books. */
@@ -20,7 +33,7 @@ export const config = {
   telegramChatId: env.TELEGRAM_CHAT_ID ?? '',
   /** Per-process secret used to authenticate worker evidence packets. Never logged. */
   evidenceKey: env.MIA_EVIDENCE_KEY ? Buffer.from(env.MIA_EVIDENCE_KEY, 'hex') : randomBytes(32),
-  webDist: resolve(process.cwd(), '..', 'web', 'dist'),
+  webDist: env.MIA_WEB_DIST ? resolve(env.MIA_WEB_DIST) : resolve(REPO_ROOT, 'web', 'dist'),
 };
 
 export function ensureDataDir() {
