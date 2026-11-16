@@ -1,5 +1,5 @@
 import { market } from './store.js';
-import { assessQuality, bookImpact } from './quality.js';
+import { assessQuality, bookImpact, bookFreshForExecution } from './quality.js';
 import { assessCexAsset, assessDexPair, type SafetyResult } from '../safety/safety.js';
 import { classifyRegime, type Regime } from '../regime/regime.js';
 import { STRATEGIES } from '../lab/strategies.js';
@@ -94,6 +94,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
       if (!safety.eligibleForAutomation) { rejectLog(inst.symbol, 'safety', `${s.id}: ${safety.status} — ${safety.reasons.join('; ')}`); continue; }
       if (q.status === 'FAIL') { rejectLog(inst.symbol, 'data-quality', `${s.id}: ${q.issues.join('; ')}`); continue; }
       candidates++;
+      try {
       const cand: Candidate = { id: uid('cand'), eventId: `${inst.symbol}:${s.interval}:${f1.t}`, traceId: uid('trace'), instrumentId: id, symbol: inst.symbol, base: inst.base, market: 'crypto', venue: 'binance',
         strategyId: s.id, strategyVersion: s.version, interval: s.interval, signal: sig, regime: reg.regime, createdAt: Date.now() };
       const ctx = buildContext(cand);
@@ -105,6 +106,10 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
       if (rep.decision === 'REJECTED' || rep.decision === 'INSUFFICIENT_DATA') rejectLog(inst.symbol, 'decision', `${s.id}: ${rep.decision} — ${[...qci.reason_codes, ...(rep.risk?.reasonCodes ?? [])].slice(0, 3).join('; ')}`);
       lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
       onDecision?.(rep);
+      } catch (e: any) {
+        // One failing candidate must not abort the scan for the rest of the universe; it is retried next cycle.
+        processed.delete(key); rejectLog(inst.symbol, 'error', `${s.id}: ${String(e?.message ?? e).slice(0, 200)}`);
+      }
     }
   }
   if (processed.size > 50_000) processed.clear();
@@ -117,7 +122,8 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
 /** Manual "analyze now" for any instrument & strategy (Trader Joe / Scanner button). Runs the full pipeline even with no live signal → evaluation only. */
 export async function analyzeInstrument(id: string, strategyId?: string): Promise<DecisionReport | { instrumentId: string; status: string; reason: string; indicators: ReturnType<typeof readIndicators>; regime: Regime; safety: SafetyResult; quality: ReturnType<typeof assessQuality> }> {
   const inst = market.instruments.get(id); if (!inst) throw new Error('unknown instrument');
-  if (!market.deep.has(id) || !market.deep.get(id)!.engines['1h'].last) {
+  const held = market.deep.get(id);
+  if (!held || !held.engines['1h'].last || !bookFreshForExecution(held.book)) {
     const { refreshDeep } = await import('./fabric.js'); await timed('analyze.ondemand', () => refreshDeep([id]));
   }
   const d = market.deep.get(id)!; const f1 = d.engines['1h'].last; const reg = classifyRegime(f1);
@@ -129,7 +135,7 @@ export async function analyzeInstrument(id: string, strategyId?: string): Promis
     const cand: Candidate = { id: uid('cand'), eventId: `${inst.symbol}:manual:${Date.now()}`, traceId: uid('trace'), instrumentId: id, symbol: inst.symbol, base: inst.base, market: 'crypto', venue: 'binance', strategyId: s.id, strategyVersion: s.version, interval: s.interval, signal: sig, regime: reg.regime, createdAt: Date.now() };
     const ctx = buildContext(cand); const qci = await runConsensus(ctx);
     const rep = decide(cand, ctx, qci, ctx.strategyStats, 0);
-    lastDecisions.push(rep);
+    lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
     return rep;
   }
   return { instrumentId: id, status: 'NO_SIGNAL', reason: `No strategy entry condition is met (regime ${reg.regime}). Nothing to trade — monitoring.`, indicators: ind, regime: reg.regime, safety: assessCexAsset(id), quality: assessQuality(id) };
