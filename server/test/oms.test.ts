@@ -54,6 +54,13 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     expect(openPositions()[0].qty).toBeCloseTo(pos.qty, 10);
     expect(listOrders().filter((o: any) => o.purpose === 'EXIT_TEST')).toHaveLength(0);
   });
+  it('does not execute an exit against a stale order book', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    market.deep.get(id)!.book!.ts = Date.now() - 180_001;
+    expect(executeExit(pos.id, pos.qty, 'STALE_BOOK')).toBeNull();
+    expect(openPositions()).toHaveLength(1);
+  });
   it('rejects expired consensus and bot entries outside PAPER mode', () => {
     expect(submitEntry(report(id, last, { consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 1, opposition: 0, expiresAt: new Date(Date.now() - 1).toISOString() } }), 'bot').reason).toMatch(/EXPIRED/);
     updateControl('owner', { mode: 'APPROVAL' });
