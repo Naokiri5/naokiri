@@ -12,9 +12,13 @@
     "prestart": "node server/scripts/ensure-build.mjs",
     "start": "npm run start -w server",
     "test": "npm test -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
+    "test:e2e": "npm run build -w web && playwright test -c e2e/playwright.config.ts",
+    "test:all": "npm run typecheck && npm test && npm run test:e2e",
+    "scan:secrets": "node scripts/secret-scan.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "concurrently": "^10.0.7"
   },
   "engines": {

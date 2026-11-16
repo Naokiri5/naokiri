@@ -4,12 +4,13 @@ import { api, connectStream, disconnectStream, useApi, fmt } from './api';
 import { ErrorLine } from './ui';
 import { JoeDrawer } from './pages/Joe';
 import * as P from './pages';
+import { CommandPalette } from './palette';
 
 const NAV: { grp: string; items: [string, string, string][] }[] = [
-  { grp: 'Command', items: [['/', '◎', 'Overview'], ['/terminal', '▤', 'Market Terminal'], ['/scanner', '⌖', 'AI Scanner'], ['/intelligence', '✦', 'AI Intelligence'], ['/joe', '☺', 'Trader Joe']] },
-  { grp: 'Markets', items: [['/bubbles', '◍', 'Market Bubble Map'], ['/whales', '◈', 'Whale & Launch Monitor'], ['/holders', '⬡', 'Holder Map'], ['/news', '☰', 'News & Events']] },
-  { grp: 'Trading', items: [['/bot', '⚙', 'Bot Account'], ['/risk', '⛨', 'Risk Center'], ['/portfolio', '◔', 'Portfolio'], ['/journal', '✎', 'Trade Journal'], ['/calendar', '▦', 'Profit Calendar'], ['/lab', '⚗', 'Strategy Lab']] },
-  { grp: 'Account', items: [['/wallet', '⬗', 'Wallet & Withdrawals'], ['/connections', '⇄', 'Connections Hub'], ['/notifications', '🔔', 'Notifications'], ['/qa', '✓', 'Release Gates'], ['/settings', '⚙', 'Settings']] },
+  { grp: 'Command', items: [['/', '◎', 'Overview'], ['/terminal', '▤', 'Market Terminal'], ['/scanner', '⌖', 'AI Scanner'], ['/discover', '✧', 'Asset Discovery'], ['/intelligence', '✦', 'AI Intelligence'], ['/qhef', '⚡', 'QHEF Performance'], ['/joe', '☺', 'Trader Joe']] },
+  { grp: 'Markets', items: [['/bubbles', '◍', 'Market Bubble Map'], ['/whales', '◈', 'Whale & Launch Monitor'], ['/copy', '⧉', 'Copy Trading'], ['/holders', '⬡', 'Holder Map'], ['/news', '☰', 'News & Events']] },
+  { grp: 'Trading', items: [['/bot', '⚙', 'Bot Account'], ['/risk', '⛨', 'Risk Center'], ['/portfolio', '◔', 'Portfolio'], ['/history', '≣', 'Trading History'], ['/journal', '✎', 'Trade Journal'], ['/calendar', '▦', 'Profit Calendar'], ['/lab', '⚗', 'Strategy Lab']] },
+  { grp: 'Account', items: [['/wallet', '⬗', 'Wallet & Withdrawals'], ['/security', '🛡', 'Security Center'], ['/connections', '⇄', 'Connections Hub'], ['/notifications', '🔔', 'Notifications'], ['/qa', '✓', 'Pre-flight / Release Gates'], ['/settings', '⚙', 'Settings']] },
 ];
 
 export default function App() {
@@ -39,6 +40,8 @@ function Login({ setup, onDone }: { setup: boolean; onDone: () => void }) {
 
 function Shell({ onLogout }: { onLogout: () => void }) {
   const shell = useApi('/api/shell', { topics: ['mode', 'bot', 'notification', 'position', 'health'], every: 15_000 });
+  const [palette, setPalette] = useState(false);
+  useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
   const [collapsed, setCollapsed] = useState(false); const [mobOpen, setMobOpen] = useState(false); const [joe, setJoe] = useState(false);
   const [theme, setTheme] = useState<string>(() => { try { return localStorage.getItem('mia-theme') ?? 'dark'; } catch { return 'dark'; } });
   useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('mia-theme', theme); } catch { /* */ } }, [theme]);
@@ -80,11 +83,20 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <Route path="/risk" element={<P.Risk />} /><Route path="/portfolio" element={<P.Portfolio />} /><Route path="/journal" element={<P.Journal />} />
         <Route path="/calendar" element={<P.Calendar />} /><Route path="/lab" element={<P.Lab />} /><Route path="/wallet" element={<P.Wallet />} />
         <Route path="/connections" element={<P.Connections />} /><Route path="/notifications" element={<P.Notifications />} /><Route path="/qa" element={<P.QA />} />
-        <Route path="/settings" element={<P.Settings />} /><Route path="/decision/:id" element={<P.DecisionPage />} />
+        <Route path="/settings" element={<P.Settings />} />
+        <Route path="/discover" element={<P.Discover />} /><Route path="/qhef" element={<P.Qhef />} /><Route path="/security" element={<P.SecurityCenter />} />
+        <Route path="/copy" element={<P.CopyTrading />} /><Route path="/history" element={<P.History />} /><Route path="/decision/:id" element={<P.DecisionPage />} />
         <Route path="*" element={<div className="empty">Not found</div>} />
       </Routes>
     </main>
     <nav className="mobnav" aria-label="Mobile">{[['/', '◎', 'Home'], ['/scanner', '⌖', 'Scanner'], ['/bot', '⚙', 'Bot'], ['/risk', '⛨', 'Risk'], ['/joe', '☺', 'Joe']].map(([to, ic, l]) => <NavLink key={to} to={to} end={to === '/'}><span>{ic}</span>{l}</NavLink>)}</nav>
+    {palette && <CommandPalette pages={NAV.flatMap((g) => g.items)} onClose={() => setPalette(false)} extra={[
+      { id: 'act:pause', label: 'Pause new orders', hint: 'risk-reducing', group: 'Action', run: async () => { await api('/api/emergency/pause', { body: {} }); shell.reload(); } },
+      { id: 'act:protect', label: 'Verify position protection', hint: 'Risk Center', group: 'Action', run: async () => { await api('/api/emergency/protect', { body: {} }); nav('/risk'); } },
+      { id: 'act:news', label: 'Refresh news now', group: 'Action', run: async () => { await api('/api/news/refresh', { body: {} }); nav('/news'); } },
+      { id: 'act:joe', label: 'Ask Trader Joe', group: 'Action', run: () => setJoe(true) },
+      { id: 'act:theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`, group: 'Action', run: () => setTheme(theme === 'dark' ? 'light' : 'dark') },
+    ]} />}
     {loc.pathname !== '/joe' && (joe ? <JoeDrawer context={loc.pathname} onClose={() => setJoe(false)} /> : <button className="fab" onClick={() => setJoe(true)}>☺ Ask Trader Joe</button>)}
   </div>;
 }
@@ -92,8 +104,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 function Search() {
   const [q, setQ] = useState(''); const [res, setRes] = useState<any[]>([]); const nav = useNavigate();
   useEffect(() => { if (q.length < 2) return setRes([]); const t = setTimeout(() => api(`/api/markets/search?q=${encodeURIComponent(q)}`).then(setRes).catch(() => {}), 200); return () => clearTimeout(t); }, [q]);
-  useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); document.getElementById('gsearch')?.focus(); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
   const go = (sym: string) => { setQ(''); setRes([]); nav(`/terminal/${sym}`); };
-  return <div className="search"><input id="gsearch" placeholder="Search asset (Ctrl/⌘K)…" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && res[0]) go(res[0].symbol); if (e.key === 'Escape') setQ(''); }} aria-label="Search assets" />
+  return <div className="search"><input id="gsearch" placeholder="Search asset… (Ctrl/⌘K for commands)" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && res[0]) go(res[0].symbol); if (e.key === 'Escape') setQ(''); }} aria-label="Search assets" />
     {res.length > 0 && <div className="results">{res.map((r) => <div key={r.id} onClick={() => go(r.symbol)}><b>{r.base}</b> <span className="muted">{r.symbol} · Binance spot</span></div>)}</div>}</div>;
 }

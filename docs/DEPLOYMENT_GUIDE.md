@@ -1,4 +1,4 @@
-# Operations Runbook
+# Deployment & Operations Guide
 
 ## Deploy
 - Single process: `npm start` (entry `server/src/main.ts` via the cross-platform launcher `server/scripts/run.mjs`;

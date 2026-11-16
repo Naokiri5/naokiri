@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { config } from './config.js';
 import { openDb } from './db/db.js';
 import './providers/binance.js'; import './providers/coinbase.js'; import './providers/kraken.js'; import './providers/coingecko.js';
@@ -10,8 +11,9 @@ import { seedStrategies } from './lab/lab.js';
 
 export async function buildApp() {
   openDb(); seedStrategies();
-  const app = Fastify({ logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.body.password'] }, bodyLimit: 256 * 1024 });
-  app.addHook('onSend', async (_req, reply, payload) => {
+  const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.body.password'] }, bodyLimit: 256 * 1024 });
+  app.addHook('onSend', async (req, reply, payload) => {
+    reply.header('x-request-id', req.id);
     reply.header('x-content-type-options', 'nosniff'); reply.header('x-frame-options', 'DENY'); reply.header('referrer-policy', 'no-referrer');
     reply.header('content-security-policy', "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'");
     return payload;
