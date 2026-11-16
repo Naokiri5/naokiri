@@ -1,7 +1,7 @@
 import { all, get, run, tx, J, P } from '../db/db.js';
 import { uid, iso } from '../core/util.js';
 import { market } from '../market/store.js';
-import { bookImpact } from '../market/quality.js';
+import { bookImpact, QUALITY_LIMITS } from '../market/quality.js';
 import { evaluateRisk } from '../risk/gate.js';
 import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
 import { ledger, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
@@ -34,10 +34,12 @@ function insertOrder(o: { clientOrderId: string; instrument: string; side: 'BUY'
 function simulateFill(instrumentId: string, side: 'BUY' | 'SELL', qty: number) {
   const d = market.deep.get(instrumentId); const px = market.price(instrumentId);
   if (!d?.book || !px) return null;
+  const bookAgeMs = Date.now() - d.book.ts;
+  if (bookAgeMs < 0 || bookAgeMs > QUALITY_LIMITS.maxBookAgeMs) return null;
   const ref = side === 'BUY' ? px.ask : px.bid;
   const imp = bookImpact(d.book, side === 'BUY' ? 'buy' : 'sell', qty * ref);
   if (!imp || !imp.filledFully) return null;
-  return { price: imp.avgPrice, impactBps: imp.impactBps, spreadBps: imp.spreadBps, bookAgeMs: Date.now() - d.book.ts };
+  return { price: imp.avgPrice, impactBps: imp.impactBps, spreadBps: imp.spreadBps, bookAgeMs };
 }
 
 /** Entry submission with Part 29 L5 last-moment validation. */
