@@ -7,3 +7,6 @@ data/
 .env
 web/dist/
 test-results/
+e2e/.data/
+test-results/
+playwright-report/

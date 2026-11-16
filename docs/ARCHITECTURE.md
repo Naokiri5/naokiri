@@ -99,7 +99,7 @@ release gate.
 | Package | Version | Purpose | Notes |
 |---|---|---|---|
 | fastify | 5.12.8 | HTTP server | |
-| @fastify/static | 8.3.0 | serves the built UI | **SEC-01: high-severity advisory, upgrade to 10.x** |
+| @fastify/static | 10.1.11 | serves the built UI | upgraded in Phase 1 (SEC-01 resolved) |
 | zod | 4.6.7 | schema validation (evidence packets, API input) | |
 | @anthropic-ai/sdk | 1.8.0 | Trader Joe | |
 | fast-xml-parser | 5.12.1 | news RSS parsing | |
@@ -107,6 +107,7 @@ release gate.
 | react · react-dom · react-router-dom | 19.3.1 · 19.3.1 · 7.18.5 | UI | |
 | lightweight-charts · d3-hierarchy | 5.3.0 · 3.1.3 | charts, bubble packing | |
 | vite · @vitejs/plugin-react · concurrently | 8.3.8 · 6.3.0 · 10.0.7 | build & dev tooling | dev only |
+| @playwright/test | 1.63.0 | browser end-to-end suite | dev only (Phase 1) |
 
 Runtime requirement: Node.js ≥ 22.13 (enforced at startup).
 

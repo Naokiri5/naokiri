@@ -6,7 +6,7 @@ before the next one starts.
 
 Priority key: **P0** must do (safety/correctness) · **P1** core spec gap · **P2** important · **P3** nice to have.
 
-## Phase 1 — Foundation hardening
+## Phase 1 — Foundation hardening ✅ DONE (2026-11-16)
 | ID | Pri | Task | Done when |
 |---|---|---|---|
 | F-1 | P0 | Fix SEC-01: upgrade `@fastify/static` to v10; clear `npm audit` high/moderate findings | `npm audit` shows 0 high, static UI still served |
@@ -54,6 +54,7 @@ Priority key: **P0** must do (safety/correctness) · **P1** core spec gap · **P
 |---|---|---|
 | Q-1 | P1 | Benchmark harness on replay workloads; record p50/p95/p99 per stage; fail CI on regressions |
 | Q-2 | P2 | Bounded priority queues with backpressure metrics; pre-computed execution cost tables |
+| Q-3 | P1 | Remove event-loop stalls (~220 ms seen): stream-parse the all-market ticker payload or move it off the main thread |
 
 ## Phase 7 — Security & QA certification
 | ID | Pri | Task |

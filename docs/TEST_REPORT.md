@@ -1,10 +1,10 @@
 # Test Report
 
-Latest run: 2026-11-16, Phase 0 audit, commit `ce655bd`, Node 22.23.4, Linux.
+Latest run: 2026-11-16, end of Phase 1, Node 22.23.4, Linux.
 
 ## Automated tests (`npm test`)
 
-**Result: 43 passed, 0 failed, 2 skipped** (the 2 skipped are the opt-in live-network tests). Typecheck of server and web: **pass**.
+**Result: 54 passed, 0 failed, 2 skipped** (the 2 skipped are the opt-in live-network tests). Typecheck of server and web: **pass**.
 
 | File | Covers | Tests |
 |---|---|---|
@@ -16,6 +16,18 @@ Latest run: 2026-11-16, Phase 0 audit, commit `ce655bd`, Node 22.23.4, Linux.
 | `lab.test.ts` | Stop-before-target and gap fills; trailing only tightens; time stop; backtester runs all strategies without look-ahead; Monte Carlo determinism | 4 |
 | `wallet.test.ts` | Keccak-256 vectors; EIP-55 checksums; network mismatch; withdrawals blocked; bot and assistant have no path | 3 |
 | `api.test.ts` | Auth, passphrase strength, CSRF, step-up, PAPER needs a policy, `BOUNDED_LIVE` locked, all GET endpoints, Trader Joe's tool allowlist | 5 |
+| `static.test.ts` (Phase 1) | UI + assets + SPA routes served; unknown API paths stay JSON; **5 path-traversal attempts blocked**; security headers | 4 |
+| `phase1.test.ts` (Phase 1) | Request IDs; QHEF budgets from real samples; Security Center never leaks secrets; revoke-other-sessions needs step-up; Discover; history input validation; CSV formula-injection; copy-trading honest state | 7 |
+
+## Browser end-to-end (`npm run test:e2e`, Playwright, Phase 1)
+
+**Result: 32 passed, 0 failed**, repeated 3 times in a row. It runs against a fresh, offline server so it is deterministic:
+owner setup → risk policy with step-up → funding → PAPER mode → Bounded Live refused → all **25 pages** render with no API
+error → command palette navigation and pause action → CSV download → **zero browser console errors** → mobile (390 px) has
+no horizontal overflow on 5 key pages.
+
+## CI (`.github/workflows/ci.yml`, Phase 1)
+Secret scan (verified to catch a planted fake key) → `npm audit --audit-level=high` → typecheck → unit tests → browser suite.
 
 ## Live verification (recorded 2026-11-16, not part of `npm test`)
 
@@ -31,9 +43,9 @@ Latest run: 2026-11-16, Phase 0 audit, commit `ce655bd`, Node 22.23.4, Linux.
 | `npm run dev`: Vite proxy to backend | pass |
 
 ## Gaps (to close in later phases)
-- The Playwright browser walkthrough was run by hand from a scratch folder and is **not committed** to the repo.
-- No frontend component tests; no CI runs tests on each push.
+- No frontend component (unit) tests; UI is covered by the browser suite instead.
+- First CI run happens when this branch is pushed; results appear on the pull request.
 - Trader Joe's conversational (Claude API) mode has **never been executed**: no API key is configured.
-- No performance-regression or load tests (Part 33.22).
+- No performance-regression or load tests (Part 33.22). The QHEF page measured event-loop spikes up to ~220 ms (likely parsing the large all-market ticker download) — Phase 6.
 - Windows startup fixes verified by code review only.
 - Node < 22.13 version guard verified by code review only.

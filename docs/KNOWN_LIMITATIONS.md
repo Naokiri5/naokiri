@@ -1,6 +1,6 @@
 # Known Limitations
 
-Updated 2026-11-16 (Phase 0). Each item says whether it is **fixable now** or **blocked** on something external.
+Updated 2026-11-16 (end of Phase 1). Each item says whether it is **fixable now** or **blocked** on something external.
 
 ## Trading & strategies
 - **The 3 built-in strategies lost money out-of-sample** on the last ~4 months of real data, with tiny samples (2–9 trades
@@ -15,7 +15,7 @@ Updated 2026-11-16 (Phase 0). Each item says whether it is **fixable now** or **
   commodities and derivatives are not connected** (blocked: licensed feeds / network host).
 - Data arrives by polling every 15–60 s, not live streaming (streaming hosts not allow-listed; fixable with approval).
 - Google News RSS is licensed for **personal, non-commercial use only**.
-- Some Binance "B"-suffixed listings are tokenized equities; MIA currently treats them as crypto.
+- Some Binance listings are tokenized stocks (CoinGecko labels them "bStocks Tokenized Stock", e.g. NVDAB, SPCXB); MIA still classifies them as crypto spot.
 
 ## Intelligence
 - 12 of the 100 workers always abstain: 3 are fixable now, 9 need provider keys (see traceability).
@@ -30,5 +30,6 @@ Updated 2026-11-16 (Phase 0). Each item says whether it is **fixable now** or **
 
 ## Operations
 - Runs locally or in this cloud session only; not yet hosted. The 30-day paper evaluation (release gate) hasn't started.
-- No CI, no automated backups, no rate limiting (see `SECURITY.md`).
+- No automated backups and no API rate limiting yet (see `SECURITY.md`). CI exists since Phase 1.
+- Occasional event-loop stalls up to ~220 ms observed (QHEF page); harmless for paper trading, scheduled for Phase 6.
 - Single owner account; no password reset.

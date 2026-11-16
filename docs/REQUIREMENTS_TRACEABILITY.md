@@ -1,6 +1,6 @@
 # Requirements Traceability — MIA 4.1 Parts 1–33
 
-Phase 0 audit · 2026-11-16 · audited commit `ce655bd` (main, after PR #1) · spec SHA-256 prefix `e2a0a376e37aa47f`
+Phase 0 audit · 2026-11-16 · audited commit `ce655bd` (main, after PR #1) · **updated after Phase 1** · spec SHA-256 prefix `e2a0a376e37aa47f`
 
 ## Status definitions
 
@@ -49,7 +49,7 @@ merged in Phase 3.
 | 7 | Portfolio tracker (multi-wallet, multi-asset) | Portfolio page, ledger | PARTIAL | Paper account only; external wallets/exchanges BLOCKED (read-only keys). |
 | 8 | Central decision engine, 7 states, trade explanation | `decision/engine.ts` | IMPLEMENTED | — |
 | 9 | Four autonomy levels + restrictions | `core/mode.ts`, risk gate | IMPLEMENTED | Level 4 is deliberately LOCKED. |
-| 10 / 15 / 28.1 | Navigation, shell, mode badge, banners | `web/src/App.tsx` | PARTIAL | 19 workspaces + Release Gates exist. **Missing pages** from your list: *Asset Discovery*, *QHEF Performance dashboard* (data is on Connections Hub), *Security Center*, *Economic calendar* page, standalone *Copy Trading* page, *Trading history* page (it lives inside Journal). |
+| 10 / 15 / 28.1 | Navigation, shell, mode badge, banners, command palette | `web/src/App.tsx`, `palette.tsx`, `pages/Phase1.tsx` | IMPLEMENTED | 25 workspaces incl. Asset Discovery, QHEF Performance, Security Center, Copy Trading (honest blocked state), Trading History (Phase 1). Economic calendar page waits on a licensed feed (BLOCKED, Part 6.2). |
 | 11.1 | Multi-timeframe analysis | 15m / 1h / 4h features | IMPLEMENTED | — |
 | 11.2 | Smart money & order flow | taker ratio, OBV, book imbalance, large prints | PARTIAL | No live trade-tape streaming (REST polling). |
 | 11.3 | Liquidity heatmap | — | MISSING | Book data exists; no heatmap view. |
@@ -63,7 +63,7 @@ merged in Phase 3.
 | 11.11 | Historical market replay engine | — | MISSING | Backtester exists; no "replay as if live" through the full QCI→risk→OMS pipeline. |
 | 11.12 | AI disagreement & uncertainty detector | challenge panel, MIXED consensus | IMPLEMENTED | — |
 | 12.1–12.2 | 15 QA roles, QA director | Tests exist; roles not mapped | MISSING | Need a QA registry assigning each test suite to QA-01…QA-15 with independent reporting. |
-| 12.3–12.4 | Coverage per role, function-by-function registry | 43 tests | PARTIAL | No frontend tests or end-to-end browser tests in the repo; no CI. |
+| 12.3–12.4 | Coverage per role, function-by-function registry | 54 unit/integration + 32 browser checks, CI | PARTIAL | Browser suite + CI added (Phase 1); per-role QA registry still MISSING (Phase 3). |
 | 12.5–12.6 | Test environments, 30-day paper evaluation | paper mode | PARTIAL | 30-day run not started (needs the app running continuously; see Phase 8). |
 | 12.7–12.9 | Release gates, defect severity, pre-flight certification | `qa/gates.ts`, Release Gates page | PARTIAL | 14 gates; no defect tracker or pre-flight checklist page. |
 | 13.1 | 50 indicator specialists | `workers/indicators.ts` | IMPLEMENTED | — |
@@ -95,7 +95,7 @@ merged in Phase 3.
 | 32.6 | Execution intelligence & OMS hardening | idempotent client IDs, last-moment checks | PARTIAL | No durable order-intent queue (would matter only for live trading). |
 | 32.8 | Independent safety supervisor | risk gate + strategy health | PARTIAL | No separate watchdog process. |
 | 32.11 | Model ops, drift, controlled learning | — | MISSING | — |
-| 32.12 | Reliability & security operations | audit chain, runbook | PARTIAL | No CI, no automated backups, no monitoring alerts outside the app. |
+| 32.12 | Reliability & security operations | audit chain, runbook, CI, request IDs, Security Center | PARTIAL | CI + request tracing added (Phase 1); automated backups and external monitoring still missing. |
 | 32.13 | Operator cockpit | Overview + Risk Center | IMPLEMENTED | — |
 | 33.4–33.6 | Pre-warming, incremental features, tiered scanning | `features/`, `fabric.ts` | IMPLEMENTED | — |
 | 33.7 | Selective parallel QCI | `runtime.ts#isApplicable` | IMPLEMENTED | — |
@@ -104,15 +104,15 @@ merged in Phase 3.
 | 33.13–33.15 | Smart execution router, DEX & stocks execution | — | BLOCKED | Live execution is locked. |
 | 33.16 | Final safety barrier | last-moment risk revalidation | IMPLEMENTED | — |
 | 33.17 | Priority scheduling & backpressure | lane timers + re-entrancy guards | PARTIAL | No bounded queue with backpressure metrics. |
-| 33.18 | Latency budgets & observability | `core/latency.ts`, p50/p95/p99 | IMPLEMENTED | No dedicated QHEF page. |
+| 33.18 | Latency budgets & observability | `core/latency.ts`, `qhef/qhef.ts`, QHEF page | IMPLEMENTED | Budgets per hot-path stage + true event-loop delay (Phase 1). |
 | 33.19–33.22 | Adaptive latency controller, safe degradation, operator UX, benchmark plan | data-quality fail-closed | PARTIAL | No performance regression tests. |
 
 ## Summary counts (requirement rows above)
 
 | Status | Rows |
 |---|---|
-| IMPLEMENTED | 27 |
-| PARTIAL | 34 |
+| IMPLEMENTED | 28 |
+| PARTIAL | 33 |
 | MISSING | 4 |
 | BLOCKED | 9 |
 | MOCKED | 0 |

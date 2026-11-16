@@ -37,6 +37,11 @@ import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { config } from '../config.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
+import { qhefReport } from '../qhef/qhef.js';
+import { securityOverview, revokeOtherSessions } from '../security/security.js';
+import { discover } from '../market/discover.js';
+import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js';
+import { provider } from '../providers/http.js';
 
 const COOKIE = 'mia_session';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
@@ -90,7 +95,8 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/markets', async () => ({ tickers: [...market.tickers.values()].filter((t) => t.quoteVolume > 1e6 && isEligibleSpot(t.base, t.quote)).sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 300), universe: market.universe, asOf: market.tickersFetchedAt }));
   app.get('/api/markets/search', async (req) => { const q = String((req.query as any).q ?? '').toUpperCase(); return [...market.instruments.values()].filter((i) => i.symbol.includes(q) || i.base.startsWith(q)).slice(0, 20).map((i) => ({ id: i.id, symbol: i.symbol, base: i.base })); });
   app.get('/api/instrument/:symbol', async (req, reply) => {
-    const i = market.bySymbol((req.params as any).symbol); if (!i) return bad(reply, 404, 'unknown instrument');
+    const i = market.bySymbol((req.params as any).symbol);
+    if (!i) return reply.code(200).send({ unavailable: true, reason: market.instruments.size ? 'Symbol is not a listed Binance spot pair.' : config.offline ? 'Market data is disabled (offline mode).' : 'Market data is still loading — try again in a few seconds.' });
     if (!market.deep.has(i.id) && !config.offline) { const { refreshDeep } = await import('../market/fabric.js'); await refreshDeep([i.id]); }
     const d = market.deep.get(i.id); const iv = ((req.query as any).interval ?? '1h') as '15m' | '1h' | '4h';
     const f = d ? { '15m': d.engines['15m'].last, '1h': d.engines['1h'].last, '4h': d.engines['4h'].last } : {};
@@ -191,6 +197,35 @@ export async function routes(app: FastifyInstance) {
 
   // ── connections / notifications / settings / QA ──
   app.get('/api/connections', async () => ({ providers: providers(), latency: latencyReport() }));
+
+  // ── Phase 1 workspaces ──
+  app.get('/api/qhef', async () => qhefReport());
+  app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
+  app.post('/api/security/sessions/revoke-others', async (req) => { stepUp(req.body); return revokeOtherSessions(tokenOf(req)); });
+  app.get('/api/discover', async (req) => discover(Number((req.query as any).minVolume ?? 1e6)));
+  const histFilter = (q: any): HistoryFilter => z.object({ from: z.coerce.number().int().positive().optional(), to: z.coerce.number().int().positive().optional(),
+    instrument: z.string().max(20).regex(/^[A-Za-z0-9]*$/).optional(), status: z.enum(['NEW', 'FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED', 'ACTIVE', 'PENDING_APPROVAL']).optional(),
+    purpose: z.enum(['ENTRY', 'EXIT', 'PROTECTIVE_STOP']).optional() }).parse(q);
+  app.get('/api/history', async (req) => tradingHistory(histFilter(req.query)));
+  app.get('/api/history.csv', async (req, reply) => {
+    const q = req.query as any; const h = tradingHistory(histFilter({ ...q, kind: undefined }));
+    const csv = q.kind === 'trades'
+      ? toCsv(h.trades, ['id', 'instrument', 'strategy', 'opened_at', 'closed_at', 'entry_price', 'exit_price', 'realized_pnl', 'fees', 'exit_reason', 'planned_risk'])
+      : toCsv(h.orders, ['id', 'client_order_id', 'created_at', 'instrument', 'side', 'type', 'purpose', 'qty', 'filled_qty', 'avg_price', 'fees', 'status', 'reject_reason']);
+    reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="mia-${q.kind === 'trades' ? 'trades' : 'orders'}-paper.csv"`);
+    return csv;
+  });
+  app.get('/api/copy', async () => {
+    const evm = provider('evm_rpc'); const sol = provider('solana_rpc');
+    return { status: 'BLOCKED', trackedWallets: [], copyRules: [],
+      requirements: [
+        { name: 'EVM RPC + explorer (wallet discovery, transfers, ranking)', providerId: 'evm_rpc', status: evm?.status ?? 'PENDING_CREDENTIALS' },
+        { name: 'Solana RPC (wallet activity, token authorities)', providerId: 'solana_rpc', status: sol?.status ?? 'PENDING_CREDENTIALS' },
+      ],
+      pipeline: ['Discover candidate whale wallets from on-chain transfers', 'Rank by verified, cost-adjusted historical performance (Part 4.3)', 'Detect a new trade by a followed wallet',
+        'Treat it as a candidate: asset safety → 100-worker QCI → decision engine → deterministic risk gate', 'Paper-execute only within your limits; never mirror size blindly'],
+      note: 'No wallet data is simulated. Copy trading activates only after an on-chain provider is connected and the feature is tested.' };
+  });
   app.get('/api/latency', async () => latencyReport());
   app.get('/api/notifications', async () => listNotifications(300));
   app.post('/api/notifications/read', async (req) => { markRead((req.body as any)?.id); return { ok: true }; });

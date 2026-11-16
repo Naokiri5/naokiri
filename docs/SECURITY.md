@@ -6,13 +6,14 @@ Phase 0 audit · 2026-11-16 · commit `ce655bd`
 
 | ID | Severity | Finding | Evidence | Proposed fix (phase) |
 |---|---|---|---|---|
-| SEC-01 | **High** | `@fastify/static@8.3.0` (serves the web UI) has published path-traversal and route-guard-bypass advisories. Two moderate transitive issues (`glob`, `minimatch`) come with it. | `npm audit`: 1 high, 2 moderate | Upgrade to `@fastify/static@10.x` and retest static serving (Phase 1). |
+| SEC-01 | ~~High~~ **RESOLVED (Phase 1)** | `@fastify/static@8.3.0` (serves the web UI) has published path-traversal and route-guard-bypass advisories. Two moderate transitive issues (`glob`, `minimatch`) come with it. | `npm audit`: 1 high, 2 moderate | Upgraded to 10.1.11; `npm audit`: 0 vulnerabilities; path-traversal regression tests in `static.test.ts`. |
 | SEC-02 | Medium | No rate limiting on the API apart from login lockout (5 attempts → 60 s). An authenticated client could hammer expensive endpoints (`/api/analyze`, `/api/lab/backtest`). | `api/routes.ts` | Per-route rate limits (Phase 7). |
 | SEC-03 | Medium | Inside containers the server binds `0.0.0.0` so forwarded ports work, which also exposes the login page on that network. All APIs still require the owner session. There is no TLS. | `config.ts#inContainer` | Document a TLS reverse proxy; add an `MIA_ALLOWED_ORIGINS`/host check (Phase 8). |
 | SEC-04 | Medium | The SQLite database (`data/mia.db`) is not encrypted at rest. It holds the scrypt password hash, audit log, address book and paper ledger. It holds no API keys or private keys. | `db/db.ts` | File-permission hardening + backup encryption guidance (Phase 7/8). |
 | SEC-05 | Low | The evidence-packet HMAC key is random per process unless `MIA_EVIDENCE_KEY` is set, so packets stored before a restart can't be re-verified afterwards. | `config.ts` | Persist a generated key with 0600 permissions (Phase 7). |
 | SEC-06 | Low | No security headers test; CSP allows `'unsafe-inline'` styles (needed by the chart library). | `index.ts` | Add header tests; tighten CSP where possible (Phase 7). |
-| SEC-07 | Info | No CI pipeline, so dependency and secret scanning only happen when someone runs them. | — | GitHub Actions: tests + `npm audit` + secret scan (Phase 1). |
+| SEC-07 | ~~Info~~ **RESOLVED (Phase 1)** | No CI pipeline. | — | `.github/workflows/ci.yml`: secret scan, `npm audit --audit-level=high`, typecheck, unit + browser tests on every push/PR. |
+| SEC-08 | Low | CSV export could carry spreadsheet formulas from stored text. | `journal/history.ts` | **Fixed in Phase 1** before release (cells starting with = + - @ are neutralised; tested). |
 
 ## Checks that passed
 

@@ -18,6 +18,7 @@ executes **paper trades against live order books**. Built from the MIA 4.1 Unifi
 | Paper OMS (live book-walk fills, fees, OMS-monitored stops, partial TP, trailing, time stops) | **Working**, verified with a real BTC round trip |
 | Strategy Lab (walk-forward backtests on real history, Monte Carlo) | **Working** |
 | Risk Center, emergency controls, Bot Account, Portfolio, Journal, Profit Calendar | **Working** |
+| Asset Discovery, QHEF Performance, Security Center, Trading History, command palette (Ctrl/⌘+K) | **Working** (Phase 1) |
 | Trader Joe | **Command mode working**; Claude conversational mode needs `ANTHROPIC_API_KEY` (not exercised in this build environment) |
 | Wallet & Withdrawals | Address book, EIP-55/format validation, guided preview, freeze. **Submission blocked by release gate** (no signer, by design) |
 | Equities, commodities, on-chain wallets/holders, copy trading, X, Telegram sources | **Pending credentials/licenses**: adapters registered and shown honestly; no simulated data |
@@ -73,10 +74,15 @@ requires the owner passphrase for every API call, but put it behind TLS before e
 ## Tests & QA evidence
 
 ```bash
-npm test                         # 43 unit/integration tests (offline, deterministic)
+npm test                         # 54 unit/integration tests (offline, deterministic)
+npm run test:e2e                 # 32 browser checks (Playwright, offline server, all 25 pages)
 npm run test:live -w server      # opt-in: real providers + real-order-book paper round trip (network)
 npm run qa -w server             # records evidence used by the Release Gates page
+npm run scan:secrets             # fails if a key/token/private key is in a tracked file
 ```
+
+CI (`.github/workflows/ci.yml`) runs the secret scan, `npm audit`, typecheck, unit tests and the browser suite on every push
+and pull request.
 
 ## Documentation
 

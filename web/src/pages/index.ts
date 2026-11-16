@@ -4,3 +4,4 @@ export { Scanner, Intelligence, DecisionPage } from './Intel';
 export { Bot, Risk, Portfolio, Journal, Calendar, Lab } from './Trading';
 export { Wallet, Connections, Notifications, QA, Settings } from './Account';
 export { JoePage } from './Joe';
+export { Discover, Qhef, SecurityCenter, CopyTrading, History } from './Phase1';

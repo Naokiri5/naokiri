@@ -12,9 +12,10 @@ export function Terminal() {
   const watch = useApi('/api/markets', { every: 30_000 });
   const [ana, setAna] = useState<any>(null);
   const t = data?.ticker; const f = data?.features;
-  return <Page title={`Market Terminal · ${data?.instrument?.base ?? symbol}`} sub={data ? `${data.instrument.symbol} · Binance spot (public market data) · cross-venue checks: ${Object.keys(data.cross).join(', ') || 'none'}` : ''}
-    right={<><Freshness at={t?.receivedAt} label="quote" /><Action className="primary" label="Run full analysis" run={async () => setAna(await api('/api/analyze', { body: { symbol } }))} /></>}>
+  return <Page title={`Market Terminal · ${data?.instrument?.base ?? symbol}`} sub={data?.instrument ? `${data.instrument.symbol} · Binance spot (public market data) · cross-venue checks: ${Object.keys(data.cross).join(', ') || 'none'}` : ''}
+    right={<><Freshness at={t?.receivedAt} label="quote" /><Action className="primary" label="Run full analysis" disabled={!!data?.unavailable} run={async () => setAna(await api('/api/analyze', { body: { symbol } }))} /></>}>
     <ErrorLine e={error} />
+    {data?.unavailable ? <div className="banner info">No data for {symbol}: {data.reason}</div> :
     <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px' }}>
       <div className="col" style={{ gap: 14 }}>
         <Card title={<span className="row"><span className="mono" style={{ fontSize: 18 }}>{fmt.px(t?.last)}</span><Chg v={t?.changePct} /><span className="hint">H {fmt.px(t?.high)} · L {fmt.px(t?.low)} · Vol {fmt.big(t?.quoteVolume)}</span></span>}
@@ -40,7 +41,7 @@ export function Terminal() {
         <Card title="Large prints" flush><div className="tablewrap" style={{ maxHeight: 220 }}><table><tbody>{(data?.prints ?? []).map((p: any, i: number) => <tr key={i}><td className="faint">{fmt.ago(p.ts)}</td><td><Badge v={p.side} /></td><td className="num">{fmt.usd(p.notional, 0)}</td></tr>)}</tbody></table>{!data?.prints?.length && <Empty>No prints above threshold recently.</Empty>}</div></Card>
         <Card title="Watchlist" flush><div className="tablewrap" style={{ maxHeight: 360 }}><table><tbody>{(watch.data?.tickers ?? []).slice(0, 40).map((w: any) => <tr key={w.symbol} className="click" onClick={() => nav(`/terminal/${w.symbol}`)}><td><b>{w.base}</b></td><td className="num">{fmt.px(w.last)}</td><td className="num"><Chg v={w.changePct} /></td></tr>)}</tbody></table></div></Card>
       </div>
-    </div>
+    </div>}
     {ana && <Modal title="Full pipeline analysis" onClose={() => setAna(null)}>{ana.decision ? <DecisionView report={ana} /> : <div className="banner info">{ana.reason}</div>}</Modal>}
   </Page>;
 }
