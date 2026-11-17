@@ -57,11 +57,12 @@ export async function runBacktest(actor: string, strategyId: string, symbol: str
 }
 const summary = (r: BtResult) => ({ strategyId: r.strategyId, instrument: r.instrument, bars: r.bars, from: r.from, to: r.to, inSample: r.inSample, outOfSample: r.outOfSample, all: r.all, warnings: r.warnings, equityR: r.equityR, costs: r.costs, trades: r.trades.slice(-200) });
 export function listBacktests(limit = 50) { return all<any>('SELECT id, strategy_id, created_at, instrument, interval, result FROM backtests ORDER BY created_at DESC LIMIT ?', limit).map((r) => ({ id: r.id, created_at: r.created_at, ...summary(P(r.result)) })); }
-/** Aggregate OUT-OF-SAMPLE stats across the most recent backtest per instrument. */
+/** Aggregate current-version OUT-OF-SAMPLE stats across the most recent backtest per instrument. */
 export function strategyStats(strategyId: string) {
+  const definition = strategyById(strategyId); if (!definition) return null;
   const rows = all<any>('SELECT instrument, result FROM backtests WHERE strategy_id=? ORDER BY created_at DESC', strategyId);
   const seen = new Set<string>(); const trades: BtTrade[] = [];
-  for (const r of rows) { if (seen.has(r.instrument)) continue; seen.add(r.instrument); trades.push(...(P<BtResult>(r.result).trades.filter((t) => t.segment === 'OOS'))); }
+  for (const r of rows) { const result = P<BtResult>(r.result); if (result.strategyVersion !== definition.version || seen.has(r.instrument)) continue; seen.add(r.instrument); trades.push(...result.trades.filter((t) => t.segment === 'OOS')); }
   if (!trades.length) return null;
   const s = stats(trades); return { ...s, instruments: seen.size, monteCarlo: monteCarlo(trades.map((t) => t.r)) };
 }

@@ -48,6 +48,23 @@ const MIGRATIONS: string[] = [
     incorrect INTEGER NOT NULL DEFAULT 0, quarantined INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
   CREATE TABLE chat (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL);
   `,
+  /* 2 — DITAS immutable research memory; existing execution tables remain authoritative. */ `
+  CREATE TABLE ditas_snapshots (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, instrument TEXT NOT NULL, payload TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE TABLE ditas_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, dedupe_key TEXT UNIQUE NOT NULL,
+    created_at INTEGER NOT NULL, kind TEXT NOT NULL, instrument TEXT NOT NULL, strategy TEXT, decision_id TEXT,
+    snapshot_id TEXT REFERENCES ditas_snapshots(id), parent_event_id TEXT REFERENCES ditas_events(id), payload TEXT NOT NULL,
+    prev_hash TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE INDEX ditas_events_ts ON ditas_events(created_at);
+  CREATE INDEX ditas_events_decision ON ditas_events(decision_id);
+  CREATE TABLE ditas_twin_runs (id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES ditas_events(id), created_at INTEGER NOT NULL, result TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE TABLE ditas_forecasts (id TEXT PRIMARY KEY, dedupe_key TEXT UNIQUE NOT NULL, event_id TEXT NOT NULL REFERENCES ditas_events(id), created_at INTEGER NOT NULL,
+    target_at INTEGER NOT NULL, probability REAL NOT NULL CHECK(probability>=0 AND probability<=1), cohort TEXT NOT NULL, payload TEXT NOT NULL);
+  CREATE TABLE ditas_outcomes (id TEXT PRIMARY KEY, forecast_id TEXT UNIQUE NOT NULL REFERENCES ditas_forecasts(id), created_at INTEGER NOT NULL,
+    outcome INTEGER NOT NULL CHECK(outcome IN (0,1)), payload TEXT NOT NULL);
+  ${['ditas_snapshots', 'ditas_events', 'ditas_twin_runs', 'ditas_forecasts', 'ditas_outcomes'].map(table => `
+  CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  CREATE TRIGGER ${table}_no_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;`).join('')}
+  `,
 ];
 
 export function migrate(db: DatabaseSync) {

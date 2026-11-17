@@ -14,3 +14,7 @@ Preserve the existing scanner, FeatureEngine, QCI coordinator, central decision 
 Use actual supported market data only. Never commit secrets, represent heuristic rule strength as a calibrated win probability, enable live trading, automatically promote untested strategies or merge main without explicit owner authorization.
 
 Validation: `npm run typecheck`, `npm test`, `npm run test:e2e`, `npm run scan:secrets`. Benchmark: `node --import tsx scripts/benchmark-chart.mjs`. Live provider tests require external connectivity and are separate from offline fixtures.
+
+## DITAS foundation
+
+For the newer Decision Intelligence, Trust & Adaptive Strategy System work, start with `docs/ditas/IMPLEMENTATION_STATUS.md`, `DITAS_ARCHITECTURE_AUDIT.md`, and the test/certification reports in that directory. The feature branch stacks on the chart intelligence increment. Preserve immutable pre-QCI snapshots, exact probability cohorts and separation of hypothetical simulations from actual paper OMS records. Continue the remaining phases from the status table; no live certification or automatic promotion is implied.

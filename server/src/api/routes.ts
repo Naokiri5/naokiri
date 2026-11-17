@@ -1,3 +1,4 @@
+import { ditasRoutes } from '../ditas/routes.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -62,6 +63,8 @@ export async function routes(app: FastifyInstance) {
     if (!auth.validSession(tokenOf(req))) return bad(reply, 401, 'authentication required');
     if (req.method !== 'GET' && req.headers['x-mia-csrf'] !== '1') return bad(reply, 403, 'missing CSRF header');
   });
+
+  await ditasRoutes(app);
 
   // ── auth ──
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));

@@ -4,8 +4,9 @@ import * as kraken from '../providers/kraken.js';
 import * as coingecko from '../providers/coingecko.js';
 import * as dexscreener from '../providers/dexscreener.js';
 import * as frankfurter from '../providers/frankfurter.js';
-import { market } from './store.js';
-import { INTERVAL_MS, type Instrument, type Interval } from './types.js';
+import { market, type DeepState } from './store.js';
+import { validateCandles } from '../chart/analysis.js';
+import { INTERVAL_MS, type Candle, type Instrument, type Interval } from './types.js';
 import { bus } from '../core/bus.js';
 import { timed } from '../core/latency.js';
 import { config } from '../config.js';
@@ -52,17 +53,50 @@ export function selectUniverse() {
   universeAt = Date.now();
 }
 
+/** Validate raw provider ordering before FeatureEngine's overlap/deduplication behavior. */
+export function validateCandleBatch(candles: readonly Candle[], interval: Interval, nowTs: number) {
+  const duration = INTERVAL_MS[interval];
+  const last = candles[candles.length - 1];
+  const validationTime = Math.max(nowTs, last ? last.t + duration : nowTs);
+  const issues = new Set(validateCandles(candles, interval, validationTime));
+  // The current interval may be forming; no candle may start in the future.
+  if (candles.some(c => c.t > nowTs)) issues.add('future candle open timestamp');
+  if (candles.some(c => c.closeTime != null && (c.closeTime < c.t || c.closeTime > c.t + duration))) issues.add('inconsistent candle close timestamp');
+  const closed = candles.filter(c => c.t + duration <= nowTs && (c.closeTime == null || c.closeTime < nowTs));
+  const forming = candles.filter(c => c.t + duration > nowTs || (c.closeTime != null && c.closeTime >= nowTs));
+  if (forming.length > 1 || (forming.length && forming[0] !== last)) issues.add('multiple or misplaced forming candles');
+  for (const issue of validateCandles(closed, interval, nowTs)) issues.add(issue);
+  return { closed, forming: forming[0], issues: [...issues] };
+}
+
+/** Bad source batches never alter indicators; the quality gate remains failed until recovery. */
+export function ingestCandleBatch(state: DeepState, interval: Interval, candles: readonly Candle[], nowTs: number) {
+  const result = validateCandleBatch(candles, interval, nowTs);
+  const engine = state.engines[interval];
+  const firstNew = result.closed.find(c => c.t > engine.lastT);
+  if (engine.lastT >= 0 && firstNew && firstNew.t !== engine.lastT + INTERVAL_MS[interval]) result.issues.push('missing candles between cached history and source batch');
+  const previousIssues = state.integrityIssues?.[interval] ?? [];
+  state.integrityIssues ??= {};
+  state.integrityIssues[interval] = result.issues;
+  state.candleFetchedAt[interval] = nowTs;
+  if (result.issues.length || previousIssues.length) bus.publish('health', {
+    type: 'market-data-integrity', instrumentId: state.instrument.id, interval, source: state.instrument.venue, at: nowTs,
+    status: result.issues.length ? 'FAIL' : 'RECOVERED', issues: result.issues,
+  });
+  if (result.issues.length) return 0;
+  // Repeated candles across separate refreshes are expected and handled idempotently.
+  const added = engine.ingest(result.closed);
+  if (result.forming) state.forming[interval] = result.forming;
+  else delete state.forming[interval];
+  return added;
+}
+
 async function refreshCandles(id: string, interval: Interval) {
   const inst = market.instruments.get(id)!; const d = market.deepState(inst);
   const eng = d.engines[interval];
   const limit = eng.lastT < 0 ? 400 : Math.min(400, Math.ceil((Date.now() - eng.lastT) / INTERVAL_MS[interval]) + 2);
   const cs = await binance.klines(inst.symbol, interval, limit);
-  const nowTs = Date.now();
-  const closed = cs.filter((c) => (c.closeTime ?? c.t + INTERVAL_MS[interval]) < nowTs);
-  const forming = cs.find((c) => (c.closeTime ?? 0) >= nowTs);
-  await timed('features.incremental', () => eng.ingest(closed));
-  if (forming) d.forming[interval] = forming;
-  d.candleFetchedAt[interval] = nowTs;
+  await timed('features.incremental', () => ingestCandleBatch(d, interval, cs, Date.now()));
 }
 
 export async function refreshDeep(ids = market.universe) {
@@ -75,7 +109,7 @@ export async function refreshDeep(ids = market.universe) {
         const fetched = d.candleFetchedAt[iv] ?? 0;
         // only refetch after a new candle could have closed (incremental, Part 33.5)
         const eng = d.engines[iv];
-        if (eng.lastT < 0 || nowTs >= eng.lastT + 2 * INTERVAL_MS[iv] || nowTs - fetched > INTERVAL_MS[iv] / 4) await refreshCandles(id, iv);
+        if (d.integrityIssues?.[iv]?.length || eng.lastT < 0 || nowTs >= eng.lastT + 2 * INTERVAL_MS[iv] || nowTs - fetched > INTERVAL_MS[iv] / 4) await refreshCandles(id, iv);
       }
       d.book = await timed('fabric.book', () => binance.depth(inst.symbol, 100));
     } catch { /* provider health already tracked; quality gate will fail-closed */ }

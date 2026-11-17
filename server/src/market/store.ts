@@ -16,6 +16,8 @@ export interface DeepState {
   engines: Record<Interval, FeatureEngine>;
   forming: Partial<Record<Interval, Candle>>;
   candleFetchedAt: Partial<Record<Interval, number>>;
+  /** Raw source-batch failures persist until a validated refresh for the same interval. */
+  integrityIssues?: Partial<Record<Interval, string[]>>;
   book: Book | null;
   cross: Record<string, Quote>;
 }
