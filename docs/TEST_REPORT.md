@@ -1,5 +1,18 @@
 # Test Report
 
+## Integration run (2026-11-17, PRs #3–#6 combined)
+| Check | Result |
+|---|---|
+| `npm run typecheck` (server + web) | pass |
+| `npm test` | **246 passed**, 0 failed, 2 skipped (opt-in live tests) — 20 test files |
+| `npm run test:e2e` (Playwright, offline server) | **37 passed**, 0 failed, run twice |
+| `npm run build` (web + compiled server) | pass |
+| Production start from the build (`npm start`) | health OK, UI + deep link 200, unauthenticated API 401 |
+| Existing database upgrade (copy of a real v1 DB) | schema 1 → 2, no data lost |
+| `npm run scan:secrets` | clean, 207 tracked files |
+| `npm audit --audit-level=high` | 0 vulnerabilities |
+| Tests from each PR kept | #4: 16/16, #5: 26/26, #6: 113/113, #3: 38/40 verbatim (2 rewritten to the no-synthetic-fill invariant) |
+
 Latest run: 2026-11-16, end of Phase 1, Node 22.23.4, Linux.
 
 ## Automated tests (`npm test`)

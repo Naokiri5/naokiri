@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased: production-repair integration (branch `claude/blissful-planck-lazglg`, PR to `main`)
+Integrates the four open pull requests into one tested branch without removing any of their work:
+PR #3 `claude/mia-production-repair`, PR #4 `fix/mia-4.1-audit-repairs`, PR #5 `feat/global-chart-intelligence`,
+PR #6 `feat/ditas-foundation`.
+- Order management follows CLAUDE.md invariant #4 strictly: no paper fill (entry or exit) without a fresh order book
+  deep enough for the full size; otherwise the position stays open and a CRITICAL protection alert fires.
+- Market-data quality gate combines PR #3 execution freshness limits with DITAS structural validation; a stale or
+  future-dated order book fails closed; candle batches use the request-time closed-candle cut-off.
+- DITAS duplicate forecasts/outcomes are rejected as client errors (400) instead of raw database faults.
+- Root-level error handler: no internal error text reaches the browser from any route.
+- 7 regression tests for the audited defects; 246 unit/integration tests and 37 browser checks pass.
+
 ## Unreleased: production repair (branch `claude/mia-production-repair`)
 - **Paper execution (OMS)**: entries refuse order books older than 60 s (`MIA_MAX_EXEC_BOOK_AGE_MS`) and are priced from
   the freshest ask plus book-walk slippage; exits never walk a stale book and always complete (book, partial book +
