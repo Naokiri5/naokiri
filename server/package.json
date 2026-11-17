@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "node scripts/run.mjs dev",
     "start": "node scripts/run.mjs start",
-    "build": "tsc -p tsconfig.json --noEmit",
+    "backup": "node scripts/run.mjs backup",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run",
     "qa": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run --reporter=default --reporter=json --outputFile.json=../data/qa/test-results.json",
@@ -17,6 +18,7 @@
     "@fastify/static": "^10.1.11",
     "fast-xml-parser": "^5.12.1",
     "fastify": "^5.12.8",
+    "pdfjs-dist": "^6.5.438",
     "zod": "^4.6.7"
   },
   "devDependencies": {

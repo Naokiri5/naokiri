@@ -2,6 +2,7 @@
 /**
  * Cross-platform launcher (replaces POSIX `VAR=x cmd` prefixes that fail in Windows cmd/PowerShell).
  *   node scripts/run.mjs start|dev
+ *   node scripts/run.mjs backup create|verify <file>|list
  * Sets NODE_USE_ENV_PROXY (so built-in fetch honours HTTPS_PROXY where one is configured) and silences the
  * node:sqlite experimental warning, then runs src/main.ts through tsx.
  */
@@ -17,12 +18,28 @@ if (maj < 22 || (maj === 22 && min < 13)) {
 }
 const mode = process.argv[2] ?? 'start';
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-let tsxCli;
-try { tsxCli = createRequire(resolve(serverDir, 'package.json')).resolve('tsx/cli'); }
-catch { console.error('\n✖ Dependencies are not installed. Run `npm install` in the repository root first.\n'); process.exit(1); }
-
 const env = { ...process.env, NODE_USE_ENV_PROXY: '1', NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' ') };
-const args = mode === 'dev' ? [tsxCli, 'watch', 'src/main.ts'] : [tsxCli, 'src/main.ts'];
-const child = spawn(process.execPath, args, { cwd: serverDir, env, stdio: 'inherit' });
+const { existsSync } = await import('node:fs');
+const entry = mode === 'backup' ? 'ops/backup-cli' : 'main';
+const extra = mode === 'backup' ? process.argv.slice(3) : [];
+const builtEntry = resolve(serverDir, 'dist', `${entry}.js`);
+let command;
+let args;
+if (mode === 'dev') {
+  let tsxCli;
+  try { tsxCli = createRequire(resolve(serverDir, 'package.json')).resolve('tsx/cli'); }
+  catch { console.error('Development dependency tsx is missing. Run npm ci first.'); process.exit(1); }
+  command = process.execPath; args = [tsxCli, 'watch', 'src/main.ts'];
+} else if (existsSync(builtEntry)) {
+  command = process.execPath; args = [builtEntry, ...extra];
+} else if (process.env.NODE_ENV === 'production') {
+  console.error('\nProduction server build missing. Run npm ci && npm run build before starting.\n'); process.exit(1);
+} else {
+  let tsxCli;
+  try { tsxCli = createRequire(resolve(serverDir, 'package.json')).resolve('tsx/cli'); }
+  catch { console.error('\nDependencies missing. Run npm install in the repository root.\n'); process.exit(1); }
+  command = process.execPath; args = [tsxCli, `src/${entry}.ts`, ...extra];
+}
+const child = spawn(command, args, { cwd: serverDir, env, stdio: 'inherit' });
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => child.kill(sig));
 child.on('exit', (code, signal) => process.exit(signal ? 1 : code ?? 0));

@@ -2,12 +2,13 @@ import { currentPolicy, type RiskPolicy } from './policy.js';
 import { accountState, openPositions, PAPER_ACCOUNT, type AccountState } from '../portfolio/ledger.js';
 import { getControl } from '../core/mode.js';
 import { market } from '../market/store.js';
-import { assessQuality, bookImpact } from '../market/quality.js';
+import { assessQuality, bookImpact, bookAge, QUALITY_LIMITS } from '../market/quality.js';
 import { assessCexAsset } from '../safety/safety.js';
 import { correlation } from '../portfolio/correlation.js';
 import { all, get } from '../db/db.js';
 import { iso } from '../core/util.js';
 import { getSetting } from '../core/settings.js';
+import { openIncidentFor } from '../exec/incidents.js';
 
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
@@ -43,6 +44,9 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
 
   const inst = market.instruments.get(p.instrumentId);
   if (!inst) { deny.push('INSTRUMENT_UNKNOWN'); return out(); }
+  // An instrument where an open paper position cannot currently be exited must not receive new exposure.
+  const incident = openIncidentFor(p.instrumentId);
+  if (incident) deny.push(`PROTECTION_INCIDENT_OPEN:${incident.id}`);
   if (!pol.approvedMarkets.includes(inst.market as any)) deny.push(`MARKET_NOT_APPROVED:${inst.market}`);
   const safety = assessCexAsset(p.instrumentId); ev.safety = safety.status;
   if (!safety.eligibleForAutomation) deny.push(`ASSET_INELIGIBLE:${safety.status}`);
@@ -51,7 +55,8 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const px = market.price(p.instrumentId);
   if (!px) { deny.push('NO_PRICE'); return out(); }
   const dev = (Math.abs(px.price - p.entryPrice) / p.entryPrice) * 100; ev.priceDeviationPct = round(dev, 4);
-  if (dev > pol.maxPriceDeviationPct) deny.push(`PRICE_DEVIATION ${dev.toFixed(3)}% > ${pol.maxPriceDeviationPct}%`);
+  if (!(p.entryPrice > 0) || !Number.isFinite(dev)) deny.push('ENTRY_PRICE_INVALID');
+  else if (dev > pol.maxPriceDeviationPct) deny.push(`PRICE_DEVIATION ${dev.toFixed(3)}% > ${pol.maxPriceDeviationPct}%`);
   if (!(p.stopPrice > 0 && p.stopPrice < px.price)) deny.push('STOP_DIRECTION_INVALID (long stop must be below price)');
 
   const acct: AccountState = accountState(account, nowTs);
@@ -92,9 +97,13 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const notional = qty * estEntry;
   if (qty <= 0 || qty < inst.minQty || notional < Math.max(inst.minNotional, 5)) deny.push(`SIZE_BELOW_VENUE_MINIMUM qty=${qty} notional=${notional.toFixed(2)}`);
   const plannedMaxLoss = qty * perUnitLoss;
+  // NaN compares false against every limit, so a non-finite input would otherwise slip through as ALLOW.
+  if (![acct.equity, acct.cash, acct.dailyPnlPct, acct.weeklyPnlPct, acct.drawdownPct, estEntry, perUnitLoss, qty, notional, plannedMaxLoss].every(Number.isFinite)) deny.push('NON_FINITE_INPUT (risk cannot be computed)');
   if (acct.openRiskUsd + plannedMaxLoss > acct.equity * (pol.maxOpenRiskPct / 100) + 1e-9) deny.push(`AGGREGATE_OPEN_RISK ${(((acct.openRiskUsd + plannedMaxLoss) / acct.equity) * 100).toFixed(2)}% > ${pol.maxOpenRiskPct}%`);
   const imp = bookImpact(d?.book ?? null, 'buy', Math.max(notional, 1));
-  if (!imp) deny.push('NO_ORDER_BOOK (cannot estimate slippage)');
+  const age = bookAge(d?.book, nowTs); ev.bookAgeMs = age;
+  if (!imp || age == null) deny.push('NO_ORDER_BOOK (cannot estimate slippage)');
+  else if (age > QUALITY_LIMITS.maxExecBookAgeMs) deny.push(`ORDER_BOOK_STALE ${Math.round(age / 1000)}s > ${Math.round(QUALITY_LIMITS.maxExecBookAgeMs / 1000)}s (slippage cannot be trusted)`);
   else {
     ev.spreadBps = round(imp.spreadBps, 2); ev.impactBps = Number.isFinite(imp.impactBps) ? round(imp.impactBps, 2) : null;
     if (imp.spreadBps > pol.maxSpreadBps) deny.push(`SPREAD ${imp.spreadBps.toFixed(1)}bps > ${pol.maxSpreadBps}`);

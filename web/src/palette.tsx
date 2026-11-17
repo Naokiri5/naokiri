@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from './api';
+import type { NavPage } from './nav';
 
 /**
  * Command palette (Ctrl/⌘+K): jump to any workspace, run a few risk-reducing actions, or open an asset.
  * Risk-increasing actions (mode changes, limits, funding) are deliberately NOT available here — they need step-up auth.
  */
-export interface PaletteItem { id: string; label: string; hint?: string; group: string; run: () => void | Promise<void> }
-export function CommandPalette({ pages, onClose, extra }: { pages: [string, string, string][]; onClose: () => void; extra: PaletteItem[] }) {
+export interface PaletteItem { id: string; label: string; hint?: string; group: string; keywords?: string[]; run: () => void | Promise<void> }
+export function CommandPalette({ pages, onClose, extra }: { pages: NavPage[]; onClose: () => void; extra: PaletteItem[] }) {
   const [q, setQ] = useState(''); const [sel, setSel] = useState(0); const [assets, setAssets] = useState<PaletteItem[]>([]); const [msg, setMsg] = useState<string | null>(null);
   const nav = useNavigate(); const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus(); }, []);
@@ -18,8 +19,11 @@ export function CommandPalette({ pages, onClose, extra }: { pages: [string, stri
   }, [q, nav]);
   const items = useMemo(() => {
     const ql = q.toLowerCase().trim();
-    const base: PaletteItem[] = [...pages.map(([to, , l]) => ({ id: `page:${to}`, label: l, hint: to, group: 'Go to', run: () => nav(to) })), ...extra];
-    const m = ql ? base.filter((i) => i.label.toLowerCase().includes(ql) || i.hint?.toLowerCase().includes(ql)) : base;
+    const base: PaletteItem[] = [...pages.map((p) => ({ id: `page:${p.to}`, label: p.label, hint: p.to, group: 'Go to', keywords: p.keywords, run: () => nav(p.to) })), ...extra];
+    // Synonyms: "profit" finds Portfolio and Profit Calendar, "ai bots" finds AI Intelligence, "fund" finds Bot Account (paper) and Wallet (real, locked).
+    // Direct label/hint matches rank first, so typing an action's name ("pause new") still runs that action with Enter.
+    const direct = (i: PaletteItem) => i.label.toLowerCase().includes(ql) || !!i.hint?.toLowerCase().includes(ql);
+    const m = ql ? [...base.filter(direct), ...base.filter((i) => !direct(i) && i.keywords?.some((k) => k.includes(ql)))] : base;
     return [...m, ...assets];
   }, [q, pages, extra, assets, nav]);
   useEffect(() => setSel(0), [q]);

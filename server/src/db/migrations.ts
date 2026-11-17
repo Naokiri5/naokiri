@@ -48,13 +48,79 @@ const MIGRATIONS: string[] = [
     incorrect INTEGER NOT NULL DEFAULT 0, quarantined INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
   CREATE TABLE chat (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL);
   `,
+  /* 2 — DITAS immutable research memory; existing execution tables remain authoritative. */ `
+  CREATE TABLE ditas_snapshots (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, instrument TEXT NOT NULL, payload TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE TABLE ditas_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, dedupe_key TEXT UNIQUE NOT NULL,
+    created_at INTEGER NOT NULL, kind TEXT NOT NULL, instrument TEXT NOT NULL, strategy TEXT, decision_id TEXT,
+    snapshot_id TEXT REFERENCES ditas_snapshots(id), parent_event_id TEXT REFERENCES ditas_events(id), payload TEXT NOT NULL,
+    prev_hash TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE INDEX ditas_events_ts ON ditas_events(created_at);
+  CREATE INDEX ditas_events_decision ON ditas_events(decision_id);
+  CREATE TABLE ditas_twin_runs (id TEXT PRIMARY KEY, event_id TEXT NOT NULL REFERENCES ditas_events(id), created_at INTEGER NOT NULL, result TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE TABLE ditas_forecasts (id TEXT PRIMARY KEY, dedupe_key TEXT UNIQUE NOT NULL, event_id TEXT NOT NULL REFERENCES ditas_events(id), created_at INTEGER NOT NULL,
+    target_at INTEGER NOT NULL, probability REAL NOT NULL CHECK(probability>=0 AND probability<=1), cohort TEXT NOT NULL, payload TEXT NOT NULL);
+  CREATE TABLE ditas_outcomes (id TEXT PRIMARY KEY, forecast_id TEXT UNIQUE NOT NULL REFERENCES ditas_forecasts(id), created_at INTEGER NOT NULL,
+    outcome INTEGER NOT NULL CHECK(outcome IN (0,1)), payload TEXT NOT NULL);
+  ${['ditas_snapshots', 'ditas_events', 'ditas_twin_runs', 'ditas_forecasts', 'ditas_outcomes'].map(table => `
+  CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  CREATE TRIGGER ${table}_no_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;`).join('')}
+  `,
+  /* 3 — Quantitative Trading Intelligence Academy: knowledge store, taxonomy, research experiments, candle history.
+     Sources are never overwritten: re-processing replaces derived chunks only and is recorded in kb_document_events. */ `
+  CREATE TABLE kb_documents (id TEXT PRIMARY KEY, sha256 TEXT UNIQUE NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL, title TEXT, authors TEXT, edition TEXT, publisher TEXT, published TEXT, discipline TEXT,
+    catalog_id TEXT, evidence_class TEXT NOT NULL DEFAULT 'AUTHOR_INTERPRETATION', status TEXT NOT NULL, error TEXT,
+    pages INTEGER, unreadable_pages TEXT NOT NULL DEFAULT '[]', text_hash TEXT, duplicate_of TEXT,
+    progress TEXT NOT NULL DEFAULT '{}', extractor_version TEXT, uploaded_at INTEGER NOT NULL, processed_at INTEGER);
+  CREATE TABLE kb_document_files (document_id TEXT PRIMARY KEY REFERENCES kb_documents(id), bytes BLOB NOT NULL);
+  CREATE TABLE kb_document_events (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id TEXT NOT NULL, ts INTEGER NOT NULL, event TEXT NOT NULL, detail TEXT);
+  CREATE TABLE kb_chunks (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES kb_documents(id), seq INTEGER NOT NULL,
+    chapter TEXT, heading TEXT, page_start INTEGER, page_end INTEGER, kind TEXT NOT NULL, text TEXT NOT NULL, hash TEXT NOT NULL,
+    tokens INTEGER NOT NULL, extractor_version TEXT NOT NULL, UNIQUE(document_id, seq));
+  CREATE INDEX kb_chunks_hash ON kb_chunks(hash);
+  CREATE VIRTUAL TABLE kb_chunks_fts USING fts5(text, heading, chunk_id UNINDEXED, tokenize='porter unicode61');
+  CREATE TABLE kb_embeddings (chunk_id TEXT PRIMARY KEY REFERENCES kb_chunks(id), provider TEXT NOT NULL, dim INTEGER NOT NULL, vector BLOB NOT NULL);
+  CREATE TABLE kb_catalog (id TEXT PRIMARY KEY, title TEXT NOT NULL, authors TEXT NOT NULL, discipline TEXT NOT NULL, priority INTEGER,
+    document_id TEXT, notes TEXT, added_at INTEGER NOT NULL, UNIQUE(title, authors));
+  CREATE TABLE kb_concepts (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, discipline TEXT NOT NULL, origin TEXT NOT NULL,
+    evidence_class TEXT NOT NULL, card TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+  CREATE TABLE kb_concept_sources (concept_id TEXT NOT NULL REFERENCES kb_concepts(id), chunk_id TEXT NOT NULL REFERENCES kb_chunks(id),
+    relation TEXT NOT NULL, score REAL NOT NULL, PRIMARY KEY(concept_id, chunk_id));
+  CREATE TABLE kb_claims (id TEXT PRIMARY KEY, concept_id TEXT NOT NULL REFERENCES kb_concepts(id), proposition TEXT NOT NULL,
+    stance TEXT NOT NULL CHECK(stance IN ('SUPPORTS','CONTRADICTS','QUALIFIES')), evidence_class TEXT NOT NULL,
+    chunk_id TEXT REFERENCES kb_chunks(id), document_id TEXT, page INTEGER, quote TEXT, origin TEXT NOT NULL, created_at INTEGER NOT NULL);
+  CREATE TABLE research_experiments (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, kind TEXT NOT NULL, concept_id TEXT,
+    hypothesis TEXT NOT NULL, spec TEXT NOT NULL, dataset TEXT NOT NULL, data_hash TEXT NOT NULL, results TEXT NOT NULL,
+    verdict TEXT NOT NULL, limitations TEXT NOT NULL, code_version TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE TRIGGER research_experiments_no_update BEFORE UPDATE ON research_experiments BEGIN SELECT RAISE(ABORT, 'research experiments are immutable'); END;
+  CREATE TABLE research_candles (instrument TEXT NOT NULL, interval TEXT NOT NULL, t INTEGER NOT NULL, o REAL NOT NULL, h REAL NOT NULL,
+    l REAL NOT NULL, c REAL NOT NULL, v REAL NOT NULL, close_time INTEGER, source TEXT NOT NULL, fetched_at INTEGER NOT NULL,
+    PRIMARY KEY(instrument, interval, t));
+  `,
+  // v4 — persistent protection incidents: a paper position that cannot be exited (stale/missing/thin market data)
+  // stays visible across restarts until the owner acknowledges it.
+  `
+  CREATE TABLE protection_incidents (id TEXT PRIMARY KEY, position_id TEXT NOT NULL, instrument TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('OPEN','RECOVERED','ACKNOWLEDGED')), reason TEXT NOT NULL,
+    opened_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, last_notified_at INTEGER NOT NULL, occurrences INTEGER NOT NULL,
+    recovered_at INTEGER, acknowledged_at INTEGER, acknowledged_by TEXT, ack_note TEXT);
+  CREATE UNIQUE INDEX protection_incidents_one_active ON protection_incidents(position_id) WHERE status IN ('OPEN','RECOVERED');
+  CREATE INDEX protection_incidents_instrument ON protection_incidents(instrument, status);
+  `,
+  // v5 — renewable runtime leases: only the instance holding 'engine' runs the scheduler lanes, so two processes on
+  // the same database (a restart overlap, an accidental second copy) can never both scan or manage paper positions.
+  `
+  CREATE TABLE runtime_leases (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at INTEGER NOT NULL,
+    renewed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+  `,
 ];
 
-export function migrate(db: DatabaseSync) {
+/** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
+export function migrate(db: DatabaseSync, target = MIGRATIONS.length) {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
   const row = db.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number | null };
   const current = row?.v ?? 0;
-  for (let i = current; i < MIGRATIONS.length; i++) {
+  for (let i = current; i < Math.min(target, MIGRATIONS.length); i++) {
     db.exec('BEGIN');
     try {
       db.exec(MIGRATIONS[i]);

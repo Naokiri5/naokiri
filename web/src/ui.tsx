@@ -7,6 +7,14 @@ export function Card({ title, right, children, flush, className }: { title?: Rea
 export function Stat({ k, v, s, tone }: { k: string; v: ReactNode; s?: ReactNode; tone?: 'up' | 'down' | 'warn' }) {
   return <div className="card stat"><div className="bd"><div className="k">{k}</div><div className={`v ${tone ?? ''}`}>{v}</div>{s && <div className="s">{s}</div>}</div></div>;
 }
+/** Usage meter for a risk limit: value/limit with green → amber (>50%) → red (>80%). A missing limit renders "—". */
+export function Meter({ label, value, limit, unit = '%', dp = 2 }: { label: ReactNode; value: number; limit: number | null | undefined; unit?: string; dp?: number }) {
+  const ratio = limit && limit > 0 ? Math.max(0, value) / limit : null;
+  const n = (x: number) => x.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  return <div><div className="row between"><span className="muted">{label}</span><span className="mono">{n(Math.max(0, value))}{unit} / {limit == null ? '—' : `${n(limit)}${unit}`}</span></div>
+    <div className="bar" role="meter" aria-valuenow={Math.max(0, value)} aria-valuemin={0} aria-valuemax={limit ?? undefined} aria-label={typeof label === 'string' ? label : undefined}>
+      <i style={{ width: `${Math.min(100, (ratio ?? 0) * 100)}%`, background: ratio == null ? 'var(--line)' : ratio > 0.8 ? 'var(--down)' : ratio > 0.5 ? 'var(--warn)' : 'var(--up)' }} /></div></div>;
+}
 const TONES: Record<string, string> = {
   APPROVED_FOR_MONITORING: 'b-info', CAUTION: 'b-warn', HIGH_RISK: 'b-bad', REJECTED: 'b-bad', UNVERIFIED: 'b-neutral',
   OK: 'b-good', WARN: 'b-warn', FAIL: 'b-bad', PASS: 'b-good', PENDING: 'b-neutral', NOT_CERTIFIED: 'b-warn', NOT_IMPLEMENTED: 'b-neutral', SKIP: 'b-neutral',

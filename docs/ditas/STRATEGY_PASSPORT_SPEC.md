@@ -1,0 +1,5 @@
+# Strategy passport and health
+
+passports.ts projects existing StrategyDef capsules and strategies/backtests/positions/decisions, preserving their single registry. Contains exact current entry/stop/exit rules, supported spot long-only market/timeframe/regimes, dependencies, weaknesses and existing deterministic sizing authority. Requested DITAS states map read-only to existing registry vocabulary; no new approval is implied and there is no promotion endpoint here.
+
+strategyStats() now filters stored backtests to current strategyVersion before latest-instrument aggregation. A new version cannot inherit stale OOS support. Paper health uses up to50 recent closed positions with linked matching decision strategy version; unknown/other versions and bad risk are counted/excluded. Minimum30 valid outcomes before approximate expectancy95% intervals; weak performance produces DEGRADED_REVIEW only. No one-loss suspension and no new automatic lifecycle mutation. Normal intervals assume independent returns and do not certify stability. Historical registry version persistence and rolling OOS evaluation remain partial.

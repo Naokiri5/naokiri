@@ -1,17 +1,13 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, connectStream, disconnectStream, useApi, fmt } from './api';
 import { ErrorLine } from './ui';
 import { JoeDrawer } from './pages/Joe';
 import * as P from './pages';
 import { CommandPalette } from './palette';
+import { ALL_PAGES } from './nav';
+import { SideNav, GroupTabs, MobileNav } from './Navigation';
 
-const NAV: { grp: string; items: [string, string, string][] }[] = [
-  { grp: 'Command', items: [['/', '◎', 'Overview'], ['/terminal', '▤', 'Market Terminal'], ['/scanner', '⌖', 'AI Scanner'], ['/discover', '✧', 'Asset Discovery'], ['/intelligence', '✦', 'AI Intelligence'], ['/qhef', '⚡', 'QHEF Performance'], ['/joe', '☺', 'Trader Joe']] },
-  { grp: 'Markets', items: [['/bubbles', '◍', 'Market Bubble Map'], ['/whales', '◈', 'Whale & Launch Monitor'], ['/copy', '⧉', 'Copy Trading'], ['/holders', '⬡', 'Holder Map'], ['/news', '☰', 'News & Events']] },
-  { grp: 'Trading', items: [['/bot', '⚙', 'Bot Account'], ['/risk', '⛨', 'Risk Center'], ['/portfolio', '◔', 'Portfolio'], ['/history', '≣', 'Trading History'], ['/journal', '✎', 'Trade Journal'], ['/calendar', '▦', 'Profit Calendar'], ['/lab', '⚗', 'Strategy Lab']] },
-  { grp: 'Account', items: [['/wallet', '⬗', 'Wallet & Withdrawals'], ['/security', '🛡', 'Security Center'], ['/connections', '⇄', 'Connections Hub'], ['/notifications', '🔔', 'Notifications'], ['/qa', '✓', 'Pre-flight / Release Gates'], ['/settings', '⚙', 'Settings']] },
-];
 
 export default function App() {
   const [auth, setAuth] = useState<{ setup: boolean; authenticated: boolean } | null>(null);
@@ -46,13 +42,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const [theme, setTheme] = useState<string>(() => { try { return localStorage.getItem('mia-theme') ?? 'dark'; } catch { return 'dark'; } });
   useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('mia-theme', theme); } catch { /* */ } }, [theme]);
   const loc = useLocation(); useEffect(() => setMobOpen(false), [loc.pathname]);
+  useEffect(() => { if (!mobOpen) return; const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobOpen(false); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [mobOpen]);
   const s = shell.data; const nav = useNavigate();
   const modeCls = s ? (s.control.emergency ? 'EMERGENCY' : s.control.pausedNewOrders ? 'PAUSED' : s.mode === 'OBSERVE' ? 'READ-ONLY' : 'PAPER') : 'READ-ONLY';
   return <div className={`shell ${collapsed ? 'collapsed' : ''}`}>
     <aside className={`side ${mobOpen ? 'open' : ''}`} aria-label="Primary">
       <div className="brand"><div className="logo">M</div><div className="bname"><div style={{ fontWeight: 600 }}>MIA 4.1</div><div className="hint">paper · read-only data</div></div></div>
-      <nav className="nav">{NAV.map((g) => <div key={g.grp}><div className="grp">{g.grp}</div>{g.items.map(([to, ic, l]) => <NavLink key={to} to={to} end={to === '/'} title={l}><span className="ic" aria-hidden>{ic}</span><span className="lbl">{l}</span></NavLink>)}</div>)}</nav>
-      <div style={{ marginTop: 'auto', padding: 10 }}><button className="ghost sm" onClick={() => setCollapsed(!collapsed)}>{collapsed ? '»' : '« collapse'}</button></div>
+      <SideNav collapsed={collapsed && !mobOpen} />
+      <div style={{ marginTop: 'auto', padding: 10 }}><button className="ghost sm desk-only" onClick={() => setCollapsed(!collapsed)} aria-pressed={collapsed} aria-label={collapsed ? 'Expand menu' : 'Collapse menu'}>{collapsed ? '»' : '« collapse'}</button></div>
     </aside>
     <header className="top">
       <button className="ghost sm mob-only" onClick={() => setMobOpen(!mobOpen)} aria-label="Menu">☰</button>
@@ -74,8 +71,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}
       {s && !s.policyAccepted && loc.pathname !== '/risk' && <div className="banner info">Risk policy not yet accepted — paper execution stays disabled until you review it in the <a href="/risk" onClick={(e) => { e.preventDefault(); nav('/risk'); }}>Risk Center</a>.</div>}
       <ErrorLine e={shell.error} />
+      <GroupTabs />
       <Routes>
         <Route path="/" element={<P.Overview />} />
+        <Route path="/ditas" element={<P.Ditas />} />
+        <Route path="/academy" element={<P.Academy />} />
         <Route path="/terminal" element={<P.Terminal />} /><Route path="/terminal/:symbol" element={<P.Terminal />} />
         <Route path="/scanner" element={<P.Scanner />} /><Route path="/intelligence" element={<P.Intelligence />} />
         <Route path="/joe" element={<P.JoePage />} /><Route path="/bubbles" element={<P.Bubbles />} /><Route path="/whales" element={<P.Whales />} />
@@ -89,8 +89,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <Route path="*" element={<div className="empty">Not found</div>} />
       </Routes>
     </main>
-    <nav className="mobnav" aria-label="Mobile">{[['/', '◎', 'Home'], ['/scanner', '⌖', 'Scanner'], ['/bot', '⚙', 'Bot'], ['/risk', '⛨', 'Risk'], ['/joe', '☺', 'Joe']].map(([to, ic, l]) => <NavLink key={to} to={to} end={to === '/'}><span>{ic}</span>{l}</NavLink>)}</nav>
-    {palette && <CommandPalette pages={NAV.flatMap((g) => g.items)} onClose={() => setPalette(false)} extra={[
+    <MobileNav moreOpen={mobOpen} onMore={() => setMobOpen(!mobOpen)} />
+    {palette && <CommandPalette pages={ALL_PAGES} onClose={() => setPalette(false)} extra={[
       { id: 'act:pause', label: 'Pause new orders', hint: 'risk-reducing', group: 'Action', run: async () => { await api('/api/emergency/pause', { body: {} }); shell.reload(); } },
       { id: 'act:protect', label: 'Verify position protection', hint: 'Risk Center', group: 'Action', run: async () => { await api('/api/emergency/protect', { body: {} }); nav('/risk'); } },
       { id: 'act:news', label: 'Refresh news now', group: 'Action', run: async () => { await api('/api/news/refresh', { body: {} }); nav('/news'); } },

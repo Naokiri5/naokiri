@@ -21,9 +21,10 @@ export interface FeatureSnapshot {
 }
 
 class Ema { v = NaN; private k: number; private seed: number[] = []; constructor(private p: number) { this.k = 2 / (p + 1); }
-  update(x: number) { if (Number.isNaN(this.v)) { this.seed.push(x); if (this.seed.length === this.p) this.v = this.seed.reduce((a, b) => a + b, 0) / this.p; } else this.v = x * this.k + this.v * (1 - this.k); return this.v; } }
+  /** A non-finite input is skipped: one NaN would otherwise poison the average permanently. */
+  update(x: number) { if (!Number.isFinite(x)) return this.v; if (Number.isNaN(this.v)) { this.seed.push(x); if (this.seed.length === this.p) { this.v = this.seed.reduce((a, b) => a + b, 0) / this.p; this.seed = []; } } else this.v = x * this.k + this.v * (1 - this.k); return this.v; } }
 class Wilder { v = NaN; private seed: number[] = []; constructor(private p: number) {}
-  update(x: number) { if (Number.isNaN(this.v)) { this.seed.push(x); if (this.seed.length === this.p) this.v = this.seed.reduce((a, b) => a + b, 0) / this.p; } else this.v = (this.v * (this.p - 1) + x) / this.p; return this.v; } }
+  update(x: number) { if (!Number.isFinite(x)) return this.v; if (Number.isNaN(this.v)) { this.seed.push(x); if (this.seed.length === this.p) { this.v = this.seed.reduce((a, b) => a + b, 0) / this.p; this.seed = []; } } else this.v = (this.v * (this.p - 1) + x) / this.p; return this.v; } }
 
 export class FeatureEngine {
   readonly candles: Candle[] = [];
@@ -60,7 +61,7 @@ export class FeatureEngine {
       this.atr.update(tr);
       const up = c.h - prev.h, dn = prev.l - c.l;
       this.pdm.update(up > dn && up > 0 ? up : 0); this.mdm.update(dn > up && dn > 0 ? dn : 0);
-      if (!Number.isNaN(this.atr.v) && !Number.isNaN(this.pdm.v)) {
+      if (this.atr.v > 0 && !Number.isNaN(this.pdm.v)) {
         const pdi = (100 * this.pdm.v) / this.atr.v, mdi = (100 * this.mdm.v) / this.atr.v;
         const dx = pdi + mdi === 0 ? 0 : (100 * Math.abs(pdi - mdi)) / (pdi + mdi);
         this.adx.update(dx);
@@ -95,7 +96,7 @@ export class FeatureEngine {
     const piv = win(11); const swingHigh = piv.length ? Math.max(...piv.slice(0, -1).map((x) => x.h)) : NaN; const swingLow = piv.length ? Math.min(...piv.slice(0, -1).map((x) => x.l)) : NaN;
     const w11 = win(11); const er = w11.length > 1 ? Math.abs(w11[w11.length - 1].c - w11[0].c) / w11.slice(1).reduce((s, x, i) => s + Math.abs(x.c - w11[i].c), 0) : NaN;
     const pdi = (100 * this.pdm.v) / this.atr.v, mdi = (100 * this.mdm.v) / this.atr.v;
-    const rs = this.loss.v === 0 ? Infinity : this.gain.v / this.loss.v;
+    const rs = this.loss.v === 0 ? (this.gain.v === 0 ? 1 : Infinity) : this.gain.v / this.loss.v; // flat series ⇒ RSI 50, not 100
     return {
       t: c.t, n, close: c.c,
       ema9: this.e9.v, ema20: this.e20.v, ema50: this.e50.v, ema200: this.e200.v,

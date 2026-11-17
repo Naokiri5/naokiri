@@ -1,10 +1,10 @@
 # Deployment & Operations Guide
 
 ## Deploy
-- Single process: `npm start` (entry `server/src/main.ts` via the cross-platform launcher `server/scripts/run.mjs`;
-  `prestart` builds the UI if `web/dist` is missing). Default bind is loopback on a desktop and `0.0.0.0` inside detected
+- Build before deployment: `npm ci && npm run build`. This builds `web/dist` and compiles the server into `server/dist`.
+- Start the compiled server with `NODE_ENV=production npm start`. Production startup requires both build outputs and does not depend on dev-only `tsx`/Vite packages. Local development can use `npm start` after `npm install`; the launcher falls back to `tsx` when no production build exists. Default bind is loopback on a desktop and `0.0.0.0` inside detected
   containers so forwarded ports work; override with `MIA_HOST`. Front it with a TLS reverse proxy if you expose it remotely.
-- Paths (`data/`, `web/dist`) resolve from the repository location, not the shell's working directory. The session cookie is `HttpOnly; SameSite=Strict`; state-changing requests require the
+- Paths (`data/`, `web/dist`) resolve from the repository location, not the shell's working directory. The session cookie is `HttpOnly; SameSite=Strict` and gains `Secure` only when `MIA_SECURE_COOKIE=1` (set it explicitly whenever MIA is served over HTTPS; `NODE_ENV` does not enable it); state-changing requests require the
   `x-mia-csrf` header.
 - Secrets only via environment variables (`.env.example`). They never reach the browser, logs (redacted), or LLM prompts.
 

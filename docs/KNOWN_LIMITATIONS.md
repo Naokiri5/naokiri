@@ -30,6 +30,6 @@ Updated 2026-11-16 (end of Phase 1). Each item says whether it is **fixable now*
 
 ## Operations
 - Runs locally or in this cloud session only; not yet hosted. The 30-day paper evaluation (release gate) hasn't started.
-- No automated backups and no API rate limiting yet (see `SECURITY.md`). CI exists since Phase 1.
+- No automated backups yet: back up `data/mia.db` **and `data/evidence.key`** together (see `SECURITY.md`). API rate limits exist since the repair branch; CI since Phase 1.
 - Occasional event-loop stalls up to ~220 ms observed (QHEF page); harmless for paper trading, scheduled for Phase 6.
 - Single owner account; no password reset.

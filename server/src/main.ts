@@ -12,7 +12,8 @@ if (maj < 22 || (maj === 22 && min < 13)) {
 }
 
 const { buildApp } = await import('./index.js');
-const { startBot, stopBot } = await import('./bot/bot.js');
+const { startBot, drainBot } = await import('./bot/bot.js');
+const { closeDb } = await import('./db/db.js');
 
 const app = await buildApp();
 try {
@@ -36,5 +37,17 @@ lines.push(`  ➜ Data:      ${config.dataDir}`, config.offline ? '  ➜ OFFLINE
 console.log(lines.filter(Boolean).join('\n') + '\n');
 
 startBot();
-const shutdown = async () => { stopBot(); await app.close(); process.exit(0); };
-process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
+// Graceful drain: stop starting lanes, let in-flight ones finish, release the engine lease, stop HTTP, close SQLite.
+// A second signal (or a stuck drain past the hard limit) exits immediately; the lease then simply expires.
+let stopping = false;
+const shutdown = async (sig: string) => {
+  if (stopping) { console.error(`\n✖ ${sig} again: exiting without waiting.`); process.exit(1); }
+  stopping = true; console.log(`\n  ${sig} received: draining engine lanes…`);
+  const hard = setTimeout(() => { console.error('✖ Drain exceeded 30 s; exiting.'); process.exit(1); }, 30_000); hard.unref();
+  const drained = await drainBot(20_000);
+  try { await app.close(); } catch { /* already closing */ }
+  try { closeDb(); } catch { /* already closed */ }
+  console.log(drained ? '  Stopped cleanly.' : '  Stopped; a lane was still busy, the engine lease will expire on its own.');
+  process.exit(0);
+};
+process.on('SIGINT', () => void shutdown('SIGINT')); process.on('SIGTERM', () => void shutdown('SIGTERM'));
