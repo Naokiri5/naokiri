@@ -11,7 +11,7 @@ export interface Segment { id: SegmentId; label: string; value: string; tone: To
 export interface ShellDto {
   mode: 'OBSERVE' | 'PAPER' | 'APPROVAL' | 'BOUNDED_LIVE'; display: string;
   control: { emergency: boolean; pausedNewOrders: boolean };
-  bot: { running: boolean; cycles: number; lastScanAt: number; lastTickerAt: number; lastError: string | null };
+  bot: { running: boolean; cycles: number; lastScanAt: number; lastTickerAt: number; lastError: string | null; lastMonitorAt?: number; monitorFailing?: boolean };
   account: { equity: number; dailyPnlPct: number; weeklyPnlPct: number; drawdownPct: number; openRiskPct: number; openCount: number; deposits: number; consecutiveLosses: number; marksMissing: number };
   policyAccepted: boolean;
   riskLimits: { dailyLossPct: number; weeklyLossPct: number; drawdownWarnPct: number; drawdownHaltPct: number; maxOpenRiskPct: number; maxConsecutiveLosses: number } | null;
@@ -42,6 +42,7 @@ export function isShellDto(x: any): x is ShellDto {
   const { control: c, bot: b, account: a, dataHealth: d, riskLimits: l } = x;
   return !!c && bool(c.emergency) && bool(c.pausedNewOrders)
     && !!b && bool(b.running) && fin(b.cycles) && fin(b.lastScanAt) && fin(b.lastTickerAt)
+    && (b.lastMonitorAt === undefined || fin(b.lastMonitorAt)) && (b.monitorFailing === undefined || bool(b.monitorFailing))
     && !!a && [a.dailyPnlPct, a.weeklyPnlPct, a.drawdownPct, a.openRiskPct, a.consecutiveLosses, a.marksMissing].every(fin)
     && !!d && bool(d.stale) && fin(d.tickersAt) && fin(d.live) && fin(d.degraded)
     && bool(x.policyAccepted) && bool(x.liveAllowed) && bool(x.offline)
@@ -95,11 +96,12 @@ export function deriveStatus({ shell: raw, requestedAt, error, streamConnected, 
   else segs.push({ id: 'data', label: 'Data', value: `LIVE · ${ago(tickAge)}`, tone: 'ok', detail: `${d.live} feeds live; last ticker update ${ago(tickAge)} ago.`, to: '/connections' });
 
   const b = shell.bot; const errNote = b.lastError ? ` Last recorded error (not cleared on recovery): ${b.lastError}.` : '';
-  const scanAge = serverNow - b.lastScanAt; const monAge = serverNow - b.lastTickerAt;
+  const scanAge = serverNow - b.lastScanAt; const monAt = b.lastMonitorAt ?? b.lastTickerAt; const monAge = serverNow - monAt;
   const scanStall = Math.max(180_000, LANE_STALL_FACTOR * shell.scanIntervalMs); const monStall = Math.max(180_000, LANE_STALL_FACTOR * shell.tickerIntervalMs);
   if (stale) segs.push(unknown('engine', 'Engine', 'STALE', `Engine state ${staleNote}`, '/bot'));
   else if (!b.running) segs.push({ id: 'engine', label: 'Engine', value: shell.offline ? 'OFF (OFFLINE)' : 'STOPPED', tone: 'bad', detail: `The headless scan/monitor loop is not running, so open paper positions are not being monitored.${errNote}`, to: '/bot' });
-  else if (!b.lastTickerAt) segs.push(unknown('engine', 'Engine', 'STARTING', `Engine started; position monitor has not completed a pass yet.${errNote}`, '/bot'));
+  else if (b.monitorFailing) segs.push({ id: 'engine', label: 'Engine', value: 'MONITOR FAILING', tone: 'bad', detail: `The last position-monitor pass failed; open paper positions are not being evaluated.${errNote}`, to: '/bot' });
+  else if (!monAt) segs.push(unknown('engine', 'Engine', 'STARTING', `Engine started; position monitor has not completed a pass yet.${errNote}`, '/bot'));
   else if (monAge > monStall) segs.push({ id: 'engine', label: 'Engine', value: `MONITOR STALLED · ${ago(monAge)}`, tone: 'bad', detail: `Position monitoring has not completed for ${ago(monAge)} (expected every ${ago(shell.tickerIntervalMs)}).${errNote}`, to: '/bot' });
   else if (!b.lastScanAt) segs.push(unknown('engine', 'Engine', 'STARTING', `Monitor running; no completed scan yet.${errNote}`, '/bot'));
   else if (scanAge > scanStall) segs.push({ id: 'engine', label: 'Engine', value: `SCAN STALLED · ${ago(scanAge)}`, tone: 'bad', detail: `No completed scan for ${ago(scanAge)} (expected every ${ago(shell.scanIntervalMs)}).${errNote}`, to: '/bot' });
