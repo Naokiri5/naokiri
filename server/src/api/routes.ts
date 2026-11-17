@@ -30,13 +30,15 @@ import * as wallet from '../wallet/wallet.js';
 import { listNotifications, markRead, notify } from '../notify/notify.js';
 import { releaseGates } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
-import { botStatusView } from '../bot/bot.js';
+import { botStatus, botStatusView, engineLease, engineRunning } from '../bot/bot.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
 import { all, get, P } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { config } from '../config.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
+import { schemaVersion, startupReport } from '../core/startup.js';
+import { readiness } from '../core/readiness.js';
 import { qhefReport } from '../qhef/qhef.js';
 import { securityOverview, revokeOtherSessions } from '../security/security.js';
 import { discover } from '../market/discover.js';
@@ -56,13 +58,20 @@ export async function routes(app: FastifyInstance) {
   // Auth gate + CSRF header for state-changing requests
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;
-    if (req.url.startsWith('/api/auth/') || req.url === '/api/health') return;
+    if (req.url.startsWith('/api/auth/') || req.url === '/api/health' || (req.method === 'GET' && req.url === '/api/ready')) return;
     if (!auth.validSession(tokenOf(req))) return bad(reply, 401, 'authentication required');
     if (req.method !== 'GET' && req.headers['x-mia-csrf'] !== '1') return bad(reply, 403, 'missing CSRF header');
   });
 
   // ── auth ──
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
+  app.get('/api/ready', async (_req, reply) => {
+    let dbOk = false; let policyAccepted = false; let mode = 'OBSERVE';
+    try { dbOk = !!get('SELECT 1') && schemaVersion() === SCHEMA_VERSION; policyAccepted = !!currentPolicy(); mode = getControl().mode; } catch { /* reported as db FAIL, never echoed */ }
+    const r = readiness({ dbOk, startupOk: !!startupReport()?.ok, offline: config.offline, running: engineRunning(), leaseState: engineLease.view().state, lastMonitorAt: botStatus.lastMonitorAt, monitorFailing: !!botStatus.laneErrors.monitor, lastScanAt: botStatus.lastScanAt,
+      tickersFetchedAt: market.tickersFetchedAt, tickerIntervalMs: config.tickerIntervalMs, policyAccepted, mode }, Date.now());
+    return reply.code(r.ready ? 200 : 503).header('cache-control', 'no-store').send(r);
+  });
   app.get('/api/auth/state', async (req) => ({ setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)) }));
   app.post('/api/auth/setup', async (req, reply) => { const { password } = z.object({ password: z.string() }).parse(req.body); auth.setupOwner(password); return issue(reply, auth.login(password, req.ip)); });
   app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: z.string() }).parse(req.body); return issue(reply, auth.login(password, req.ip)); });

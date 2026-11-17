@@ -118,6 +118,31 @@ describe('status ribbon model', () => {
     expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastError: 'scan: boom' } }) }).segments, 'engine').detail).toMatch(/scan: boom/);
   });
 
+  it('engine: startup failure is bad and names the checks; a standby process says so instead of STOPPED', () => {
+    const b = shell().bot;
+    const failed = seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, running: false, startup: { ok: false, failed: ['audit_chain', 'schema'] } } }) }).segments, 'engine');
+    expect(failed).toMatchObject({ value: 'STARTUP FAILED', tone: 'bad' }); expect(failed.detail).toMatch(/audit_chain, schema/);
+    const standby = seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, running: false, lease: { state: 'STANDBY', epoch: 4, heartbeatAgeMs: 2_000, ttlMs: 15_000 }, startup: { ok: true, failed: [] } } }) }).segments, 'engine');
+    expect(standby).toMatchObject({ value: 'STANDBY', tone: 'warn' }); expect(standby.detail).toMatch(/another MIA process owns the scheduler/i);
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, running: false, lease: { state: 'VACANT', epoch: 4, heartbeatAgeMs: null, ttlMs: 15_000 } } }) }).segments, 'engine').value).toBe('STOPPED');
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lease: { state: 'OWNER', epoch: 1, heartbeatAgeMs: 0, ttlMs: 15_000 }, startup: { ok: true, failed: [] } } }) }).segments, 'engine').tone).toBe('ok');
+  });
+
+  it('monitor stall uses the last committed monitor pass, not the last ticker refresh', () => {
+    const b = shell().bot;
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastTickerAt: NOW - 1_000, lastMonitorAt: NOW - 181_000 } }) }).segments, 'engine')).toMatchObject({ value: 'MONITOR STALLED · 3m', tone: 'bad' });
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastMonitorAt: 0, lastError: 'monitor: MONITOR_FAILED' } }) }).segments, 'engine')).toMatchObject({ value: 'STARTING', tone: 'unknown', detail: expect.stringMatching(/MONITOR_FAILED/) });
+    expect(seg(deriveStatus({ ...base, shell: { ...shell(), bot: { ...b, lastMonitorAt: 'x' } } }).segments, 'engine').value).toBe('UNKNOWN');
+  });
+
+  it('lease and startup are optional, but malformed when present makes the payload invalid', () => {
+    const b = shell().bot;
+    const bad: unknown[] = [{ ...b, lease: null }, { ...b, lease: { state: 'BOSS', epoch: 1, heartbeatAgeMs: 0, ttlMs: 1 } }, { ...b, lease: { state: 'OWNER', epoch: '1', heartbeatAgeMs: 0, ttlMs: 1 } },
+      { ...b, lease: { state: 'OWNER', epoch: 1, heartbeatAgeMs: undefined, ttlMs: 1 } }, { ...b, startup: { ok: 'yes', failed: [] } }, { ...b, startup: { ok: false, failed: [1] } }, { ...b, startup: { ok: false } }];
+    for (const bot of bad) expect(seg(deriveStatus({ ...base, shell: { ...shell(), bot } }).segments, 'engine').value, JSON.stringify(bot).slice(60)).toBe('UNKNOWN');
+    expect(seg(deriveStatus({ ...base, shell: shell() }).segments, 'engine').tone).toBe('ok');
+  });
+
   it('risk: emergency, missing policy, tripped breaker, near limit', () => {
     expect(seg(deriveStatus({ ...base, shell: shell({ control: { emergency: true, pausedNewOrders: true }, display: 'EMERGENCY' }) }).segments, 'risk')).toMatchObject({ value: 'EMERGENCY STOP', tone: 'bad' });
     expect(seg(deriveStatus({ ...base, shell: shell({ policyAccepted: false, riskLimits: null }) }).segments, 'risk')).toMatchObject({ value: 'NO POLICY', tone: 'warn' });

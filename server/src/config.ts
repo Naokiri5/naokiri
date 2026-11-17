@@ -27,6 +27,8 @@ export const config = {
   deepTierSize: Number(env.MIA_DEEP_TIER ?? 24),
   scanIntervalMs: Number(env.MIA_SCAN_INTERVAL_MS ?? 60_000),
   tickerIntervalMs: Number(env.MIA_TICKER_INTERVAL_MS ?? 15_000),
+  /** Engine lease TTL (one scheduler per database); renewed every ttl/3. */
+  leaseTtlMs: Math.max(1000, Number(env.MIA_LEASE_TTL_MS) || 15_000),
   anthropicApiKey: env.ANTHROPIC_API_KEY ?? '',
   joeModel: env.MIA_JOE_MODEL ?? 'claude-opus-5-5',
   telegramBotToken: env.TELEGRAM_BOT_TOKEN ?? '',

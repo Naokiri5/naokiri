@@ -8,6 +8,21 @@
   `x-mia-csrf` header.
 - Secrets only via environment variables (`.env.example`). They never reach the browser, logs (redacted), or LLM prompts.
 
+## Supervision & readiness
+- Run MIA under a supervisor that restarts it: systemd `Restart=always` (with `RestartSec=5`), or Docker
+  `restart: unless-stopped` plus `HEALTHCHECK CMD curl -fsS http://127.0.0.1:8787/api/ready || exit 1`. The engine runs
+  headless: no browser needs to be open.
+- `GET /api/ready` (no login, `Cache-Control: no-store`) returns 200 only when this process owns the engine lease, startup
+  checks passed, the position monitor ran recently and market data is fresh; otherwise 503 with `reasons`. Ready grants no
+  execution permission and says nothing about live eligibility. Not ready means open paper positions may be unmonitored.
+  `/api/health` stays a static liveness probe.
+- Startup checks (DB integrity, schema version, audit chain, ledger reconciliation, one matching protective stop per open
+  position) run once at boot. On any failure the server still serves the UI so you can read why, but the engine never
+  starts and `/api/ready` stays 503. Nothing is auto-repaired.
+- Two processes on one data dir is safe: a DB lease (`engine.lease`, TTL `MIA_LEASE_TTL_MS`, default 15 s) lets exactly
+  one schedule; the other idles in STANDBY and serves the UI. A clean stop releases the lease at once; after a hard kill
+  (`kill -9`, power loss) the standby waits up to one TTL of observed silence before taking over.
+
 ## Backup & restore
 - Data lives in `$MIA_DATA_DIR/mia.db` (SQLite WAL). Back up with `sqlite3 data/mia.db ".backup data/backup-$(date +%F).db"`
   while running. Restore by stopping the server and replacing `mia.db` (delete `-wal`/`-shm`).

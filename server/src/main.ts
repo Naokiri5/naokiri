@@ -13,6 +13,7 @@ if (maj < 22 || (maj === 22 && min < 13)) {
 
 const { buildApp } = await import('./index.js');
 const { startBot, stopBot } = await import('./bot/bot.js');
+const { runStartupChecks } = await import('./core/startup.js');
 
 const app = await buildApp();
 try {
@@ -35,6 +36,8 @@ if (config.host === '0.0.0.0' || config.host === '::') {
 lines.push(`  ➜ Data:      ${config.dataDir}`, config.offline ? '  ➜ OFFLINE mode: market data polling disabled' : '');
 console.log(lines.filter(Boolean).join('\n') + '\n');
 
+const startup = runStartupChecks();
+if (!startup.ok) console.error(`✖ Startup checks failed, the engine will not start (nothing was repaired):\n${startup.checks.filter((c) => c.status !== 'PASS').map((c) => `    ${c.id}: ${c.detail}`).join('\n')}\n  The UI stays up so you can read why; /api/ready reports not ready.\n`);
 startBot();
 const shutdown = async () => { stopBot(); await app.close(); process.exit(0); };
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);
