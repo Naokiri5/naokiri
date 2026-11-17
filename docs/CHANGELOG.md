@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased: Autopilot Phase 1 (24/7 PAPER-only server)
+- **Single-runner engine lease.** Migration v5 adds `runtime_leases`. Only the lease holder scans and manages paper positions, and a second copy waits on STANDBY.
+- **Readiness.** `GET /api/ready` is unauthenticated and returns 200 or 503.
+- **Stall alarm.** One CRITICAL notification when the scanner stalls, and one when it recovers.
+- **Graceful drain on SIGTERM.**
+- **Backups.** Snapshots with a sha256 manifest, optional AES-256-GCM encryption, retention, scheduled runs by the leader, and a restore check (integrity, schema, audit chain, DITAS chain). Run them yourself with `npm run backup -- create|verify|list`.
+- **Supervisor.** `npm run start:supervised` restarts crashes with bounded backoff and stops after a crash loop. Adds the `deploy/mia.service` systemd unit.
+- **Inventory.** `docs/engineering/AUTOPILOT_100_INVENTORY.md` gives the status of all 100 backlog items.
+- **Soak.** `docs/engineering/PHASE1_SOAK.md` records the headless soak. It was shorter than 24 h and did not run on a hosted server.
+- Nothing is deployed and live execution stays locked.
+
 ## Unreleased: Compact cockpit PR A (six-destination navigation)
 - Navigation is regrouped into Home · Markets · Autopilot · Portfolio · AI Intelligence · Settings & Security, plus
   Trader Joe. It adds a one-level submenu, a collapsible rail, sibling-page tabs and a mobile bottom bar with More.

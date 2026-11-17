@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "node scripts/run.mjs dev",
     "start": "node scripts/run.mjs start",
+    "start:supervised": "node scripts/supervise.mjs",
     "backup": "node scripts/run.mjs backup",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

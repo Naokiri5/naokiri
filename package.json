@@ -11,6 +11,7 @@
     "build": "npm run build -w web && npm run build -w server",
     "prestart": "node server/scripts/ensure-build.mjs",
     "start": "npm run start -w server",
+    "start:supervised": "npm run start:supervised -w server",
     "backup": "npm run backup -w server --",
     "test": "npm test -w server",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",

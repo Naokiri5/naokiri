@@ -1,0 +1,41 @@
+# MIA 4.1 — always-on PAPER server (systemd). Real-money execution stays locked; this unit enables nothing live.
+#
+# Install (adjust User and paths), then:  sudo systemctl daemon-reload && sudo systemctl enable --now mia
+# Readiness:  curl -fsS http://127.0.0.1:8787/api/ready
+# Secrets (optional, e.g. MIA_BACKUP_KEY) go in /etc/mia/mia.env with mode 0600 — never in this file or the repo.
+[Unit]
+Description=MIA 4.1 paper-trading server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mia
+WorkingDirectory=/opt/mia/server
+Environment=NODE_ENV=production
+Environment=MIA_HOST=127.0.0.1
+Environment=MIA_DATA_DIR=/var/lib/mia
+EnvironmentFile=-/etc/mia/mia.env
+# The supervisor restarts crashes with backoff and gives up on a crash loop (exit 1); systemd then restarts the
+# supervisor after RestartSec, at most StartLimitBurst times per StartLimitIntervalSec.
+ExecStart=/usr/bin/node scripts/supervise.mjs
+Restart=on-failure
+RestartSec=30
+StartLimitIntervalSec=3600
+StartLimitBurst=5
+# SIGTERM → graceful drain (lanes finish, engine lease released, DB closed). Must exceed the 30 s drain limit.
+KillSignal=SIGTERM
+# Signal only the supervisor (it forwards once). control-group mode would also signal the server directly, and a
+# second signal skips the drain.
+KillMode=mixed
+TimeoutStopSec=45
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mia
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
