@@ -91,3 +91,7 @@ export class PageErrorBoundary extends Component<{ children: ReactNode }, { erro
     </div></div>;
   }
 }
+
+/** Props that make a clickable table row (or card) operable by keyboard and screen readers: Enter/Space opens it. */
+export const rowProps = (onOpen: () => void, label: string) => ({ role: 'button', tabIndex: 0, 'aria-label': label, style: { cursor: 'pointer' },
+  onClick: onOpen, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } } });

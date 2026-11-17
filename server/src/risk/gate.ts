@@ -22,7 +22,7 @@ export function evaluateRisk(p: RiskProposal, nowTs = Date.now()): RiskDecision 
 }
 const currentPolicySafe = () => { try { return currentPolicy()?.version ?? null; } catch { return null; } };
 
-function floorStep(q: number, step: number) { if (!step) return q; const n = Math.floor(q / step + 1e-9); return Number((n * step).toFixed(12)); }
+function floorStep(q: number, step: number) { if (!(step > 0)) return q; const n = Math.floor(q / step + 1e-9); return Number((n * step).toFixed(12)); }
 
 function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const deny: string[] = []; const review: string[] = []; const ev: RiskDecision['evaluated'] = {};

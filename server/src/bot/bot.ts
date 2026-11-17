@@ -37,11 +37,16 @@ function holdEngine(): boolean {
   if (takeoverRefused) return false; // integrity checks failed: no lease until the owner restarts the engine
   let ok = false;
   try { ok = tryAcquireLease(ENGINE_LEASE, botStatus.instanceId, engineLeaseTtlMs()); } catch (e: any) { botStatus.lastError = `lease: ${e.message}`; }
-  if (ok && botStatus.running && botStatus.role !== 'LEADER' && !takeoverAllowed()) return false;
+  // MIA-BOT-001: nothing in here may throw out of a lane (an unhandled rejection from a setInterval lane ends the
+  // process). A failing integrity check counts as "not leader" (fail closed); a failing journal/notify is recorded only.
+  try { if (ok && botStatus.running && botStatus.role !== 'LEADER' && !takeoverAllowed()) return false; }
+  catch (e: any) { botStatus.lastError = `takeover check: ${e.message}`; return false; }
   const role = ok ? 'LEADER' : 'STANDBY';
   if (botStatus.running && role !== botStatus.role) {
-    journal('SYSTEM', role === 'LEADER' ? `Engine lease acquired by ${botStatus.instanceId}` : `Engine lease held by another instance; ${botStatus.instanceId} is on standby`);
-    if (botStatus.role === 'LEADER') notify('CRITICAL', 'Engine lease lost', `${botStatus.instanceId} no longer holds the engine lease and stopped scanning/managing positions.`, 'engine-lease');
+    try {
+      journal('SYSTEM', role === 'LEADER' ? `Engine lease acquired by ${botStatus.instanceId}` : `Engine lease held by another instance; ${botStatus.instanceId} is on standby`);
+      if (botStatus.role === 'LEADER') notify('CRITICAL', 'Engine lease lost', `${botStatus.instanceId} no longer holds the engine lease and stopped scanning/managing positions.`, 'engine-lease');
+    } catch (e: any) { botStatus.lastError = `lease journal: ${e.message}`; }
   }
   if (botStatus.running) botStatus.role = role;
   return ok;
@@ -94,7 +99,7 @@ async function hotLane() {
     catch (e: any) { botStatus.lastError = `monitor: ${e.message}`; botStatus.monitorFailing = true; }
     try { expireApprovals(); } catch (e: any) { botStatus.lastError = `approvals: ${e.message}`; }
     try { checkScanStall(botStatus); } catch (e: any) { botStatus.lastError = `watchdog: ${e.message}`; }
-  }
+  } catch (e: any) { botStatus.lastError = `hot lane: ${e.message}`; }
   finally { ticking = false; }
 }
 async function scanLane() {
@@ -109,7 +114,7 @@ async function scanLane() {
 }
 async function backgroundLane() {
   if (backgrounding || !botStatus.running) return; backgrounding = true; // a slow pass must not overlap the next (duplicated prints/news)
-  try { if (holdEngine()) await backgroundPass(); } finally { backgrounding = false; }
+  try { if (holdEngine()) await backgroundPass(); } catch (e: any) { botStatus.lastError = `background lane: ${e.message}`; } finally { backgrounding = false; }
 }
 async function backgroundPass() {
   try { await refreshBackground(); } catch { /* tracked per provider */ }
@@ -138,7 +143,7 @@ export function startBot() {
   if (botStatus.running || config.offline) return;
   botStatus.running = true; botStatus.startedAt = Date.now(); botStatus.monitorFailing = false; takeoverRefused = false;
   journal('SYSTEM', `MIA engine started in ${displayMode()} mode`);
-  hotLane().then(() => backgroundLane()).then(() => scanLane());
+  hotLane().then(() => backgroundLane()).then(() => scanLane()).catch((e: any) => { botStatus.lastError = `startup: ${e?.message ?? e}`; });
   timers = [
     setInterval(hotLane, config.tickerIntervalMs),
     setInterval(scanLane, config.scanIntervalMs),

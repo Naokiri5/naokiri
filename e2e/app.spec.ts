@@ -65,10 +65,15 @@ test('accept risk policy (step-up) → fund → PAPER mode', async () => {
 
 test('BOUNDED LIVE cannot be enabled', async () => {
   const before = errors.length;
-  await page.goto('/bot'); await page.getByPlaceholder('Owner passphrase (step-up)').fill(PW);
-  await page.locator('label:has-text("Bounded live")').getByRole('button', { name: 'Switch' }).click();
-  await expect(page.getByText(/BOUNDED_LIVE blocked/)).toBeVisible();
-  await expect(page.locator('.mode')).toHaveText('PAPER');
+  await page.goto('/bot');
+  // The UI no longer offers a Switch for live mode (MIA-WEB-017): it is shown as LOCKED.
+  const live = page.locator('label:has-text("Bounded live")');
+  await expect(live.getByRole('button', { name: 'Switch' })).toHaveCount(0);
+  await expect(live.getByText('LOCKED', { exact: true })).toBeVisible();
+  // The server still refuses it directly, even with the correct passphrase (the authoritative check).
+  const r = await page.evaluate(async (pw) => { const res = await fetch('/api/control', { method: 'POST', headers: { 'content-type': 'application/json', 'x-mia-csrf': '1' }, body: JSON.stringify({ mode: 'BOUNDED_LIVE', password: pw }) }); return { status: res.status, body: await res.json() }; }, PW);
+  expect(r.status).toBe(400); expect(r.body.error).toMatch(/BOUNDED_LIVE blocked/);
+  await page.reload(); await expect(page.locator('.mode')).toHaveText('PAPER');
   // the server's refusal (HTTP 400) is the expected outcome; the browser logs it as a failed resource
   const extra = errors.splice(before); expect(extra.every((e) => /status of 400/.test(e)), extra.join('\n')).toBe(true);
 });
@@ -245,6 +250,27 @@ test('terminal never shows the previous symbol after an in-app switch to one tha
   await expect(page.getByText('No data for FOOUSDT')).toBeVisible();
   await expect(page.getByRole('heading', { name: /Market Terminal · BTC$/ })).toHaveCount(0);
   await page.unroute('**/api/instrument/BTCUSDT*'); await page.unroute('**/api/instrument/FOOUSDT*');
+});
+
+test('trading history loads once instead of refetching in a loop (MIA-WEB-030)', async () => {
+  let n = 0; const count = (r: any) => { if (r.url().includes('/api/history?')) n++; };
+  page.on('request', count);
+  await page.goto('/history'); await expect(page.locator('h1')).toHaveText('Trading History');
+  await page.waitForTimeout(2000);
+  page.off('request', count);
+  expect(n, `history requests in ~2 s: ${n}`).toBeLessThanOrEqual(3); // was 753 in 3 s
+});
+
+test('academy rejects an over-limit file before uploading it (MIA-WEB-032)', async () => {
+  await page.route('**/api/academy/stats', async (r) => { const res = await r.fetch(); const j = await res.json(); await r.fulfill({ json: { ...j, uploadLimitBytes: 1024 } }); });
+  let uploads = 0; const watchUploads = (r: any) => { if (r.method() === 'POST' && r.url().includes('/api/academy/documents')) uploads++; };
+  page.on('request', watchUploads);
+  await page.goto('/academy'); await page.getByRole('tab', { name: 'Library' }).click();
+  await page.getByLabel('Document file').setInputFiles({ name: 'big.txt', mimeType: 'text/plain', buffer: Buffer.alloc(4096, 'a') });
+  await page.getByRole('button', { name: 'Upload' }).click();
+  await expect(page.getByText(/big\.txt is 0\.0 MB; the limit is 0 MB/)).toBeVisible();
+  page.off('request', watchUploads); await page.unroute('**/api/academy/stats');
+  expect(uploads).toBe(0);
 });
 
 test('sign-out that fails on the network keeps the session and says so (MIA-WEB-001)', async () => {

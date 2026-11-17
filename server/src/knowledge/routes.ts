@@ -27,7 +27,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   const notFound = (what: string) => Object.assign(new Error(`${what} not found`), { statusCode: 404 });
 
 
-  app.get('/api/academy/stats', async () => libraryStats());
+  app.get('/api/academy/stats', async () => ({ ...libraryStats(), uploadLimitBytes: LIMITS.maxUploadBytes }));
   app.get('/api/academy/disciplines', async () => DISCIPLINES);
   app.get('/api/academy/catalog', async () => catalog());
   app.post('/api/academy/catalog/import', async (req) => {

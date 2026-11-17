@@ -241,8 +241,17 @@ export async function routes(app: FastifyInstance) {
   });
   app.post('/api/risk/policy', async (req) => { const b = z.object({ policy: z.unknown(), password: PW.optional() }).strict().parse(req.body ?? {}); stepUp(req, b); return acceptPolicy('owner', b.policy); });
   app.post('/api/control', async (req) => {
-    const b = z.object({ mode: z.enum(['OBSERVE', 'PAPER', 'APPROVAL', 'BOUNDED_LIVE']).optional(), pausedNewOrders: z.boolean().optional(), emergency: z.boolean().optional(), disabledStrategies: z.array(z.string().max(60)).max(50).optional(), password: PW.optional() }).parse(req.body);
-    const { password, ...patch } = b;
+    const b = z.object({ mode: z.enum(['OBSERVE', 'PAPER', 'APPROVAL', 'BOUNDED_LIVE']).optional(), pausedNewOrders: z.boolean().optional(), emergency: z.boolean().optional(), disabledStrategies: z.array(z.string().max(60)).max(50).optional(),
+      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), password: PW.optional() }).parse(req.body);
+    const { password, disableStrategy, enableStrategy, ...patch } = b;
+    // MIA-WEB-010: single-strategy operations computed from the server's CURRENT list. A client that sent a whole list
+    // from a stale copy could re-enable a strategy the owner (or the health monitor) had just disabled.
+    if (disableStrategy || enableStrategy) {
+      if (patch.disabledStrategies) throw httpError(400, 'use either disabledStrategies or disableStrategy/enableStrategy, not both');
+      const list = new Set(getControl().disabledStrategies);
+      if (disableStrategy) list.add(disableStrategy); if (enableStrategy) list.delete(enableStrategy);
+      patch.disabledStrategies = [...list];
+    }
     // Anything that INCREASES risk needs the passphrase: mode changes, clearing an emergency, resuming after a pause,
     // and re-enabling strategies (the last two previously needed only a session).
     const cur = getControl();
