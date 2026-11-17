@@ -1,5 +1,9 @@
 # Test Report
 
+> **Historical document.** Its counts come from earlier integration runs (for example 246 server and 37 browser tests). The latest run recorded in the audit report was 350 server, 18 web and 53 browser tests. It was not re-verified against current code. For the current state see
+> `docs/engineering/DEBUG_AUDIT_2026-11-17.md` (bug register and tested results), `docs/engineering/AUTOPILOT_100_INVENTORY.md`
+> (feature status) and `docs/SECURITY.md`. DOC-DRIFT note added 2026-11-17.
+
 ## Integration run (2026-11-17, PRs #3–#6 combined)
 | Check | Result |
 |---|---|

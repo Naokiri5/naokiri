@@ -1,5 +1,9 @@
 # Project Status
 
+> **Historical document.** It describes the project as of 2026-11-16 (Phase 1 foundation), before PRs #7 and #9 merged. It was not re-verified against current code. For the current state see
+> `docs/engineering/DEBUG_AUDIT_2026-11-17.md` (bug register and tested results), `docs/engineering/AUTOPILOT_100_INVENTORY.md`
+> (feature status) and `docs/SECURITY.md`. DOC-DRIFT note added 2026-11-17.
+
 **Last updated:** 2026-11-16 — **Phase 1 (foundation hardening) complete. Waiting for your approval to start Phase 2.**
 
 ## In one paragraph
