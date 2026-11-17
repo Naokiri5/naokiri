@@ -31,9 +31,8 @@
   "server/src/providers/http.ts": "READ_FULL",
   "server/src/providers/coingecko.ts": "READ_FULL",
   "server/src/providers/googlenews.ts": "READ_FULL",
-  "server/src/providers": "NOT_REVIEWED",
   "server/src/db": "PARTIAL",
-  "server/src/safety": "NOT_REVIEWED",
+  "server/src/safety": "READ_FULL",
   "server/src/index.ts": "READ_FULL",
   "server/src/main.ts": "READ_FULL",
   "server/src/config.ts": "READ_FULL",
@@ -68,5 +67,16 @@
   "web/package.json": "READ_FULL",
   ".github": "PARTIAL",
   ".claude/rules": "READ_FULL",
-  ".env.example": "PARTIAL"
+  ".env.example": "PARTIAL",
+  "server/src/providers": "READ_FULL",
+  "web/src/pages/Academy.tsx": "READ_FULL",
+  "web/src/pages/Account.tsx": "READ_FULL",
+  "web/src/pages/Ditas.tsx": "READ_FULL",
+  "web/src/pages/Overview.tsx": "READ_FULL",
+  "web/src/pages/Phase1.tsx": "READ_FULL",
+  "web/src/styles.css": "PARTIAL",
+  "scripts/load-baseline.mjs": "READ_FULL",
+  "server/src/ops/integrity.ts": "NOT_REVIEWED",
+  "server/src/exec/crashpoint.ts": "NOT_REVIEWED",
+  "_note2": "Files changed by Capy PRs #12/#13/#16 after the line-by-line reviews (bot.ts, routes.ts, qa/gates.ts, exec/oms.ts, lab/lab.ts, core/mode.ts, workers/runtime.ts, ops/readiness.ts, Intel.tsx, Trading.tsx) keep READ_FULL for the reviewed version; their later diffs were covered by the test suite only, not re-read."
 }

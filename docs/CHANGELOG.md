@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased: Debug audit Batch C (2026-11-17)
+- **Trading History no longer refetches in a loop.** It made 753 requests in 3 s before the fix.
+- **Strategy revoke/re-enable** is a single operation on the server's current list.
+- **Bot work loops** cannot crash the process on a database error.
+- **Provider data is validated where it comes in:** symbol rules, cross-venue quotes, timestamps and DEX ids. Token safety no longer reports PASS on missing or stale data.
+- **Smaller fixes:** live mode shows LOCKED in the UI; Academy checks the upload limit first; table rows work from the keyboard; open risk includes the stop buffer and exit fee.
+- **Measurements:** decision-memory growth measured at ≈ 394 MB/day, which needs an owner decision. Performance baseline script: `scripts/load-baseline.mjs`.
+
 ## Unreleased: Debug audit Batch B (2026-11-17)
 - **Stale prices fail closed.** A stale or future-dated price for an open position now counts as missing, so the risk gate denies new entries (MIA-RISK-001).
 - **Exits and risk policy.** A paper exit can no longer roll back forever when a small position closes early in a pass (MIA-OMS-003). A stored risk policy that fails validation is denied (MIA-RISK-006).

@@ -1,12 +1,12 @@
 {
- "generatedFrom": "70efa71705e776bdefc665c49e7392591153ad26",
- "totalFiles": 260,
+ "generatedFrom": "0018f2280ba1cf715224c4f033c7c4ad708248fc",
+ "totalFiles": 277,
  "counts": {
-  "NOT_REVIEWED": 38,
-  "READ_FULL": 112,
-  "PARTIAL": 7,
-  "DOC": 58,
-  "TEST_CODE": 44,
+  "NOT_REVIEWED": 27,
+  "READ_FULL": 125,
+  "PARTIAL": 8,
+  "DOC": 59,
+  "TEST_CODE": 57,
   "GENERATED": 1
  },
  "files": [
@@ -159,7 +159,7 @@
   },
   {
    "path": ".env.example",
-   "bytes": 1573,
+   "bytes": 1730,
    "language": ".example",
    "team": "A Repository & architecture",
    "review": "PARTIAL"
@@ -236,7 +236,7 @@
   },
   {
    "path": "docs/CHANGELOG.md",
-   "bytes": 10075,
+   "bytes": 13168,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
@@ -250,7 +250,7 @@
   },
   {
    "path": "docs/DEPLOYMENT_GUIDE.md",
-   "bytes": 6693,
+   "bytes": 7375,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
@@ -299,7 +299,7 @@
   },
   {
    "path": "docs/SECURITY.md",
-   "bytes": 7553,
+   "bytes": 8335,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
@@ -565,7 +565,7 @@
   },
   {
    "path": "docs/engineering/DEBUG_AUDIT_2026-11-17.md",
-   "bytes": 12815,
+   "bytes": 22526,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
@@ -599,8 +599,15 @@
    "review": "DOC"
   },
   {
+   "path": "docs/engineering/audit-files.json",
+   "bytes": 0,
+   "language": "json",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
    "path": "docs/engineering/audit-review-status.json",
-   "bytes": 2815,
+   "bytes": 3533,
    "language": "json",
    "team": "A Repository & architecture",
    "review": "DOC"
@@ -614,7 +621,7 @@
   },
   {
    "path": "e2e/app.spec.ts",
-   "bytes": 13698,
+   "bytes": 20791,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -648,8 +655,22 @@
    "review": "TEST_CODE"
   },
   {
+   "path": "e2e/quarantine-worker.mjs",
+   "bytes": 160,
+   "language": "javascript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "e2e/seed-backtest.ts",
+   "bytes": 245,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
    "path": "e2e/start-server.mjs",
-   "bytes": 997,
+   "bytes": 1601,
    "language": "javascript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -685,6 +706,13 @@
   {
    "path": "scripts/inventory.mjs",
    "bytes": 2769,
+   "language": "javascript",
+   "team": "B Build, dependencies & CI",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "scripts/load-baseline.mjs",
+   "bytes": 3333,
    "language": "javascript",
    "team": "B Build, dependencies & CI",
    "review": "READ_FULL"
@@ -733,14 +761,14 @@
   },
   {
    "path": "server/src/api/routes.ts",
-   "bytes": 35678,
+   "bytes": 36893,
    "language": "typescript",
    "team": "D Backend API & security",
    "review": "READ_FULL"
   },
   {
    "path": "server/src/bot/bot.ts",
-   "bytes": 8603,
+   "bytes": 11909,
    "language": "typescript",
    "team": "H Reliability",
    "review": "READ_FULL"
@@ -761,7 +789,7 @@
   },
   {
    "path": "server/src/config.ts",
-   "bytes": 4679,
+   "bytes": 4883,
    "language": "typescript",
    "team": "D Backend API & security",
    "review": "READ_FULL"
@@ -789,7 +817,7 @@
   },
   {
    "path": "server/src/core/mode.ts",
-   "bytes": 2039,
+   "bytes": 2052,
    "language": "typescript",
    "team": "D Backend API & security",
    "review": "READ_FULL"
@@ -914,6 +942,13 @@
    "review": "READ_FULL"
   },
   {
+   "path": "server/src/exec/crashpoint.ts",
+   "bytes": 826,
+   "language": "typescript",
+   "team": "G Order lifecycle & risk",
+   "review": "NOT_REVIEWED"
+  },
+  {
    "path": "server/src/exec/incidents.ts",
    "bytes": 5607,
    "language": "typescript",
@@ -922,7 +957,7 @@
   },
   {
    "path": "server/src/exec/oms.ts",
-   "bytes": 29299,
+   "bytes": 30618,
    "language": "typescript",
    "team": "G Order lifecycle & risk",
    "review": "READ_FULL"
@@ -1013,7 +1048,7 @@
   },
   {
    "path": "server/src/knowledge/routes.ts",
-   "bytes": 7504,
+   "bytes": 7554,
    "language": "typescript",
    "team": "I AI, knowledge & provider safety",
    "review": "READ_FULL"
@@ -1055,7 +1090,7 @@
   },
   {
    "path": "server/src/lab/lab.ts",
-   "bytes": 6921,
+   "bytes": 6962,
    "language": "typescript",
    "team": "F Markets & intelligence",
    "review": "READ_FULL"
@@ -1152,6 +1187,13 @@
    "review": "READ_FULL"
   },
   {
+   "path": "server/src/ops/integrity.ts",
+   "bytes": 2473,
+   "language": "typescript",
+   "team": "H Reliability",
+   "review": "NOT_REVIEWED"
+  },
+  {
    "path": "server/src/ops/lease.ts",
    "bytes": 1814,
    "language": "typescript",
@@ -1160,7 +1202,7 @@
   },
   {
    "path": "server/src/ops/readiness.ts",
-   "bytes": 4809,
+   "bytes": 5170,
    "language": "typescript",
    "team": "H Reliability",
    "review": "READ_FULL"
@@ -1181,24 +1223,24 @@
   },
   {
    "path": "server/src/portfolio/ledger.ts",
-   "bytes": 5432,
+   "bytes": 5889,
    "language": "typescript",
    "team": "E Database & accounting",
    "review": "READ_FULL"
   },
   {
    "path": "server/src/providers/binance.ts",
-   "bytes": 3733,
+   "bytes": 4284,
    "language": "typescript",
    "team": "F Markets & intelligence",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "server/src/providers/coinbase.ts",
-   "bytes": 780,
+   "bytes": 1192,
    "language": "typescript",
    "team": "F Markets & intelligence",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "server/src/providers/coingecko.ts",
@@ -1209,17 +1251,17 @@
   },
   {
    "path": "server/src/providers/dexscreener.ts",
-   "bytes": 3166,
+   "bytes": 3492,
    "language": "typescript",
    "team": "F Markets & intelligence",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "server/src/providers/frankfurter.ts",
    "bytes": 1631,
    "language": "typescript",
    "team": "F Markets & intelligence",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "server/src/providers/googlenews.ts",
@@ -1237,21 +1279,21 @@
   },
   {
    "path": "server/src/providers/kraken.ts",
-   "bytes": 1474,
+   "bytes": 1654,
    "language": "typescript",
    "team": "F Markets & intelligence",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "server/src/providers/pending.ts",
    "bytes": 2633,
    "language": "typescript",
    "team": "F Markets & intelligence",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "server/src/qa/gates.ts",
-   "bytes": 4392,
+   "bytes": 13107,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "READ_FULL"
@@ -1293,7 +1335,7 @@
   },
   {
    "path": "server/src/risk/gate.ts",
-   "bytes": 10748,
+   "bytes": 10754,
    "language": "typescript",
    "team": "G Order lifecycle & risk",
    "review": "READ_FULL"
@@ -1307,10 +1349,10 @@
   },
   {
    "path": "server/src/safety/safety.ts",
-   "bytes": 5831,
+   "bytes": 7252,
    "language": "typescript",
    "team": "I AI, knowledge & provider safety",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "server/src/security/security.ts",
@@ -1363,7 +1405,7 @@
   },
   {
    "path": "server/src/workers/runtime.ts",
-   "bytes": 4584,
+   "bytes": 4694,
    "language": "typescript",
    "team": "F Markets & intelligence",
    "review": "READ_FULL"
@@ -1377,7 +1419,7 @@
   },
   {
    "path": "server/test/api.test.ts",
-   "bytes": 12290,
+   "bytes": 18527,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1390,8 +1432,43 @@
    "review": "TEST_CODE"
   },
   {
+   "path": "server/test/bot-lane-errors.test.ts",
+   "bytes": 1223,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
    "path": "server/test/chart.test.ts",
    "bytes": 3883,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/crash.oms.test.ts",
+   "bytes": 12131,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/crash/child.ts",
+   "bytes": 2618,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/crash/harness.ts",
+   "bytes": 9299,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/crash/invariants.ts",
+   "bytes": 4510,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1467,6 +1544,20 @@
    "review": "TEST_CODE"
   },
   {
+   "path": "server/test/fixtures/engine-lease-process.ts",
+   "bytes": 950,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/gates.test.ts",
+   "bytes": 16358,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
    "path": "server/test/hardening.test.ts",
    "bytes": 7965,
    "language": "typescript",
@@ -1475,7 +1566,7 @@
   },
   {
    "path": "server/test/helpers.ts",
-   "bytes": 3770,
+   "bytes": 4884,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1537,6 +1628,20 @@
    "review": "TEST_CODE"
   },
   {
+   "path": "server/test/ops-lease-hardening.test.ts",
+   "bytes": 9352,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ops-lease.process.test.ts",
+   "bytes": 3847,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
    "path": "server/test/ops-lease.test.ts",
    "bytes": 3156,
    "language": "typescript",
@@ -1545,7 +1650,7 @@
   },
   {
    "path": "server/test/ops-readiness.test.ts",
-   "bytes": 4610,
+   "bytes": 5670,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1560,6 +1665,13 @@
   {
    "path": "server/test/phase1.test.ts",
    "bytes": 5087,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/provider-validation.test.ts",
+   "bytes": 3703,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1609,6 +1721,13 @@
   {
    "path": "server/test/static.test.ts",
    "bytes": 2405,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/strategy-toggle.test.ts",
+   "bytes": 1773,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1713,28 +1832,28 @@
   },
   {
    "path": "web/src/pages/Academy.tsx",
-   "bytes": 21647,
+   "bytes": 22005,
    "language": "tsx",
    "team": "C Frontend & accessibility",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "web/src/pages/Account.tsx",
    "bytes": 15504,
    "language": "tsx",
    "team": "C Frontend & accessibility",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "web/src/pages/Ditas.tsx",
    "bytes": 13804,
    "language": "tsx",
    "team": "C Frontend & accessibility",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "web/src/pages/Intel.tsx",
-   "bytes": 19939,
+   "bytes": 20347,
    "language": "tsx",
    "team": "C Frontend & accessibility",
    "review": "READ_FULL"
@@ -1748,7 +1867,7 @@
   },
   {
    "path": "web/src/pages/Markets.tsx",
-   "bytes": 21241,
+   "bytes": 21321,
    "language": "tsx",
    "team": "C Frontend & accessibility",
    "review": "READ_FULL"
@@ -1758,18 +1877,18 @@
    "bytes": 10671,
    "language": "tsx",
    "team": "C Frontend & accessibility",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "web/src/pages/Phase1.tsx",
-   "bytes": 16957,
+   "bytes": 17287,
    "language": "tsx",
    "team": "C Frontend & accessibility",
-   "review": "NOT_REVIEWED"
+   "review": "READ_FULL"
   },
   {
    "path": "web/src/pages/Trading.tsx",
-   "bytes": 31808,
+   "bytes": 32811,
    "language": "tsx",
    "team": "C Frontend & accessibility",
    "review": "READ_FULL"
@@ -1790,14 +1909,14 @@
   },
   {
    "path": "web/src/status.test.ts",
-   "bytes": 11278,
+   "bytes": 12362,
    "language": "typescript",
    "team": "C Frontend & accessibility",
    "review": "TEST_CODE"
   },
   {
    "path": "web/src/status.ts",
-   "bytes": 12621,
+   "bytes": 13059,
    "language": "typescript",
    "team": "C Frontend & accessibility",
    "review": "READ_FULL"
@@ -1807,11 +1926,11 @@
    "bytes": 17165,
    "language": "css",
    "team": "C Frontend & accessibility",
-   "review": "NOT_REVIEWED"
+   "review": "PARTIAL"
   },
   {
    "path": "web/src/ui.tsx",
-   "bytes": 9175,
+   "bytes": 9580,
    "language": "tsx",
    "team": "C Frontend & accessibility",
    "review": "READ_FULL"

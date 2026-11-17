@@ -249,3 +249,78 @@ Four read-only reviewers (subagents) each read one area line by line: trading co
 
 ### 8.6 Draft PRs #6 and #8
 Every file in them is already on `main` with newer fixes on top. They are superseded, and closing them is the owner's decision.
+
+## 9. Batch C: merge of Capy PRs, remaining files, measurements (2026-11-17)
+
+**Merge.** Capy's PRs #12 (lease hardening), #13 (release-gate evidence) and #16 (OMS crash injection) were merged into `main` and then into this branch. Only the changelog conflicted. After the merge: server 523 passed / 3 skipped and web 19 passed. Of the review notes in §8.2:
+- **Addressed by those PRs:** MIA-BOT-002 and MIA-SEC-005/MIA-WEB-015.
+- **Still present, fixed here:** MIA-WEB-010, MIA-BOT-001 and MIA-WEB-017.
+
+**Two more read-only reviewers** covered the remaining files: the 6 provider adapters plus `safety/safety.ts`, and 5 web pages plus `styles.css`. They reported 14 findings.
+
+### 9.1 Fixed and verified (each test fails on the old code unless noted)
+| ID | Pri | What was wrong | Test |
+|---|---|---|---|
+| MIA-WEB-030 | P1 | **Trading History refetched in a loop.** `from` used `Date.now()` on every render, so the request path changed every render. Measured in a browser: 753 `/api/history` requests in 3 s, and 441 in 2 s in the test. | `e2e/app.spec.ts` |
+| MIA-WEB-010 | P1 | Strategy revoke/re-enable sent the whole list from a stale per-row fetch, which could re-enable another strategy. Replaced with server-side `disableStrategy`/`enableStrategy` operations on the current list; re-enable still needs step-up. | `strategy-toggle.test.ts` |
+| MIA-BOT-001 | P2 | Lease-check journal/notify and lane bodies could throw out of a `setInterval` lane. An unhandled rejection ends the process. | `bot-lane-errors.test.ts` |
+| MIA-SAFE-001 | P2 | Token safety returned PASS on NaN fields (`NaN >= x` is false) and on stale tickers or books. It now returns UNVERIFIED and never eligible for automation. | `provider-validation.test.ts` |
+| MIA-SAFE-002 | P3 | DEX safety turned unreported liquidity into PASS; a seconds-based creation time looked 50 years old. | same |
+| MIA-PROV-001 | P2 | Symbol rules were not validated (`"abc"` gave NaN and disabled lot rounding in the gate; negative steps). Invalid symbols are now dropped, and the gate requires `step > 0` like the OMS. | same (`validRules`) |
+| MIA-PROV-002 | P2 | Kraken/Coinbase cross quotes were not validated (NaN, zero, crossed, undated). | same (`validQuote`) |
+| MIA-PROV-003 | P3 | DEX profile `chainId`/`tokenAddress` went into a URL path unchecked. | same |
+| MIA-PROV-004 | P3 | Binance kline/aggTrade timestamps were not coerced to numbers. | code |
+| MIA-RISK-007 | P3 | Open risk on existing positions left out the stop-fill buffer and exit fee. | full suite (no dedicated test) |
+| MIA-WEB-017 | P3 | Live mode offered a Switch button. It now shows LOCKED, and the e2e test also proves the server still refuses `BOUNDED_LIVE` directly. | `e2e/app.spec.ts` (updated, not weakened) |
+| MIA-WEB-032 | P2 | Academy sent over-limit files before failing, and re-uploaded the same file on a second click. | `e2e/app.spec.ts` |
+| MIA-WEB-018/033 | P3 | Clickable rows were not keyboard-operable. They now use a shared `rowProps` on Discover, Markets and Strategy Lab. Intel rows are left for Capy's open notification-center branch, which edits `Intel.tsx`. | code |
+
+### 9.2 Left as notes: files Capy's open branch `capy/severity-notification-center` is editing (`Account.tsx`, `styles.css`, `Intel.tsx`, `App.tsx`)
+- **MIA-WEB-031 (P2):** the profit-calendar timezone Save writes UTC (0) if the select was not touched, and cannot represent :30/:45 offsets.
+- **MIA-WEB-034 (P3):** clearing the quiet-hours end becomes 0.
+- **MIA-WEB-035 (P3):** the wallet passphrase field is not cleared after step-up.
+- **MIA-WEB-036 (P3):** `.kv` grid overflows on phones with long values; use `minmax(0,1fr)` and `overflow-wrap:anywhere`.
+- **Intel table rows:** not keyboard-operable.
+- **MIA-PROV-005 (P3):** no response-size cap in `providers/http.ts`. Not touched by any branch; left as a follow-up.
+
+### 9.3 Measured: decision-memory growth (MIA-DITAS-001, now CONFIRMED)
+- Seeded instrument, 72 NO_SIGNAL events (one hour at the default 24-instrument deep tier × 3 strategies).
+- **72 snapshots of 223 KB each** (16.4 MB). The same market state was stored 72 times.
+- That is **≈ 394 MB/day, ≈ 12 GB/month**. Every backup copies it, and the restore check loads it.
+- `verifyMemory` took 30 ms at this size.
+- **Owner decision needed**, because the tables are append-only by design. Recommended option: store candles and books once in a content-addressed table, and have snapshots reference them by hash, with dedupe excluding `asOf`/`receivedAt`. That keeps full immutable evidence and should drop growth by roughly the number of strategies × overlapping candle windows (estimate). Needs an append-only migration.
+
+### 9.4 Performance baseline (§10.7; `node scripts/load-baseline.mjs 200`)
+Offline built server, temporary data dir, empty paper account, 200 sequential requests per route, Node 22.23, this container. No providers and no LLM, so this measures the API, database and serialization path only.
+
+| Metric | Value |
+|---|---|
+| Startup until `/api/health` answers | 400 ms |
+| `/api/health` p50 / p95 / p99 | 1.03 / 2.05 / 3.90 ms |
+| `/api/shell` | 1.84 / 2.30 / 4.60 ms |
+| `/api/overview` | 1.91 / 3.30 / 6.44 ms |
+| `/api/risk` | 1.69 / 2.74 / 5.04 ms |
+| `/api/history` | 1.39 / 2.07 / 5.06 ms |
+| Event-loop delay after load | p50 0.24 ms, p99 7.84 ms, max 76.7 ms |
+| Process after load | RSS 164 MB, heap 41 MB |
+| Chart analysis (`scripts/benchmark-chart.mjs`, 2,000 runs) | p50 0.014 ms, p99 0.16 ms |
+
+CR-15 (10,000 synthetic market events) remains a TEST_GAP. These numbers are an idle-account baseline, not a load test under live data.
+
+### 9.5 Coverage now (`audit-files.json`, 277 tracked files)
+| Status | Files |
+|---|---|
+| Read in full | 125 |
+| Partial | 8 |
+| Not reviewed | 27: `.claude/agents` + `.claude/skills` (17), tool configs (8), and Capy's new `ops/integrity.ts` and `exec/crashpoint.ts` |
+| Docs / test code | 59 / 57 |
+
+Capy's later edits to files that were already reviewed were checked by the test suite only, not re-read.
+
+### 9.6 Checks after Batch C
+- `npm run typecheck` ✓
+- server **529 passed / 3 skipped**; web **19 passed**
+- `npm run test:e2e` **61 passed**
+- `npm run scan:secrets` ✓
+
+All run by the lead.
