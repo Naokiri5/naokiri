@@ -4,7 +4,7 @@
 
 ```
                 ┌───────────────────────────── Browser (web/) ─────────────────────────────┐
-                │ React SPA · Part 15 shell · 19 workspaces · mode banner · SSE live stream │
+                │ React SPA · Part 15 shell · 25 workspaces · mode banner · SSE live stream │
                 └───────────────▲──────────────────────────────────────┬──────────────────┘
                      SSE /api/stream                         REST /api/* (owner session)
                 ┌───────────────┴──────────────────────────────────────▼──────────────────┐

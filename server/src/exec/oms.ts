@@ -213,6 +213,9 @@ const flagged = new Map<string, number>();
  * Order/fill/ledger/position rows are written together; journal, autopsy and bus events are deferred to `after`
  * so nothing is announced for a transaction that rolls back.
  */
+/** Exit reasons that reduce risk and must complete even without a fresh, deep enough book. */
+export const PROTECTIVE_EXITS = new Set(['STOP', 'TRAIL_STOP', 'TIME', 'MANUAL_CLOSE']);
+
 function applyExit(positionId: string, wantQty: number, reason: string, fr: number, nowTs: number, after: Deferred) {
   const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId);
   if (!p || p.status !== 'OPEN' || !(p.qty > 0)) return null;
@@ -225,6 +228,10 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
   const fill = simulateExitFill(p.instrument, qty, pol.stopFillBufferPct, nowTs);
   if (!fill) return null;
+  // Integration rule (PR #3 + PR #4): protective exits must complete, so they may use the conservative quote-based
+  // price when the book is stale or too thin. Every other exit (take-profit, discretionary) is only booked against a
+  // fresh book that absorbs the full size — never a synthetic fill — and otherwise stays open with a warning.
+  if (!PROTECTIVE_EXITS.has(reason) && fill.basis !== 'BOOK') return null;
   const px = fill.price; const fee = px * qty * fr; const pnl = (px - p.entry_price) * qty - fee; const closed = remaining === 0;
   const seq = get<{ n: number }>("SELECT COUNT(*) n FROM orders WHERE position_id=? AND purpose LIKE 'EXIT_%'", positionId)!.n + 1;
   // Deterministic client id: a second writer trying to record the same exit hits UNIQUE(client_order_id) and rolls back.

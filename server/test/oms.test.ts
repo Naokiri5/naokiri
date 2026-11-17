@@ -4,7 +4,7 @@ import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, getControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState, openPositions } from '../src/portfolio/ledger.js';
-import { submitEntry, monitorPositions, emergencyStop, closeAllPositions, closePosition, queueForApproval, decideApproval, listOrders } from '../src/exec/oms.js';
+import { submitEntry, monitorPositions, emergencyStop, closeAllPositions, closePosition, executeExit, queueForApproval, decideApproval, listOrders } from '../src/exec/oms.js';
 import { reconcile, calendar } from '../src/portfolio/calendar.js';
 import { verifyAuditChain } from '../src/core/audit.js';
 import { run, all, get, J } from '../src/db/db.js';
@@ -79,6 +79,23 @@ describe('Order-book freshness and fill accounting', () => {
   beforeEach(() => {
     freshDb(); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+  });
+  // ── from PR #4 (fix/mia-4.1-audit-repairs), kept verbatim ──
+  it('does not record a full exit when executable order-book depth is unavailable', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    market.deep.get(id)!.book = null;
+    expect(executeExit(pos.id, pos.qty, 'TEST')).toBeNull();
+    expect(openPositions()).toHaveLength(1);
+    expect(openPositions()[0].qty).toBeCloseTo(pos.qty, 10);
+    expect(listOrders().filter((o: any) => o.purpose === 'EXIT_TEST')).toHaveLength(0);
+  });
+  it('does not execute an exit against a stale order book', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    market.deep.get(id)!.book!.ts = Date.now() - 180_001;
+    expect(executeExit(pos.id, pos.qty, 'STALE_BOOK')).toBeNull();
+    expect(openPositions()).toHaveLength(1);
   });
   it('refuses to enter against a stale order book even when the ticker is fresh', () => {
     market.deep.get(id)!.book!.ts = Date.now() - QUALITY_LIMITS.maxExecBookAgeMs - 5_000;

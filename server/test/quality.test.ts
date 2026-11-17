@@ -21,6 +21,8 @@ describe('data quality gate (Part 32.2)', () => {
   beforeEach(() => seed(T));
   it('fresh multi-source data is OK', () => { const q = assessQuality(inst.id, '1h', T); expect(q.status).toBe('OK'); expect(q.independentSources).toBe(2); });
   it('stale quote fails closed', () => { expect(assessQuality(inst.id, '1h', T + 120_000).status).toBe('FAIL'); });
+  it('stale order book fails closed', () => { expect(assessQuality(inst.id, '1h', T + 180_001).status).toBe('FAIL'); });
+  it('future-dated order book fails closed', () => { market.deep.get(inst.id)!.book!.ts = T + 1; expect(assessQuality(inst.id, '1h', T).status).toBe('FAIL'); });
   it('cross-venue deviation fails', () => { market.deep.get(inst.id)!.cross.kraken.price *= 1.05; const q = assessQuality(inst.id, '1h', T); expect(q.status).toBe('FAIL'); expect(q.issues.join()).toMatch(/deviation/); });
   it('missing instrument fails', () => { expect(assessQuality('crypto:binance:NOPE', '1h', T).status).toBe('FAIL'); });
 });

@@ -70,13 +70,13 @@ merged in Phase 3.
 | 13.2 | Telegram launch intelligence | — | BLOCKED | Telegram API access + approved channels. |
 | 13.3 | Telegram & push notifications | `notify/notify.ts` | PARTIAL | In-app done; Telegram code written but BLOCKED (bot token); native push MISSING. |
 | 14 | Consolidated roadmap | `IMPLEMENTATION_ROADMAP.md` | IMPLEMENTED | — |
-| 15.4–15.12 | Overview, terminal, scanner cards, risk UX, design system, accessibility, responsive, data-integrity rules | `web/src` | PARTIAL | Keyboard search exists; no full command palette; no accessibility audit; no automated responsive tests. |
+| 15.4–15.12 | Overview, terminal, scanner cards, risk UX, design system, accessibility, responsive, data-integrity rules | `web/src` | PARTIAL | The command palette and keyboard navigation are implemented; accessibility audit and automated responsive tests remain outstanding. |
 | 16 | Opportunity intelligence, adversarial analyst, calibration, rejection intel, execution feasibility | `decision/`, `qci/challenge.ts` | PARTIAL | Calibration MISSING (needs outcome data). |
 | 17 | Deterministic risk engine, sizing, stops, breakers, emergency semantics | `risk/`, `exec/oms.ts`, `lab/exits.ts` | IMPLEMENTED | — |
 | 18 | Strategy lab lifecycle & governance | `lab/lab.ts` | PARTIAL | Lifecycle + promotion gate done; change history of parameters MISSING. |
 | 19 | Portfolio optimisation & allocation | correlation limits | PARTIAL | No allocation optimiser or portfolio stress test. |
 | 20 | Journal & performance analytics | Journal, Portfolio | PARTIAL | Backtest-vs-paper comparison view MISSING. |
-| 21 | Acceptance testing | tests + manual Playwright runs | PARTIAL | Playwright suite not committed. |
+| 21 | Acceptance testing | tests + manual Playwright runs | PARTIAL | Playwright suite is committed in `e2e/app.spec.ts`; expand coverage as new workflows are added. |
 | 22 | Claude implementation process | docs/ | IMPLEMENTED | — |
 | 23 | X & Telegram account integrations | Connections Hub (status only) | BLOCKED | Accounts + keys. |
 | 24.1–24.4 | Network registry, withdrawal workflow, safety controls, history | `wallet/` | PARTIAL | Validation, address book, cooling-off, freeze, preview: done. Submission is LOCKED by design. |

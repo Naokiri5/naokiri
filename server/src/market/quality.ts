@@ -33,13 +33,13 @@ export function assessQuality(instrumentId: string, interval: Interval = '1h', n
   const warn = (m: string) => { issues.push(m); if (status === 'OK') status = 'WARN'; };
   const t = market.tickers.get(instrumentId); const d = market.deep.get(instrumentId);
   const quoteAgeMs = t ? nowTs - t.receivedAt : null;
-  if (quoteAgeMs == null) bad('no quote'); else if (quoteAgeMs > QUALITY_LIMITS.maxQuoteAgeMs) bad(`quote stale (${Math.round(quoteAgeMs / 1000)}s)`);
+  if (quoteAgeMs == null) bad('no quote'); else if (quoteAgeMs < 0 || quoteAgeMs > QUALITY_LIMITS.maxQuoteAgeMs) bad(`quote stale (${Math.round(quoteAgeMs / 1000)}s)`);
   const eng = d?.engines[interval];
   let candleAgeMs: number | null = null;
   if (!eng?.last) bad(`no ${interval} candles`);
   else { candleAgeMs = nowTs - (eng.last.t + INTERVAL_MS[interval]); if (candleAgeMs > 2 * INTERVAL_MS[interval]) bad(`${interval} candles stale`); }
   const bookAgeMs = d?.book ? nowTs - d.book.ts : null;
-  if (bookAgeMs == null) warn('no order book'); else if (bookAgeMs > QUALITY_LIMITS.maxBookAgeMs) warn('order book stale');
+  if (bookAgeMs == null) warn('no order book'); else if (bookAgeMs < 0 || bookAgeMs > QUALITY_LIMITS.maxBookAgeMs) bad('order book stale or timestamp is in the future');
   const sources = ['binance', ...Object.keys(d?.cross ?? {})];
   let maxDev: number | null = null;
   const ref = t?.last;

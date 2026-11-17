@@ -38,7 +38,7 @@ Secret scan (verified to catch a planted fake key) → `npm audit --audit-level=
 | Paper round trip against the real Binance BTCUSDT book | pass: filled at the live ask; $3.72 fees and spread on ~$1,860 |
 | Engine ran a full live cycle; autonomous paper entry (SPCXBUSDT, trend pullback) | observed |
 | Fresh clone → `npm install` → `npm start` (auto-builds UI) | pass |
-| Browser (Playwright) through the forwarded address: owner setup, policy, funding, PAPER mode, all 20 routes | pass, 0 console errors |
+| Browser (Playwright) through the forwarded address: owner setup, policy, funding, PAPER mode, all 25 pages | pass, 0 console errors |
 | Mobile 390 px width: no horizontal overflow | pass |
 | 22 authenticated API endpoints → 200; unauthenticated → 401; SSE stream emits ticker/scan/bot events | pass |
 | `npm run dev`: Vite proxy to backend | pass |
