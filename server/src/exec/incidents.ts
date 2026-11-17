@@ -65,7 +65,9 @@ export function acknowledgeIncident(actor: string, id: string, note: string, now
   if (inc.status === 'ACKNOWLEDGED') return inc;
   if (inc.status === 'OPEN') throw new IncidentError('incident is still OPEN: the position cannot be exited yet. Restore market data or close the position manually once a fresh book is available, then acknowledge.');
   if (!note.trim()) throw new IncidentError('a note describing the operator action is required', 400);
-  run("UPDATE protection_incidents SET status='ACKNOWLEDGED', acknowledged_at=?, acknowledged_by=?, ack_note=? WHERE id=?", nowTs, actor, note.slice(0, 1000), id);
-  audit(actor, 'risk.incident.ack', { id, positionId: inc.position_id, note: note.slice(0, 200) });
+  tx(() => { // acknowledgement and its audit record commit together
+    run("UPDATE protection_incidents SET status='ACKNOWLEDGED', acknowledged_at=?, acknowledged_by=?, ack_note=? WHERE id=?", nowTs, actor, note.slice(0, 1000), id);
+    audit(actor, 'risk.incident.ack', { id, positionId: inc.position_id, note: note.slice(0, 200) });
+  });
   return get<Incident>('SELECT * FROM protection_incidents WHERE id=?', id)!;
 }

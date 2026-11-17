@@ -19,6 +19,8 @@ describe('worker effectiveness (registered ≠ productive)', () => {
     expect(breadthWorker.evaluate(ctx({ universe: 10, advancers: 9, decliners: 1, asOf: now })).reasons[0]).toMatch(/fewer than 30/);
     expect(breadthWorker.evaluate(ctx({ universe: 100, advancers: 90, decliners: 10, asOf: now - 600_000 })).reasons[0]).toMatch(/stale/);
     expect(breadthWorker.evaluate(ctx(undefined)).stance).toBe('ABSTAIN');
+    expect(breadthWorker.evaluate(ctx({ universe: 100, advancers: 90, decliners: 10, asOf: now + 600_000 })).stance).toBe('ABSTAIN'); // future-dated
+
   });
   it('classifies every worker; provider-blocked and constant-rule workers are counted separately', () => {
     const e = workerEffectiveness();
@@ -36,5 +38,18 @@ describe('worker effectiveness (registered ≠ productive)', () => {
     expect(row(a.id)).toMatchObject({ status: 'PRODUCTIVE', runs: 10, voteRate: 0.4 });
     expect(row(b.id)).toMatchObject({ status: 'ALWAYS_ABSTAINED', voteRate: 0 });
     expect(e.summary).toMatchObject({ productiveDataDriven: 1, alwaysAbstained: 1, notYetEvaluated: 98 });
+  });
+});
+
+describe('market breadth input', () => {
+  it('counts only tickers from the latest batch with a valid provider timestamp', async () => {
+    const { market } = await import('../src/market/store.js'); const { marketBreadth } = await import('../src/market/bubbles.js');
+    market.reset(); const now = Date.now(); market.tickersFetchedAt = now;
+    const t = (sym: string, changePct: number, receivedAt: number, providerTs: number) => market.tickers.set(`crypto:binance:${sym}`, { instrumentId: `crypto:binance:${sym}`, symbol: sym, base: sym.replace('USDT', ''), quote: 'USDT', last: 1, bid: 1, ask: 1, changePct, quoteVolume: 5e6, high: 1, low: 1, open: 1, trades: 1, providerTs, receivedAt, source: 'binance' } as any);
+    t('AAAUSDT', 2, now, now); t('BBBUSDT', -1, now, now);
+    t('OLDUSDT', 5, now - 60_000, now - 60_000); // left over from an earlier batch
+    t('FUTUSDT', 5, now, now + 600_000); // provider timestamp in the future
+    t('STLUSDT', 5, now, now - 3_600_000); // provider timestamp an hour old
+    expect(marketBreadth()).toMatchObject({ universe: 2, advancers: 1, decliners: 1, asOf: now });
   });
 });

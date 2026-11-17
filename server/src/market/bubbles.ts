@@ -1,10 +1,15 @@
+import { QUALITY_LIMITS } from './quality.js';
 import { market } from './store.js';
 import { isEligibleSpot } from './fabric.js';
 import { assessCexAsset } from '../safety/safety.js';
 
 /** Advance/decline breadth over liquid eligible spot pairs from the latest 24h tickers (real feed only). */
 export function marketBreadth(minVolume = 1_000_000) {
-  const rows = [...market.tickers.values()].filter((t) => isEligibleSpot(t.base, t.quote) && t.quoteVolume >= minVolume && Number.isFinite(t.changePct));
+  // Only rows from the latest batch, with a provider timestamp that is neither stale nor future-dated (same limits as
+  // the quote-quality gate), so a stale row can never be reported under the fresh batch timestamp.
+  const L = QUALITY_LIMITS; const batch = market.tickersFetchedAt;
+  const rows = [...market.tickers.values()].filter((t) => t.receivedAt === batch && Number.isFinite(t.providerTs) && t.providerTs <= t.receivedAt + L.clockSkewMs
+    && t.receivedAt - t.providerTs <= L.maxQuoteAgeMs && isEligibleSpot(t.base, t.quote) && t.quoteVolume >= minVolume && Number.isFinite(t.changePct));
   return { universe: rows.length, advancers: rows.filter((r) => r.changePct > 0).length, decliners: rows.filter((r) => r.changePct < 0).length, asOf: market.tickersFetchedAt || null };
 }
 /** Part 25.1/25.2 cross-market gainers/losers bubble data + breadth. Only real feeds are included. */

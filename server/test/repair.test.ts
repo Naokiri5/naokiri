@@ -91,6 +91,8 @@ describe('R-PR7: CodeRabbit-verified fail-closed fixes', () => {
     const exits = all<{ price: number; qty: number }>("SELECT f.price, f.qty FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.purpose<>'ENTRY' ORDER BY f.ts, f.rowid");
     expect(exits).toHaveLength(2);
     expect(exits[1].price).toBeLessThan(exits[0].price); // previously both filled at the top level
+    // order created_at and fill ts come from the same clock reading: execution delays are never negative
+    for (const r of all<{ d: number }>("SELECT f.ts - o.created_at d FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.purpose<>'ENTRY'")) expect(r.d).toBe(0);
   });
   it('a take-profit slice smaller than one lot is not marked done (it sold nothing) and stays eligible', () => {
     expect(submitEntry(report(id, last), 'bot').ok).toBe(true);

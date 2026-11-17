@@ -76,6 +76,19 @@ describe('protection incidents', () => {
     stale(id); monitorPositions(); expect(listIncidents()).toHaveLength(1); expect(listIncidents()[0].id).not.toBe(inc.id);
   });
 
+  it('a fresh ticker alone does not recover the incident while the book is too thin to exit', () => {
+    stale(id); monitorPositions(); expect(listIncidents()[0].status).toBe('OPEN');
+    setBook(id, last); market.tickers.get(id)!.receivedAt = Date.now(); // data fresh again…
+    market.deep.get(id)!.book!.bids = [[last * 0.999, 1e-6]]; // …but nowhere near enough depth for the position
+    monitorPositions();
+    expect(listIncidents()[0].status).toBe('OPEN'); expect(riskFor(id, last).reasonCodes.join(' ')).toMatch(/PROTECTION_INCIDENT_OPEN/);
+  });
+  it('acknowledgement is atomic with its audit record', () => {
+    stale(id); monitorPositions(); setBook(id, last); market.tickers.get(id)!.receivedAt = Date.now(); monitorPositions();
+    const inc = listIncidents()[0]; expect(inc.status).toBe('RECOVERED');
+    acknowledgeIncident('owner', inc.id, 'verified after recovery');
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM audit_log WHERE action='risk.incident.ack'")!.n).toBe(1);
+  });
   it('a position closed some other way does not leave an OPEN incident behind', () => {
     stale(id); monitorPositions(); const pos = openPositions()[0];
     run("UPDATE positions SET status='CLOSED', closed_at=? WHERE id=?", Date.now(), pos.id);

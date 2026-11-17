@@ -1,6 +1,6 @@
 {
   "generatedFrom": {
-    "commit": "926074dea659342fba09c965e4c9bc7a3825aaf6",
+    "commit": "b9613a03b4c0a69e8b00c829304f1b9871a00b04",
     "note": "static scan of the working tree at this commit; uncommitted changes would also be included"
   },
   "runtime": {
@@ -15,7 +15,7 @@
     "routes": 105,
     "tables": 38,
     "testFiles": 27,
-    "testCases": 247,
+    "testCases": 250,
     "pages": 9
   },
   "areas": {
@@ -789,7 +789,7 @@
     {
       "path": "server/src/exec/incidents.ts",
       "area": "exec",
-      "lines": 72,
+      "lines": 74,
       "imports": [
         "../db/db.js",
         "../core/util.js",
@@ -815,7 +815,7 @@
     {
       "path": "server/src/exec/oms.ts",
       "area": "exec",
-      "lines": 354,
+      "lines": 358,
       "imports": [
         "../db/db.js",
         "../core/util.js",
@@ -1339,8 +1339,9 @@
     {
       "path": "server/src/market/bubbles.ts",
       "area": "market",
-      "lines": 34,
+      "lines": 39,
       "imports": [
+        "./quality.js",
         "./store.js",
         "./fabric.js",
         "../safety/safety.js"
@@ -2017,7 +2018,7 @@
     {
       "path": "server/src/workers/registry.ts",
       "area": "workers",
-      "lines": 139,
+      "lines": 140,
       "imports": [
         "./types.js",
         "../features/indicators.js",
@@ -2177,7 +2178,7 @@
     },
     {
       "path": "server/test/incidents.test.ts",
-      "cases": 7
+      "cases": 9
     },
     {
       "path": "server/test/knowledge.test.ts",
@@ -2225,7 +2226,7 @@
     },
     {
       "path": "server/test/workers-effectiveness.test.ts",
-      "cases": 3
+      "cases": 4
     }
   ],
   "pages": [

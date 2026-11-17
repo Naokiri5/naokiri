@@ -24,8 +24,8 @@ const feeRate = () => (currentPolicy()?.policy ?? DEFAULT_POLICY).feeRate;
 
 export class OmsError extends Error {}
 
-function insertOrder(o: { clientOrderId: string; instrument: string; side: 'BUY' | 'SELL'; type: string; qty: number; limit?: number | null; stop?: number | null; status: string; purpose: string; positionId?: string | null; decisionId?: string | null; reject?: string | null }) {
-  const id = uid('ord'); const t = Date.now();
+function insertOrder(o: { clientOrderId: string; instrument: string; side: 'BUY' | 'SELL'; type: string; qty: number; limit?: number | null; stop?: number | null; status: string; purpose: string; positionId?: string | null; decisionId?: string | null; reject?: string | null; at?: number }) {
+  const id = uid('ord'); const t = o.at ?? Date.now(); // `at`: same timestamp as the fill/ledger rows written with it
   run('INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,limit_price,stop_price,status,purpose,position_id,decision_id,reject_reason,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     id, o.clientOrderId, PAPER_ACCOUNT, VENUE, o.instrument, o.side, o.type, o.qty, o.limit ?? null, o.stop ?? null, o.status, o.purpose, o.positionId ?? null, o.decisionId ?? null, o.reject ?? null, t, t);
   return id;
@@ -226,7 +226,11 @@ export function monitorPositions(nowTs = Date.now()) {
         if (reopened) run('UPDATE positions SET targets=? WHERE id=?', J(meta), p.id);
       });
       after.forEach((fn) => fn());
-      markRecovered(p.id, nowTs); // evaluated with fresh executable data this pass
+      // Recovery needs more than a fresh ticker: a fresh book must be able to absorb what is still open.
+      const left = get<{ qty: number; status: string }>('SELECT qty, status FROM positions WHERE id=?', p.id);
+      const book = market.deep.get(p.instrument)?.book ?? null;
+      if (left?.status !== 'OPEN' || (bookFreshForExecution(book, nowTs) && walkBook(book!, 'sell', left.qty)?.filledFully)) markRecovered(p.id, nowTs);
+      else flagUnprotected(p, 'order book missing, stale or too thin to execute the stop');
     } catch (e: any) {
       flagUnprotected(p, e instanceof ExitUnavailable ? 'no fresh executable price for exit' : `exit failed: ${String(e?.message ?? e).slice(0, 160)}`);
     }
@@ -260,7 +264,7 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   const px = fill.price; const fee = px * qty * fr; const pnl = (px - p.entry_price) * qty - fee; const closed = remaining === 0;
   const seq = get<{ n: number }>("SELECT COUNT(*) n FROM orders WHERE position_id=? AND purpose LIKE 'EXIT_%'", positionId)!.n + 1;
   // Deterministic client id: a second writer trying to record the same exit hits UNIQUE(client_order_id) and rolls back.
-  const oid = insertOrder({ clientOrderId: `exit-${positionId}-${seq}`, instrument: p.instrument, side: 'SELL', type: 'MARKET', qty, status: 'FILLED', purpose: `EXIT_${reason}`, positionId });
+  const oid = insertOrder({ clientOrderId: `exit-${positionId}-${seq}`, instrument: p.instrument, side: 'SELL', type: 'MARKET', qty, status: 'FILLED', purpose: `EXIT_${reason}`, positionId, at: nowTs });
   run('UPDATE orders SET filled_qty=?, avg_price=?, fees=? WHERE id=?', qty, px, fee, oid);
   run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, px, fee, 'TAKER', nowTs);
   ledger(PAPER_ACCOUNT, 'SELL', px * qty, oid, `${p.instrument} exit ${reason}`, nowTs); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'exit fee', nowTs);
