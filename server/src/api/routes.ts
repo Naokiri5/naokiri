@@ -80,11 +80,12 @@ export async function routes(app: FastifyInstance) {
 
   // ── shell / overview ──
   app.get('/api/shell', async () => {
-    const ctl = getControl(); const acct = accountState(); const pv = providers();
+    const ctl = getControl(); const acct = accountState(); const pv = providers(); const gates = releaseGates(); const pol = currentPolicy()?.policy;
     const stale = market.tickersFetchedAt ? Date.now() - market.tickersFetchedAt > 60_000 : true;
     return { mode: ctl.mode, display: displayMode(ctl), control: ctl, bot: botStatusView(), account: { equity: acct.equity, dailyPnlPct: acct.dailyPnlPct, drawdownPct: acct.drawdownPct, openRiskPct: acct.openRiskPct, openCount: acct.openCount, deposits: acct.deposits },
-      policyAccepted: !!currentPolicy(), dataHealth: { stale, tickersAt: market.tickersFetchedAt, scanAt: market.lastScanAt, live: pv.filter((p) => p.status === 'LIVE').length, degraded: pv.filter((p) => p.status === 'DEGRADED' || p.status === 'DOWN').length },
-      unread: get<{ n: number }>('SELECT COUNT(*) n FROM notifications WHERE read=0')!.n, gates: releaseGates().summary, offline: config.offline };
+      policyAccepted: !!pol, riskLimits: pol ? { dailyLossPct: pol.dailyLossPct, drawdownWarnPct: pol.drawdownWarnPct, drawdownHaltPct: pol.drawdownHaltPct, maxOpenRiskPct: pol.maxOpenRiskPct } : null,
+      dataHealth: { stale, tickersAt: market.tickersFetchedAt, scanAt: market.lastScanAt, live: pv.filter((p) => p.status === 'LIVE').length, degraded: pv.filter((p) => p.status === 'DEGRADED' || p.status === 'DOWN').length },
+      unread: get<{ n: number }>('SELECT COUNT(*) n FROM notifications WHERE read=0')!.n, gates: gates.summary, liveAllowed: gates.liveAllowed, offline: config.offline, scanIntervalMs: config.scanIntervalMs, serverTime: Date.now() };
   });
   app.get('/api/overview', async () => {
     const b = bubbleMap({ limit: 60 }); const btc = market.deep.get('crypto:binance:BTCUSDT')?.engines['1h'].last ?? null;

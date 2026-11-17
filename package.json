@@ -11,7 +11,7 @@
     "build": "npm run build -w web && npm run build -w server",
     "prestart": "node server/scripts/ensure-build.mjs",
     "start": "npm run start -w server",
-    "test": "npm test -w server",
+    "test": "npm test -w server && npm test -w web",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "test:e2e": "npm run build -w web && playwright test -c e2e/playwright.config.ts",
     "test:all": "npm run typecheck && npm test && npm run test:e2e",
