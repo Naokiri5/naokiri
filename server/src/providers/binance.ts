@@ -36,10 +36,13 @@ export async function klines(symbol: string, interval: string, limit = 300): Pro
   const raw: any[] = await fetchProvider('binance', `${BASE}/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`);
   return raw.map((k) => ({ t: k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], qv: +k[7], n: +k[8], tbv: +k[9], closeTime: k[6] }));
 }
-export interface Book { bids: [number, number][]; asks: [number, number][]; ts: number }
+/** ts is stamped when the request STARTS (age is never understated by latency); lastUpdateId orders snapshots. */
+export interface Book { bids: [number, number][]; asks: [number, number][]; ts: number; lastUpdateId?: number }
 export async function depth(symbol: string, limit = 100): Promise<Book> {
+  const ts = Date.now();
   const raw = await fetchProvider('binance', `${BASE}/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
-  return { bids: raw.bids.map((x: string[]) => [+x[0], +x[1]]), asks: raw.asks.map((x: string[]) => [+x[0], +x[1]]), ts: Date.now() };
+  const side = (xs: string[][]) => xs.map((x) => [+x[0], +x[1]] as [number, number]).filter(([p, q]) => Number.isFinite(p) && Number.isFinite(q) && p > 0 && q > 0);
+  return { bids: side(raw.bids ?? []), asks: side(raw.asks ?? []), ts, lastUpdateId: Number.isFinite(+raw.lastUpdateId) ? +raw.lastUpdateId : undefined };
 }
 export interface AggTrade { id: number; price: number; qty: number; ts: number; buyerIsMaker: boolean }
 export async function aggTrades(symbol: string, limit = 500): Promise<AggTrade[]> {

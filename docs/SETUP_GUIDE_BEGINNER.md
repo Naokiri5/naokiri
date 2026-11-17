@@ -5,9 +5,9 @@ runs it for you, so you can skip to "First use".)
 
 ## 1. Install Node.js (one time)
 1. Open **https://nodejs.org/** in your browser.
-2. Click the big **LTS** download button (version 22 or newer).
+2. Click the big **LTS** download button (version 22.13 or newer).
 3. Run the installer and accept the defaults.
-4. **Success looks like:** opening a terminal and typing `node -v` prints a version that starts with `v22` or higher.
+4. **Success looks like:** opening a terminal and typing `node -v` prints a version that is `v22.13` or higher.
    - Windows: press the Start key, type **PowerShell**, open it.
    - Mac: press ⌘ + Space, type **Terminal**, open it.
 

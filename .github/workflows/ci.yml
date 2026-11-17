@@ -26,6 +26,8 @@ jobs:
         run: npm audit --audit-level=high
       - name: Typecheck
         run: npm run typecheck
+      - name: Production build (web + compiled server)
+        run: npm run build
       - name: Unit & integration tests (offline, deterministic)
         run: npm run qa -w server
       - name: Web unit tests (status ribbon model)

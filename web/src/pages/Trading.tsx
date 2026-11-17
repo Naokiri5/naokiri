@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
-import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs } from '../ui';
+import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter } from '../ui';
 
 export const StepUp = ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
   <input type="password" placeholder="Owner passphrase (step-up)" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="current-password" aria-label="Owner passphrase for step-up authentication" />;
@@ -32,7 +32,8 @@ export function Bot() {
         <StepUp value={pw} onChange={setPw} />
         {!s?.policyAccepted && <div className="hint warn">Accept a risk policy in the <Link to="/risk">Risk Center</Link> before paper execution.</div>}
         <div className="row"><Action className="danger" label="Pause new orders" run={async () => { await api('/api/emergency/pause', { body: {} }); reload(); }} />
-          {s?.paused && !s?.emergency && <Action label="Resume" run={async () => { await api('/api/control', { body: { pausedNewOrders: false } }); reload(); }} />}</div>
+          {s?.paused && !s?.emergency && <Action label="Resume" run={async () => { await api('/api/control', { body: { pausedNewOrders: false, password: pw } }); reload(); }} />}</div>
+        {s?.paused && !s?.emergency && <div className="hint">Resuming needs the owner passphrase above (step-up).</div>}
       </div></Card>
       <Card title="Paper allocation"><div className="col">
         <div className="hint">Funding the paper bot is a simulated deposit into the isolated paper account. It does not authorize trading — the mode does.</div>
@@ -48,12 +49,13 @@ export function Bot() {
     <PositionsTable rows={data?.positions ?? []} onChange={reload} />
     <div style={{ height: 14 }} />
     <Card title="Strategies" right={<Link to="/lab">Strategy Lab →</Link>} flush><table><thead><tr><th>Strategy</th><th>Status</th><th className="num">OOS trades</th><th className="num">OOS expectancy</th><th className="num">Paper trades</th><th className="num">Paper expectancy</th><th>Bot permission</th></tr></thead>
-      <tbody>{(data?.strategies ?? []).map((st: any) => { const disabled = data?.status && (data as any).status && false; void disabled; return <tr key={st.id}><td><b>{st.name}</b> <span className="faint">v{st.version}</span></td><td><Badge v={st.status} /></td><td className="num">{st.stats?.trades ?? '—'}</td><td className="num">{st.stats ? `${st.stats.expectancyR.toFixed(3)}R` : '—'}</td><td className="num">{st.live?.trades ?? 0}</td><td className="num">{st.live ? `${st.live.expectancyR.toFixed(2)}R` : '—'}</td><td><StrategyToggle id={st.id} onChange={reload} /></td></tr>; })}</tbody></table></Card>
+      <tbody>{(data?.strategies ?? []).map((st: any) => { const disabled = data?.status && (data as any).status && false; void disabled; return <tr key={st.id}><td><b>{st.name}</b> <span className="faint">v{st.version}</span></td><td><Badge v={st.status} /></td><td className="num">{st.stats?.trades ?? '—'}</td><td className="num">{st.stats ? `${st.stats.expectancyR.toFixed(3)}R` : '—'}</td><td className="num">{st.live?.trades ?? 0}</td><td className="num">{st.live ? `${st.live.expectancyR.toFixed(2)}R` : '—'}</td><td><StrategyToggle id={st.id} pw={pw} onChange={reload} /></td></tr>; })}</tbody></table></Card>
   </Page>;
 }
-function StrategyToggle({ id, onChange }: { id: string; onChange: () => void }) {
+/** Revoking reduces risk and needs no passphrase; re-enabling increases it and uses the step-up passphrase entered above. */
+function StrategyToggle({ id, pw, onChange }: { id: string; pw: string; onChange: () => void }) {
   const shell = useApi('/api/shell'); const dis: string[] = shell.data?.control.disabledStrategies ?? []; const off = dis.includes(id);
-  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { await api('/api/control', { body: { disabledStrategies: off ? dis.filter((x) => x !== id) : [...dis, id] } }); shell.reload(); onChange(); }} />;
+  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { await api('/api/control', { body: off ? { disabledStrategies: dis.filter((x) => x !== id), password: pw } : { disabledStrategies: [...dis, id] } }); shell.reload(); onChange(); }} />;
 }
 export function PositionsTable({ rows, onChange }: { rows: any[]; onChange: () => void }) {
   return <Card title={`Open positions (${rows.length})`} flush>{rows.length ? <div className="tablewrap"><table><thead><tr><th>Instrument</th><th>Strategy</th><th className="num">Qty</th><th className="num">Entry</th><th className="num">Mark</th><th className="num">Stop</th><th>Targets</th><th className="num">Unrealized</th><th>Opened</th><th /></tr></thead>
@@ -69,19 +71,33 @@ const POLICY_FIELDS: [string, string, string][] = [
   ['maxCostR', 'Max round-trip cost (R)', '0.01–0.5'], ['maxPriceDeviationPct', 'Max price deviation at submit (%)', '0.05–3'], ['stopFillBufferPct', 'Conservative stop-fill buffer (%)', '0.1–5'], ['feeRate', 'Fee rate (fraction)', '0–0.005'],
   ['maxCorrelatedPositions', 'Max correlated positions', '1–10'], ['correlationThreshold', 'Correlation threshold', '0.3–0.99'], ['minOpportunityScore', 'Min opportunity score', '40–95'],
 ];
+/** Persistent protection incidents: visible until the owner acknowledges them after executable data has returned. */
+function IncidentsCard({ incidents, reload }: { incidents: any[]; reload: () => void }) {
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  if (!incidents.length) return null;
+  return <Card title="Protection incidents" right={<Badge v={`${incidents.filter((i) => i.status === 'OPEN').length} OPEN`} tone="b-bad" />} flush>
+    <table><tbody>{incidents.map((i) => <tr key={i.id}>
+      <td><b>{i.instrument.split(':')[2] ?? i.instrument}</b><div className="hint">{i.reason}</div><div className="hint">since {fmt.time(i.opened_at)} · seen {i.occurrences}× · last {fmt.ago(i.last_seen_at)}</div></td>
+      <td><Badge v={i.status} tone={i.status === 'OPEN' ? 'b-bad' : 'b-warn'} /></td>
+      <td>{i.status === 'OPEN' ? <span className="hint">Position kept open — no synthetic fill. New entries on this instrument are blocked until a fresh, deep order book returns.</span>
+        : <div className="row"><input aria-label="Acknowledgement note" placeholder="Action taken" value={notes[i.id] ?? ''} onChange={(e) => setNotes({ ...notes, [i.id]: e.target.value })} style={{ width: 160 }} />
+          <Action className="sm" label="Acknowledge" run={async () => { await api(`/api/risk/incidents/${i.id}/ack`, { body: { note: notes[i.id] ?? '' } }); reload(); }} /></div>}</td>
+    </tr>)}</tbody></table>
+  </Card>;
+}
+
 export function Risk() {
   const { data, error, reload } = useApi('/api/risk', { topics: ['position', 'mode', 'risk'], every: 20_000 });
   const [draft, setDraft] = useState<any>(null); const [pw, setPw] = useState(''); const [confirm, setConfirm] = useState(''); const [result, setResult] = useState<any>(null);
   useEffect(() => { if (data && !draft) setDraft({ ...(data.policy?.policy ?? data.defaults) }); }, [data, draft]);
   const a = data?.account; const p = data?.policy?.policy ?? data?.defaults;
-  const meter = (label: string, v: number, lim: number) => <div><div className="row between"><span className="muted">{label}</span><span className="mono">{fmt.num(v, 2)}% / {lim}%</span></div><div className="bar"><i style={{ width: `${Math.min(100, (Math.max(0, v) / lim) * 100)}%`, background: v / lim > 0.8 ? 'var(--down)' : v / lim > 0.5 ? 'var(--warn)' : 'var(--up)' }} /></div></div>;
   return <Page title="Risk Center" sub="Deterministic, fail-closed risk authority (Part 17). No agent, QCI result or assistant can bypass it. Limits change only through this authenticated, versioned workflow.">
     <ErrorLine e={error} />
     {!data?.policy && <div className="banner info">No risk policy accepted yet. Review the conservative paper defaults below and accept them (or adjust) to enable paper execution.</div>}
     <div className="grid g-1-2">
       <div className="col" style={{ gap: 14 }}>
         <Card title="Circuit breakers">{a && p ? <div className="col">
-          {meter('Daily loss', -a.dailyPnlPct, p.dailyLossPct)}{meter('Weekly loss', -a.weeklyPnlPct, p.weeklyLossPct)}{meter('Drawdown (halt)', a.drawdownPct, p.drawdownHaltPct)}{meter('Open risk', a.openRiskPct, p.maxOpenRiskPct)}
+          <Meter label="Daily loss" value={-a.dailyPnlPct} limit={p.dailyLossPct} /><Meter label="Weekly loss" value={-a.weeklyPnlPct} limit={p.weeklyLossPct} /><Meter label="Drawdown (halt)" value={a.drawdownPct} limit={p.drawdownHaltPct} /><Meter label="Open risk" value={a.openRiskPct} limit={p.maxOpenRiskPct} />
           <div className="kv"><span>Equity</span><span className="mono">{fmt.usd(a.equity)}</span><span>Start of day</span><span className="mono">{fmt.usd(a.startOfDayEquity)}</span><span>High-water mark</span><span className="mono">{fmt.usd(a.highWaterMark)}</span><span>Loss streak</span><span>{a.consecutiveLosses} / {p.maxConsecutiveLosses}</span><span>Leverage</span><span>disabled (spot, hard constraint)</span></div>
         </div> : <Empty>…</Empty>}</Card>
         <Card title="Emergency controls (Part 17.8)"><div className="col">
@@ -95,6 +111,7 @@ export function Risk() {
           <StepUp value={pw} onChange={setPw} />
           {result && <div className="card"><div className="bd"><div className="row">Result: <Badge v={result.state ?? 'CONFIRMED'} /></div><pre className="hint">{JSON.stringify(result, null, 1).slice(0, 1200)}</pre></div></div>}
         </div></Card>
+        <IncidentsCard incidents={data?.incidents ?? []} reload={reload} />
         <Card title="Position protection" flush>{data?.protection.positions.length ? <table><tbody>{data.protection.positions.map((x: any) => <tr key={x.positionId}><td>{x.instrument.split(':')[2]}</td><td>{x.protected ? <Badge v="PROTECTED" tone="b-good" /> : <Badge v="UNVERIFIED" tone="b-bad" />}</td><td className="muted">{x.issue ?? `stop ${fmt.px(x.stop)}`}</td></tr>)}</tbody></table> : <Empty>No open positions.</Empty>}</Card>
       </div>
       <div className="col" style={{ gap: 14 }}>

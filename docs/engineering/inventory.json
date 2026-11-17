@@ -1,0 +1,2243 @@
+{
+  "generatedFrom": {
+    "commit": "b9613a03b4c0a69e8b00c829304f1b9871a00b04",
+    "note": "static scan of the working tree at this commit; uncommitted changes would also be included"
+  },
+  "runtime": {
+    "node": ">=22.13",
+    "workspaces": [
+      "server",
+      "web"
+    ]
+  },
+  "summary": {
+    "modules": 89,
+    "routes": 105,
+    "tables": 38,
+    "testFiles": 27,
+    "testCases": 250,
+    "pages": 9
+  },
+  "areas": {
+    "api": [
+      "server/src/api/auth.ts",
+      "server/src/api/routes.ts"
+    ],
+    "bot": [
+      "server/src/bot/bot.ts"
+    ],
+    "chart": [
+      "server/src/chart/analysis.ts",
+      "server/src/chart/replay.ts"
+    ],
+    "config.ts": [
+      "server/src/config.ts"
+    ],
+    "core": [
+      "server/src/core/audit.ts",
+      "server/src/core/bus.ts",
+      "server/src/core/latency.ts",
+      "server/src/core/mode.ts",
+      "server/src/core/ratelimit.ts",
+      "server/src/core/settings.ts",
+      "server/src/core/signing.ts",
+      "server/src/core/util.ts"
+    ],
+    "dashboard": [
+      "server/src/dashboard/overview.ts"
+    ],
+    "db": [
+      "server/src/db/db.ts",
+      "server/src/db/migrations.ts"
+    ],
+    "decision": [
+      "server/src/decision/engine.ts",
+      "server/src/decision/scoring.ts"
+    ],
+    "ditas": [
+      "server/src/ditas/calibration.ts",
+      "server/src/ditas/execution.ts",
+      "server/src/ditas/fingerprint.ts",
+      "server/src/ditas/memory.ts",
+      "server/src/ditas/passports.ts",
+      "server/src/ditas/routes.ts",
+      "server/src/ditas/service.ts",
+      "server/src/ditas/twin.ts"
+    ],
+    "exec": [
+      "server/src/exec/incidents.ts",
+      "server/src/exec/oms.ts"
+    ],
+    "features": [
+      "server/src/features/indicators.ts"
+    ],
+    "index.ts": [
+      "server/src/index.ts"
+    ],
+    "joe": [
+      "server/src/joe/joe.ts"
+    ],
+    "journal": [
+      "server/src/journal/history.ts",
+      "server/src/journal/journal.ts"
+    ],
+    "knowledge": [
+      "server/src/knowledge/chunk.ts",
+      "server/src/knowledge/concepts.ts",
+      "server/src/knowledge/extract.ts",
+      "server/src/knowledge/integration.ts",
+      "server/src/knowledge/memory.ts",
+      "server/src/knowledge/providers.ts",
+      "server/src/knowledge/research.ts",
+      "server/src/knowledge/routes.ts",
+      "server/src/knowledge/search.ts",
+      "server/src/knowledge/store.ts",
+      "server/src/knowledge/taxonomy.ts"
+    ],
+    "lab": [
+      "server/src/lab/backtest.ts",
+      "server/src/lab/exits.ts",
+      "server/src/lab/lab.ts",
+      "server/src/lab/strategies.ts"
+    ],
+    "main.ts": [
+      "server/src/main.ts"
+    ],
+    "market": [
+      "server/src/market/bubbles.ts",
+      "server/src/market/discover.ts",
+      "server/src/market/fabric.ts",
+      "server/src/market/quality.ts",
+      "server/src/market/scanner.ts",
+      "server/src/market/store.ts",
+      "server/src/market/types.ts"
+    ],
+    "news": [
+      "server/src/news/news.ts"
+    ],
+    "notify": [
+      "server/src/notify/notify.ts"
+    ],
+    "portfolio": [
+      "server/src/portfolio/calendar.ts",
+      "server/src/portfolio/correlation.ts",
+      "server/src/portfolio/ledger.ts"
+    ],
+    "providers": [
+      "server/src/providers/binance.ts",
+      "server/src/providers/coinbase.ts",
+      "server/src/providers/coingecko.ts",
+      "server/src/providers/dexscreener.ts",
+      "server/src/providers/frankfurter.ts",
+      "server/src/providers/googlenews.ts",
+      "server/src/providers/http.ts",
+      "server/src/providers/kraken.ts",
+      "server/src/providers/pending.ts"
+    ],
+    "qa": [
+      "server/src/qa/gates.ts"
+    ],
+    "qci": [
+      "server/src/qci/challenge.ts",
+      "server/src/qci/coordinator.ts",
+      "server/src/qci/schemas.ts"
+    ],
+    "qhef": [
+      "server/src/qhef/qhef.ts"
+    ],
+    "regime": [
+      "server/src/regime/regime.ts"
+    ],
+    "risk": [
+      "server/src/risk/gate.ts",
+      "server/src/risk/policy.ts"
+    ],
+    "safety": [
+      "server/src/safety/safety.ts"
+    ],
+    "security": [
+      "server/src/security/security.ts"
+    ],
+    "wallet": [
+      "server/src/wallet/keccak.ts",
+      "server/src/wallet/wallet.ts"
+    ],
+    "whales": [
+      "server/src/whales/prints.ts"
+    ],
+    "workers": [
+      "server/src/workers/effectiveness.ts",
+      "server/src/workers/indicators.ts",
+      "server/src/workers/registry.ts",
+      "server/src/workers/runtime.ts",
+      "server/src/workers/types.ts"
+    ]
+  },
+  "modules": [
+    {
+      "path": "server/src/api/auth.ts",
+      "area": "api",
+      "lines": 53,
+      "imports": [
+        "../db/db.js",
+        "../core/settings.js",
+        "../core/util.js",
+        "../core/audit.js",
+        "../core/ratelimit.js"
+      ],
+      "exports": [
+        "AuthError",
+        "isSetup",
+        "setupOwner",
+        "checkPassword",
+        "verifyPassphrase",
+        "login",
+        "validSession",
+        "logout",
+        "changePassword"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/api/routes.ts",
+      "area": "api",
+      "lines": 336,
+      "imports": [
+        "../ditas/routes.js",
+        "../knowledge/routes.js",
+        "../chart/analysis.js",
+        "../chart/replay.js",
+        "./auth.js",
+        "../core/bus.js",
+        "../market/store.js",
+        "../market/scanner.js",
+        "../market/bubbles.js",
+        "../market/fabric.js",
+        "../market/quality.js",
+        "../safety/safety.js",
+        "../regime/regime.js",
+        "../workers/indicators.js",
+        "../workers/registry.js",
+        "../workers/runtime.js",
+        "../workers/effectiveness.js",
+        "../dashboard/overview.js",
+        "../qci/coordinator.js",
+        "../providers/http.js",
+        "../core/latency.js",
+        "../core/mode.js",
+        "../risk/policy.js",
+        "../portfolio/ledger.js",
+        "../portfolio/correlation.js",
+        "../portfolio/calendar.js",
+        "../exec/oms.js",
+        "../exec/incidents.js",
+        "../journal/journal.js",
+        "../news/news.js",
+        "../whales/prints.js",
+        "../lab/lab.js",
+        "../lab/strategies.js",
+        "../wallet/wallet.js",
+        "../notify/notify.js",
+        "../qa/gates.js",
+        "../core/audit.js",
+        "../bot/bot.js",
+        "../joe/joe.js",
+        "../db/db.js",
+        "../core/settings.js",
+        "../core/audit.js",
+        "../config.js",
+        "../db/migrations.js",
+        "../qhef/qhef.js",
+        "../security/security.js",
+        "../market/discover.js",
+        "../journal/history.js",
+        "../providers/http.js",
+        "../core/ratelimit.js",
+        "../core/util.js"
+      ],
+      "exports": [
+        "routes"
+      ],
+      "routes": [
+        "GET /api/risk/incidents",
+        "POST /api/risk/incidents/:id/ack",
+        "GET /api/health",
+        "GET /api/auth/state",
+        "POST /api/auth/setup",
+        "POST /api/auth/login",
+        "POST /api/auth/logout",
+        "POST /api/settings/password",
+        "GET /api/stream",
+        "GET /api/shell",
+        "GET /api/overview",
+        "GET /api/markets",
+        "GET /api/markets/search",
+        "GET /api/instrument/:symbol",
+        "POST /api/chart/replay",
+        "GET /api/fx",
+        "GET /api/bubbles",
+        "GET /api/dex",
+        "GET /api/scanner",
+        "GET /api/decisions",
+        "GET /api/decisions/:id",
+        "POST /api/analyze",
+        "GET /api/intelligence",
+        "GET /api/consensus/:id",
+        "POST /api/workers/:id/release",
+        "GET /api/risk",
+        "POST /api/risk/policy",
+        "POST /api/control",
+        "POST /api/emergency/:action",
+        "GET /api/bot",
+        "POST /api/bot/allocation",
+        "GET /api/portfolio",
+        "GET /api/orders",
+        "POST /api/orders/:id/approve",
+        "POST /api/orders/:id/reject",
+        "POST /api/positions/:id/close",
+        "GET /api/journal",
+        "GET /api/calendar",
+        "POST /api/calendar/tz",
+        "GET /api/lab",
+        "POST /api/lab/backtest",
+        "POST /api/lab/strategy/:id/status",
+        "GET /api/news",
+        "POST /api/news/refresh",
+        "GET /api/whales",
+        "GET /api/wallet",
+        "POST /api/wallet/validate",
+        "POST /api/wallet/address",
+        "POST /api/wallet/address/:id/verify",
+        "DELETE /api/wallet/address/:id",
+        "POST /api/wallet/withdraw/preview",
+        "POST /api/wallet/freeze",
+        "GET /api/connections",
+        "GET /api/qhef",
+        "GET /api/security",
+        "POST /api/security/sessions/revoke-others",
+        "GET /api/discover",
+        "GET /api/history",
+        "GET /api/history.csv",
+        "GET /api/copy",
+        "GET /api/latency",
+        "GET /api/notifications",
+        "POST /api/notifications/read",
+        "POST /api/notifications/test",
+        "GET /api/settings",
+        "POST /api/settings/notify",
+        "GET /api/qa",
+        "GET /api/audit",
+        "GET /api/joe",
+        "POST /api/joe"
+      ]
+    },
+    {
+      "path": "server/src/bot/bot.ts",
+      "area": "bot",
+      "lines": 84,
+      "imports": [
+        "../market/fabric.js",
+        "../market/scanner.js",
+        "../exec/oms.js",
+        "../news/news.js",
+        "../whales/prints.js",
+        "../lab/lab.js",
+        "../core/mode.js",
+        "../portfolio/ledger.js",
+        "../risk/policy.js",
+        "../notify/notify.js",
+        "../journal/journal.js",
+        "../core/bus.js",
+        "../config.js",
+        "../decision/engine.js"
+      ],
+      "exports": [
+        "botStatus",
+        "startBot",
+        "stopBot",
+        "botStatusView",
+        "_test"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/chart/analysis.ts",
+      "area": "chart",
+      "lines": 70,
+      "imports": [
+        "../market/types.js"
+      ],
+      "exports": [
+        "Detection",
+        "ChartReport",
+        "validateCandles",
+        "analyzeChart"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/chart/replay.ts",
+      "area": "chart",
+      "lines": 13,
+      "imports": [
+        "./analysis.js",
+        "../market/types.js"
+      ],
+      "exports": [
+        "replayChart"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/config.ts",
+      "area": "config.ts",
+      "lines": 79,
+      "imports": [],
+      "exports": [
+        "REPO_ROOT",
+        "inContainer",
+        "loadEvidenceKey",
+        "config",
+        "ensureDataDir"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/core/audit.ts",
+      "area": "core",
+      "lines": 25,
+      "imports": [
+        "../db/db.js",
+        "./util.js"
+      ],
+      "exports": [
+        "audit",
+        "verifyAuditChain",
+        "recentAudit"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/core/bus.ts",
+      "area": "core",
+      "lines": 13,
+      "imports": [],
+      "exports": [
+        "BusTopic",
+        "bus"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/core/latency.ts",
+      "area": "core",
+      "lines": 24,
+      "imports": [],
+      "exports": [
+        "record",
+        "timed",
+        "latencyReport",
+        "resetLatency"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/core/mode.ts",
+      "area": "core",
+      "lines": 34,
+      "imports": [
+        "./settings.js",
+        "./audit.js",
+        "./bus.js"
+      ],
+      "exports": [
+        "Mode",
+        "ControlState",
+        "getControl",
+        "displayMode",
+        "updateControl"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/core/ratelimit.ts",
+      "area": "core",
+      "lines": 53,
+      "imports": [],
+      "exports": [
+        "RateLimitError",
+        "limiter",
+        "failureGate"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/core/settings.ts",
+      "area": "core",
+      "lines": 10,
+      "imports": [
+        "../db/db.js"
+      ],
+      "exports": [
+        "getSetting",
+        "setSetting"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/core/signing.ts",
+      "area": "core",
+      "lines": 19,
+      "imports": [
+        "../config.js"
+      ],
+      "exports": [
+        "canonical",
+        "sign",
+        "verify"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/core/util.ts",
+      "area": "core",
+      "lines": 28,
+      "imports": [],
+      "exports": [
+        "now",
+        "iso",
+        "uid",
+        "sha256",
+        "clamp",
+        "round",
+        "sleep",
+        "mean",
+        "std",
+        "quantile",
+        "withDeadline"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/dashboard/overview.ts",
+      "area": "dashboard",
+      "lines": 96,
+      "imports": [
+        "../db/db.js",
+        "../market/store.js",
+        "../market/bubbles.js",
+        "../market/scanner.js",
+        "../regime/regime.js",
+        "../portfolio/ledger.js",
+        "../risk/policy.js",
+        "../core/mode.js",
+        "../notify/notify.js",
+        "../providers/http.js",
+        "../qa/gates.js",
+        "../exec/incidents.js",
+        "../workers/effectiveness.js",
+        "../joe/joe.js"
+      ],
+      "exports": [
+        "ActivityKind",
+        "Activity",
+        "riskMonitor",
+        "pipelineStatus",
+        "activityFeed",
+        "overviewSnapshot"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/db/db.ts",
+      "area": "db",
+      "lines": 35,
+      "imports": [
+        "../config.js",
+        "./migrations.js"
+      ],
+      "exports": [
+        "openDb",
+        "getDb",
+        "closeDb",
+        "all",
+        "get",
+        "run",
+        "inTransaction",
+        "tx",
+        "J",
+        "P"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/db/migrations.ts",
+      "area": "db",
+      "lines": 127,
+      "imports": [],
+      "exports": [
+        "migrate",
+        "SCHEMA_VERSION"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/decision/engine.ts",
+      "area": "decision",
+      "lines": 102,
+      "imports": [
+        "../workers/types.js",
+        "../qci/schemas.js",
+        "../qci/coordinator.js",
+        "./scoring.js",
+        "../risk/gate.js",
+        "../risk/policy.js",
+        "../core/mode.js",
+        "../ditas/memory.js",
+        "../db/db.js",
+        "../core/util.js",
+        "../core/latency.js",
+        "../core/bus.js",
+        "../workers/indicators.js",
+        "../knowledge/integration.js"
+      ],
+      "exports": [
+        "DecisionState",
+        "PipelineStep",
+        "DecisionReport",
+        "decide"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/decision/scoring.ts",
+      "area": "decision",
+      "lines": 36,
+      "imports": [
+        "../qci/schemas.js",
+        "../core/util.js"
+      ],
+      "exports": [
+        "SCORE_VERSION",
+        "SCORE_WEIGHTS",
+        "ScoreFactor",
+        "OpportunityScore",
+        "scoreOpportunity"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/ditas/calibration.ts",
+      "area": "ditas",
+      "lines": 75,
+      "imports": [],
+      "exports": [
+        "CalibrationRow",
+        "CalibrationOptions",
+        "ReliabilityBin",
+        "CalibrationReport",
+        "calibrationReport"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/ditas/execution.ts",
+      "area": "ditas",
+      "lines": 25,
+      "imports": [
+        "../db/db.js",
+        "../portfolio/ledger.js"
+      ],
+      "exports": [
+        "executionQuality"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/ditas/fingerprint.ts",
+      "area": "ditas",
+      "lines": 57,
+      "imports": [
+        "../workers/types.js",
+        "../market/types.js"
+      ],
+      "exports": [
+        "MarketFingerprint",
+        "fingerprint",
+        "compareFingerprints"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/ditas/memory.ts",
+      "area": "ditas",
+      "lines": 86,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js",
+        "../market/store.js",
+        "../market/quality.js",
+        "../core/mode.js",
+        "../market/types.js",
+        "../workers/types.js",
+        "../decision/engine.js",
+        "../regime/regime.js",
+        "../lab/strategies.js",
+        "./fingerprint.js"
+      ],
+      "exports": [
+        "MemoryKind",
+        "MemoryEvent",
+        "recordOpportunity",
+        "correctEvent",
+        "memoryEvents",
+        "memoryDetail",
+        "verifyMemory"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/ditas/passports.ts",
+      "area": "ditas",
+      "lines": 66,
+      "imports": [
+        "../lab/strategies.js",
+        "../lab/lab.js",
+        "../db/db.js"
+      ],
+      "exports": [
+        "returnHealth",
+        "strategyPassports"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/ditas/routes.ts",
+      "area": "ditas",
+      "lines": 36,
+      "imports": [
+        "./execution.js",
+        "../core/audit.js",
+        "./memory.js",
+        "./service.js"
+      ],
+      "exports": [
+        "ditasRoutes"
+      ],
+      "routes": [
+        "GET /api/ditas/execution",
+        "GET /api/ditas",
+        "GET /api/ditas/verify",
+        "GET /api/ditas/events/:id",
+        "GET /api/ditas/events/:id/similar",
+        "POST /api/ditas/events/:id/corrections",
+        "POST /api/ditas/twins",
+        "POST /api/ditas/forecasts",
+        "POST /api/ditas/outcomes",
+        "GET /api/ditas/calibration"
+      ]
+    },
+    {
+      "path": "server/src/ditas/service.ts",
+      "area": "ditas",
+      "lines": 101,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js",
+        "../portfolio/ledger.js",
+        "../core/mode.js",
+        "../market/store.js",
+        "../market/quality.js",
+        "./memory.js",
+        "./passports.js",
+        "./fingerprint.js",
+        "./calibration.js",
+        "./twin.js",
+        "../market/types.js"
+      ],
+      "exports": [
+        "DITAS_COVERAGE",
+        "forecastCohorts",
+        "calibrationFor",
+        "ditasOverview",
+        "runDecisionTwin",
+        "similarEnvironments",
+        "addForecast",
+        "addOutcome"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/ditas/twin.ts",
+      "area": "ditas",
+      "lines": 103,
+      "imports": [
+        "../lab/exits.js",
+        "../lab/strategies.js",
+        "../market/types.js"
+      ],
+      "exports": [
+        "TwinPlan",
+        "TwinAssumptions",
+        "TwinFill",
+        "TwinTrade",
+        "TwinResult",
+        "simulateTwin"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/exec/incidents.ts",
+      "area": "exec",
+      "lines": 74,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js",
+        "../notify/notify.js",
+        "../journal/journal.js",
+        "../core/audit.js",
+        "../core/bus.js"
+      ],
+      "exports": [
+        "IncidentStatus",
+        "Incident",
+        "REALERT_MS",
+        "IncidentError",
+        "reportUnprotected",
+        "markRecovered",
+        "sweepClosedPositions",
+        "openIncidentFor",
+        "listIncidents",
+        "acknowledgeIncident"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/exec/oms.ts",
+      "area": "exec",
+      "lines": 358,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js",
+        "../market/store.js",
+        "../market/quality.js",
+        "../risk/gate.js",
+        "../risk/policy.js",
+        "../portfolio/ledger.js",
+        "../journal/journal.js",
+        "../notify/notify.js",
+        "../core/bus.js",
+        "../core/audit.js",
+        "../core/mode.js",
+        "../lab/exits.js",
+        "../core/latency.js",
+        "../decision/engine.js",
+        "./incidents.js"
+      ],
+      "exports": [
+        "VENUE",
+        "OmsError",
+        "SimFill",
+        "quoteAgeOk",
+        "submitEntry",
+        "queueForApproval",
+        "decideApproval",
+        "expireApprovals",
+        "monitorPositions",
+        "executeExit",
+        "autopsy",
+        "pauseNewOrders",
+        "cancelPendingEntries",
+        "protectPositions",
+        "closeAllPositions",
+        "closePosition",
+        "emergencyStop",
+        "listOrders",
+        "listPositions"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/features/indicators.ts",
+      "area": "features",
+      "lines": 125,
+      "imports": [
+        "../market/types.js"
+      ],
+      "exports": [
+        "FeatureSnapshot",
+        "FeatureEngine",
+        "isNum"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/index.ts",
+      "area": "index.ts",
+      "lines": 43,
+      "imports": [
+        "./config.js",
+        "./db/db.js",
+        "./providers/binance.js",
+        "./providers/dexscreener.js",
+        "./api/routes.js",
+        "./lab/lab.js",
+        "./knowledge/store.js",
+        "./knowledge/concepts.js"
+      ],
+      "exports": [
+        "buildApp"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/joe/joe.ts",
+      "area": "joe",
+      "lines": 156,
+      "imports": [
+        "../config.js",
+        "../market/store.js",
+        "../market/bubbles.js",
+        "../market/scanner.js",
+        "../safety/safety.js",
+        "../market/quality.js",
+        "../regime/regime.js",
+        "../workers/indicators.js",
+        "../portfolio/ledger.js",
+        "../exec/oms.js",
+        "../risk/policy.js",
+        "../core/mode.js",
+        "../news/news.js",
+        "../whales/prints.js",
+        "../db/db.js",
+        "../providers/http.js",
+        "../core/audit.js",
+        "../knowledge/integration.js"
+      ],
+      "exports": [
+        "JOE_TOOL_NAMES",
+        "chatHistory",
+        "askJoe",
+        "commandMode",
+        "dailyBriefing"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/journal/history.ts",
+      "area": "journal",
+      "lines": 27,
+      "imports": [
+        "../db/db.js"
+      ],
+      "exports": [
+        "HistoryFilter",
+        "tradingHistory",
+        "toCsv"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/journal/journal.ts",
+      "area": "journal",
+      "lines": 9,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js"
+      ],
+      "exports": [
+        "JournalKind",
+        "journal",
+        "listJournal"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/chunk.ts",
+      "area": "knowledge",
+      "lines": 88,
+      "imports": [
+        "./extract.js"
+      ],
+      "exports": [
+        "ChunkKind",
+        "Chunk",
+        "CHUNK",
+        "normalizeText",
+        "hashText",
+        "tokenCount",
+        "ChunkState",
+        "chunkDocument"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/concepts.ts",
+      "area": "knowledge",
+      "lines": 163,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js",
+        "../core/audit.js",
+        "./taxonomy.js",
+        "../risk/policy.js",
+        "../lab/strategies.js"
+      ],
+      "exports": [
+        "ConceptCardSchema",
+        "seedConcepts",
+        "createConcept",
+        "linkDocumentConcepts",
+        "unlinkDocument",
+        "addClaim",
+        "conflicts",
+        "listConcepts",
+        "findConcept",
+        "conceptDetail",
+        "researchSpec"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/extract.ts",
+      "area": "knowledge",
+      "lines": 241,
+      "imports": [],
+      "exports": [
+        "EXTRACTOR_VERSION",
+        "LIMITS",
+        "Format",
+        "DocMeta",
+        "TextUnit",
+        "Extracted",
+        "ExtractionError",
+        "detectFormat",
+        "replaceElements",
+        "decodeEntities",
+        "htmlToText",
+        "sniffMeta",
+        "extract"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/integration.ts",
+      "area": "knowledge",
+      "lines": 33,
+      "imports": [
+        "../db/db.js",
+        "./taxonomy.js",
+        "./search.js"
+      ],
+      "exports": [
+        "KnowledgeRef",
+        "KNOWLEDGE_AUTHORITY",
+        "strategyKnowledge",
+        "domainKnowledge",
+        "knowledgeForAssistant",
+        "conceptCard"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/memory.ts",
+      "area": "knowledge",
+      "lines": 31,
+      "imports": [
+        "../db/db.js"
+      ],
+      "exports": [
+        "MEMORY_CATEGORIES",
+        "memoryOverview"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/providers.ts",
+      "area": "knowledge",
+      "lines": 89,
+      "imports": [
+        "../config.js",
+        "../providers/http.js"
+      ],
+      "exports": [
+        "EmbeddingProvider",
+        "terms",
+        "localHashEmbedder",
+        "embedder",
+        "toBlob",
+        "fromBlob",
+        "cosine",
+        "Passage",
+        "ReasonedAnswer",
+        "ReasoningProvider",
+        "fenceSafe",
+        "claudeReasoner"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/research.ts",
+      "area": "knowledge",
+      "lines": 212,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js",
+        "../core/audit.js",
+        "../config.js",
+        "../lab/lab.js",
+        "../lab/backtest.js",
+        "../lab/strategies.js",
+        "../regime/regime.js",
+        "../features/indicators.js",
+        "../market/types.js",
+        "./concepts.js",
+        "../risk/policy.js"
+      ],
+      "exports": [
+        "RESEARCH_VERSION",
+        "ExperimentKind",
+        "storeCandles",
+        "storedCandles",
+        "researchCandles",
+        "candleInventory",
+        "mean",
+        "acf",
+        "chiSquareSurvival",
+        "ljungBox",
+        "rng",
+        "performanceMetrics",
+        "RunInput",
+        "runExperiment",
+        "listExperiments",
+        "experimentDetail",
+        "compareStrategies",
+        "paperExperimentStatus"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/routes.ts",
+      "area": "knowledge",
+      "lines": 85,
+      "imports": [
+        "./taxonomy.js",
+        "./extract.js",
+        "./store.js",
+        "./concepts.js",
+        "./search.js",
+        "./research.js",
+        "./memory.js",
+        "./integration.js"
+      ],
+      "exports": [
+        "knowledgeRoutes"
+      ],
+      "routes": [
+        "GET /api/academy/stats",
+        "GET /api/academy/disciplines",
+        "GET /api/academy/catalog",
+        "POST /api/academy/catalog/import",
+        "GET /api/academy/documents",
+        "GET /api/academy/documents/:id",
+        "POST /api/academy/documents/:id/reprocess",
+        "PATCH /api/academy/documents/:id",
+        "GET /api/academy/search",
+        "POST /api/academy/ask",
+        "GET /api/academy/citations/:id",
+        "GET /api/academy/concepts",
+        "GET /api/academy/concepts/:id",
+        "POST /api/academy/concepts",
+        "POST /api/academy/claims",
+        "GET /api/academy/conflicts",
+        "GET /api/academy/concepts/:id/research-spec",
+        "POST /api/academy/experiments",
+        "GET /api/academy/experiments",
+        "GET /api/academy/experiments/:id",
+        "POST /api/academy/strategy-comparison",
+        "GET /api/academy/paper-experiment",
+        "GET /api/academy/candles",
+        "GET /api/academy/memory",
+        "GET /api/academy/domain-concepts"
+      ]
+    },
+    {
+      "path": "server/src/knowledge/search.ts",
+      "area": "knowledge",
+      "lines": 103,
+      "imports": [
+        "../db/db.js",
+        "./providers.js",
+        "./concepts.js",
+        "./taxonomy.js"
+      ],
+      "exports": [
+        "Mode",
+        "Filters",
+        "Hit",
+        "ftsQuery",
+        "keywordSearch",
+        "semanticSearch",
+        "hybridSearch",
+        "search",
+        "citation",
+        "matchConcepts",
+        "ask"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/store.ts",
+      "area": "knowledge",
+      "lines": 223,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js",
+        "../core/audit.js",
+        "../core/bus.js",
+        "./extract.js",
+        "./chunk.js",
+        "./providers.js",
+        "./taxonomy.js",
+        "./concepts.js"
+      ],
+      "exports": [
+        "DocStatus",
+        "PDF_BATCH_PAGES",
+        "seedCatalog",
+        "importCatalog",
+        "catalog",
+        "UploadOptions",
+        "uploadDocument",
+        "enqueue",
+        "resumeIngestion",
+        "waitForIdle",
+        "processDocument",
+        "reprocessDocument",
+        "updateDocumentMeta",
+        "listDocuments",
+        "documentDetail",
+        "libraryStats",
+        "_hashText"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/knowledge/taxonomy.ts",
+      "area": "knowledge",
+      "lines": 207,
+      "imports": [],
+      "exports": [
+        "EvidenceClass",
+        "EVIDENCE_CLASSES",
+        "Discipline",
+        "DISCIPLINES",
+        "disciplineIds",
+        "PRIORITY_CATALOG",
+        "ConceptCard",
+        "CONCEPT_CARDS",
+        "STRATEGY_CONCEPTS",
+        "DOMAIN_CONCEPTS"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/lab/backtest.ts",
+      "area": "lab",
+      "lines": 82,
+      "imports": [
+        "../features/indicators.js",
+        "../regime/regime.js",
+        "./strategies.js",
+        "../market/types.js",
+        "./exits.js",
+        "../core/util.js"
+      ],
+      "exports": [
+        "BtCosts",
+        "BtTrade",
+        "BtStats",
+        "BtResult",
+        "backtest",
+        "stats",
+        "monteCarlo"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/lab/exits.ts",
+      "area": "lab",
+      "lines": 34,
+      "imports": [],
+      "exports": [
+        "ExitState",
+        "Bar",
+        "ExitFill",
+        "stepExit",
+        "newExitState"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/lab/lab.ts",
+      "area": "lab",
+      "lines": 89,
+      "imports": [
+        "./strategies.js",
+        "./backtest.js",
+        "../providers/http.js",
+        "../db/db.js",
+        "../core/util.js",
+        "../core/audit.js",
+        "../market/store.js",
+        "../core/settings.js",
+        "../market/types.js"
+      ],
+      "exports": [
+        "StrategyStatus",
+        "seedStrategies",
+        "listStrategies",
+        "setStrategyStatus",
+        "fetchHistory",
+        "runBacktest",
+        "listBacktests",
+        "strategyStats",
+        "paperStats",
+        "checkStrategyHealth",
+        "_universeSymbols"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/lab/strategies.ts",
+      "area": "lab",
+      "lines": 71,
+      "imports": [
+        "../features/indicators.js",
+        "../features/indicators.js",
+        "../market/types.js",
+        "../regime/regime.js"
+      ],
+      "exports": [
+        "Signal",
+        "StrategyDef",
+        "STRATEGIES",
+        "strategyById"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/main.ts",
+      "area": "main.ts",
+      "lines": 41,
+      "imports": [
+        "./config.js"
+      ],
+      "exports": [],
+      "routes": []
+    },
+    {
+      "path": "server/src/market/bubbles.ts",
+      "area": "market",
+      "lines": 39,
+      "imports": [
+        "./quality.js",
+        "./store.js",
+        "./fabric.js",
+        "../safety/safety.js"
+      ],
+      "exports": [
+        "marketBreadth",
+        "bubbleMap"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/market/discover.ts",
+      "area": "market",
+      "lines": 28,
+      "imports": [
+        "./store.js",
+        "./fabric.js",
+        "../safety/safety.js",
+        "../regime/regime.js"
+      ],
+      "exports": [
+        "discover"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/market/fabric.ts",
+      "area": "market",
+      "lines": 210,
+      "imports": [
+        "../providers/binance.js",
+        "../providers/coinbase.js",
+        "../providers/kraken.js",
+        "../providers/coingecko.js",
+        "../providers/dexscreener.js",
+        "../providers/frankfurter.js",
+        "./store.js",
+        "../chart/analysis.js",
+        "./types.js",
+        "../core/bus.js",
+        "../features/indicators.js",
+        "../core/latency.js",
+        "../config.js",
+        "../portfolio/ledger.js",
+        "../providers/binance.js"
+      ],
+      "exports": [
+        "isEligibleSpot",
+        "refreshRules",
+        "refreshTickers",
+        "selectUniverse",
+        "validateCandleBatch",
+        "REBUILD_MIN_BARS",
+        "ingestCandleBatch",
+        "refreshDeep",
+        "refreshBooks",
+        "refreshBackground",
+        "ensureRules"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/market/quality.ts",
+      "area": "market",
+      "lines": 158,
+      "imports": [
+        "../chart/analysis.js",
+        "./store.js",
+        "./types.js",
+        "../providers/binance.js"
+      ],
+      "exports": [
+        "DataQuality",
+        "QUALITY_LIMITS",
+        "validBook",
+        "bookAge",
+        "bookFreshForExecution",
+        "assessQuality",
+        "bookImpact",
+        "walkBook"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/market/scanner.ts",
+      "area": "market",
+      "lines": 154,
+      "imports": [
+        "../ditas/memory.js",
+        "./bubbles.js",
+        "./store.js",
+        "./quality.js",
+        "../safety/safety.js",
+        "../regime/regime.js",
+        "../lab/strategies.js",
+        "../qci/coordinator.js",
+        "../decision/engine.js",
+        "../news/news.js",
+        "../whales/prints.js",
+        "../portfolio/correlation.js",
+        "../portfolio/ledger.js",
+        "../risk/policy.js",
+        "../lab/lab.js",
+        "../workers/indicators.js",
+        "../core/mode.js",
+        "../core/util.js",
+        "../db/db.js",
+        "./types.js",
+        "../core/latency.js",
+        "../core/bus.js",
+        "../workers/types.js"
+      ],
+      "exports": [
+        "BoardRow",
+        "board",
+        "rejections",
+        "recentDecisions",
+        "buildContext",
+        "scanOnce",
+        "analyzeInstrument",
+        "dexBoard"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/market/store.ts",
+      "area": "market",
+      "lines": 64,
+      "imports": [
+        "../features/indicators.js",
+        "./types.js",
+        "../providers/binance.js",
+        "../providers/coinbase.js",
+        "../providers/coingecko.js",
+        "../providers/dexscreener.js",
+        "../providers/frankfurter.js"
+      ],
+      "exports": [
+        "TickerState",
+        "DeepState",
+        "market"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/market/types.ts",
+      "area": "market",
+      "lines": 10,
+      "imports": [],
+      "exports": [
+        "Candle",
+        "Market",
+        "Instrument",
+        "Interval",
+        "INTERVAL_MS"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/news/news.ts",
+      "area": "news",
+      "lines": 74,
+      "imports": [
+        "../providers/googlenews.js",
+        "../db/db.js",
+        "../core/util.js",
+        "../market/store.js",
+        "../core/bus.js",
+        "../notify/notify.js"
+      ],
+      "exports": [
+        "NEWS_QUERIES",
+        "NewsItem",
+        "classify",
+        "matchAssets",
+        "refreshNews",
+        "recentNews",
+        "newsContext"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/notify/notify.ts",
+      "area": "notify",
+      "lines": 35,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js",
+        "../core/bus.js",
+        "../config.js",
+        "../providers/http.js",
+        "../core/settings.js"
+      ],
+      "exports": [
+        "Severity",
+        "notify",
+        "listNotifications",
+        "markRead"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/portfolio/calendar.ts",
+      "area": "portfolio",
+      "lines": 38,
+      "imports": [
+        "../db/db.js",
+        "./ledger.js",
+        "../core/settings.js"
+      ],
+      "exports": [
+        "tzOffsetMin",
+        "calendar",
+        "reconcile"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/portfolio/correlation.ts",
+      "area": "portfolio",
+      "lines": 15,
+      "imports": [
+        "../market/store.js"
+      ],
+      "exports": [
+        "correlation"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/portfolio/ledger.ts",
+      "area": "portfolio",
+      "lines": 60,
+      "imports": [
+        "../db/db.js",
+        "../core/util.js",
+        "../market/store.js",
+        "../core/settings.js"
+      ],
+      "exports": [
+        "PAPER_ACCOUNT",
+        "LedgerKind",
+        "ledger",
+        "cashBalance",
+        "totalDeposits",
+        "PositionRow",
+        "openPositions",
+        "markPrice",
+        "AccountState",
+        "accountState"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/providers/binance.ts",
+      "area": "providers",
+      "lines": 52,
+      "imports": [
+        "./http.js",
+        "../market/types.js"
+      ],
+      "exports": [
+        "Ticker24",
+        "SymbolRules",
+        "tickers24h",
+        "exchangeInfo",
+        "klines",
+        "Book",
+        "depth",
+        "AggTrade",
+        "aggTrades"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/providers/coinbase.ts",
+      "area": "providers",
+      "lines": 12,
+      "imports": [
+        "./http.js"
+      ],
+      "exports": [
+        "Quote",
+        "ticker"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/providers/coingecko.ts",
+      "area": "providers",
+      "lines": 12,
+      "imports": [
+        "./http.js"
+      ],
+      "exports": [
+        "CgMarket",
+        "markets"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/providers/dexscreener.ts",
+      "area": "providers",
+      "lines": 49,
+      "imports": [
+        "./http.js"
+      ],
+      "exports": [
+        "DexPair",
+        "latestTokenPairs",
+        "search"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/providers/frankfurter.ts",
+      "area": "providers",
+      "lines": 24,
+      "imports": [
+        "./http.js"
+      ],
+      "exports": [
+        "FX_PAIRS",
+        "FxSeries",
+        "fxSeries"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/providers/googlenews.ts",
+      "area": "providers",
+      "lines": 26,
+      "imports": [
+        "./http.js"
+      ],
+      "exports": [
+        "RssItem",
+        "searchNews",
+        "parseRss"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/providers/http.ts",
+      "area": "providers",
+      "lines": 89,
+      "imports": [
+        "../core/bus.js",
+        "../core/latency.js",
+        "../config.js"
+      ],
+      "exports": [
+        "ProviderStatus",
+        "ProviderInfo",
+        "registerProvider",
+        "providers",
+        "provider",
+        "setRateLimit",
+        "ProviderError",
+        "fetchProvider"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/providers/kraken.ts",
+      "area": "providers",
+      "lines": 30,
+      "imports": [
+        "./http.js",
+        "./coinbase.js"
+      ],
+      "exports": [
+        "krakenAlt",
+        "tickers"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/providers/pending.ts",
+      "area": "providers",
+      "lines": 30,
+      "imports": [
+        "./http.js",
+        "../config.js"
+      ],
+      "exports": [],
+      "routes": []
+    },
+    {
+      "path": "server/src/qa/gates.ts",
+      "area": "qa",
+      "lines": 38,
+      "imports": [
+        "../config.js",
+        "../db/db.js",
+        "../risk/policy.js",
+        "../core/audit.js",
+        "../workers/registry.js",
+        "../portfolio/calendar.js"
+      ],
+      "exports": [
+        "Gate",
+        "releaseGates",
+        "openDefects"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/qci/challenge.ts",
+      "area": "qci",
+      "lines": 45,
+      "imports": [
+        "./schemas.js",
+        "../workers/types.js"
+      ],
+      "exports": [
+        "challengePanel"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/qci/coordinator.ts",
+      "area": "qci",
+      "lines": 114,
+      "imports": [
+        "./schemas.js",
+        "../core/signing.js",
+        "../workers/registry.js",
+        "../workers/runtime.js",
+        "./challenge.js",
+        "../workers/types.js",
+        "../core/util.js",
+        "../core/latency.js",
+        "../db/db.js"
+      ],
+      "exports": [
+        "QCI_POLICY",
+        "DOMAIN_WEIGHTS",
+        "validatePacket",
+        "aggregate",
+        "runConsensus",
+        "isExpired"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/qci/schemas.ts",
+      "area": "qci",
+      "lines": 57,
+      "imports": [],
+      "exports": [
+        "EVIDENCE_SCHEMA_VERSION",
+        "DomainEnum",
+        "StanceEnum",
+        "EvidencePacket",
+        "EvidencePacket",
+        "SignedPacket",
+        "SignedPacket",
+        "ConsensusState",
+        "ConsensusState",
+        "ChallengeFinding",
+        "ChallengeFinding",
+        "ConsensusRecord"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/qhef/qhef.ts",
+      "area": "qhef",
+      "lines": 53,
+      "imports": [
+        "../core/latency.js",
+        "../workers/runtime.js",
+        "../qci/coordinator.js",
+        "../config.js",
+        "../market/store.js",
+        "../bot/bot.js"
+      ],
+      "exports": [
+        "Budget",
+        "BUDGETS",
+        "qhefReport",
+        "resetLoopDelay"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/regime/regime.ts",
+      "area": "regime",
+      "lines": 18,
+      "imports": [
+        "../features/indicators.js",
+        "../features/indicators.js"
+      ],
+      "exports": [
+        "Regime",
+        "RegimeResult",
+        "classifyRegime"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/risk/gate.ts",
+      "area": "risk",
+      "lines": 124,
+      "imports": [
+        "./policy.js",
+        "../portfolio/ledger.js",
+        "../core/mode.js",
+        "../market/store.js",
+        "../market/quality.js",
+        "../safety/safety.js",
+        "../portfolio/correlation.js",
+        "../db/db.js",
+        "../core/util.js",
+        "../core/settings.js",
+        "../exec/incidents.js"
+      ],
+      "exports": [
+        "RiskDecisionKind",
+        "RiskProposal",
+        "Sizing",
+        "RiskDecision",
+        "evaluateRisk"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/risk/policy.ts",
+      "area": "risk",
+      "lines": 59,
+      "imports": [
+        "../db/db.js",
+        "../core/audit.js"
+      ],
+      "exports": [
+        "RiskPolicy",
+        "RiskPolicy",
+        "DEFAULT_POLICY",
+        "PolicyVersion",
+        "currentPolicy",
+        "acceptPolicy",
+        "policyHistory"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/safety/safety.ts",
+      "area": "safety",
+      "lines": 61,
+      "imports": [
+        "../market/store.js",
+        "../market/quality.js",
+        "../providers/dexscreener.js"
+      ],
+      "exports": [
+        "SafetyStatus",
+        "SafetyResult",
+        "SAFETY_LIMITS",
+        "assessCexAsset",
+        "assessDexPair"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/security/security.ts",
+      "area": "security",
+      "lines": 52,
+      "imports": [
+        "../db/db.js",
+        "../config.js",
+        "../core/settings.js",
+        "../core/audit.js",
+        "../core/mode.js",
+        "../wallet/wallet.js",
+        "../qa/gates.js",
+        "../core/util.js"
+      ],
+      "exports": [
+        "Check",
+        "securityOverview",
+        "revokeOtherSessions"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/wallet/keccak.ts",
+      "area": "wallet",
+      "lines": 26,
+      "imports": [],
+      "exports": [
+        "keccak256"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/wallet/wallet.ts",
+      "area": "wallet",
+      "lines": 95,
+      "imports": [
+        "./keccak.js",
+        "../db/db.js",
+        "../core/util.js",
+        "../core/audit.js",
+        "../core/settings.js",
+        "../qa/gates.js"
+      ],
+      "exports": [
+        "Network",
+        "NETWORKS",
+        "toChecksum",
+        "validateAddress",
+        "ADDRESS_COOLDOWN_MS",
+        "addAddress",
+        "removeAddress",
+        "verifyAddress",
+        "listAddresses",
+        "withdrawalFrozen",
+        "setWithdrawalFreeze",
+        "previewWithdrawal",
+        "listWithdrawals"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/whales/prints.ts",
+      "area": "whales",
+      "lines": 40,
+      "imports": [
+        "../providers/binance.js",
+        "../market/store.js",
+        "../core/bus.js"
+      ],
+      "exports": [
+        "LargePrint",
+        "printThreshold",
+        "scanPrints",
+        "recentPrints",
+        "printContext",
+        "_injectPrintsForTest"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/workers/effectiveness.ts",
+      "area": "workers",
+      "lines": 34,
+      "imports": [
+        "../db/db.js",
+        "./registry.js"
+      ],
+      "exports": [
+        "workerEffectiveness"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/workers/indicators.ts",
+      "area": "workers",
+      "lines": 55,
+      "imports": [
+        "../features/indicators.js",
+        "../features/indicators.js",
+        "../market/types.js"
+      ],
+      "exports": [
+        "IndicatorReading",
+        "INDICATOR_SPECIALISTS",
+        "INDICATOR_COUNT",
+        "readIndicators"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/workers/registry.ts",
+      "area": "workers",
+      "lines": 140,
+      "imports": [
+        "./types.js",
+        "../features/indicators.js",
+        "../features/indicators.js",
+        "../market/types.js"
+      ],
+      "exports": [
+        "WORKERS",
+        "DOMAINS",
+        "REQUIRED_DOMAINS"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/workers/runtime.ts",
+      "area": "workers",
+      "lines": 79,
+      "imports": [
+        "./registry.js",
+        "./types.js",
+        "../qci/schemas.js",
+        "../core/signing.js",
+        "../core/util.js",
+        "../db/db.js",
+        "../core/latency.js"
+      ],
+      "exports": [
+        "POOL",
+        "quarantined",
+        "isApplicable",
+        "dispatch",
+        "flushWorkerStats",
+        "releaseQuarantine"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/workers/types.ts",
+      "area": "workers",
+      "lines": 43,
+      "imports": [
+        "../features/indicators.js",
+        "../lab/strategies.js",
+        "../regime/regime.js",
+        "../market/quality.js",
+        "../safety/safety.js",
+        "../market/types.js"
+      ],
+      "exports": [
+        "Stance",
+        "Domain",
+        "Candidate",
+        "WorkerContext",
+        "WorkerResult",
+        "WorkerCapability",
+        "WorkerDef"
+      ],
+      "routes": []
+    }
+  ],
+  "tables": [
+    "settings",
+    "audit_log",
+    "sessions",
+    "risk_policy_versions",
+    "consensus_records",
+    "decisions",
+    "orders",
+    "fills",
+    "positions",
+    "ledger_entries",
+    "journal",
+    "news",
+    "notifications",
+    "address_book",
+    "withdrawal_requests",
+    "strategies",
+    "backtests",
+    "worker_stats",
+    "chat",
+    "ditas_snapshots",
+    "ditas_events",
+    "ditas_twin_runs",
+    "ditas_forecasts",
+    "ditas_outcomes",
+    "kb_documents",
+    "kb_document_files",
+    "kb_document_events",
+    "kb_chunks",
+    "kb_chunks_fts",
+    "kb_embeddings",
+    "kb_catalog",
+    "kb_concepts",
+    "kb_concept_sources",
+    "kb_claims",
+    "research_experiments",
+    "research_candles",
+    "protection_incidents",
+    "schema_migrations"
+  ],
+  "tests": [
+    {
+      "path": "e2e/app.spec.ts",
+      "cases": 13
+    },
+    {
+      "path": "e2e/ditas.spec.ts",
+      "cases": 4
+    },
+    {
+      "path": "server/test/api.test.ts",
+      "cases": 15
+    },
+    {
+      "path": "server/test/chart.test.ts",
+      "cases": 8
+    },
+    {
+      "path": "server/test/dashboard.test.ts",
+      "cases": 3
+    },
+    {
+      "path": "server/test/ditas-api.test.ts",
+      "cases": 10
+    },
+    {
+      "path": "server/test/ditas-calibration.test.ts",
+      "cases": 7
+    },
+    {
+      "path": "server/test/ditas-execution.test.ts",
+      "cases": 2
+    },
+    {
+      "path": "server/test/ditas-frames.test.ts",
+      "cases": 4
+    },
+    {
+      "path": "server/test/ditas-market.test.ts",
+      "cases": 8
+    },
+    {
+      "path": "server/test/ditas-memory.test.ts",
+      "cases": 14
+    },
+    {
+      "path": "server/test/ditas-twin.test.ts",
+      "cases": 12
+    },
+    {
+      "path": "server/test/features.test.ts",
+      "cases": 5
+    },
+    {
+      "path": "server/test/hardening.test.ts",
+      "cases": 14
+    },
+    {
+      "path": "server/test/incidents.test.ts",
+      "cases": 9
+    },
+    {
+      "path": "server/test/knowledge.test.ts",
+      "cases": 37
+    },
+    {
+      "path": "server/test/lab.test.ts",
+      "cases": 4
+    },
+    {
+      "path": "server/test/live.providers.test.ts",
+      "cases": 2
+    },
+    {
+      "path": "server/test/oms.test.ts",
+      "cases": 13
+    },
+    {
+      "path": "server/test/phase1.test.ts",
+      "cases": 7
+    },
+    {
+      "path": "server/test/qci.test.ts",
+      "cases": 6
+    },
+    {
+      "path": "server/test/quality.test.ts",
+      "cases": 20
+    },
+    {
+      "path": "server/test/repair.test.ts",
+      "cases": 13
+    },
+    {
+      "path": "server/test/risk.test.ts",
+      "cases": 9
+    },
+    {
+      "path": "server/test/static.test.ts",
+      "cases": 4
+    },
+    {
+      "path": "server/test/wallet.test.ts",
+      "cases": 3
+    },
+    {
+      "path": "server/test/workers-effectiveness.test.ts",
+      "cases": 4
+    }
+  ],
+  "pages": [
+    "web/src/pages/Academy.tsx",
+    "web/src/pages/Account.tsx",
+    "web/src/pages/Ditas.tsx",
+    "web/src/pages/Intel.tsx",
+    "web/src/pages/Joe.tsx",
+    "web/src/pages/Markets.tsx",
+    "web/src/pages/Overview.tsx",
+    "web/src/pages/Phase1.tsx",
+    "web/src/pages/Trading.tsx"
+  ]
+}

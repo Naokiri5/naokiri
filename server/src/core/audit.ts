@@ -9,8 +9,8 @@ export function audit(actor: string, action: string, detail?: unknown) {
   const hash = sha256(`${prev?.hash ?? 'GENESIS'}|${ts}|${actor}|${action}|${d ?? ''}`);
   run('INSERT INTO audit_log(ts, actor, action, detail, prev_hash, hash) VALUES (?,?,?,?,?,?)', ts, actor, action, d, prev?.hash ?? null, hash);
 }
-export function verifyAuditChain() {
-  const rows = all<any>('SELECT * FROM audit_log ORDER BY id');
+/** Verifies the hash chain. `rows` lets a backup check verify a snapshot's rows without touching the live database. */
+export function verifyAuditChain(rows: any[] = all<any>('SELECT * FROM audit_log ORDER BY id')) {
   let prev = 'GENESIS';
   for (const r of rows) {
     const h = sha256(`${prev}|${r.ts}|${r.actor}|${r.action}|${r.detail ?? ''}`);

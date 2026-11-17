@@ -8,15 +8,26 @@ import './providers/binance.js'; import './providers/coinbase.js'; import './pro
 import './providers/dexscreener.js'; import './providers/frankfurter.js'; import './providers/googlenews.js'; import './providers/pending.js';
 import { routes } from './api/routes.js';
 import { seedStrategies } from './lab/lab.js';
+import { seedCatalog, resumeIngestion } from './knowledge/store.js';
+import { seedConcepts } from './knowledge/concepts.js';
 
 export async function buildApp() {
-  openDb(); seedStrategies();
-  const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.body.password'] }, bodyLimit: 256 * 1024 });
+  openDb(); seedStrategies(); seedCatalog(); seedConcepts(); resumeIngestion();
+  const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.body.password', 'req.body.current', 'req.body.next'] }, bodyLimit: 256 * 1024 });
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('x-request-id', req.id);
     reply.header('x-content-type-options', 'nosniff'); reply.header('x-frame-options', 'DENY'); reply.header('referrer-policy', 'no-referrer');
-    reply.header('content-security-policy', "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'");
+    reply.header('content-security-policy', "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+    // API responses (balances, positions, CSV exports) must not be cached by the browser or an intermediary.
+    if (req.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
     return payload;
+  });
+  // Root-level safety net for anything outside the API plugin (static files, future plugins): Fastify's default
+  // handler would echo internal error messages. Client errors keep their message; server faults never do.
+  app.setErrorHandler((err: any, req, reply) => {
+    const code = Number.isInteger(err?.statusCode) && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 500;
+    if (code >= 500) { req.log.error({ err }, 'unhandled server error'); return reply.code(code).send({ error: 'internal server error', requestId: req.id }); }
+    return reply.code(code).send({ error: String(err?.message ?? 'request failed') });
   });
   await app.register(routes);
   if (existsSync(config.webDist)) {

@@ -8,12 +8,20 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   if (!res.ok) throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
   return data as T;
 }
+/** Raw file upload (Academy documents). Same auth/CSRF/error contract as `api`; bytes are sent unmodified. */
+export async function uploadFile<T = any>(path: string, file: File): Promise<T> {
+  const res = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-mia-csrf': '1', 'x-filename': encodeURIComponent(file.name) }, body: file, credentials: 'same-origin' });
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 401) window.dispatchEvent(new Event('mia:unauthorized'));
+  if (!res.ok) throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
+  return data as T;
+}
 
 /** Live event stream (SSE). Components subscribe to topics to trigger refetches. */
 type Handler = (topic: string, payload: any) => void;
 const handlers = new Set<Handler>(); let es: EventSource | null = null;
 export const streamState = { connected: false, lastEventAt: 0 };
-const TOPICS = ['ticker', 'candle', 'scan', 'consensus', 'decision', 'order', 'position', 'risk', 'alert', 'news', 'whale', 'bot', 'health', 'mode', 'notification'];
+const TOPICS = ['ticker', 'candle', 'scan', 'consensus', 'decision', 'order', 'position', 'risk', 'alert', 'news', 'whale', 'bot', 'health', 'mode', 'notification', 'knowledge'];
 export function connectStream() {
   if (es) return; es = new EventSource('/api/stream');
   es.onopen = () => { streamState.connected = true; };
