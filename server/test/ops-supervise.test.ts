@@ -48,3 +48,13 @@ describe('supervisor', () => {
     expect(r.code).toBe(2);
   });
 });
+
+describe('supervisor spawn failure (MIA-OPS-004)', () => {
+  it('a command that cannot start counts as a crash and ends in the crash-loop exit code, not 0', async () => {
+    const p = spawn(process.execPath, [SUP], { env: { ...process.env, MIA_SUPERVISE_CMD: JSON.stringify(['/nonexistent/mia-binary']), MIA_SUPERVISE_BASE_MS: '5', MIA_SUPERVISE_MAX_CRASHES: '2' } });
+    let err = ''; p.stderr.on('data', (d) => (err += d));
+    const code = await new Promise<number | null>((r) => p.on('exit', r));
+    expect(err).toMatch(/spawn failed/); expect(err).toMatch(/crash loop/);
+    expect(code).toBe(1);
+  });
+});

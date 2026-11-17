@@ -166,3 +166,85 @@ Against §6 of the work order it still lacks:
   - backups are encrypted by policy on hosts
   - a 24 h hosted soak is recorded
 - **Real-money execution: disabled.** No signer exists, withdrawals are locked, and G07, G08, G12, G13 and G14 cannot pass.
+
+## 8. Batch B: full read-through and verified fixes (2026-11-17, later the same day)
+
+Four read-only reviewers (subagents) each read one area line by line: trading core; API, security and knowledge; DITAS, ops and bot; web. They reported **37 candidate findings**. The lead (Claude Code) reproduced or traced every finding before fixing it.
+
+**Rules for every fix below:**
+- It has a regression test, and that test was run against the old code and **failed**. The exceptions are noted.
+- Files that Capy's open PRs #12, #13 and #14 are changing were left to those PRs. Their findings are listed as review notes instead.
+
+### 8.1 Fixed and verified on `claude/blissful-planck-lazglg` (not merged)
+| ID | Pri | What was wrong | Evidence | Test |
+|---|---|---|---|---|
+| MIA-RISK-001 | P1 | The ledger trusted any non-null mark regardless of age. A frozen feed on an open position kept equity, the loss breakers and open risk on stale data, and the gate **failed open** for other instruments (breaks invariant #3). Stale, future-dated and non-positive marks now count as missing, so the gate denies `POSITION_MARKS_MISSING`. | traced and reproduced in a test | `risk.test.ts` (2) |
+| MIA-OMS-003 | P2 | A target fill that closed a small position (sub-lot remainder snapped) followed by a TIME fill in the same pass threw. The transaction rolled back on every pass: the position could never exit and a false incident was raised. | reproduced | `oms.test.ts` |
+| MIA-RISK-006 | P3 | The stored policy was not re-validated on read. A missing field made checks such as `costR > undefined` silently pass. It now denies `POLICY_INVALID` until the owner re-accepts. | reproduced | `risk.test.ts` |
+| MIA-KB-001 | P2 | An EPUB spine repeating one chapter was inflated once per reference: a 2 KB upload produced 65 MB of text, 1.4 s of blocking and a 200 MB heap. Each file is now read once and the size budget is enforced as it accumulates. Measured after the fix: 39 ms, 18 MB. | measured | `knowledge.test.ts` |
+| MIA-SEC-004 | P3 | CoinGecko symbols went into `RegExp` unescaped. `"USD+("` threw and broke the whole news refresh. | reproduced | `untrusted-provider-text.test.ts` |
+| MIA-SEC-006 | P3 | RSS and DEX Screener links were stored unchecked. Only `http(s)` links are kept now. The CSP already mitigated this. | unit test | same file |
+| MIA-SEC-001 | P2 | Trader Joe's pause tool depended on the model obeying the prompt, so an injected headline could pause trading. Code now allows the pause only when the owner's own message asks for it. | unit-tested gate (no live LLM call) | `joe-gate.test.ts` |
+| MIA-SEC-002 | P3 | One Joe message could run unlimited `analyze_instrument` calls, bypassing the `/api/analyze` limit. Now capped at 3 analyses and 16 tool calls per message. | unit test | `joe-gate.test.ts` |
+| MIA-SEC-003 | P3 | Academy experiments and strategy comparison had no rate limit (backtests were limited to 6/min). Now limited to 6/min (burst 2) and 2/min (burst 1). | HTTP test | `research-limits.test.ts` (not run against the old code) |
+| MIA-OPS-003 | P2 | `mia.db` was created 0644 in a 0755 directory, so any local account could read the passphrase hash, sessions and ledger. The file is now 0600 and a new data dir is 0700. | `stat` | `db-permissions.test.ts` |
+| MIA-OPS-007 | P2 | **Found by the lead while checking a reviewer claim.** One open browser tab (SSE stream) made every graceful stop hang until the 30 s hard limit, exit 1 and skip `closeDb`. Streams now end on `preClose`. Measured: 32 s → 1.1 s, clean exit. | timed with curl + SIGTERM | `shutdown-sse.test.ts` (old code: 8 s timeout) |
+| MIA-OPS-008 | P3 | Shutdown released the engine lease before HTTP stopped. It now drains lanes, closes HTTP, then releases the lease and closes the DB. An undrained stop keeps the lease and exits 1. | code + live SIGTERM run | covered by the measured stop above |
+| MIA-OPS-004 | P3 | The supervisor treated a spawn failure (ENOENT) as idle and exited 0, which systemd reads as a clean stop. It now counts as a crash, so the crash-loop cap applies and the exit code is 1. | reproduced | `ops-supervise.test.ts` |
+| MIA-WEB-011 | P1 (UX) | A failed Joe send wiped both the error and the typed text. The text now returns to the box and the error stays visible. | browser | `e2e/app.spec.ts` |
+| MIA-WEB-013 | P2 | After an in-app switch, the Terminal kept showing the previous symbol's chart and book under the new URL. `useApi` now resets on a path change, and pages remount per route. Either change alone fixes it. | browser | `e2e/app.spec.ts` |
+| MIA-WEB-014 | P2 | An empty book side threw, and there was no error boundary, so the whole app went blank including the emergency banner. The book is guarded and a page-level boundary keeps the header and banners up. | code | no dedicated test (no DOM unit-test setup) |
+| MIA-WEB-012 | P2 | A missing quote or book age was shown as a fresh "0s". It now shows "missing". | code | none |
+| MIA-WEB-016 | P3 | An older asset-search response could overwrite newer results (header search and palette). Stale responses are now ignored. | code | none |
+| MIA-WEB-002 | P3 | The debounced stream refresh timer was not cleared on unmount. | code | none |
+
+### 8.2 Left to Capy's open PRs (review notes, no duplicate code)
+**PR #13 (control, strategy promote, Trading.tsx):**
+- **MIA-WEB-010 (P1):** each strategy row sends the whole `disabledStrategies` list from its own stale fetch. Revoking B can re-send a list without A and silently re-enable A while a passphrase is typed. PR #13's passphrase clearing turns this into a confusing failure but does not fix it. Fix: explicit `{disable|enable: id}` operations on the server.
+- **MIA-SEC-005 / MIA-WEB-015** (promote without step-up): already addressed by PR #13.
+- **MIA-WEB-017:** do not render "Switch" for BOUNDED_LIVE.
+
+**PR #12 (bot.ts, readiness.ts):**
+- **MIA-BOT-001 (P2):** `hotLane` and `backgroundLane` use try/finally without catch, and `holdEngine` journals and notifies outside a try. A DB error becomes an unhandled rejection and Node exits. The supervisor restarts it, but the lanes should catch.
+- **MIA-BOT-002:** already addressed by PR #12's `stillLeader()`.
+- **MIA-OPS-006:** a wedged STANDBY still reports ready. Add a lease-check heartbeat.
+
+**PR #14 (backup.ts):**
+- **MIA-OPS-001b:** `MIA_BACKUP_INTERVAL_H=` (blank) silently disables backups (`Number('')` = 0).
+- **MIA-OPS-002:** a failed restore check blocks retries for 24 h. PR #14's last-good retention partly addresses this.
+- **MIA-OPS-005:** orphan and `.verify-*` files are never pruned.
+- **Plaintext `.db` backups are written 0644.** `chmod 0600` them.
+
+### 8.3 Open: owner decision or larger change
+- **SEC-14:** global login lockout. Unchanged; options are in §4.
+- **MIA-QCI-002 (P2):** dependency groups are de-duplicated only within a domain, so one input (e.g. `ticker.24h`) votes in up to four domains. Abstentions count toward quorum, and constant-rule workers always cover the required domains. This is evidence only and the gate stays authoritative. It is the same owner decision as R-12.
+- **MIA-DITAS-001 (P1, estimated, not measured):** every NO_SIGNAL/REJECTED event stores a full snapshot (candles + book). There is no dedupe or retention because the tables are append-only by design. The reviewer estimates ~250 MB/day. `verifyMemory` loads every snapshot into memory. Changing the snapshot policy changes the immutable-evidence design, so it needs an owner decision and a migration plan; measure growth first.
+- **MIA-PORT-005 (P3):** the start-of-day baseline is captured lazily. Losses between 00:00 UTC and the first full-mark evaluation after a restart can vanish from the daily breaker.
+- **MIA-OMS-004, MIA-RISK-007, MIA-SCAN-008 (P3):**
+  - a lot-sized residual after all targets
+  - existing-position open risk excludes the stop buffer
+  - a manual analyze suppresses the scheduled evaluation
+- **MIA-WHALE-001 (P3):** large-print paging misses trades on busy symbols. Evidence only.
+- **MIA-WEB-018 (P3):** clickable table rows and calendar days are not keyboard-operable.
+- **Ingestion crash loop:** a document that crashes ingestion is re-queued at every start. Less likely after MIA-KB-001.
+
+### 8.4 Coverage after Batch B (`docs/engineering/audit-files.json`, generated by `scripts/audit-inventory.mjs`)
+| Status | Files |
+|---|---|
+| Total tracked | 260 |
+| Read in full | 112 (all of server/src except the items below; 14 core web files; scripts; deploy unit; manifests) |
+| Partial | 7 (`db/*`, `knowledge/taxonomy.ts` data, `.github`, `.env.example`) |
+| Not reviewed | 38 (6 provider adapters, `safety/safety.ts`, 5 web pages: Academy, Account, Ditas, Overview, Phase1; `styles.css`; `.claude/agents` and `.claude/skills`; tool configs) |
+| Docs / test code (not audited as product code) | 58 / 44 |
+| Generated | 1 |
+
+### 8.5 Checks after Batch B (run by the lead)
+- `npm run typecheck` ✓
+- `npm test`: server **367 passed, 3 skipped**; web **18 passed**
+- `npm run build` ✓
+- `npm run test:e2e`: **55 passed** on two consecutive full runs. One earlier run had a single timeout in `navigation.spec.ts` (palette synonyms, 1 min, during a slow run); that test then passed alone and in both full runs.
+- `npm run scan:secrets` ✓
+- `npm audit --audit-level=high`: 0 vulnerabilities
+
+### 8.6 Draft PRs #6 and #8
+Every file in them is already on `main` with newer fixes on top. They are superseded, and closing them is the owner's decision.

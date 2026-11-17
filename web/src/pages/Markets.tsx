@@ -81,6 +81,8 @@ function CandleChart({ candles, features }: { candles: any[]; features: any }) {
   return <div ref={ref} className="chart" role="img" aria-label="Candlestick price chart" />;
 }
 function Book({ book }: { book: any }) {
+  // MIA-WEB-014: a one-sided or empty book used to throw (book.bids[0][0]) and blank the whole app.
+  if (!book?.bids?.length || !book?.asks?.length) return <div className="hint">Order book unavailable (one side is empty). Entries and exits wait for a two-sided book.</div>;
   const max = Math.max(...[...book.bids, ...book.asks].map((x: any) => x[0] * x[1]));
   const row = (x: any, side: 'b' | 'a') => <tr key={side + x[0]}><td className={`num ${side === 'b' ? 'up' : 'down'}`} style={{ background: `linear-gradient(to left, ${side === 'b' ? 'rgba(34,195,142,.12)' : 'rgba(240,80,90,.12)'} ${(x[0] * x[1] / max) * 100}%, transparent 0)` }}>{fmt.px(x[0])}</td><td className="num">{fmt.num(x[1], 4)}</td></tr>;
   return <div className="tablewrap" style={{ maxHeight: 420 }}><table><tbody>{[...book.asks.slice(0, 12)].reverse().map((x: any) => row(x, 'a'))}<tr><td colSpan={2} className="hint" style={{ textAlign: 'center' }}>spread {fmt.num(((book.asks[0][0] - book.bids[0][0]) / book.bids[0][0]) * 1e4, 2)} bps</td></tr>{book.bids.slice(0, 12).map((x: any) => row(x, 'b'))}</tbody></table></div>;

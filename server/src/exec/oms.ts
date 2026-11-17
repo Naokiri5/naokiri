@@ -223,6 +223,9 @@ export function monitorPositions(nowTs = Date.now()) {
         for (const f of fills) {
           const r = applyExit(p.id, f.qty, f.reason, pol.feeRate, nowTs, after, consumed); if (!r) throw new ExitUnavailable(); consumed += r.qty;
           if (f.reason === 'TARGET') { const idx = newlyDone[k++]; if (r.qty === 0 && idx != null) { meta.targets[idx].done = false; reopened = true; } }
+          // MIA-OMS-003: a fill that closes the position (e.g. a sub-lot remainder snapped into it) ends this pass. The next
+          // fill would find the position closed, return null and roll everything back — forever, on every pass.
+          if (r.closed) break;
         }
         if (reopened) run('UPDATE positions SET targets=? WHERE id=?', J(meta), p.id);
       });

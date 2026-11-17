@@ -28,6 +28,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const deny: string[] = []; const review: string[] = []; const ev: RiskDecision['evaluated'] = {};
   const pv = currentPolicy();
   if (!pv) return { decision: 'DENY', reasonCodes: ['POLICY_NOT_ACCEPTED: owner must review and accept a risk policy'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
+  if (pv.invalid) return { decision: 'DENY', reasonCodes: [`POLICY_INVALID: stored policy v${pv.version} failed validation (${pv.invalid}); the owner must review and re-accept it`], evaluated: {}, sizing: null, policyVersion: pv.version, ts: iso(nowTs), traceId: p.traceId };
   const pol: RiskPolicy = pv.policy; const account = p.account ?? PAPER_ACCOUNT;
   const ctl = getControl();
   ev.mode = ctl.mode;

@@ -38,10 +38,18 @@ export const DEFAULT_POLICY: RiskPolicy = {
   maxCorrelatedPositions: 2, correlationThreshold: 0.8, leverage: 1, minOpportunityScore: 60, approvedMarkets: ['crypto'], approvedVenues: ['binance-paper'],
 };
 
-export interface PolicyVersion { version: number; policy: RiskPolicy; created_at: number; accepted_by: string }
+export interface PolicyVersion { version: number; policy: RiskPolicy; created_at: number; accepted_by: string; /** set when the stored policy fails validation */ invalid?: string }
+/**
+ * MIA-RISK-006: the stored policy is re-validated on every read. A row missing a field (written by an older schema) or
+ * holding NaN-turned-null would make comparisons like `costR > pol.maxCostR` false, i.e. the check silently passes.
+ * An invalid stored policy is reported as `invalid` and the gate denies (POLICY_INVALID) until the owner re-accepts.
+ */
 export function currentPolicy(): PolicyVersion | null {
   const r = get<any>('SELECT * FROM risk_policy_versions ORDER BY version DESC LIMIT 1');
-  return r ? { version: r.version, policy: P(r.policy), created_at: r.created_at, accepted_by: r.accepted_by } : null;
+  if (!r) return null;
+  const parsed = RiskPolicy.safeParse(P(r.policy));
+  return { version: r.version, policy: parsed.success ? parsed.data : P(r.policy), created_at: r.created_at, accepted_by: r.accepted_by,
+    ...(parsed.success ? {} : { invalid: parsed.error.issues.slice(0, 3).map((i) => `${i.path.join('.') || 'policy'}: ${i.message}`).join('; ') }) };
 }
 /** Only the authenticated owner may accept/change limits (Part 17.1). Changes are versioned + audited. */
 export function acceptPolicy(actor: string, input: unknown): PolicyVersion {

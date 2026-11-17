@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { Component, useState, type ReactNode } from 'react';
 import { fmt } from './api';
 
 export function Card({ title, right, children, flush, className }: { title?: ReactNode; right?: ReactNode; children: ReactNode; flush?: boolean; className?: string }) {
@@ -71,4 +71,23 @@ export function Freshness({ at, label = 'as of' }: { at: number | string | null 
   if (!at) return <span className="hint">no data yet</span>;
   const age = Date.now() - (typeof at === 'string' ? Date.parse(at) : at);
   return <span className={`hint ${age > 120_000 ? 'warn' : ''}`} title={fmt.time(at)}>{label} {fmt.ago(at)}</span>;
+}
+
+/**
+ * Page-level error boundary (MIA-WEB-014). A render error in one page used to unmount the whole app, including the
+ * emergency-stop and stale-data banners. Now only the page area shows the error; navigation and banners stay up.
+ * Pass key={pathname} so moving to another page starts fresh.
+ */
+export class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) { console.error('page render error:', error.message); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return <div className="card" role="alert" style={{ margin: 16 }}><div className="bd col">
+      <b>This page could not be displayed.</b>
+      <span className="hint">{this.state.error.message}. The rest of MIA is still running; other pages, alerts and the risk controls are unaffected.</span>
+      <div className="row"><button className="sm" onClick={() => this.setState({ error: null })}>Try again</button></div>
+    </div></div>;
+  }
 }

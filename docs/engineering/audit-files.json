@@ -1,0 +1,1834 @@
+{
+ "generatedFrom": "70efa71705e776bdefc665c49e7392591153ad26",
+ "totalFiles": 260,
+ "counts": {
+  "NOT_REVIEWED": 38,
+  "READ_FULL": 112,
+  "PARTIAL": 7,
+  "DOC": 58,
+  "TEST_CODE": 44,
+  "GENERATED": 1
+ },
+ "files": [
+  {
+   "path": ".claude/agents/architecture-analyst.md",
+   "bytes": 1100,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/backend-engineer.md",
+   "bytes": 913,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/database-engineer.md",
+   "bytes": 782,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/documentation-engineer.md",
+   "bytes": 777,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/frontend-engineer.md",
+   "bytes": 917,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/fullstack-engineer.md",
+   "bytes": 2048,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/integration-reviewer.md",
+   "bytes": 892,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/performance-reviewer.md",
+   "bytes": 825,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/refactoring-specialist.md",
+   "bytes": 1172,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/security-reviewer.md",
+   "bytes": 804,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/test-engineer.md",
+   "bytes": 833,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/agents/trading-risk-reviewer.md",
+   "bytes": 1194,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/rules/backend.md",
+   "bytes": 913,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "READ_FULL"
+  },
+  {
+   "path": ".claude/rules/database-and-tests.md",
+   "bytes": 964,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "READ_FULL"
+  },
+  {
+   "path": ".claude/rules/frontend.md",
+   "bytes": 848,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "READ_FULL"
+  },
+  {
+   "path": ".claude/rules/trading-safety.md",
+   "bytes": 1323,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "READ_FULL"
+  },
+  {
+   "path": ".claude/settings.json",
+   "bytes": 444,
+   "language": "json",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/skills/duplication-audit/SKILL.md",
+   "bytes": 2006,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/skills/fullstack-delivery/SKILL.md",
+   "bytes": 2445,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/skills/release-review/SKILL.md",
+   "bytes": 1013,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".claude/skills/safe-refactor/SKILL.md",
+   "bytes": 1761,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".env.example",
+   "bytes": 1573,
+   "language": ".example",
+   "team": "A Repository & architecture",
+   "review": "PARTIAL"
+  },
+  {
+   "path": ".github/pull_request_template.md",
+   "bytes": 1496,
+   "language": "markdown",
+   "team": "B Build, dependencies & CI",
+   "review": "PARTIAL"
+  },
+  {
+   "path": ".github/workflows/ci.yml",
+   "bytes": 1705,
+   "language": "yaml",
+   "team": "B Build, dependencies & CI",
+   "review": "PARTIAL"
+  },
+  {
+   "path": ".github/workflows/claude.yml",
+   "bytes": 1054,
+   "language": "yaml",
+   "team": "B Build, dependencies & CI",
+   "review": "PARTIAL"
+  },
+  {
+   "path": ".gitignore",
+   "bytes": 122,
+   "language": "other",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": ".nvmrc",
+   "bytes": 3,
+   "language": "other",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "CLAUDE.md",
+   "bytes": 9344,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "README.md",
+   "bytes": 7937,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "deploy/mia.service",
+   "bytes": 1498,
+   "language": "systemd",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "docs/API_INTEGRATIONS.md",
+   "bytes": 2766,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ARCHITECTURE.md",
+   "bytes": 9129,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/CHANGELOG.md",
+   "bytes": 10075,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/CLAUDE_CODE_WORKFLOW.md",
+   "bytes": 3881,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/DEPLOYMENT_GUIDE.md",
+   "bytes": 6693,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/IMPLEMENTATION_ROADMAP.md",
+   "bytes": 4831,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/KNOWN_LIMITATIONS.md",
+   "bytes": 2966,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/PROJECT_STATUS.md",
+   "bytes": 4559,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/QHEF_LATENCY_BASELINE.md",
+   "bytes": 1607,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/REFACTORING_BACKLOG.md",
+   "bytes": 6020,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/REQUIREMENTS_TRACEABILITY.md",
+   "bytes": 12765,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/SECURITY.md",
+   "bytes": 7553,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/SETUP_GUIDE_BEGINNER.md",
+   "bytes": 2455,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/TEST_REPORT.md",
+   "bytes": 6174,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/academy/ACADEMY_ARCHITECTURE.md",
+   "bytes": 8047,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/academy/IMPLEMENTATION_STATUS.md",
+   "bytes": 3142,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/ADAPTIVE_LEARNING_SPEC.md",
+   "bytes": 563,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/AI_SPECIALIST_COORDINATION_SPEC.md",
+   "bytes": 657,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/CHART_ANALYSIS_ENGINE_SPEC.md",
+   "bytes": 1733,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/CHART_INTELLIGENCE_TEST_REPORT.md",
+   "bytes": 2032,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/FUNDAMENTAL_INTELLIGENCE_SPEC.md",
+   "bytes": 557,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/GLOBAL_CHART_INTELLIGENCE_AUDIT.md",
+   "bytes": 4360,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/GLOBAL_MARKET_DATA_SPEC.md",
+   "bytes": 564,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/IMPLEMENTATION_STATUS.md",
+   "bytes": 4538,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/MULTI_TIMEFRAME_ANALYSIS_SPEC.md",
+   "bytes": 561,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/PERFORMANCE_BENCHMARK_REPORT.md",
+   "bytes": 1036,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/QUANT_STRATEGY_LAB_SPEC.md",
+   "bytes": 635,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/chart-intelligence/TRADE_FAILURE_CHALLENGER_SPEC.md",
+   "bytes": 542,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/AI_RELIABILITY_SPEC.md",
+   "bytes": 826,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/CONFIDENCE_CALIBRATION_SPEC.md",
+   "bytes": 1753,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/DECISION_LEDGER_SPEC.md",
+   "bytes": 1820,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/DECISION_TWIN_SPEC.md",
+   "bytes": 1688,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/DITAS_ACCEPTANCE_CRITERIA.md",
+   "bytes": 1492,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/DITAS_ARCHITECTURE_AUDIT.md",
+   "bytes": 4618,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/DITAS_CERTIFICATION_REPORT.md",
+   "bytes": 2777,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/DITAS_DATA_FLOW_MAP.md",
+   "bytes": 1220,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/DITAS_IMPLEMENTATION_ROADMAP.md",
+   "bytes": 1584,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/DITAS_SERVICE_DEPENDENCY_MAP.md",
+   "bytes": 827,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/DITAS_TEST_REPORT.md",
+   "bytes": 3099,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/EXECUTION_INTELLIGENCE_SPEC.md",
+   "bytes": 668,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/EXECUTION_QUALITY_INCREMENT.md",
+   "bytes": 906,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/IMPLEMENTATION_STATUS.md",
+   "bytes": 3876,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/MARKET_DATA_TRUTH_SPEC.md",
+   "bytes": 1620,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/MARKET_DNA_SPEC.md",
+   "bytes": 968,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/PORTFOLIO_INTELLIGENCE_SPEC.md",
+   "bytes": 748,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/SAFETY_GOVERNOR_SPEC.md",
+   "bytes": 870,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/ditas/STRATEGY_PASSPORT_SPEC.md",
+   "bytes": 1122,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/engineering/AUTOPILOT_100_INVENTORY.md",
+   "bytes": 12876,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/engineering/DASHBOARD_RUNTIME_VERIFICATION.md",
+   "bytes": 6973,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/engineering/DEBUG_AUDIT_2026-11-17.md",
+   "bytes": 12815,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/engineering/IMPLEMENTATION_INVENTORY.md",
+   "bytes": 8087,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/engineering/NAVIGATION_PR_A.md",
+   "bytes": 5201,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/engineering/PHASE1_SOAK.md",
+   "bytes": 3703,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/engineering/REQUIREMENTS_TRACEABILITY.csv",
+   "bytes": 12807,
+   "language": "csv",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/engineering/audit-review-status.json",
+   "bytes": 2815,
+   "language": "json",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/engineering/inventory.json",
+   "bytes": 50590,
+   "language": "json",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "e2e/app.spec.ts",
+   "bytes": 13698,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "e2e/auth.spec.ts",
+   "bytes": 2146,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "e2e/ditas.spec.ts",
+   "bytes": 6100,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "e2e/navigation.spec.ts",
+   "bytes": 6424,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "e2e/playwright.config.ts",
+   "bytes": 634,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "e2e/start-server.mjs",
+   "bytes": 997,
+   "language": "javascript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "package-lock.json",
+   "bytes": 136273,
+   "language": "json",
+   "team": "B Build, dependencies & CI",
+   "review": "GENERATED"
+  },
+  {
+   "path": "package.json",
+   "bytes": 975,
+   "language": "json",
+   "team": "B Build, dependencies & CI",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "scripts/audit-inventory.mjs",
+   "bytes": 3523,
+   "language": "javascript",
+   "team": "B Build, dependencies & CI",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "scripts/benchmark-chart.mjs",
+   "bytes": 931,
+   "language": "javascript",
+   "team": "B Build, dependencies & CI",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "scripts/inventory.mjs",
+   "bytes": 2769,
+   "language": "javascript",
+   "team": "B Build, dependencies & CI",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "scripts/secret-scan.mjs",
+   "bytes": 1347,
+   "language": "javascript",
+   "team": "B Build, dependencies & CI",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/package.json",
+   "bytes": 1183,
+   "language": "json",
+   "team": "A Repository & architecture",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/scripts/ensure-build.mjs",
+   "bytes": 948,
+   "language": "javascript",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/scripts/run.mjs",
+   "bytes": 2484,
+   "language": "javascript",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/scripts/supervise.mjs",
+   "bytes": 3902,
+   "language": "javascript",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/api/auth.ts",
+   "bytes": 5153,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/api/routes.ts",
+   "bytes": 35678,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/bot/bot.ts",
+   "bytes": 8603,
+   "language": "typescript",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/chart/analysis.ts",
+   "bytes": 7234,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/chart/replay.ts",
+   "bytes": 1023,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/config.ts",
+   "bytes": 4679,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/core/audit.ts",
+   "bytes": 1302,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/core/bus.ts",
+   "bytes": 524,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/core/latency.ts",
+   "bytes": 1144,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/core/mode.ts",
+   "bytes": 2039,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/core/ratelimit.ts",
+   "bytes": 2755,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/core/settings.ts",
+   "bytes": 485,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/core/signing.ts",
+   "bytes": 929,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/core/util.ts",
+   "bytes": 2033,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/dashboard/overview.ts",
+   "bytes": 7116,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/db/db.ts",
+   "bytes": 2055,
+   "language": "typescript",
+   "team": "E Database & accounting",
+   "review": "PARTIAL"
+  },
+  {
+   "path": "server/src/db/migrations.ts",
+   "bytes": 12294,
+   "language": "typescript",
+   "team": "E Database & accounting",
+   "review": "PARTIAL"
+  },
+  {
+   "path": "server/src/decision/engine.ts",
+   "bytes": 10371,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/decision/scoring.ts",
+   "bytes": 2974,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ditas/calibration.ts",
+   "bytes": 4629,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ditas/execution.ts",
+   "bytes": 2250,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ditas/fingerprint.ts",
+   "bytes": 4105,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ditas/memory.ts",
+   "bytes": 8725,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ditas/passports.ts",
+   "bytes": 5834,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ditas/routes.ts",
+   "bytes": 3695,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ditas/service.ts",
+   "bytes": 12210,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ditas/twin.ts",
+   "bytes": 10640,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/exec/incidents.ts",
+   "bytes": 5607,
+   "language": "typescript",
+   "team": "G Order lifecycle & risk",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/exec/oms.ts",
+   "bytes": 29299,
+   "language": "typescript",
+   "team": "G Order lifecycle & risk",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/features/indicators.ts",
+   "bytes": 8996,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/index.ts",
+   "bytes": 3734,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/joe/joe.ts",
+   "bytes": 19805,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/journal/history.ts",
+   "bytes": 2276,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/journal/journal.ts",
+   "bytes": 752,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/chunk.ts",
+   "bytes": 7489,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/concepts.ts",
+   "bytes": 15650,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/extract.ts",
+   "bytes": 20188,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/integration.ts",
+   "bytes": 2551,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/memory.ts",
+   "bytes": 2831,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/providers.ts",
+   "bytes": 7081,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/research.ts",
+   "bytes": 22183,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/routes.ts",
+   "bytes": 7504,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/search.ts",
+   "bytes": 8832,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/store.ts",
+   "bytes": 17429,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/knowledge/taxonomy.ts",
+   "bytes": 26399,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "PARTIAL"
+  },
+  {
+   "path": "server/src/lab/backtest.ts",
+   "bytes": 6728,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/lab/exits.ts",
+   "bytes": 2263,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/lab/lab.ts",
+   "bytes": 6921,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/lab/strategies.ts",
+   "bytes": 4281,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/main.ts",
+   "bytes": 4050,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/market/bubbles.ts",
+   "bytes": 3491,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/market/discover.ts",
+   "bytes": 2031,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/market/fabric.ts",
+   "bytes": 12841,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/market/quality.ts",
+   "bytes": 10776,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/market/scanner.ts",
+   "bytes": 12170,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/market/store.ts",
+   "bytes": 2900,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/market/types.ts",
+   "bytes": 623,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/news/news.ts",
+   "bytes": 5322,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/notify/notify.ts",
+   "bytes": 2578,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ops/backup-cli.ts",
+   "bytes": 1725,
+   "language": "typescript",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ops/backup.ts",
+   "bytes": 9099,
+   "language": "typescript",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ops/lease.ts",
+   "bytes": 1814,
+   "language": "typescript",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/ops/readiness.ts",
+   "bytes": 4809,
+   "language": "typescript",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/portfolio/calendar.ts",
+   "bytes": 3251,
+   "language": "typescript",
+   "team": "E Database & accounting",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/portfolio/correlation.ts",
+   "bytes": 1017,
+   "language": "typescript",
+   "team": "E Database & accounting",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/portfolio/ledger.ts",
+   "bytes": 5432,
+   "language": "typescript",
+   "team": "E Database & accounting",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/providers/binance.ts",
+   "bytes": 3733,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "server/src/providers/coinbase.ts",
+   "bytes": 780,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "server/src/providers/coingecko.ts",
+   "bytes": 1076,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/providers/dexscreener.ts",
+   "bytes": 3166,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "server/src/providers/frankfurter.ts",
+   "bytes": 1631,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "server/src/providers/googlenews.ts",
+   "bytes": 1412,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/providers/http.ts",
+   "bytes": 4522,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/providers/kraken.ts",
+   "bytes": 1474,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "server/src/providers/pending.ts",
+   "bytes": 2633,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "server/src/qa/gates.ts",
+   "bytes": 4392,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/qci/challenge.ts",
+   "bytes": 3578,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/qci/coordinator.ts",
+   "bytes": 7825,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/qci/schemas.ts",
+   "bytes": 3165,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/qhef/qhef.ts",
+   "bytes": 4142,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/regime/regime.ts",
+   "bytes": 1754,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/risk/gate.ts",
+   "bytes": 10748,
+   "language": "typescript",
+   "team": "G Order lifecycle & risk",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/risk/policy.ts",
+   "bytes": 4323,
+   "language": "typescript",
+   "team": "G Order lifecycle & risk",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/safety/safety.ts",
+   "bytes": 5831,
+   "language": "typescript",
+   "team": "I AI, knowledge & provider safety",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "server/src/security/security.ts",
+   "bytes": 5818,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/wallet/keccak.ts",
+   "bytes": 2065,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/wallet/wallet.ts",
+   "bytes": 8824,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/whales/prints.ts",
+   "bytes": 2243,
+   "language": "typescript",
+   "team": "D Backend API & security",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/workers/effectiveness.ts",
+   "bytes": 2126,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/workers/indicators.ts",
+   "bytes": 3878,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/workers/registry.ts",
+   "bytes": 24803,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/workers/runtime.ts",
+   "bytes": 4584,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/src/workers/types.ts",
+   "bytes": 2738,
+   "language": "typescript",
+   "team": "F Markets & intelligence",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/test/api.test.ts",
+   "bytes": 12290,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/auth-setup.test.ts",
+   "bytes": 4819,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/chart.test.ts",
+   "bytes": 3883,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/dashboard.test.ts",
+   "bytes": 4975,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/db-permissions.test.ts",
+   "bytes": 1224,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ditas-api.test.ts",
+   "bytes": 14682,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ditas-calibration.test.ts",
+   "bytes": 4663,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ditas-execution.test.ts",
+   "bytes": 1367,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ditas-frames.test.ts",
+   "bytes": 4891,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ditas-market.test.ts",
+   "bytes": 6729,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ditas-memory.test.ts",
+   "bytes": 12342,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ditas-twin.test.ts",
+   "bytes": 6899,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/features.test.ts",
+   "bytes": 2097,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/hardening.test.ts",
+   "bytes": 7965,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/helpers.ts",
+   "bytes": 3770,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/incidents.test.ts",
+   "bytes": 8049,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/joe-gate.test.ts",
+   "bytes": 1747,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/kb-fixtures.ts",
+   "bytes": 5498,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/knowledge.test.ts",
+   "bytes": 29746,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/lab.test.ts",
+   "bytes": 1914,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/live.providers.test.ts",
+   "bytes": 4199,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/oms.test.ts",
+   "bytes": 13568,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ops-backup.test.ts",
+   "bytes": 4533,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ops-lease.test.ts",
+   "bytes": 3156,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ops-readiness.test.ts",
+   "bytes": 4610,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/ops-supervise.test.ts",
+   "bytes": 3996,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/phase1.test.ts",
+   "bytes": 5087,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/qci.test.ts",
+   "bytes": 4663,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/quality.test.ts",
+   "bytes": 12242,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/repair.test.ts",
+   "bytes": 10099,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/research-limits.test.ts",
+   "bytes": 2274,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/risk.test.ts",
+   "bytes": 9031,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/shutdown-sse.test.ts",
+   "bytes": 1453,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/static.test.ts",
+   "bytes": 2405,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/untrusted-provider-text.test.ts",
+   "bytes": 1859,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/wallet.test.ts",
+   "bytes": 1898,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/workers-effectiveness.test.ts",
+   "bytes": 4517,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/tsconfig.build.json",
+   "bytes": 253,
+   "language": "json",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "server/tsconfig.json",
+   "bytes": 334,
+   "language": "json",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "server/vitest.config.ts",
+   "bytes": 152,
+   "language": "typescript",
+   "team": "A Repository & architecture",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "web/index.html",
+   "bytes": 504,
+   "language": "html",
+   "team": "C Frontend & accessibility",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "web/package.json",
+   "bytes": 721,
+   "language": "json",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/App.tsx",
+   "bytes": 11768,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/Navigation.tsx",
+   "bytes": 4593,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/StatusRibbon.tsx",
+   "bytes": 2427,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/api.ts",
+   "bytes": 5894,
+   "language": "typescript",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/main.tsx",
+   "bytes": 238,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/nav.ts",
+   "bytes": 6974,
+   "language": "typescript",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/pages/Academy.tsx",
+   "bytes": 21647,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "web/src/pages/Account.tsx",
+   "bytes": 15504,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "web/src/pages/Ditas.tsx",
+   "bytes": 13804,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "web/src/pages/Intel.tsx",
+   "bytes": 19939,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/pages/Joe.tsx",
+   "bytes": 3623,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/pages/Markets.tsx",
+   "bytes": 21241,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/pages/Overview.tsx",
+   "bytes": 10671,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "web/src/pages/Phase1.tsx",
+   "bytes": 16957,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "web/src/pages/Trading.tsx",
+   "bytes": 31808,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/pages/index.ts",
+   "bytes": 508,
+   "language": "typescript",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/palette.tsx",
+   "bytes": 4224,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/status.test.ts",
+   "bytes": 11278,
+   "language": "typescript",
+   "team": "C Frontend & accessibility",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "web/src/status.ts",
+   "bytes": 12621,
+   "language": "typescript",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/src/styles.css",
+   "bytes": 17165,
+   "language": "css",
+   "team": "C Frontend & accessibility",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "web/src/ui.tsx",
+   "bytes": 9175,
+   "language": "tsx",
+   "team": "C Frontend & accessibility",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "web/tsconfig.json",
+   "bytes": 259,
+   "language": "json",
+   "team": "C Frontend & accessibility",
+   "review": "NOT_REVIEWED"
+  },
+  {
+   "path": "web/vite.config.ts",
+   "bytes": 521,
+   "language": "typescript",
+   "team": "C Frontend & accessibility",
+   "review": "NOT_REVIEWED"
+  }
+ ]
+}

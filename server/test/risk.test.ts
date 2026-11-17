@@ -106,3 +106,18 @@ describe('stale position marks fail closed (MIA-RISK-001)', () => {
     expect(accountState().marksMissing).toEqual([x.id]); // …but the ledger does not trust it
   });
 });
+
+describe('stored risk policy is re-validated (MIA-RISK-006)', () => {
+  beforeEach(() => { freshDb(); market.reset(); });
+  it('denies with POLICY_INVALID when the stored policy lacks a field, instead of passing the missing check', async () => {
+    const { run } = await import('../src/db/db.js');
+    const { inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
+    updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const { maxCostR: _drop, ...partial } = DEFAULT_POLICY;
+    run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (1, ?, ?, ?)', JSON.stringify(partial), Date.now(), 'owner');
+    const r = evaluateRisk(prop(id, last));
+    expect(r.decision).toBe('DENY'); expect(r.reasonCodes[0]).toMatch(/^POLICY_INVALID: stored policy v1 .*maxCostR/);
+    acceptPolicy('owner', DEFAULT_POLICY); // the owner re-accepts a valid policy
+    expect(evaluateRisk(prop(id, last)).reasonCodes.join()).not.toMatch(/POLICY_INVALID/);
+  });
+});

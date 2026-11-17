@@ -12,7 +12,7 @@ if (maj < 22 || (maj === 22 && min < 13)) {
 }
 
 const { buildApp } = await import('./index.js');
-const { startBot, drainBot } = await import('./bot/bot.js');
+const { startBot, drainBot, releaseEngineLease } = await import('./bot/bot.js');
 const { closeDb } = await import('./db/db.js');
 
 const app = await buildApp();
@@ -46,10 +46,14 @@ const shutdown = async (sig: string) => {
   if (stopping) { console.error(`\n✖ ${sig} again: exiting without waiting.`); process.exit(1); }
   stopping = true; console.log(`\n  ${sig} received: draining engine lanes…`);
   const hard = setTimeout(() => { console.error('✖ Drain exceeded 30 s; exiting.'); process.exit(1); }, 30_000); hard.unref();
-  const drained = await drainBot(20_000);
+  // Order matters (MIA-OPS-003): lanes drain first, then HTTP stops (no more owner writes), and only then is the lease
+  // released, so a successor never runs while this process can still write. A lane that did not drain keeps the lease
+  // (it expires) and the exit code is 1 so a supervisor or systemd sees an unclean stop.
+  const drained = await drainBot(20_000, false);
   try { await app.close(); } catch { /* already closing */ }
+  if (drained) releaseEngineLease();
   try { closeDb(); } catch { /* already closed */ }
   console.log(drained ? '  Stopped cleanly.' : '  Stopped; a lane was still busy, the engine lease will expire on its own.');
-  process.exit(0);
+  process.exit(drained ? 0 : 1);
 };
 process.on('SIGINT', () => void shutdown('SIGINT')); process.on('SIGTERM', () => void shutdown('SIGTERM'));

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased: Debug audit Batch B (2026-11-17)
+- **Stale prices fail closed.** A stale or future-dated price for an open position now counts as missing, so the risk gate denies new entries (MIA-RISK-001).
+- **Exits and risk policy.** A paper exit can no longer roll back forever when a small position closes early in a pass (MIA-OMS-003). A stored risk policy that fails validation is denied (MIA-RISK-006).
+- **Resource and injection limits.** EPUB spine amplification is bounded. Provider symbols and links are treated as untrusted. Trader Joe can pause only when the owner asks, and its tool calls are capped. Academy research runs are rate limited.
+- **Operations.** The database file is owner-only. Graceful stop no longer hangs while a browser tab is open (32 s → 1.1 s), and the shutdown order is fixed. The supervisor treats a spawn failure as a crash.
+- **Web.** The Joe chat keeps the message and shows the error when a send fails. The terminal no longer shows the previous symbol. A page error boundary keeps banners visible. An empty book no longer crashes the page. Missing data ages show as "missing". Stale search responses are ignored.
+- **Audit records.** The machine-readable file inventory is `docs/engineering/audit-files.json`. The full register is §8 of `DEBUG_AUDIT_2026-11-17.md`.
+
 ## Unreleased: Debug audit Batch A (2026-11-17)
 - **SEC-13 fixed.** First-owner setup from a non-local browser (forwarded port, container, LAN) now needs a one-time code printed in the server console. A loopback socket that carries proxy headers counts as remote. Tests: `server/test/auth-setup.test.ts`, `e2e/auth.spec.ts`.
 - **MIA-WEB-001 fixed.** Sign-out only leaves the app after the server confirms; a failed sign-out says the session is still active.

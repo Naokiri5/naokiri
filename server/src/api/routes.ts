@@ -146,6 +146,10 @@ export async function routes(app: FastifyInstance) {
 
   // ── live stream (SSE) ──
   let streams = 0;
+  // MIA-OPS-007: an open live stream kept app.close() waiting, so every graceful stop with a browser tab open hung until
+  // the 30 s hard limit, exited 1 and skipped closing the database. Streams are ended before the server closes.
+  const openStreams = new Set<() => void>();
+  app.addHook('preClose', async () => { for (const end of [...openStreams]) end(); });
   app.get('/api/stream', (req, reply) => {
     if (streams >= 20) return bad(reply, 503, 'too many open live streams');
     const token = tokenOf(req);
@@ -154,7 +158,8 @@ export async function routes(app: FastifyInstance) {
     streams++;
     reply.raw.write(': connected\n\n');
     let closed = false; let backlog = 0;
-    const close = () => { if (closed) return; closed = true; streams--; bus.off('*', send); clearInterval(ka); reply.raw.end(); };
+    const close = () => { if (closed) return; closed = true; streams--; openStreams.delete(close); bus.off('*', send); clearInterval(ka); reply.raw.end(); };
+    openStreams.add(close);
     const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
     const send = (e: { topic: string; payload: unknown }) => write(`event: ${e.topic}\ndata: ${JSON.stringify(e.payload)}\n\n`);
     // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.

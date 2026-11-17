@@ -163,6 +163,28 @@ test('mobile layout has no horizontal overflow', async ({ browser }) => {
   await ctx.close();
 });
 
+test('Trader Joe: a failed send shows the error and gives the message back (MIA-WEB-011)', async () => {
+  await page.goto('/joe');
+  await page.route('**/api/joe', (r) => r.request().method() === 'POST' ? r.fulfill({ status: 429, json: { error: 'rate limit: Trader Joe is limited to 10/min — try again shortly' } }) : r.fallback());
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await box.fill('what is the risk on ETH today?');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByText(/Not sent: rate limit/)).toBeVisible();
+  await expect(box).toHaveValue('what is the risk on ETH today?');
+  await page.unroute('**/api/joe');
+});
+
+test('terminal never shows the previous symbol after an in-app switch to one that fails (MIA-WEB-013)', async () => {
+  await page.route('**/api/instrument/BTCUSDT*', (r) => r.fulfill({ json: { instrument: { base: 'BTC', symbol: 'BTCUSDT' }, cross: {}, ticker: { last: 50_000, receivedAt: Date.now() }, candles: [], features: null } }));
+  await page.route('**/api/instrument/FOOUSDT*', (r) => r.fulfill({ status: 404, json: { error: 'unknown symbol FOOUSDT' } }));
+  await page.goto('/terminal/BTCUSDT');
+  await expect(page.getByRole('heading', { name: /Market Terminal · BTC$/ })).toBeVisible();
+  await page.evaluate(() => { history.pushState({}, '', '/terminal/FOOUSDT'); dispatchEvent(new PopStateEvent('popstate')); });
+  await expect(page.getByText('No data for FOOUSDT')).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Market Terminal · BTC$/ })).toHaveCount(0);
+  await page.unroute('**/api/instrument/BTCUSDT*'); await page.unroute('**/api/instrument/FOOUSDT*');
+});
+
 test('sign-out that fails on the network keeps the session and says so (MIA-WEB-001)', async () => {
   await page.goto('/');
   await page.route('**/api/auth/logout', (r) => r.abort('failed'));

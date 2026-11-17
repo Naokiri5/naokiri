@@ -59,7 +59,7 @@ export function DecisionView({ report: r, consensus }: { report: any; consensus?
         <span>Take-profit</span><span className="mono">{r.takeProfit.map((t: any) => `${fmt.px(t.price)} (${t.r}R, ${t.fraction * 100}%)`).join(' · ')}</span>
         <span>Position size</span><span className="mono">{r.positionSize ? `${r.positionSize.qty} ≈ ${fmt.usd(r.positionSize.notional)} · max loss ${fmt.usd(r.positionSize.plannedMaxLoss)}` : 'not sized (not eligible for execution)'}</span>
         <span>Expected costs</span><span className="mono">fees {fmt.usd(r.expectedCosts.feesUsd)} · spread {fmt.num(r.expectedCosts.spreadBps, 1)}bps · slippage {fmt.num(r.expectedCosts.slippageBps, 1)}bps · {r.expectedCosts.costR ?? '—'}R · funding {r.expectedCosts.funding}</span>
-        <span>Data freshness</span><span><Badge v={r.dataFreshness.status} /> quote {fmt.num((r.dataFreshness.quoteAgeMs ?? 0) / 1000, 0)}s · book {fmt.num((r.dataFreshness.bookAgeMs ?? 0) / 1000, 0)}s</span>
+        <span>Data freshness</span><span><Badge v={r.dataFreshness.status} /> quote {r.dataFreshness.quoteAgeMs == null ? 'missing' : `${fmt.num(r.dataFreshness.quoteAgeMs / 1000, 0)}s`} · book {r.dataFreshness.bookAgeMs == null ? 'missing' : `${fmt.num(r.dataFreshness.bookAgeMs / 1000, 0)}s`}</span>
         <span>Opportunity score</span><span className="mono">{r.opportunity.score} <span className="faint">({r.opportunity.version})</span></span>
       </div></Card>
       <div className="col" style={{ gap: 14 }}>

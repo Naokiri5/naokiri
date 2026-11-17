@@ -143,6 +143,17 @@ describe('Order-book freshness and fill accounting', () => {
     expect(reconcile().ok).toBe(true);
     expect(all("SELECT id FROM orders WHERE purpose='PROTECTIVE_STOP' AND status='ACTIVE'")).toHaveLength(0);
   });
+  it('a target that closes a small position does not roll back with a TIME exit in the same pass (MIA-OMS-003)', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    // A venue minimum larger than half the position: the first target's remainder is unsellable, so it closes everything.
+    market.instruments.get(id)!.minQty = pos.qty * 0.6;
+    run('UPDATE positions SET max_hold_ms=1000, opened_at=? WHERE id=?', Date.now() - 10_000, pos.id); // max hold also expired
+    setBook(id, last * 1.05); monitorPositions();
+    expect(openPositions()).toHaveLength(0); // before the fix: every pass rolled back and the position never exited
+    expect(all("SELECT id FROM protection_incidents WHERE status='OPEN'")).toHaveLength(0);
+    expect(reconcile().ok).toBe(true);
+  });
   it('never fills an exit from a thin book at top-of-book or an invented price: waits for real depth', () => {
     // CLAUDE.md invariant #4 (PR #4): sufficient fresh depth or no fill. Originally (PR #3) this booked a partial
     // fill plus a synthetic remainder below the worst visible bid.

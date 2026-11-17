@@ -44,7 +44,12 @@ export function useApi<T = any>(path: string | null, opts: { topics?: string[]; 
     catch (e: any) { if (n === seq.current) setError(e.message); }
     finally { if (n === seq.current) setLoading(false); }
   }, [path]);
+  // MIA-WEB-013: a new path starts empty. Keeping the previous path's data meant /terminal/FOOUSDT kept showing BTC's
+  // chart and order book (and its "Run analysis" button) when the new request failed.
+  useEffect(() => { setData(null); setError(null); setRequestedAt(null); }, [path]);
   useEffect(() => { load(); if (!opts.every) return; const t = window.setInterval(load, opts.every); return () => clearInterval(t); }, [load, opts.every]);
+  // MIA-WEB-002: a debounced stream refresh must not fire after the component is gone.
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
   useStream((t) => { if (opts.topics?.includes(t)) { if (timer.current) clearTimeout(timer.current); timer.current = window.setTimeout(load, 600); } });
   return { data, error, loading, requestedAt, reload: load, setData };
 }

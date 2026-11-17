@@ -113,19 +113,21 @@ export function startBot() {
   ];
 }
 export function stopBot() { timers.forEach(clearInterval); timers = []; botStatus.running = false; botStatus.role = 'STOPPED'; }
+/** Hand the engine lease to a successor now (graceful stop), instead of letting it expire. */
+export function releaseEngineLease() { try { releaseLease(ENGINE_LEASE, botStatus.instanceId); } catch { /* DB already closed: lease expires */ } }
 /** Lanes currently executing (graceful drain waits for these before the lease is released and the DB closed). */
 export const lanesBusy = () => ticking || scanning || backgrounding;
 /**
  * Graceful stop: no new lane starts, in-flight lanes finish (bounded wait), then the lease is released so a successor
  * starts at once instead of waiting for expiry. Returns whether every lane drained in time.
  */
-export async function drainBot(timeoutMs = 20_000): Promise<boolean> {
+export async function drainBot(timeoutMs = 20_000, release = true): Promise<boolean> {
   stopBot();
   const until = Date.now() + timeoutMs;
   while (lanesBusy() && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
   const drained = !lanesBusy();
   // Release only after the lanes stopped; if one is still stuck, keep the lease so it expires rather than overlapping.
-  if (drained) { try { releaseLease(ENGINE_LEASE, botStatus.instanceId); } catch { /* DB already closed: lease expires */ } }
+  if (drained && release) releaseEngineLease();
   return drained;
 }
 export function botStatusView() {

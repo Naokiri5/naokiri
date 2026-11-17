@@ -14,8 +14,9 @@ export function CommandPalette({ pages, onClose, extra }: { pages: NavPage[]; on
   useEffect(() => { input.current?.focus(); }, []);
   useEffect(() => {
     if (q.trim().length < 2) { setAssets([]); return; }
-    const t = setTimeout(() => api<any[]>(`/api/markets/search?q=${encodeURIComponent(q.trim())}`).then((r) => setAssets(r.slice(0, 6).map((a) => ({ id: `asset:${a.id}`, label: `${a.base}`, hint: `${a.symbol} · open terminal`, group: 'Assets', run: () => nav(`/terminal/${a.symbol}`) })))).catch(() => setAssets([])), 150);
-    return () => clearTimeout(t);
+    let live = true; // MIA-WEB-016: ignore a response for an older query
+    const t = setTimeout(() => api<any[]>(`/api/markets/search?q=${encodeURIComponent(q.trim())}`).then((r) => live && setAssets(r.slice(0, 6).map((a) => ({ id: `asset:${a.id}`, label: `${a.base}`, hint: `${a.symbol} · open terminal`, group: 'Assets', run: () => nav(`/terminal/${a.symbol}`) })))).catch(() => setAssets([])), 150);
+    return () => { live = false; clearTimeout(t); };
   }, [q, nav]);
   const items = useMemo(() => {
     const ql = q.toLowerCase().trim();

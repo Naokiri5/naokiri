@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, connectStream, disconnectStream, useApi, fmt } from './api';
-import { ErrorLine } from './ui';
+import { ErrorLine, PageErrorBoundary } from './ui';
 import { JoeDrawer } from './pages/Joe';
 import * as P from './pages';
 import { CommandPalette } from './palette';
@@ -75,7 +75,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       {s && !s.policyAccepted && loc.pathname !== '/risk' && <div className="banner info">Risk policy not yet accepted — paper execution stays disabled until you review it in the <a href="/risk" onClick={(e) => { e.preventDefault(); nav('/risk'); }}>Risk Center</a>.</div>}
       <ErrorLine e={shell.error} />
       <GroupTabs />
-      <Routes>
+      <PageErrorBoundary key={loc.pathname}><Routes>
         <Route path="/" element={<P.Overview />} />
         <Route path="/ditas" element={<P.Ditas />} />
         <Route path="/academy" element={<P.Academy />} />
@@ -90,7 +90,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <Route path="/discover" element={<P.Discover />} /><Route path="/qhef" element={<P.Qhef />} /><Route path="/security" element={<P.SecurityCenter />} />
         <Route path="/copy" element={<P.CopyTrading />} /><Route path="/history" element={<P.History />} /><Route path="/decision/:id" element={<P.DecisionPage />} />
         <Route path="*" element={<div className="empty">Not found</div>} />
-      </Routes>
+      </Routes></PageErrorBoundary>
     </main>
     <MobileNav moreOpen={mobOpen} onMore={() => setMobOpen(!mobOpen)} />
     {palette && <CommandPalette pages={ALL_PAGES} onClose={() => setPalette(false)} extra={[
@@ -106,7 +106,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
 
 function Search() {
   const [q, setQ] = useState(''); const [res, setRes] = useState<any[]>([]); const nav = useNavigate();
-  useEffect(() => { if (q.length < 2) return setRes([]); const t = setTimeout(() => api(`/api/markets/search?q=${encodeURIComponent(q)}`).then(setRes).catch(() => {}), 200); return () => clearTimeout(t); }, [q]);
+  // MIA-WEB-016: a response for an older query must not overwrite (or refill) the results of the current one.
+  useEffect(() => { if (q.length < 2) return setRes([]); let live = true; const t = setTimeout(() => api(`/api/markets/search?q=${encodeURIComponent(q)}`).then((r) => { if (live) setRes(r); }).catch(() => {}), 200); return () => { live = false; clearTimeout(t); }; }, [q]);
   const go = (sym: string) => { setQ(''); setRes([]); nav(`/terminal/${sym}`); };
   return <div className="search"><input id="gsearch" placeholder="Search asset… (Ctrl/⌘K for commands)" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && res[0]) go(res[0].symbol); if (e.key === 'Escape') setQ(''); }} aria-label="Search assets" />
     {res.length > 0 && <div className="results">{res.map((r) => <div key={r.id} onClick={() => go(r.symbol)}><b>{r.base}</b> <span className="muted">{r.symbol} · Binance spot</span></div>)}</div>}</div>;

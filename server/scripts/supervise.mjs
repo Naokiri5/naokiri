@@ -34,9 +34,14 @@ let child = null; let stopping = false; let streak = 0; let timer = null; const 
 function start() {
   timer = null; const startedAt = Date.now();
   child = spawn(cmd[0], cmd.slice(1), { cwd: serverDir, stdio: 'inherit', env: process.env });
-  log(`started pid ${child.pid}`);
-  child.on('error', (e) => log(`spawn failed: ${e.message}`));
-  child.on('exit', (code, signal) => {
+  log(`started pid ${child.pid ?? '(none)'}`);
+  let handled = false;
+  // A spawn failure (ENOENT/EACCES) may emit 'error' without 'exit'; the supervisor used to fall idle and exit 0, which
+  // systemd reads as a clean stop (MIA-OPS-004). Treat it exactly like a crash.
+  child.on('error', (e) => { log(`spawn failed: ${e.message}`); onExit(127, null); });
+  child.on('exit', (code, signal) => onExit(code, signal));
+  function onExit(code, signal) {
+    if (handled) return; handled = true;
     child = null; const upMs = Date.now() - startedAt;
     if (stopping) { log(`stopped (${signal ?? code})`); process.exit(0); }
     if (code === 0) { log('exited cleanly; supervision ends'); process.exit(0); }
@@ -46,7 +51,7 @@ function start() {
     const delay = Math.min(capMs, baseMs * 2 ** (streak - 1));
     log(`crashed (${signal ? `signal ${signal}` : `code ${code}`}) after ${Math.round(upMs / 1000)} s; restart ${crashes.length}/${maxCrashes} in ${delay} ms`);
     timer = setTimeout(start, delay);
-  });
+  }
 }
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {
   if (stopping) return; stopping = true; log(`${sig}: stopping`);
