@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased: Overview dashboard + backend input hardening
+- **Overview dashboard** (`server/src/dashboard/overview.ts`, `web/src/pages/Overview.tsx`). It is a read-only composition of authoritative state and has these panels:
+  - paper account (equity, cash, positions, unrealized and realized P&L, today/week, drawdown)
+  - market intelligence (breadth, BTC regime, scanner recency, worker status)
+  - risk monitor (mode, policy, emergency, incidents, limit meters, live-gate summary)
+  - data-source health
+  - de-duplicated activity feed
+
+  The fields of the original `/api/overview` contract are kept.
+- A shared `Meter` component is now used by both the Overview and the Risk Center.
+- DITAS has a new **Execution quality** tab for the PR #8 report.
+- **Fix B-1:** repeated query keys were bound straight to SQL, and the internal SQLite error text was returned to the
+  client. Every remaining raw route input is now Zod-validated.
+- Runtime verification report: `docs/engineering/DASHBOARD_RUNTIME_VERIFICATION.md`. It covers 28 routes crawled live
+  with 0 issues, an API sweep, the live paper workflow, and dev and production modes.
+
 ## Unreleased: MIA 4.2 Phase 0 + P0/P1 slice
 - **Branch reconciliation:** PR #8 (read-only DITAS execution-quality report) was cherry-picked onto the integration
   branch. It did not conflict with or duplicate anything.

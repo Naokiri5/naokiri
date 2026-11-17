@@ -61,6 +61,14 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect((await app.inject({ method: 'POST', url: '/api/chart/replay', headers: H(), payload: { ...payload, visibleBars: 31 } })).statusCode).toBe(400);
     expect((await app.inject({ method: 'POST', url: '/api/chart/replay', headers: H(), payload: { ...payload, candles: Array(2001).fill(candles[0]) } })).statusCode).toBe(400);
   });
+  it('repeated query keys and bad ids are rejected as validation errors, never leaked as database errors', async () => {
+    for (const url of ['/api/decisions?decision=a&decision=b', '/api/journal?kind=a&kind=b', '/api/markets/search?q=a&q=b', `/api/decisions/${'x'.repeat(200)}`]) {
+      const r = await app.inject({ url, headers: { cookie } });
+      expect([400, 404], url).toContain(r.statusCode); expect(r.body, url).not.toMatch(/named parameter|SQLITE|sqlite/i); // over-long path ids are 404 at the router
+    }
+    const r = await app.inject({ method: 'POST', url: '/api/emergency/pause', headers: { cookie, 'x-mia-csrf': '1' }, payload: { unexpected: true } });
+    expect(r.statusCode).toBe(400);
+  });
   it('Trader Joe has no order/limit/mode/withdraw tools and refuses such commands', async () => {
     expect([...JOE_TOOL_NAMES].sort()).toEqual(['analyze_instrument', 'explain_decision', 'get_instrument', 'get_large_prints', 'get_market_overview', 'get_news', 'get_opportunities', 'get_portfolio', 'get_risk_status', 'get_status', 'pause_new_orders', 'search_knowledge']);
     expect(await commandMode('buy 10 BTC now')).toMatch(/can’t place orders/);

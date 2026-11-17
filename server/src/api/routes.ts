@@ -17,6 +17,7 @@ import { readIndicators, INDICATOR_SPECIALISTS } from '../workers/indicators.js'
 import { WORKERS, DOMAINS, REQUIRED_DOMAINS } from '../workers/registry.js';
 import { POOL, quarantined, releaseQuarantine } from '../workers/runtime.js';
 import { workerEffectiveness } from '../workers/effectiveness.js';
+import { overviewSnapshot } from '../dashboard/overview.js';
 import { QCI_POLICY, DOMAIN_WEIGHTS } from '../qci/coordinator.js';
 import { providers } from '../providers/http.js';
 import { latencyReport } from '../core/latency.js';
@@ -58,6 +59,10 @@ const bad = (reply: FastifyReply, code: number, msg: string) => reply.code(code)
 const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, req.ip, 'step-up');
 const PW = z.string().min(1).max(1024);
 const INTERVAL = z.enum(['15m', '1h', '4h']);
+/** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
+const ID = z.string().min(1).max(150);
+const idOf = (req: FastifyRequest) => z.object({ id: ID }).parse(req.params).id;
+const TOKEN = z.string().trim().min(1).max(60);
 const MONTH = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'month must be YYYY-MM');
 const httpError = (code: number, msg: string) => Object.assign(new Error(msg), { statusCode: code });
 /** Programming/infrastructure faults: these are server errors (500, logged), never "bad request". */
@@ -153,18 +158,15 @@ export async function routes(app: FastifyInstance) {
       policyAccepted: !!currentPolicy(), dataHealth: { stale, tickersAt: market.tickersFetchedAt, scanAt: market.lastScanAt, live: pv.filter((p) => p.status === 'LIVE').length, degraded: pv.filter((p) => p.status === 'DEGRADED' || p.status === 'DOWN').length },
       unread: get<{ n: number }>('SELECT COUNT(*) n FROM notifications WHERE read=0')!.n, gates: releaseGates().summary, offline: config.offline };
   });
-  app.get('/api/overview', async () => {
-    const b = bubbleMap({ limit: 60 }); const btc = market.deep.get('crypto:binance:BTCUSDT')?.engines['1h'].last ?? null;
-    return { breadth: b.breadth, btcRegime: classifyRegime(btc), account: accountState(), opportunities: recentDecisions().slice(0, 8), alerts: listNotifications(8), briefing: dailyBriefing(), movers: [...b.crypto].sort((x, y) => y.changePct - x.changePct), asOf: b.asOf };
-  });
+  app.get('/api/overview', async () => overviewSnapshot());
 
   // ── markets ──
   app.get('/api/markets', async () => ({ tickers: [...market.tickers.values()].filter((t) => t.quoteVolume > 1e6 && isEligibleSpot(t.base, t.quote)).sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 300), universe: market.universe, asOf: market.tickersFetchedAt }));
-  app.get('/api/markets/search', async (req) => { const q = String((req.query as any).q ?? '').toUpperCase(); return [...market.instruments.values()].filter((i) => i.symbol.includes(q) || i.base.startsWith(q)).slice(0, 20).map((i) => ({ id: i.id, symbol: i.symbol, base: i.base })); });
+  app.get('/api/markets/search', async (req) => { const q = z.object({ q: z.string().max(30).default('') }).parse(req.query).q.toUpperCase(); return [...market.instruments.values()].filter((i) => i.symbol.includes(q) || i.base.startsWith(q)).slice(0, 20).map((i) => ({ id: i.id, symbol: i.symbol, base: i.base })); });
   app.get('/api/instrument/:symbol', async (req, reply) => {
     // Validated BEFORE indexing d.engines: an unknown value (5m, 1d, __proto__) used to crash the handler.
     const { interval: iv } = z.object({ interval: INTERVAL.default('1h') }).parse(req.query ?? {});
-    const symbol = z.string().min(1).max(20).regex(/^[A-Za-z0-9._-]+$/).parse((req.params as any).symbol);
+    const symbol = z.object({ symbol: z.string().min(1).max(20).regex(/^[A-Za-z0-9._-]+$/) }).parse(req.params).symbol;
     const i = market.bySymbol(symbol);
     // Unknown symbol (catalogue loaded) ⇒ 404. Offline / catalogue still loading is a normal state the page polls
     // through, so it stays 200 with `unavailable` (a 503 every 15 s would read as a fault during every startup).
@@ -192,8 +194,8 @@ export async function routes(app: FastifyInstance) {
 
   // ── scanner / decisions ──
   app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
-  app.get('/api/decisions', async (req) => { const q = req.query as any; return all<any>(`SELECT id, instrument, strategy, decision, score, risk_decision, created_at FROM decisions ${q.decision ? 'WHERE decision=?' : ''} ORDER BY created_at DESC LIMIT 300`, ...(q.decision ? [q.decision] : [])); });
-  app.get('/api/decisions/:id', async (req, reply) => { const r = get<any>('SELECT report, consensus_id FROM decisions WHERE id=?', (req.params as any).id); if (!r) return bad(reply, 404, 'not found'); const c = get<any>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id); return { report: P(r.report), consensus: c ? P(c.record) : null }; });
+  app.get('/api/decisions', async (req) => { const q = z.object({ decision: TOKEN.optional() }).parse(req.query); return all<any>(`SELECT id, instrument, strategy, decision, score, risk_decision, created_at FROM decisions ${q.decision ? 'WHERE decision=?' : ''} ORDER BY created_at DESC LIMIT 300`, ...(q.decision ? [q.decision] : [])); });
+  app.get('/api/decisions/:id', async (req, reply) => { const r = get<any>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found'); const c = get<any>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id); return { report: P(r.report), consensus: c ? P(c.record) : null }; });
   app.post('/api/analyze', async (req) => { const { symbol, strategyId } = z.object({ symbol: z.string().min(1).max(20), strategyId: z.string().max(60).optional() }).parse(req.body); const i = market.bySymbol(symbol); if (!i) throw httpError(404, 'unknown symbol'); limit(req, 'analyze', 'analysis'); return analyzeInstrument(i.id, strategyId); });
 
   // ── AI intelligence (workers / QCI) ──
@@ -206,8 +208,8 @@ export async function routes(app: FastifyInstance) {
       domains: DOMAINS.map((d) => ({ domain: d, weight: DOMAIN_WEIGHTS[d], required: REQUIRED_DOMAINS.includes(d), workers: WORKERS.filter((w) => w.domain === d).length })), policy: QCI_POLICY, pool: POOL, consensus: recs,
       note: 'Workers are deterministic, versioned evaluators running in a bounded pool — not LLM agents. Confidence is NOT_CALIBRATED until walk-forward calibration is performed.' };
   });
-  app.get('/api/consensus/:id', async (req, reply) => { const r = get<any>('SELECT record FROM consensus_records WHERE id=?', (req.params as any).id); return r ? P(r.record) : bad(reply, 404, 'not found'); });
-  app.post('/api/workers/:id/release', async (req) => { releaseQuarantine((req.params as any).id); audit('owner', 'worker.release', { id: (req.params as any).id }); return { ok: true }; });
+  app.get('/api/consensus/:id', async (req, reply) => { const r = get<any>('SELECT record FROM consensus_records WHERE id=?', idOf(req)); return r ? P(r.record) : bad(reply, 404, 'not found'); });
+  app.post('/api/workers/:id/release', async (req) => { const id = idOf(req); releaseQuarantine(id); audit('owner', 'worker.release', { id }); return { ok: true }; });
 
   // ── risk center ──
   app.get('/api/risk', async () => {
@@ -215,7 +217,7 @@ export async function routes(app: FastifyInstance) {
     const corr = pos.map((a) => pos.map((b) => correlation(a.instrument, b.instrument)));
     return { policy: currentPolicy(), defaults: DEFAULT_POLICY, history: policyHistory().slice(0, 20), account: acct, control: getControl(), display: displayMode(), positions: pos, correlation: { instruments: pos.map((p) => p.instrument), matrix: corr }, protection: oms.protectPositions(), incidents: listIncidents(), gates: releaseGates() };
   });
-  app.post('/api/risk/policy', async (req) => { const b = req.body as any; stepUp(req, b); return acceptPolicy('owner', b?.policy); });
+  app.post('/api/risk/policy', async (req) => { const b = z.object({ policy: z.unknown(), password: PW.optional() }).strict().parse(req.body ?? {}); stepUp(req, b); return acceptPolicy('owner', b.policy); });
   app.post('/api/control', async (req) => {
     const b = z.object({ mode: z.enum(['OBSERVE', 'PAPER', 'APPROVAL', 'BOUNDED_LIVE']).optional(), pausedNewOrders: z.boolean().optional(), emergency: z.boolean().optional(), disabledStrategies: z.array(z.string().max(60)).max(50).optional(), password: PW.optional() }).parse(req.body);
     const { password, ...patch } = b;
@@ -231,12 +233,12 @@ export async function routes(app: FastifyInstance) {
     });
   });
   app.post('/api/emergency/:action', async (req) => {
-    const a = (req.params as any).action; const b = req.body as any;
+    const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), password: PW.optional() }).strict().parse(req.body ?? {});
     if (a === 'pause') return oms.pauseNewOrders('owner');
     if (a === 'cancel-pending') return oms.cancelPendingEntries('owner');
     if (a === 'protect') return oms.protectPositions(true);
     if (a === 'stop') return oms.emergencyStop('owner');
-    if (a === 'close-all') { stepUp(req, b); return oms.closeAllPositions('owner', b?.confirm); }
+    if (a === 'close-all') { stepUp(req, b); return oms.closeAllPositions('owner', b.confirm ?? ''); }
     throw httpError(404, 'unknown emergency action');
   });
 
@@ -254,12 +256,12 @@ export async function routes(app: FastifyInstance) {
     return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
   });
   app.get('/api/orders', async () => oms.listOrders(300));
-  app.post('/api/orders/:id/approve', async (req) => oms.decideApproval((req.params as any).id, true));
-  app.post('/api/orders/:id/reject', async (req) => oms.decideApproval((req.params as any).id, false));
-  app.post('/api/positions/:id/close', async (req) => oms.closePosition('owner', (req.params as any).id));
+  app.post('/api/orders/:id/approve', async (req) => oms.decideApproval(idOf(req), true));
+  app.post('/api/orders/:id/reject', async (req) => oms.decideApproval(idOf(req), false));
+  app.post('/api/positions/:id/close', async (req) => oms.closePosition('owner', idOf(req)));
 
   // ── journal / calendar ──
-  app.get('/api/journal', async (req) => listJournal(400, (req.query as any).kind));
+  app.get('/api/journal', async (req) => listJournal(400, z.object({ kind: TOKEN.optional() }).parse(req.query).kind));
   app.get('/api/calendar', async (req) => calendar(z.object({ month: MONTH.default(new Date().toISOString().slice(0, 7)) }).parse(req.query ?? {}).month));
   app.post('/api/calendar/tz', async (req) => { const { offsetMin } = z.object({ offsetMin: z.number().int().min(-720).max(840) }).parse(req.body); setSetting('calendarTzOffsetMin', offsetMin); return { ok: true }; });
 
@@ -277,8 +279,8 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/wallet', async () => ({ networks: wallet.NETWORKS, addresses: wallet.listAddresses(), withdrawals: wallet.listWithdrawals(), frozen: wallet.withdrawalFrozen(), custody: 'READ-ONLY build: no keys, no signer. Seed phrases are never requested.' }));
   app.post('/api/wallet/validate', async (req) => { const b = z.object({ network: z.string(), address: z.string().max(120) }).parse(req.body); return wallet.validateAddress(b.network, b.address); });
   app.post('/api/wallet/address', async (req) => { const b = z.object({ label: z.string().min(1).max(60), network: z.string(), address: z.string().max(120), memo: z.string().max(100).optional() }).parse(req.body); return wallet.addAddress('owner', b.label, b.network, b.address, b.memo); });
-  app.post('/api/wallet/address/:id/verify', async (req) => { stepUp(req, req.body); wallet.verifyAddress('owner', (req.params as any).id); return { ok: true }; });
-  app.delete('/api/wallet/address/:id', async (req) => { wallet.removeAddress('owner', (req.params as any).id); return { ok: true }; });
+  app.post('/api/wallet/address/:id/verify', async (req) => { stepUp(req, req.body); wallet.verifyAddress('owner', idOf(req)); return { ok: true }; });
+  app.delete('/api/wallet/address/:id', async (req) => { wallet.removeAddress('owner', idOf(req)); return { ok: true }; });
   app.post('/api/wallet/withdraw/preview', async (req) => {
     const { password, ...input } = z.object({ network: z.string().max(40), asset: z.string().max(20), amount: z.number().finite(), addressId: z.string().max(64), password: PW }).parse(req.body);
     stepUp(req, { password }); return wallet.previewWithdrawal('owner', input); // the passphrase never reaches the audit log
@@ -298,7 +300,7 @@ export async function routes(app: FastifyInstance) {
     purpose: z.enum(['ENTRY', 'EXIT', 'PROTECTIVE_STOP']).optional() }).parse(q);
   app.get('/api/history', async (req) => tradingHistory(histFilter(req.query)));
   app.get('/api/history.csv', async (req, reply) => {
-    const q = req.query as any; const h = tradingHistory(histFilter({ ...q, kind: undefined }));
+    const { kind, ...rest } = z.object({ kind: TOKEN.optional() }).passthrough().parse(req.query ?? {}); const q = { kind }; const h = tradingHistory(histFilter(rest));
     const csv = q.kind === 'trades'
       ? toCsv(h.trades, ['id', 'instrument', 'strategy', 'opened_at', 'closed_at', 'entry_price', 'exit_price', 'realized_pnl', 'fees', 'exit_reason', 'planned_risk'])
       : toCsv(h.orders, ['id', 'client_order_id', 'created_at', 'instrument', 'side', 'type', 'purpose', 'qty', 'filled_qty', 'avg_price', 'fees', 'status', 'reject_reason']);

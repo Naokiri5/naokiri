@@ -105,6 +105,21 @@ test('academy: upload a document, see it indexed, search it with a cited source'
   await expect(page.getByText(/Extractive mode|LLM answer/)).toBeVisible();
 });
 
+test('overview dashboard shows account, market intelligence, risk monitor, data sources and activity from the backend', async () => {
+  await page.goto('/');
+  for (const t of ['Paper account', 'Market intelligence', 'Risk monitor', 'Data sources', 'Activity', 'Trader Joe daily briefing']) await expect(page.getByText(t, { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('Equity', { exact: true })).toBeVisible();
+  await expect(page.getByRole('meter', { name: 'Daily loss' })).toBeVisible(); // policy accepted earlier in this suite
+  await expect(page.getByText(/gates passed — live execution LOCKED/)).toBeVisible();
+});
+
+test('DITAS execution quality tab lists actual paper orders only', async () => {
+  await page.goto('/ditas');
+  await page.getByRole('tab', { name: 'Execution quality' }).click();
+  await expect(page.getByText('Paper execution quality')).toBeVisible();
+  await expect(page.getByText(/Actual paper OMS records only/)).toBeVisible();
+});
+
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });
 
 test('mobile layout has no horizontal overflow', async ({ browser }) => {

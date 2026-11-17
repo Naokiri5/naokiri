@@ -1,6 +1,6 @@
 {
   "generatedFrom": {
-    "commit": "e47ecd23f73c9296328a4f7854d0abb6981fbd6f",
+    "commit": "926074dea659342fba09c965e4c9bc7a3825aaf6",
     "note": "static scan of the working tree at this commit; uncommitted changes would also be included"
   },
   "runtime": {
@@ -11,11 +11,11 @@
     ]
   },
   "summary": {
-    "modules": 88,
+    "modules": 89,
     "routes": 105,
     "tables": 38,
-    "testFiles": 26,
-    "testCases": 241,
+    "testFiles": 27,
+    "testCases": 247,
     "pages": 9
   },
   "areas": {
@@ -42,6 +42,9 @@
       "server/src/core/settings.ts",
       "server/src/core/signing.ts",
       "server/src/core/util.ts"
+    ],
+    "dashboard": [
+      "server/src/dashboard/overview.ts"
     ],
     "db": [
       "server/src/db/db.ts",
@@ -198,7 +201,7 @@
     {
       "path": "server/src/api/routes.ts",
       "area": "api",
-      "lines": 334,
+      "lines": 336,
       "imports": [
         "../ditas/routes.js",
         "../knowledge/routes.js",
@@ -217,6 +220,7 @@
         "../workers/registry.js",
         "../workers/runtime.js",
         "../workers/effectiveness.js",
+        "../dashboard/overview.js",
         "../qci/coordinator.js",
         "../providers/http.js",
         "../core/latency.js",
@@ -511,6 +515,36 @@
         "std",
         "quantile",
         "withDeadline"
+      ],
+      "routes": []
+    },
+    {
+      "path": "server/src/dashboard/overview.ts",
+      "area": "dashboard",
+      "lines": 96,
+      "imports": [
+        "../db/db.js",
+        "../market/store.js",
+        "../market/bubbles.js",
+        "../market/scanner.js",
+        "../regime/regime.js",
+        "../portfolio/ledger.js",
+        "../risk/policy.js",
+        "../core/mode.js",
+        "../notify/notify.js",
+        "../providers/http.js",
+        "../qa/gates.js",
+        "../exec/incidents.js",
+        "../workers/effectiveness.js",
+        "../joe/joe.js"
+      ],
+      "exports": [
+        "ActivityKind",
+        "Activity",
+        "riskMonitor",
+        "pipelineStatus",
+        "activityFeed",
+        "overviewSnapshot"
       ],
       "routes": []
     },
@@ -2087,7 +2121,7 @@
   "tests": [
     {
       "path": "e2e/app.spec.ts",
-      "cases": 11
+      "cases": 13
     },
     {
       "path": "e2e/ditas.spec.ts",
@@ -2095,11 +2129,15 @@
     },
     {
       "path": "server/test/api.test.ts",
-      "cases": 14
+      "cases": 15
     },
     {
       "path": "server/test/chart.test.ts",
       "cases": 8
+    },
+    {
+      "path": "server/test/dashboard.test.ts",
+      "cases": 3
     },
     {
       "path": "server/test/ditas-api.test.ts",

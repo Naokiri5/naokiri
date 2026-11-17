@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
-import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs } from '../ui';
+import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter } from '../ui';
 
 export const StepUp = ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
   <input type="password" placeholder="Owner passphrase (step-up)" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="current-password" aria-label="Owner passphrase for step-up authentication" />;
@@ -91,14 +91,13 @@ export function Risk() {
   const [draft, setDraft] = useState<any>(null); const [pw, setPw] = useState(''); const [confirm, setConfirm] = useState(''); const [result, setResult] = useState<any>(null);
   useEffect(() => { if (data && !draft) setDraft({ ...(data.policy?.policy ?? data.defaults) }); }, [data, draft]);
   const a = data?.account; const p = data?.policy?.policy ?? data?.defaults;
-  const meter = (label: string, v: number, lim: number) => <div><div className="row between"><span className="muted">{label}</span><span className="mono">{fmt.num(v, 2)}% / {lim}%</span></div><div className="bar"><i style={{ width: `${Math.min(100, (Math.max(0, v) / lim) * 100)}%`, background: v / lim > 0.8 ? 'var(--down)' : v / lim > 0.5 ? 'var(--warn)' : 'var(--up)' }} /></div></div>;
   return <Page title="Risk Center" sub="Deterministic, fail-closed risk authority (Part 17). No agent, QCI result or assistant can bypass it. Limits change only through this authenticated, versioned workflow.">
     <ErrorLine e={error} />
     {!data?.policy && <div className="banner info">No risk policy accepted yet. Review the conservative paper defaults below and accept them (or adjust) to enable paper execution.</div>}
     <div className="grid g-1-2">
       <div className="col" style={{ gap: 14 }}>
         <Card title="Circuit breakers">{a && p ? <div className="col">
-          {meter('Daily loss', -a.dailyPnlPct, p.dailyLossPct)}{meter('Weekly loss', -a.weeklyPnlPct, p.weeklyLossPct)}{meter('Drawdown (halt)', a.drawdownPct, p.drawdownHaltPct)}{meter('Open risk', a.openRiskPct, p.maxOpenRiskPct)}
+          <Meter label="Daily loss" value={-a.dailyPnlPct} limit={p.dailyLossPct} /><Meter label="Weekly loss" value={-a.weeklyPnlPct} limit={p.weeklyLossPct} /><Meter label="Drawdown (halt)" value={a.drawdownPct} limit={p.drawdownHaltPct} /><Meter label="Open risk" value={a.openRiskPct} limit={p.maxOpenRiskPct} />
           <div className="kv"><span>Equity</span><span className="mono">{fmt.usd(a.equity)}</span><span>Start of day</span><span className="mono">{fmt.usd(a.startOfDayEquity)}</span><span>High-water mark</span><span className="mono">{fmt.usd(a.highWaterMark)}</span><span>Loss streak</span><span>{a.consecutiveLosses} / {p.maxConsecutiveLosses}</span><span>Leverage</span><span>disabled (spot, hard constraint)</span></div>
         </div> : <Empty>…</Empty>}</Card>
         <Card title="Emergency controls (Part 17.8)"><div className="col">

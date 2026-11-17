@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
 
-const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Foundation coverage'];
+const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Foundation coverage'];
 const count = (v: unknown) => Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0;
 
 /** Read-only DITAS evidence. No control, strategy promotion, simulation or execution authority. */
@@ -67,6 +67,7 @@ export function Ditas() {
     {data && tab === 'Strategy passports' && <div className="col" style={{ gap: 14 }}>{(data.passports ?? []).map((p: any) => <Card key={p.id ?? p.strategyId} title={`${p.name ?? p.id ?? p.strategyId} · v${p.version ?? p.strategyVersion}`} right={<Badge v={p.ditasState ?? p.currentStatus ?? 'RESEARCH'} />}>
       <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
+    {tab === 'Execution quality' && <ExecutionQuality />}
     {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibration?.status ?? 'UNCALIBRATED'} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
@@ -89,4 +90,21 @@ export function Ditas() {
     </tbody></table></div><div style={{ padding: 14 }} className="hint">A passing test suite does not certify live trading, calibrated forecasts or strategy profitability. See the release gates for outstanding evidence.</div></Card>}
     {detail && <Modal title={detail.title} onClose={() => setDetail(null)}><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '65vh', overflowY: 'auto', fontSize: 12 }}>{JSON.stringify(detail.value, null, 2)}</pre></Modal>}
   </Page>;
+}
+
+/** Read-only paper execution quality (actual paper OMS orders and fills only; never hypothetical Twin results). */
+function ExecutionQuality() {
+  const { data, error } = useApi<any>('/api/ditas/execution?limit=100', { topics: ['order', 'position'] });
+  const rows: any[] = data?.orders ?? [];
+  return <Card title="Paper execution quality" right={<Badge v={data?.label ?? 'PAPER'} tone="b-violet" />} flush>
+    <ErrorLine e={error} />
+    <div className="tablewrap"><table><thead><tr><th>Order</th><th>Purpose</th><th>Status</th><th>Filled</th><th>Avg fill</th><th>Expected</th><th>Adverse slippage</th><th>Fees</th><th>First fill</th></tr></thead><tbody>
+      {rows.map((o) => <tr key={o.orderId}><td><b>{o.instrumentId.split(':').pop()}</b> <Badge v={o.side} /><div className="hint mono">{o.orderId}</div></td><td>{o.purpose}</td><td><Badge v={o.status} /></td>
+        <td className="mono">{fmt.num(o.filledQty, 6)} / {fmt.num(o.requestedQty, 6)}</td><td className="mono">{fmt.px(o.averageFillPrice)}</td><td className="mono">{fmt.px(o.expectedPrice)}</td>
+        <td className="mono">{o.adverseSlippageBps == null ? <span className="hint">n/a</span> : `${fmt.num(o.adverseSlippageBps, 1)} bps`}</td><td className="mono">{fmt.usd(o.fees, 4)}</td>
+        <td className="mono">{o.firstFillDelayMs == null ? '—' : `${o.firstFillDelayMs} ms`}</td></tr>)}
+    </tbody></table></div>
+    {data && !rows.length && <Empty>No paper orders yet.</Empty>}
+    {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
+  </Card>;
 }
