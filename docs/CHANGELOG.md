@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: Compact cockpit PR A (six-destination navigation)
+- Navigation is regrouped into Home · Markets · Autopilot · Portfolio · AI Intelligence · Settings & Security, plus
+  Trader Joe. It adds a one-level submenu, a collapsible rail, sibling-page tabs and a mobile bottom bar with More.
+- The command palette understands synonyms, and direct action matches rank first.
+- This is presentation only: all routes and URLs are unchanged, and there are no backend changes.
+- 7 new browser tests. See `docs/engineering/NAVIGATION_PR_A.md`.
+
 ## Unreleased: Overview dashboard + backend input hardening
 - **Overview dashboard** (`server/src/dashboard/overview.ts`, `web/src/pages/Overview.tsx`). It is a read-only composition of authoritative state and has these panels:
   - paper account (equity, cash, positions, unrealized and realized P&L, today/week, drawdown)
