@@ -6,7 +6,7 @@ import { all, run } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 
 const T = 1_800_000_000_000;
-const engine = (o: Partial<EngineView> = {}): EngineView => ({ running: true, role: 'LEADER', startedAt: T - 3_600_000, lastTickerAt: T - 1_000, lastScanAt: T - 1_000, ...o });
+const engine = (o: Partial<EngineView> = {}): EngineView => ({ running: true, role: 'LEADER', startedAt: T - 3_600_000, lastTickerAt: T - 1_000, lastScanAt: T - 1_000, lastMonitorAt: T - 1_000, monitorFailing: false, ...o });
 const byName = (r: ReturnType<typeof readiness>, n: string) => r.checks.find((c) => c.name === n);
 
 describe('readiness probe', () => {
@@ -33,6 +33,17 @@ describe('readiness probe', () => {
   it('treats a standby (lease held elsewhere) as healthy with idle lanes', () => {
     const r = readiness(engine({ role: 'STANDBY', lastScanAt: 0, lastTickerAt: 0 }), T);
     expect(r.ready).toBe(true); expect(byName(r, 'engine')!.status).toBe('info'); expect(byName(r, 'scanner')).toBeUndefined();
+  });
+  it('fails while the leader position monitor is erroring or stale; standby and offline are unaffected', () => {
+    expect(byName(readiness(engine(), T), 'monitor')!.status).toBe('pass');
+    const failing = readiness(engine({ monitorFailing: true }), T);
+    expect(failing.ready).toBe(false); expect(byName(failing, 'monitor')).toEqual({ name: 'monitor', status: 'fail', detail: 'last position-monitor pass failed' });
+    expect(readiness(engine({ lastMonitorAt: T - staleAfter().tickerMs - 1 }), T).ready).toBe(false);
+    expect(readiness(engine({ lastMonitorAt: 0, startedAt: T - staleAfter().tickerMs - 1 }), T).ready).toBe(false); // never completed a pass
+    const standby = readiness(engine({ role: 'STANDBY', monitorFailing: true, lastMonitorAt: 0 }), T);
+    expect(standby.ready).toBe(true); expect(byName(standby, 'monitor')).toBeUndefined();
+    (config as any).offline = true;
+    expect(readiness(engine({ running: false, role: 'STOPPED', monitorFailing: true }), T).ready).toBe(true);
   });
   it('fails when the schema is behind the code', () => {
     run('DELETE FROM schema_migrations WHERE version = (SELECT MAX(version) FROM schema_migrations)');
