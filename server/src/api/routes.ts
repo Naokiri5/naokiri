@@ -18,6 +18,7 @@ import { WORKERS, DOMAINS, REQUIRED_DOMAINS } from '../workers/registry.js';
 import { POOL, quarantined, releaseQuarantine } from '../workers/runtime.js';
 import { workerEffectiveness } from '../workers/effectiveness.js';
 import { overviewSnapshot } from '../dashboard/overview.js';
+import { noTradeBoard } from '../decision/noTrade.js';
 import { QCI_POLICY, DOMAIN_WEIGHTS } from '../qci/coordinator.js';
 import { providers } from '../providers/http.js';
 import { latencyReport } from '../core/latency.js';
@@ -34,7 +35,7 @@ import { recentPrints, printThreshold } from '../whales/prints.js';
 import * as lab from '../lab/lab.js';
 import { STRATEGIES } from '../lab/strategies.js';
 import * as wallet from '../wallet/wallet.js';
-import { listNotifications, markRead, notify } from '../notify/notify.js';
+import { listNotifications, markRead, notify, notificationCenter, criticalSummary, ackNotificationGroup } from '../notify/notify.js';
 import { releaseGates } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
 import { botStatus, botStatusView } from '../bot/bot.js';
@@ -199,6 +200,7 @@ export async function routes(app: FastifyInstance) {
 
   // ── scanner / decisions ──
   app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
+  app.get('/api/no-trade', async () => noTradeBoard());
   app.get('/api/decisions', async (req) => { const q = z.object({ decision: TOKEN.optional() }).parse(req.query); return all<any>(`SELECT id, instrument, strategy, decision, score, risk_decision, created_at FROM decisions ${q.decision ? 'WHERE decision=?' : ''} ORDER BY created_at DESC LIMIT 300`, ...(q.decision ? [q.decision] : [])); });
   app.get('/api/decisions/:id', async (req, reply) => { const r = get<any>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found'); const c = get<any>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id); return { report: P(r.report), consensus: c ? P(c.record) : null }; });
   app.post('/api/analyze', async (req) => { const { symbol, strategyId } = z.object({ symbol: z.string().min(1).max(20), strategyId: z.string().max(60).optional() }).parse(req.body); const i = market.bySymbol(symbol); if (!i) throw httpError(404, 'unknown symbol'); limit(req, 'analyze', 'analysis'); return analyzeInstrument(i.id, strategyId); });
@@ -326,6 +328,9 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/latency', async () => latencyReport());
   app.get('/api/notifications', async () => listNotifications(300));
   app.post('/api/notifications/read', async (req) => { const { id } = z.object({ id: z.string().min(1).max(64).optional() }).parse(req.body ?? {}); markRead(id); return { ok: true }; });
+  app.get('/api/notifications/center', async (req) => notificationCenter({ hideInfo: z.object({ hideInfo: z.enum(['0', '1']).default('0') }).strict().parse(req.query ?? {}).hideInfo === '1' }));
+  app.get('/api/notifications/critical', async () => criticalSummary());
+  app.post('/api/notifications/ack', async (req) => ackNotificationGroup('owner', z.object({ source: z.string().min(1).max(100), title: z.string().min(1).max(200), severity: z.enum(['INFO', 'WARNING', 'CRITICAL']), throughId: z.string().regex(/^\d{1,15}$/) }).strict().parse(req.body)));
   app.post('/api/notifications/test', async () => ({ id: notify('INFO', 'Test notification', 'Delivery check from Settings', 'settings') }));
   app.get('/api/settings', async () => ({ notifyPrefs: getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null }), calendarTzOffsetMin: getSetting('calendarTzOffsetMin', 0), joe: { model: config.joeModel, llm: !!config.anthropicApiKey, tools: JOE_TOOL_NAMES }, telegram: { configured: !!config.telegramBotToken } }));
   app.post('/api/settings/notify', async (req) => { const b = z.object({ telegramMinSeverity: z.enum(['INFO', 'WARNING', 'CRITICAL']), quietHoursUtc: z.tuple([z.number().int().min(0).max(23), z.number().int().min(0).max(23)]).nullable() }).parse(req.body); setSetting('notifyPrefs', b); return { ok: true }; });

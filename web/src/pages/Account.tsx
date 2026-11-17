@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Empty, ErrorLine, Page, Tabs } from '../ui';
 import { StepUp } from './Trading';
+import { ackGroup } from '../CriticalStrip';
 
 export function Wallet() {
   const { data, error, reload } = useApi('/api/wallet');
@@ -58,13 +60,49 @@ export function Connections() {
   </Page>;
 }
 
+interface NotificationGroup { source: string; title: string; severity: 'INFO' | 'WARNING' | 'CRITICAL'; count: number; unread: number; firstTs: number; lastTs: number; lastBody: string; ackThroughId: string; href: string | null; sticky: boolean }
+const HIDE_INFO_KEY = 'mia-hide-info';
+/**
+ * Severity notification center. Repeats are grouped by source + title + severity on the server; unread CRITICAL groups
+ * are pinned until explicitly acknowledged. "Hide INFO" is a local view preference and only ever removes INFO groups.
+ */
 export function Notifications() {
-  const { data, error, reload } = useApi('/api/notifications', { topics: ['notification'] }); const [sev, setSev] = useState('');
-  const items = (data ?? []).filter((n: any) => !sev || n.severity === sev);
-  return <Page title="Notifications" sub="In-app history with delivery state per channel." right={<><select value={sev} onChange={(e) => setSev(e.target.value)} aria-label="Severity"><option value="">All</option><option>CRITICAL</option><option>WARNING</option><option>INFO</option></select><Action label="Mark all read" run={async () => { await api('/api/notifications/read', { body: {} }); reload(); }} /></>}>
-    <ErrorLine e={error} />
-    <Card flush><div className="tablewrap" style={{ maxHeight: 700 }}><table><tbody>{items.map((n: any) => { const d = JSON.parse(n.delivery); return <tr key={n.id} style={{ opacity: n.read ? 0.65 : 1 }}><td className="faint" style={{ whiteSpace: 'nowrap' }}>{fmt.time(n.ts)}</td><td><Badge v={n.severity} /></td><td><b>{n.title}</b><div className="muted">{n.body}</div></td><td className="hint">{n.source}</td><td className="hint">app: {d.inApp}<br />telegram: {d.telegram}</td><td>{!n.read && <button className="sm ghost" onClick={async () => { await api('/api/notifications/read', { body: { id: n.id } }); reload(); }}>read</button>}</td></tr>; })}</tbody></table>{!items.length && <Empty>No notifications.</Empty>}</div></Card>
+  const [hideInfo, setHideInfo] = useState(() => { try { return localStorage.getItem(HIDE_INFO_KEY) === '1'; } catch { return false; } });
+  const [tab, setTab] = useState('By severity');
+  const center = useApi<{ groups: NotificationGroup[]; hasMore: boolean }>('/api/notifications/center?hideInfo=' + (hideInfo ? '1' : '0'), { topics: ['notification'], every: 30_000 });
+  const raw = useApi(tab === 'Raw history' ? '/api/notifications' : null, { topics: ['notification'] });
+  const toggleInfo = (on: boolean) => { setHideInfo(on); try { localStorage.setItem(HIDE_INFO_KEY, on ? '1' : '0'); } catch { /* */ } };
+  const groups = center.data?.groups ?? [];
+  const sections = [
+    { title: 'Needs acknowledgement', rows: groups.filter((g) => g.sticky) },
+    { title: 'Critical · acknowledged', rows: groups.filter((g) => !g.sticky && g.severity === 'CRITICAL') },
+    { title: 'Warning', rows: groups.filter((g) => g.severity === 'WARNING') },
+    { title: 'Info', rows: groups.filter((g) => g.severity === 'INFO') },
+  ];
+  const reload = () => { center.reload(); raw.reload(); };
+  return <Page title="Notifications" sub="Repeats are grouped by source, title and severity. Unread CRITICAL stays pinned until you acknowledge it; acknowledging never resolves an incident or resumes trading."
+    right={<><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={hideInfo} onChange={(e) => toggleInfo(e.target.checked)} />Hide INFO</label>
+      <Action label="Mark non-critical read" run={async () => { await api('/api/notifications/read', { body: {} }); reload(); }} /></>}>
+    <ErrorLine e={center.error} />
+    {!center.data && center.error && <div className="alertbar warn" role="status">Critical status unknown: the notification center could not be loaded.</div>}
+    {hideInfo && <div className="hint" style={{ marginBottom: 10 }}>INFO is hidden. CRITICAL and WARNING are never hidden.</div>}
+    <Tabs tabs={['By severity', 'Raw history']} value={tab} onChange={setTab} />
+    {tab === 'By severity' && <>
+      {sections.filter((x) => x.rows.length).map((x) => <Card key={x.title} title={x.title + ' (' + x.rows.length + ')'} flush>
+        <ul className="feed">{x.rows.map((g) => <NotificationGroupRow key={g.source + '|' + g.title + '|' + g.severity} g={g} onDone={reload} />)}</ul></Card>)}
+      {center.data && !groups.length && <Empty>No notifications in the last 14 days.</Empty>}
+      {center.data?.hasMore && <div className="hint">Older non-critical groups are not shown (the newest 100 are). Unread CRITICAL groups are always shown.</div>}
+    </>}
+    {tab === 'Raw history' && <Card flush><div className="tablewrap" style={{ maxHeight: 700 }}><table><tbody>{(raw.data ?? []).map((n: any) => { const d = JSON.parse(n.delivery); return <tr key={n.id} style={{ opacity: n.read ? 0.65 : 1 }}><td className="faint" style={{ whiteSpace: 'nowrap' }}>{fmt.time(n.ts)}</td><td><Badge v={n.severity} /></td><td><b>{n.title}</b><div className="muted">{n.body}</div></td><td className="hint">{n.source}</td><td className="hint">app: {d.inApp}<br />telegram: {d.telegram}</td><td>{!n.read && n.severity !== 'CRITICAL' && <button className="sm ghost" onClick={async () => { await api('/api/notifications/read', { body: { id: n.id } }); reload(); }}>read</button>}</td></tr>; })}</tbody></table>{raw.data && !raw.data.length && <Empty>No notifications.</Empty>}</div></Card>}
   </Page>;
+}
+function NotificationGroupRow({ g, onDone }: { g: NotificationGroup; onDone: () => void }) {
+  return <li style={{ opacity: g.unread ? 1 : 0.7 }}>
+    <Badge v={g.severity} />
+    <div className="what"><b>{g.title}</b> <span className="hint">×{g.count}{g.unread ? ' · ' + g.unread + ' unread' : ''} · last {fmt.ago(g.lastTs)}{g.count > 1 ? ' · first ' + fmt.ago(g.firstTs) : ''} · {g.source}</span>
+      <div className="hint">{g.lastBody}</div>{g.href && <Link to={g.href}>Root cause →</Link>}</div>
+    {g.unread > 0 && <Action className="sm" label={g.severity === 'CRITICAL' ? 'Acknowledge' : 'Mark read'} run={async () => { await ackGroup(g); onDone(); }} />}
+  </li>;
 }
 
 export function QA() {
