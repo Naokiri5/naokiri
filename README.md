@@ -97,6 +97,11 @@ ledger, and the audit log. It does not back up environment variables, encryption
 | `MIA_BACKUP_KEEP` | `14` | Number of completed backups retained |
 | `MIA_BACKUP_KEY` | unset | Optional 64-hex-character key for AES-256-GCM encryption at rest |
 
+The interval must be finite and retention a positive integer; invalid configuration stops startup. Automatic
+snapshots use SQLite `quick_check`; manual backups and restore tests use `integrity_check`. Every verification also
+checks foreign keys, schema, the audit chain and reconciliation. Disabled scheduling, a backup older than seven
+days, or a retained failed restore test prevents a PASS status.
+
 The owner can generate a key with `openssl rand -hex 32`, then supply it through the server's environment. Keep it
 in a password manager or another secure offline location, separate from the backups. Never put it in Git, logs, or
 chat. **Lose the key and you lose its encrypted backups.** Keep old keys when rotating: each existing snapshot still
@@ -137,6 +142,7 @@ For step 3, save this offline helper as `decrypt-backup.mjs` outside the reposit
 original key supplied securely in `MIA_BACKUP_KEY`, run `node decrypt-backup.mjs SNAPSHOT MANIFEST NEW_DIR/mia.db`.
 Create `NEW_DIR` first. The helper checks the stored-file checksum and GCM tag, and refuses to overwrite a file.
 The envelope is 8 bytes `MIABAK1\0`, a 12-byte nonce, ciphertext, then a 16-byte authentication tag.
+GCM authenticates the manifest identity as associated data: `MIABAK1|id|seq|schemaVersion`.
 
 ```js
 import { createDecipheriv, createHash } from 'node:crypto';
@@ -151,6 +157,7 @@ if (!m.encrypted || stored.length < 36 || !stored.subarray(0, 8).equals(Buffer.f
 const key = process.env.MIA_BACKUP_KEY ?? '';
 if (!/^[0-9a-fA-F]{64}$/.test(key)) throw new Error('Supply the original 64-hex-character MIA_BACKUP_KEY');
 const decipher = createDecipheriv('aes-256-gcm', Buffer.from(key, 'hex'), stored.subarray(8, 20));
+decipher.setAAD(Buffer.from(`MIABAK1|${m.id}|${m.seq}|${m.schemaVersion}`));
 decipher.setAuthTag(stored.subarray(-16));
 const plaintext = Buffer.concat([decipher.update(stored.subarray(20, -16)), decipher.final()]);
 writeFileSync(output, plaintext, { mode: 0o600, flag: 'wx' });

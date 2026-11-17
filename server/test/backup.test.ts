@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash, randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, fsyncSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -14,36 +14,55 @@ import { SCHEMA_VERSION } from '../src/db/migrations.js';
 import { buildApp } from '../src/index.js';
 import { backupCheck, backupStatus, createBackup, listBackups, restoreTest, startBackups, stopBackups } from '../src/backup/backup.js';
 
+vi.mock('node:fs', async (load) => {
+  const fs = await load<typeof import('node:fs')>();
+  return { ...fs, copyFileSync: vi.fn(fs.copyFileSync), fsyncSync: vi.fn(fs.fsyncSync), renameSync: vi.fn(fs.renameSync), writeFileSync: vi.fn(fs.writeFileSync) };
+});
+
 const hash = (b: Buffer) => `sha256:${createHash('sha256').update(b).digest('hex')}`;
-let dir: string; const original = { ...config.backup };
+let dir: string; const original = { ...config.backup }; const originalDataDir = config.dataDir;
 const manifestPath = (id: string) => join(config.backup.dir, `mia-${id}.json`);
 beforeEach(() => {
+  vi.clearAllMocks();
   closeDb(); dir = mkdtempSync(join(tmpdir(), 'mia-backup-test-'));
+  config.dataDir = dir;
   Object.assign(config.backup, { dir: join(dir, 'backups'), intervalMs: 6 * 3600_000, keep: 14 });
   delete process.env.MIA_BACKUP_KEY;
   openDb(join(dir, 'mia.db')); audit('test', 'seed');
 });
 afterEach(() => {
   stopBackups(); vi.useRealTimers(); vi.restoreAllMocks(); closeDb(); delete process.env.MIA_BACKUP_KEY;
-  Object.assign(config.backup, original); rmSync(dir, { recursive: true, force: true });
+  Object.assign(config.backup, original); config.dataDir = originalDataDir; rmSync(dir, { recursive: true, force: true });
 });
 
 describe('verified backups', () => {
   it('includes committed WAL rows, records schema/checksum and verifies without replacing or changing the live DB', async () => {
-    const live = getDb(); live.exec('PRAGMA wal_autocheckpoint=0');
+    const live = getDb(); const livePath = live.location(); const verificationPaths: string[] = [];
+    const prepare = DatabaseSync.prototype.prepare;
+    vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
+      if (sql === 'PRAGMA integrity_check') verificationPaths.push(this.location()!);
+      return prepare.call(this, sql);
+    });
+    const tables = live.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('audit_log','settings')").all().map((r) => String(r.name));
+    const counts = () => tables.map((t) => live.prepare(`SELECT count(*) n FROM "${t}"`).get()!.n);
     setSetting('wal-marker', 'committed in WAL');
     expect(statSync(join(dir, 'mia.db-wal')).size).toBeGreaterThan(0);
+    const before = counts(); const auditBefore = Number(live.prepare('SELECT count(*) n FROM audit_log').get()!.n);
+    const settingsBefore = Number(live.prepare('SELECT count(*) n FROM settings').get()!.n);
     const b = await createBackup(); const stored = readFileSync(join(config.backup.dir, b.file));
     expect(b).toMatchObject({ version: 1, seq: 1, schemaVersion: SCHEMA_VERSION, bytes: stored.length, checksum: hash(stored), encrypted: false });
     expect(b.id).toMatch(/^000001-[0-9a-f]{4}$/); expect(b.restoreTestedAt).toBeGreaterThan(0);
     expect(b.restoreTest).toMatchObject({ ok: true, integrity: 'ok', auditEntries: 1, auditOk: true, reconcileOk: true, error: null });
     const copy = new DatabaseSync(join(config.backup.dir, b.file), { readOnly: true });
     try { expect(copy.prepare('SELECT value FROM settings WHERE key=?').get('wal-marker')?.value).toBe(JSON.stringify('committed in WAL')); } finally { copy.close(); }
-    expect(getDb()).toBe(live);
-    const before = hash(readFileSync(join(dir, 'mia.db')));
+    expect(getDb()).toBe(live); expect(counts()).toEqual(before);
     const r = await restoreTest(b.id);
     expect(r.restoreTest.ok).toBe(true); expect(r.restoreTestedAt).toBeGreaterThanOrEqual(b.restoreTestedAt!);
-    expect(hash(readFileSync(join(dir, 'mia.db')))).toBe(before); expect(getDb()).toBe(live);
+    expect(counts()).toEqual(before); expect(getDb()).toBe(live);
+    expect(live.prepare('SELECT count(*) n FROM audit_log').get()!.n).toBe(auditBefore + 2);
+    expect(live.prepare('SELECT count(*) n FROM settings').get()!.n).toBe(settingsBefore + 1);
+    expect(verificationPaths).toHaveLength(2);
+    for (const path of verificationPaths) { expect(path).not.toBe(livePath); expect(path).toContain(join(config.dataDir, '.mia-backup-verify-')); }
     expect(JSON.parse(readFileSync(manifestPath(b.id), 'utf8'))).toEqual(r);
     expect(statSync(config.backup.dir).mode & 0o777).toBe(0o700);
     expect(statSync(join(config.backup.dir, b.file)).mode & 0o777).toBe(0o600);
@@ -101,6 +120,66 @@ describe('verified backups', () => {
     expect(readdirSync(config.backup.dir).some((x) => /staging|verify|\.tmp$/.test(x))).toBe(false);
   });
 
+  it('keeps all plaintext staging and verification on the private data disk when encrypted', async () => {
+    process.env.MIA_BACKUP_KEY = randomBytes(32).toString('hex');
+    const paths: string[] = []; const prepare = DatabaseSync.prototype.prepare;
+    vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
+      if (sql === 'SELECT MAX(version) v FROM schema_migrations' || sql === 'PRAGMA integrity_check') {
+        const path = this.location()!; paths.push(path);
+        expect(path).toContain(join(config.dataDir, '.mia-backup-')); expect(path).not.toContain(config.backup.dir);
+        expect(statSync(join(path, '..')).mode & 0o777).toBe(0o700);
+        for (const name of readdirSync(config.backup.dir).filter((n) => n.endsWith('.tmp'))) expect(readFileSync(join(config.backup.dir, name)).subarray(0, 8).toString()).toBe('MIABAK1\0');
+      }
+      return prepare.call(this, sql);
+    });
+    await createBackup(); expect(paths.length).toBeGreaterThanOrEqual(3);
+    expect(readdirSync(config.dataDir).some((name) => name.startsWith('.mia-backup-'))).toBe(false);
+  });
+
+  it.skipIf(!existsSync('/dev/shm'))('promotes encrypted backups across filesystems without renaming the private staging file', async () => {
+    const destination = mkdtempSync('/dev/shm/mia-backup-test-'); config.backup.dir = destination;
+    try {
+      expect(statSync(destination).dev).not.toBe(statSync(config.dataDir).dev);
+      process.env.MIA_BACKUP_KEY = randomBytes(32).toString('hex');
+      const b = await createBackup(); expect(b.restoreTest.ok).toBe(true); expect((await restoreTest(b.id)).restoreTest.ok).toBe(true);
+    } finally { rmSync(destination, { recursive: true, force: true }); }
+  });
+
+  it('syncs the copied payload and directory before promotion, then syncs the manifest and directory', async () => {
+    await createBackup();
+    const copied = vi.mocked(copyFileSync).mock.invocationCallOrder[0];
+    const renamed = vi.mocked(renameSync).mock.invocationCallOrder;
+    const synced = vi.mocked(fsyncSync).mock.invocationCallOrder;
+    const writes = vi.mocked(writeFileSync).mock;
+    const manifestWrite = writes.invocationCallOrder[writes.calls.findIndex(([path]) => /\.json\.[0-9a-f]{8}\.tmp$/.test(String(path)))];
+    expect(synced.filter((n) => n > copied && n < renamed[0])).toHaveLength(2);
+    expect(synced.some((n) => n > renamed[0] && n < manifestWrite)).toBe(true);
+    expect(synced.filter((n) => n > manifestWrite && n < renamed[1])).toHaveLength(2);
+    expect(synced.at(-1)).toBeGreaterThan(renamed[1]);
+  });
+
+  it('rejects a tampered GCM tag even when its stored checksum has been recomputed', async () => {
+    process.env.MIA_BACKUP_KEY = randomBytes(32).toString('hex');
+    const b = await createBackup(); const bytes = readFileSync(join(config.backup.dir, b.file)); bytes[bytes.length - 1] ^= 1;
+    writeFileSync(join(config.backup.dir, b.file), bytes); writeFileSync(manifestPath(b.id), JSON.stringify({ ...b, checksum: hash(bytes) }));
+    expect((await restoreTest(b.id)).restoreTest.error?.code).toBe('DECRYPT');
+  });
+
+  it('binds encrypted bytes to the manifest identity, sequence and schema via GCM AAD', async () => {
+    process.env.MIA_BACKUP_KEY = randomBytes(32).toString('hex');
+    const first = await createBackup(); const second = await createBackup(); const bytes = readFileSync(join(config.backup.dir, first.file));
+    writeFileSync(join(config.backup.dir, second.file), bytes);
+    writeFileSync(manifestPath(second.id), JSON.stringify({ ...second, bytes: bytes.length, checksum: hash(bytes) }));
+    expect((await restoreTest(second.id)).restoreTest.error?.code).toBe('DECRYPT'); expect((await restoreTest(first.id)).restoreTest.ok).toBe(true);
+  });
+
+  it('reports key format as absent, invalid or valid without returning the key', () => {
+    expect(backupStatus().encryptionKeyStatus).toBe('absent');
+    process.env.MIA_BACKUP_KEY = 'invalid-backup-key'; expect(backupStatus().encryptionKeyStatus).toBe('invalid');
+    process.env.MIA_BACKUP_KEY = randomBytes(32).toString('hex'); expect(backupStatus().encryptionKeyStatus).toBe('valid');
+    expect(JSON.stringify(backupStatus())).not.toContain(process.env.MIA_BACKUP_KEY);
+  });
+
   it('rejects malformed keys without creating snapshot files or leaking the value', async () => {
     process.env.MIA_BACKUP_KEY = 'invalid-backup-key';
     await expect(createBackup()).rejects.toMatchObject({ code: 'KEY' });
@@ -127,18 +206,19 @@ describe('verified backups', () => {
   it('retains newest N by sequence, ignores incomplete snapshots and sweeps old staging/tmp files only', async () => {
     config.backup.keep = 2; const first = await createBackup();
     const m = { ...first, createdAt: Date.now() + 3600_000 }; writeFileSync(manifestPath(first.id), JSON.stringify(m));
-    const staging = join(config.backup.dir, '.staging-abandoned'); mkdirSync(staging); writeFileSync(join(staging, 'snapshot.db.tmp'), 'incomplete');
+    const staging = join(config.dataDir, '.mia-backup-staging-Abc123'); mkdirSync(staging); writeFileSync(join(staging, 'snapshot.db.tmp'), 'incomplete');
     const tmp = join(config.backup.dir, 'orphan.tmp'); writeFileSync(tmp, 'incomplete');
-    const recent = join(config.backup.dir, 'recent.tmp'); writeFileSync(recent, 'incomplete');
+    const miaTmp = join(config.backup.dir, 'mia-000009-abcd.db.enc.0123abcd.tmp'); writeFileSync(miaTmp, 'incomplete');
+    const recent = join(config.backup.dir, 'mia-000010-abcd.json.0123abcd.tmp'); writeFileSync(recent, 'incomplete');
     const incomplete = join(config.backup.dir, 'mia-999999-abcd.db'); writeFileSync(incomplete, 'not a completed backup');
     const oldOrphan = join(config.backup.dir, 'mia-000009-abcd.db.enc'); writeFileSync(oldOrphan, 'not a completed backup');
     const unrelated = join(config.backup.dir, 'important.txt'); writeFileSync(unrelated, 'keep');
-    const old = new Date(Date.now() - 11 * 60_000); utimesSync(staging, old, old); utimesSync(tmp, old, old); utimesSync(oldOrphan, old, old);
+    const old = new Date(Date.now() - 11 * 60_000); utimesSync(staging, old, old); utimesSync(tmp, old, old); utimesSync(miaTmp, old, old); utimesSync(oldOrphan, old, old);
     expect(listBackups()).toHaveLength(1); const second = await createBackup(); const third = await createBackup();
     expect(listBackups().map((x) => x.seq)).toEqual([3, 2]);
     expect(existsSync(join(config.backup.dir, first.file))).toBe(false); expect(existsSync(manifestPath(first.id))).toBe(false);
     expect(existsSync(join(config.backup.dir, second.file))).toBe(true); expect(existsSync(join(config.backup.dir, third.file))).toBe(true);
-    expect(existsSync(staging)).toBe(false); expect(existsSync(tmp)).toBe(false); expect(existsSync(recent)).toBe(true);
+    expect(existsSync(staging)).toBe(false); expect(existsSync(tmp)).toBe(true); expect(existsSync(miaTmp)).toBe(false); expect(existsSync(recent)).toBe(true);
     expect(existsSync(unrelated)).toBe(true); expect(existsSync(incomplete)).toBe(true); expect(existsSync(oldOrphan)).toBe(false);
   });
 
@@ -151,13 +231,22 @@ describe('verified backups', () => {
     await expect(restoreTest('../mia.db')).rejects.toMatchObject({ statusCode: 400 });
   });
 
+  it('skips directory-shaped and unreadable manifests instead of failing the list', async () => {
+    const b = await createBackup(); mkdirSync(join(config.backup.dir, 'mia-000002-abcd.json'));
+    const unreadable = join(config.backup.dir, 'mia-000003-abcd.json'); writeFileSync(unreadable, JSON.stringify(b)); chmodSync(unreadable, 0);
+    try { expect(listBackups().map((m) => m.id)).toEqual([b.id]); } finally { chmodSync(unreadable, 0o600); }
+  });
+
   it('rejects overlapping calls in process and a lock held by another connection', async () => {
+    process.env.MIA_BACKUP_KEY = randomBytes(32).toString('hex');
     const one = createBackup(); expect(backupStatus().running).toBe(true);
     await expect(createBackup()).rejects.toMatchObject({ code: 'BUSY', statusCode: 409 }); await one;
     const mutex = new DatabaseSync(join(config.backup.dir, 'mutex.sqlite'));
     try {
       mutex.exec('BEGIN IMMEDIATE');
       await expect(createBackup()).rejects.toMatchObject({ code: 'BUSY', statusCode: 409 });
+      expect(backupStatus().lastError).toBeNull(); expect(backupCheck().status).toBe('PASS');
+      expect(getDb().prepare("SELECT count(*) n FROM notifications WHERE source='backups'").get()?.n).toBe(0);
       mutex.exec('ROLLBACK');
     } finally { mutex.close(); }
     expect(backupStatus().running).toBe(false); await createBackup(); expect(backupStatus().lastError).toBeNull();
@@ -170,7 +259,8 @@ describe('verified backups', () => {
       process.stdin.once('data', () => { db.exec('ROLLBACK'); db.close(); });`, join(config.backup.dir, 'mutex.sqlite')], { stdio: ['pipe', 'pipe', 'ignore'] });
     try { await once(child.stdout, 'data'); await expect(createBackup()).rejects.toMatchObject({ code: 'BUSY', statusCode: 409 }); }
     finally { const exit = once(child, 'exit'); child.stdin.end('release'); await exit; }
-    expect(listBackups()).toHaveLength(1); expect(backupStatus().running).toBe(false);
+    expect(listBackups()).toHaveLength(1); expect(backupStatus().running).toBe(false); expect(backupStatus().lastError).toBeNull();
+    expect(getDb().prepare("SELECT count(*) n FROM notifications WHERE source='backups'").get()?.n).toBe(0);
   });
 
   it('warns on no backup, staleness and clock skew, but fails on an error after success', async () => {
@@ -179,6 +269,29 @@ describe('verified backups', () => {
     writeFileSync(manifestPath(b.id), JSON.stringify({ ...b, createdAt: Date.now() - 3 * config.backup.intervalMs })); expect(backupCheck().status).toBe('WARN');
     writeFileSync(manifestPath(b.id), JSON.stringify({ ...b, createdAt: Date.now() + 3600_000 })); expect(backupCheck()).toMatchObject({ status: 'WARN', detail: expect.stringMatching(/clock/i) });
     setSetting('backup.lastError', { at: Date.now() + 1, code: 'IO', message: 'Backup storage failed' }); expect(backupCheck().status).toBe('FAIL');
+  });
+
+  it('warns when scheduling is disabled or a backup exceeds seven days regardless of the interval', async () => {
+    process.env.MIA_BACKUP_KEY = randomBytes(32).toString('hex'); const b = await createBackup();
+    config.backup.intervalMs = 0; expect(backupCheck()).toMatchObject({ status: 'WARN', detail: expect.stringContaining('automatic backups disabled') });
+    config.backup.intervalMs = 30 * 86400_000;
+    writeFileSync(manifestPath(b.id), JSON.stringify({ ...b, createdAt: Date.now() - 8 * 86400_000 }));
+    expect(backupCheck()).toMatchObject({ status: 'WARN', detail: expect.stringContaining('seven days') });
+  });
+
+  it('keeps a warning for any retained failed test after a newer verified backup succeeds', async () => {
+    process.env.MIA_BACKUP_KEY = randomBytes(32).toString('hex'); const b = await createBackup();
+    const bytes = readFileSync(join(config.backup.dir, b.file)); bytes[40] ^= 1; writeFileSync(join(config.backup.dir, b.file), bytes);
+    expect((await restoreTest(b.id)).restoreTest.ok).toBe(false); await createBackup();
+    expect(backupStatus().lastError).toBeNull();
+    expect(backupCheck()).toMatchObject({ status: 'WARN', detail: expect.stringContaining('retained backup') });
+  });
+
+  it('rejects malformed backup scheduling and retention configuration during startup', () => {
+    for (const [name, value] of [['MIA_BACKUP_INTERVAL_MS', 'not-numeric'], ['MIA_BACKUP_INTERVAL_MS', 'Infinity'], ['MIA_BACKUP_INTERVAL_MS', ''], ['MIA_BACKUP_KEEP', 'not-numeric'], ['MIA_BACKUP_KEEP', '1.5'], ['MIA_BACKUP_KEEP', '0']]) {
+      const r = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', "await import('./src/config.ts')"], { cwd: process.cwd(), env: { ...process.env, [name]: value }, encoding: 'utf8' });
+      expect(r.status, name).not.toBe(0); expect(r.stderr).toContain(name);
+    }
   });
 
   it('only notifies once per failure transition, and again after a recovery', async () => {
@@ -194,13 +307,41 @@ describe('verified backups', () => {
     vi.useFakeTimers(); config.backup.intervalMs = 60_000;
     startBackups(); await vi.advanceTimersByTimeAsync(29_999); expect(listBackups()).toEqual([]);
     await vi.advanceTimersByTimeAsync(1); await vi.waitFor(() => expect(listBackups()).toHaveLength(1));
+    expect(listBackups()[0].restoreTest.integrityCheck).toBe('quick_check');
     await vi.advanceTimersByTimeAsync(60_000); await vi.waitFor(() => expect(listBackups()).toHaveLength(2));
     stopBackups(); await vi.advanceTimersByTimeAsync(120_000); expect(listBackups()).toHaveLength(2);
     config.backup.intervalMs = 0; startBackups(); await vi.advanceTimersByTimeAsync(120_000); expect(listBackups()).toHaveLength(2);
   });
+
+  it('uses quick_check on scheduled snapshots and integrity_check for manual restore tests', async () => {
+    const b = await createBackup(true); expect(b.restoreTest.integrityCheck).toBe('quick_check');
+    expect((await restoreTest(b.id)).restoreTest.integrityCheck).toBe('integrity_check');
+  });
+
+  it('skips scheduler contention without setting an error or notifying', async () => {
+    vi.useFakeTimers(); config.backup.intervalMs = 60_000; await createBackup();
+    const mutex = new DatabaseSync(join(config.backup.dir, 'mutex.sqlite')); mutex.exec('BEGIN IMMEDIATE');
+    try {
+      startBackups(); await vi.advanceTimersByTimeAsync(90_000);
+      expect(listBackups()).toHaveLength(1); expect(backupStatus().lastError).toBeNull();
+      expect(getDb().prepare("SELECT count(*) n FROM notifications WHERE source='backups'").get()?.n).toBe(0);
+    } finally { stopBackups(); mutex.exec('ROLLBACK'); mutex.close(); }
+  });
 });
 
 describe('backup API', () => {
+  it('keeps the Security Center available with DATA-3 FAIL when the backup directory is unusable', async () => {
+    const app = await buildApp();
+    try {
+      const auth = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'backup test owner passphrase' } });
+      const cookie = String(auth.headers['set-cookie']).split(';')[0]; config.backup.dir = join(dir, 'mia.db');
+      const response = await app.inject({ url: '/api/security', headers: { cookie } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().checks.find((c: any) => c.id === 'DATA-3')).toMatchObject({ status: 'FAIL', detail: 'IO: Backup storage operation failed' });
+      expect(response.body).not.toContain(dir);
+    } finally { await app.close(); }
+  });
+
   it('requires session/CSRF, validates ids, exposes no paths or key, and leaves release gates unchanged', async () => {
     const app = await buildApp();
     try {
@@ -219,7 +360,7 @@ describe('backup API', () => {
       expect((await app.inject({ method: 'POST', url: `/api/backups/${b.id}/restore-test`, headers: { cookie } })).statusCode).toBe(403);
       expect((await app.inject({ method: 'POST', url: `/api/backups/${b.id}/restore-test`, headers: h })).json().restoreTest.ok).toBe(true);
       const status = await app.inject({ url: '/api/backups', headers: h }); expect(status.statusCode).toBe(200);
-      expect(status.json()).toMatchObject({ enabled: true, encryptionKeyConfigured: true, running: false, latest: { id: b.id }, check: { status: 'PASS' } });
+      expect(status.json()).toMatchObject({ enabled: true, encryptionKeyStatus: 'valid', running: false, latest: { id: b.id }, check: { status: 'PASS' } });
       expect(status.body).not.toContain(dir); expect(status.body).not.toContain(process.env.MIA_BACKUP_KEY);
       expect((await app.inject({ url: '/api/security', headers: h })).json().checks.find((c: any) => c.id === 'DATA-3').status).toBe('PASS');
       const qaAfter = (await app.inject({ url: '/api/qa', headers: h })).json();

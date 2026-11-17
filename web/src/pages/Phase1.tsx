@@ -81,8 +81,8 @@ export function SecurityCenter() {
       <div className="kv" style={{ margin: '12px 0' }}>
         <span>Schedule</span><span>{backupData ? `${backupData.enabled ? `Every ${fmt.num(backupData.intervalMs / 3600_000, 1)}h` : 'Disabled'} · keep ${backupData.keep}${backupData.running ? ' · running' : ''}` : 'UNKNOWN'}</span>
         <span>Latest</span><span>{latest ? <>{fmt.ago(latest.createdAt)} · {fmt.big(latest.bytes)} bytes · <Badge v={latest.encrypted ? 'ENCRYPTED' : 'PLAINTEXT'} /></> : backupData ? 'No backups yet.' : 'UNKNOWN'}</span>
-        <span>Encryption key</span><span>{backupData ? backupData.encryptionKeyConfigured ? 'Configured' : 'Not configured' : 'UNKNOWN'}</span>
-        <span>Restore verification</span><span><Badge v={verification ? verification.ok ? 'PASS' : 'FAIL' : 'UNKNOWN'} /> {verification ? <>{fmt.time(verification.at)} · integrity {verification.integrity} · schema {verification.schemaVersion ?? 'unknown'}<br />Audit <Badge v={verification.auditOk ? 'OK' : 'FAIL'} /> · {verification.auditEntries} entries · reconciliation <Badge v={verification.reconcileOk ? 'OK' : 'FAIL'} /><div className="hint">{verification.reconcileDetail}</div>{verification.error && <div className="err">{verification.error.code}: {verification.error.message}</div>}</> : backupData ? 'Not tested.' : 'Status unavailable.'}</span>
+        <span>Key format</span><span>{backupData ? <Badge v={backupData.encryptionKeyStatus.toUpperCase()} tone={backupData.encryptionKeyStatus === 'invalid' ? 'b-bad' : 'b-neutral'} /> : 'UNKNOWN'}</span>
+        <span>Restore verification</span><span><Badge v={verification ? verification.ok ? 'PASS' : 'FAIL' : 'UNKNOWN'} /> {verification ? <>{fmt.time(verification.at)} · {verification.integrityCheck ?? 'integrity_check'} {verification.integrity} · schema {verification.schemaVersion ?? 'unknown'}<br />Audit <Badge v={verification.auditOk ? 'OK' : 'FAIL'} /> · {verification.auditEntries} entries · reconciliation <Badge v={verification.reconcileOk ? 'OK' : 'FAIL'} /><div className="hint">{verification.reconcileDetail}</div>{verification.error && <div className="err">{verification.error.code}: {verification.error.message}</div>}</> : backupData ? 'Not tested.' : 'Status unavailable.'}</span>
       </div>
       {backupData?.lastError && <div className="banner stale"><Badge v="FAIL" /> {fmt.time(backupData.lastError.at)} · {backupData.lastError.code}: {backupData.lastError.message}</div>}
       <div className="row" style={{ marginBottom: 12 }}>
@@ -108,10 +108,10 @@ export function SecurityCenter() {
 
 type BackupManifest = {
   id: string; file: string; createdAt: number; bytes: number; encrypted: boolean; restoreTestedAt: number | null;
-  restoreTest: { at: number; ok: boolean; integrity: string; schemaVersion: number | null; auditEntries: number; auditOk: boolean; reconcileOk: boolean; reconcileDetail: string; error: { code: string; message: string } | null } | null;
+  restoreTest: { at: number; ok: boolean; integrity: string; integrityCheck?: string; schemaVersion: number | null; auditEntries: number; auditOk: boolean; reconcileOk: boolean; reconcileDetail: string; error: { code: string; message: string } | null } | null;
 };
 type BackupStatus = {
-  enabled: boolean; intervalMs: number; keep: number; encryptionKeyConfigured: boolean; running: boolean;
+  enabled: boolean; intervalMs: number; keep: number; encryptionKeyStatus: 'valid' | 'invalid' | 'absent'; running: boolean;
   lastError: { at: number; code: string; message: string } | null; latest: BackupManifest | null; backups: BackupManifest[]; check: { status: string; detail: string };
 };
 

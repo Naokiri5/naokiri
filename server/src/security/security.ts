@@ -19,6 +19,8 @@ export function securityOverview(currentToken?: string) {
   const since = Date.now() - 24 * 3600_000;
   const failed24h = get<{ n: number }>("SELECT COUNT(*) n FROM audit_log WHERE action='auth.login.failed' AND ts > ?", since)!.n;
   const chain = verifyAuditChain(); const ctl = getControl(); const gates = releaseGates();
+  let backups: ReturnType<typeof backupCheck>;
+  try { backups = backupCheck(); } catch { backups = { status: 'FAIL', detail: 'IO: Backup storage operation failed' }; }
   const exposed = config.host === '0.0.0.0' || config.host === '::';
   const checks: Check[] = [
     { id: 'AUTH-1', area: 'Authentication', name: 'Owner passphrase set (scrypt)', status: owner ? 'PASS' : 'FAIL', detail: owner ? `created ${new Date(owner.createdAt).toISOString()}` : 'not configured' },
@@ -29,7 +31,7 @@ export function securityOverview(currentToken?: string) {
     { id: 'NET-3', area: 'Network', name: 'API rate limiting', status: 'WARN', detail: 'login lockout only; per-route limits scheduled (SEC-02, Phase 7)' },
     { id: 'DATA-1', area: 'Data', name: 'Audit log integrity', status: chain.ok ? 'PASS' : 'FAIL', detail: `${chain.entries} hash-chained entries${chain.ok ? ' verified' : ` — broken at ${chain.brokenAt}`}` },
     { id: 'DATA-2', area: 'Data', name: 'Database encryption at rest', status: 'WARN', detail: 'SQLite file not encrypted; contains no API keys or private keys (SEC-04)' },
-    { id: 'DATA-3', area: 'Data', name: 'Backups & restore test', ...backupCheck() },
+    { id: 'DATA-3', area: 'Data', name: 'Backups & restore test', ...backups },
     { id: 'SEC-1', area: 'Secrets', name: 'Anthropic API key', status: 'INFO', detail: config.anthropicApiKey ? 'configured (server-side only)' : 'not configured' },
     { id: 'SEC-2', area: 'Secrets', name: 'Telegram bot token', status: 'INFO', detail: config.telegramBotToken ? 'configured (server-side only)' : 'not configured' },
     { id: 'SEC-3', area: 'Secrets', name: 'Evidence-packet signing key', status: process.env.MIA_EVIDENCE_KEY ? 'PASS' : 'WARN', detail: process.env.MIA_EVIDENCE_KEY ? 'fixed key configured' : 'random per process — packets cannot be re-verified after restart (SEC-05)' },

@@ -7,6 +7,10 @@ const env = process.env;
 /** Repository root, derived from this file's location (NOT the shell's cwd), so any launch directory works. */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const dataDir = env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data');
+const backupIntervalMs = Number(env.MIA_BACKUP_INTERVAL_MS ?? 6 * 3600_000);
+const backupKeep = Number(env.MIA_BACKUP_KEEP ?? 14);
+if (!Number.isFinite(backupIntervalMs) || env.MIA_BACKUP_INTERVAL_MS?.trim() === '') throw new Error('MIA_BACKUP_INTERVAL_MS must be a finite number');
+if (!Number.isInteger(backupKeep) || backupKeep < 1 || env.MIA_BACKUP_KEEP?.trim() === '') throw new Error('MIA_BACKUP_KEEP must be a positive integer');
 
 /**
  * Inside containers / Codespaces / dev containers / WSL-forwarded or cloud sessions, a port forwarder connects to the
@@ -24,8 +28,8 @@ export const config = {
   dataDir,
   backup: {
     dir: env.MIA_BACKUP_DIR ? resolve(env.MIA_BACKUP_DIR) : resolve(dataDir, 'backups'),
-    intervalMs: Number(env.MIA_BACKUP_INTERVAL_MS ?? 6 * 3600_000),
-    keep: Math.max(1, Math.floor(Number(env.MIA_BACKUP_KEEP) || 14)),
+    intervalMs: backupIntervalMs,
+    keep: backupKeep,
   },
   /** Disable all outbound polling (tests / offline). */
   offline: env.MIA_OFFLINE === '1',
