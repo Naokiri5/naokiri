@@ -36,6 +36,18 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/BOUNDED_LIVE blocked/);
     expect((await app.inject({ url: '/api/qa', headers: { cookie } })).json().liveAllowed).toBe(false);
   });
+  it('shell carries what the status ribbon needs: server clock, live lock, policy limits, engine cadence', async () => {
+    const before = Date.now();
+    const s = (await app.inject({ url: '/api/shell', headers: { cookie } })).json();
+    expect(s.serverTime).toBeGreaterThanOrEqual(before);
+    expect(s.liveAllowed).toBe(false); expect(s.gates).toMatch(/live execution LOCKED/);
+    const { dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses } = DEFAULT_POLICY;
+    expect(s.riskLimits).toEqual({ dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses });
+    expect(s.account).toMatchObject({ weeklyPnlPct: 0, consecutiveLosses: 0, marksMissing: 0 });
+    expect(s.scanIntervalMs).toBeGreaterThan(0); expect(s.tickerIntervalMs).toBeGreaterThan(0);
+    expect(s.offline).toBe(true); expect(s.bot.running).toBe(false);
+    expect(s.dataHealth.stale).toBe(true); expect(s.dataHealth.tickersAt).toBe(0);
+  });
   it('every GET workspace endpoint responds', async () => {
     for (const u of ['/api/overview', '/api/markets', '/api/scanner', '/api/intelligence', '/api/risk', '/api/bot', '/api/portfolio', '/api/orders', '/api/journal', '/api/calendar', '/api/lab', '/api/news', '/api/whales', '/api/wallet', '/api/connections', '/api/notifications', '/api/settings', '/api/qa', '/api/audit', '/api/joe', '/api/bubbles', '/api/dex', '/api/fx'])
       expect((await app.inject({ url: u, headers: { cookie } })).statusCode, u).toBe(200);

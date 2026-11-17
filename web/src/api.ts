@@ -34,14 +34,19 @@ export function useStream(fn: Handler) { const ref = useRef(fn); ref.current = f
 /** Fetch + auto-refresh on listed stream topics (debounced) and optional interval. */
 export function useApi<T = any>(path: string | null, opts: { topics?: string[]; every?: number } = {}) {
   const [data, setData] = useState<T | null>(null); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(false);
-  const timer = useRef<number | null>(null);
+  /** Monotonic (performance.now()) time the newest successful request was SENT; conservative for freshness checks. */
+  const [requestedAt, setRequestedAt] = useState<number | null>(null);
+  const timer = useRef<number | null>(null); const seq = useRef(0);
   const load = useCallback(async () => {
     if (!path) return; setLoading(true);
-    try { setData(await api<T>(path)); setError(null); } catch (e: any) { setError(e.message); } finally { setLoading(false); }
+    const n = ++seq.current; const sent = performance.now();
+    try { const d = await api<T>(path); if (n !== seq.current) return; setData(d); setError(null); setRequestedAt(sent); }
+    catch (e: any) { if (n === seq.current) setError(e.message); }
+    finally { if (n === seq.current) setLoading(false); }
   }, [path]);
   useEffect(() => { load(); if (!opts.every) return; const t = window.setInterval(load, opts.every); return () => clearInterval(t); }, [load, opts.every]);
   useStream((t) => { if (opts.topics?.includes(t)) { if (timer.current) clearTimeout(timer.current); timer.current = window.setTimeout(load, 600); } });
-  return { data, error, loading, reload: load, setData };
+  return { data, error, loading, requestedAt, reload: load, setData };
 }
 
 export const fmt = {

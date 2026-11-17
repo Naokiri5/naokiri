@@ -5,6 +5,8 @@ import { ErrorLine } from './ui';
 import { JoeDrawer } from './pages/Joe';
 import * as P from './pages';
 import { CommandPalette } from './palette';
+import { StaleBanner, StatusRibbon } from './StatusRibbon';
+import type { ShellDto } from './status';
 import { ALL_PAGES } from './nav';
 import { SideNav, GroupTabs, MobileNav } from './Navigation';
 
@@ -35,7 +37,7 @@ function Login({ setup, onDone }: { setup: boolean; onDone: () => void }) {
 }
 
 function Shell({ onLogout }: { onLogout: () => void }) {
-  const shell = useApi('/api/shell', { topics: ['mode', 'bot', 'notification', 'position', 'health'], every: 15_000 });
+  const shell = useApi<ShellDto>('/api/shell', { topics: ['mode', 'bot', 'notification', 'position', 'health'], every: 15_000 });
   const [palette, setPalette] = useState(false);
   useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
   const [collapsed, setCollapsed] = useState(false); const [mobOpen, setMobOpen] = useState(false); const [joe, setJoe] = useState(false);
@@ -44,7 +46,6 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const loc = useLocation(); useEffect(() => setMobOpen(false), [loc.pathname]);
   useEffect(() => { if (!mobOpen) return; const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobOpen(false); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [mobOpen]);
   const s = shell.data; const nav = useNavigate();
-  const modeCls = s ? (s.control.emergency ? 'EMERGENCY' : s.control.pausedNewOrders ? 'PAUSED' : s.mode === 'OBSERVE' ? 'READ-ONLY' : 'PAPER') : 'READ-ONLY';
   return <div className={`shell ${collapsed ? 'collapsed' : ''}`}>
     <aside className={`side ${mobOpen ? 'open' : ''}`} aria-label="Primary">
       <div className="brand"><div className="logo">M</div><div className="bname"><div style={{ fontWeight: 600 }}>MIA 4.1</div><div className="hint">paper · read-only data</div></div></div>
@@ -53,19 +54,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     </aside>
     <header className="top">
       <button className="ghost sm mob-only" onClick={() => setMobOpen(!mobOpen)} aria-label="Menu">☰</button>
-      <span className={`mode ${modeCls}`} data-m={s?.display} title="Execution mode (Part 9)">{s?.display ?? '…'}</span>
+      <StatusRibbon shell={shell} />
       <Search />
-      <button className="pill" onClick={() => nav('/connections')} title="Market-data health">
-        <span className={`dot ${!s ? 'warn' : s.dataHealth.stale ? 'bad' : s.dataHealth.degraded ? 'warn' : ''}`} />{s ? `${s.dataHealth.live} feeds live${s.dataHealth.stale ? ' · STALE' : ''}` : 'data…'}
-      </button>
-      <button className="pill" onClick={() => nav('/risk')} title="Risk status — opens Risk Center">
-        <span className={`dot ${s && (s.account.drawdownPct > 5 || s.account.dailyPnlPct < -1.5) ? 'bad' : s && !s.policyAccepted ? 'warn' : ''}`} />Risk {s ? `${fmt.num(s.account.openRiskPct, 2)}% open · DD ${fmt.num(s.account.drawdownPct, 1)}%` : ''}
-      </button>
       <button className="pill" onClick={() => nav('/notifications')} aria-label="Notifications">🔔 {s?.unread ?? 0}</button>
       <button className="ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
       <button className="ghost sm" onClick={async () => { await api('/api/auth/logout', { body: {} }).catch(() => {}); onLogout(); }}>Sign out</button>
     </header>
     <main>
+      <StaleBanner shell={shell} />
       {s?.control.emergency && <div className="banner stale">⛔ EMERGENCY STOP active — new orders blocked. Existing positions are still monitored. Resolve in the Risk Center.</div>}
       {s && s.dataHealth.stale && <div className="banner stale">⚠ Market data is stale or disconnected (last update {fmt.ago(s.dataHealth.tickersAt)}). New entries are blocked by the data-quality gate.</div>}
       {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}
