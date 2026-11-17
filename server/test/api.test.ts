@@ -1,11 +1,16 @@
-import { seedInstrument } from './helpers.js';
+import { seedInstrument, seedBacktestFixture } from './helpers.js';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { closeDb, openDb } from '../src/db/db.js';
+import { all, closeDb, openDb } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { DEFAULT_POLICY } from '../src/risk/policy.js';
 import { commandMode, JOE_TOOL_NAMES } from '../src/joe/joe.js';
-import { getControl } from '../src/core/mode.js';
+import { getControl, updateControl } from '../src/core/mode.js';
 import { failureGate } from '../src/core/ratelimit.js';
+import { setStrategyStatus } from '../src/lab/lab.js';
+import { STRATEGIES } from '../src/lab/strategies.js';
+import { quarantined, releaseQuarantine } from '../src/workers/runtime.js';
+import { WORKERS } from '../src/workers/registry.js';
+import { getSetting, setSetting } from '../src/core/settings.js';
 
 describe('HTTP API (auth, permissions, release gate)', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
@@ -47,6 +52,83 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(s.scanIntervalMs).toBeGreaterThan(0); expect(s.tickerIntervalMs).toBeGreaterThan(0);
     expect(s.offline).toBe(true); expect(s.bot.running).toBe(false);
     expect(s.dataHealth.stale).toBe(true); expect(s.dataHealth.tickersAt).toBe(0);
+  });
+  it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {
+    const password = 'correct horse battery'; const id = STRATEGIES[0].id; const worker = WORKERS[0].id;
+    const statusUrl = `/api/lab/strategy/${id}/status`; const releaseUrl = `/api/workers/${worker}/release`;
+    const post = (url: string, payload?: object) => app.inject({ method: 'POST', url, headers: H(), payload });
+    const snapshot = () => ({
+      control: getControl(), strategies: all('SELECT * FROM strategies ORDER BY id'), suspended: getSetting('suspendedStrategies', []), quarantine: [...quarantined].sort(),
+      successes: all("SELECT * FROM audit_log WHERE action IN ('control.update','strategy.status','worker.release') ORDER BY id"),
+    });
+    const denied = async (url: string, payload: object) => {
+      for (const password of [undefined, 'incorrect step-up passphrase']) {
+        const before = snapshot(); const r = await post(url, { ...payload, password });
+        expect(r.statusCode).toBe(403); expect(r.json().error).toMatch(/step-up/); expect(snapshot()).toEqual(before);
+        expect(r.body).not.toContain('incorrect step-up passphrase');
+      }
+    };
+    expect((await post('/api/emergency/pause', {})).statusCode).toBe(200);
+    expect(getControl().pausedNewOrders).toBe(true);
+    await denied('/api/control', { pausedNewOrders: false });
+    expect((await post('/api/control', { pausedNewOrders: false, password })).statusCode).toBe(200);
+    expect(getControl().pausedNewOrders).toBe(false);
+    await denied('/api/control', { pausedNewOrders: false });
+    expect((await post('/api/control', { disabledStrategies: [id] })).statusCode).toBe(200);
+    await denied('/api/control', { disabledStrategies: [] });
+    expect((await post('/api/control', { disabledStrategies: [], password })).statusCode).toBe(200);
+    expect(getControl().disabledStrategies).toEqual([]);
+    expect((await post('/api/emergency/stop', {})).statusCode).toBe(200);
+    expect(getControl()).toMatchObject({ emergency: true, pausedNewOrders: true });
+    await denied('/api/control', { emergency: false, pausedNewOrders: false });
+    expect((await post('/api/control', { emergency: false, pausedNewOrders: false, password })).statusCode).toBe(200);
+    expect(getControl()).toMatchObject({ emergency: false, pausedNewOrders: false });
+
+    expect((await post(statusUrl, { status: 'SUSPENDED' })).statusCode).toBe(200);
+    await denied(statusUrl, { status: 'PAPER' });
+    const noBacktest = await post(statusUrl, { status: 'PAPER', password });
+    expect(noBacktest.statusCode).toBe(400); expect(noBacktest.json().error).toMatch(/backtest/);
+    seedBacktestFixture(id);
+    expect((await post(statusUrl, { status: 'PAPER', password })).statusCode).toBe(200);
+    expect((await app.inject({ url: '/api/lab', headers: { cookie } })).json().strategies.find((s: { id: string; status: string }) => s.id === id).status).toBe('PAPER');
+    expect((await post(statusUrl, { status: 'PAPER' })).statusCode).toBe(200);
+    setSetting('suspendedStrategies', [id]);
+    await denied(statusUrl, { status: 'PAPER' });
+    expect((await post(statusUrl, { status: 'PAPER', password })).statusCode).toBe(200);
+    expect(getSetting<string[]>('suspendedStrategies', [])).not.toContain(id);
+    await denied(statusUrl, { status: 'LIVE_CANDIDATE' });
+    const beforeLive = snapshot(); const live = await post(statusUrl, { status: 'LIVE_CANDIDATE', password });
+    expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/release-gate/); expect(snapshot()).toEqual(beforeLive);
+    for (const status of ['SUSPENDED', 'RETIRED', 'RESEARCH', 'BACKTESTED']) expect((await post(statusUrl, { status })).statusCode).toBe(200);
+
+    quarantined.add(worker);
+    try {
+      const beforeMissingBody = snapshot();
+      expect((await post(releaseUrl)).statusCode).toBe(403); expect(snapshot()).toEqual(beforeMissingBody);
+      await denied(releaseUrl, {});
+      expect((await post(releaseUrl, { password })).statusCode).toBe(200); expect(quarantined.has(worker)).toBe(false);
+      quarantined.add(worker);
+      for (const [url, payload] of [['/api/control', { pausedNewOrders: false, password }], [statusUrl, { status: 'PAPER', password }], [releaseUrl, { password }]] as const) {
+        const before = snapshot();
+        expect((await app.inject({ method: 'POST', url, payload: { ...payload, actor: 'owner' } })).statusCode).toBe(401);
+        expect((await app.inject({ method: 'POST', url, headers: { cookie }, payload })).statusCode).toBe(403);
+        expect(snapshot()).toEqual(before);
+      }
+      expect(() => updateControl('trader-joe', { pausedNewOrders: false })).toThrow(/may not resume/);
+      updateControl('owner', { disabledStrategies: [id] }); const beforeActor = snapshot();
+      expect(() => updateControl('trader-joe', { disabledStrategies: [] })).toThrow(/may not re-enable/);
+      expect(() => updateControl('trader-joe', { disabledStrategies: ['replacement'] })).toThrow(/may not re-enable/);
+      expect(() => setStrategyStatus('trader-joe', id, 'PAPER')).toThrow(/only the owner/);
+      expect(() => setStrategyStatus('trader-joe', id, 'RESEARCH')).toThrow(/only the owner/);
+      expect(() => releaseQuarantine('trader-joe', worker)).toThrow(/only the owner/);
+      expect(snapshot()).toEqual(beforeActor);
+      updateControl('owner', { disabledStrategies: [] });
+      setStrategyStatus('strategy-health-monitor', id, 'SUSPENDED');
+      expect(getSetting<string[]>('suspendedStrategies', [])).toContain(id);
+    } finally { quarantined.delete(worker); }
+    const audit = JSON.stringify(all('SELECT * FROM audit_log'));
+    expect(audit).toContain('auth.stepup.failed'); expect(audit).not.toContain(password); expect(audit).not.toContain('incorrect step-up passphrase');
+    expect(JSON.stringify(getControl())).not.toContain('password');
   });
   it('every GET workspace endpoint responds', async () => {
     for (const u of ['/api/overview', '/api/markets', '/api/scanner', '/api/intelligence', '/api/risk', '/api/bot', '/api/portfolio', '/api/orders', '/api/journal', '/api/calendar', '/api/lab', '/api/news', '/api/whales', '/api/wallet', '/api/connections', '/api/notifications', '/api/settings', '/api/qa', '/api/audit', '/api/joe', '/api/bubbles', '/api/dex', '/api/fx'])

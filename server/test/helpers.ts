@@ -14,9 +14,25 @@ export function synthCandles(n: number, opts: { start?: number; drift?: number; 
 }
 
 import { market } from '../src/market/store.js';
-import { closeDb, openDb, run } from '../src/db/db.js';
+import { closeDb, openDb, run, J } from '../src/db/db.js';
 import { seedStrategies } from '../src/lab/lab.js';
 import type { Instrument } from '../src/market/types.js';
+import { STRATEGIES } from '../src/lab/strategies.js';
+import { stats, type BtResult, type BtTrade } from '../src/lab/backtest.js';
+export function seedBacktestFixture(strategyId = STRATEGIES[0].id) {
+  const strategy = STRATEGIES.find((s) => s.id === strategyId)!;
+  const trade: BtTrade = {
+    entryT: 1, exitT: 2, entry: 100, exit: 101, r: 0.2, reason: 'SYNTHETIC TEST FIXTURE',
+    regime: 'TREND_UP', segment: 'OOS', bars: 1, mfe: 1, mae: 0,
+  };
+  const result: BtResult = {
+    strategyId, strategyVersion: strategy.version, instrument: 'crypto:fixture:SYNTHETIC', interval: strategy.interval,
+    bars: 500, from: 0, to: 3, splitAt: 1, costs: { feeRate: 0.001, slippageBps: 3, spreadBps: 2 },
+    inSample: stats([]), outOfSample: stats([trade]), all: stats([trade]), trades: [trade], equityR: [0.2],
+    warnings: ['Synthetic test fixture — not market data or performance evidence'],
+  };
+  run('INSERT INTO backtests(id,strategy_id,created_at,instrument,interval,result) VALUES (?,?,?,?,?,?)', `bt_fixture_${strategyId}`, strategyId, Date.now(), result.instrument, strategy.interval, J(result));
+}
 export function freshDb(promote = true) {
   closeDb(); openDb(':memory:'); seedStrategies();
   if (promote) run("UPDATE strategies SET status='PAPER'");
