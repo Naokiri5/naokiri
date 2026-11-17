@@ -50,8 +50,22 @@ for (const r of ROUTES) {
   test(`renders ${r}`, async () => {
     await page.goto(r); await expect(page.locator('h1')).toBeVisible(); await page.waitForTimeout(400);
     await expect(page.locator('[role=alert]')).toHaveCount(0); // no API error lines
+    if (r === '/security') await expect(page.getByRole('heading', { name: 'Backups', exact: true })).toBeVisible();
   });
 }
+
+test('security backup creation and isolated restore test', async () => {
+  await page.goto('/security');
+  const card = page.locator('section.card').filter({ has: page.getByRole('heading', { name: 'Backups', exact: true }) });
+  const created = page.waitForResponse((r) => r.url().endsWith('/api/backups') && r.request().method() === 'POST');
+  await card.getByRole('button', { name: 'Back up now', exact: true }).click();
+  const response = await created; expect(response.status()).toBe(200); expect((await response.json()).restoreTest.ok).toBe(true);
+  await expect(card.locator('tbody tr')).toHaveCount(1);
+  const tested = page.waitForResponse((r) => r.url().endsWith('/restore-test') && r.request().method() === 'POST');
+  await card.getByRole('button', { name: 'Run restore test', exact: true }).click();
+  expect((await (await tested).json()).restoreTest.ok).toBe(true);
+  await expect(card.locator('tbody tr .badge').last()).toHaveText('PASS');
+});
 
 test('command palette navigates and runs a risk-reducing action', async () => {
   await page.goto('/'); await expect(page.locator('h1')).toBeVisible(); await page.keyboard.press('Control+k');
@@ -73,6 +87,6 @@ test('no console errors anywhere', async () => { expect(errors, errors.join('\n'
 test('mobile layout has no horizontal overflow', async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
   const m = await ctx.newPage();
-  for (const r of ['/', '/scanner', '/risk', '/qhef', '/history']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
+  for (const r of ['/', '/scanner', '/risk', '/qhef', '/history', '/security']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
   await ctx.close();
 });

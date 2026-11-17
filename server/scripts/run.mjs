@@ -11,8 +11,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const [maj, min] = process.versions.node.split('.').map(Number);
-if (maj < 22 || (maj === 22 && min < 13)) {
-  console.error(`\n✖ MIA requires Node.js 22.13 or newer (found ${process.versions.node}). Install Node 22 LTS or newer.\n`);
+if (maj < 22 || (maj === 22 && min < 16)) {
+  console.error(`\n✖ MIA requires Node.js 22.16 or newer (found ${process.versions.node}). Install Node 22 LTS or newer.\n`);
   process.exit(1);
 }
 const mode = process.argv[2] ?? 'start';

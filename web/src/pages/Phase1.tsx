@@ -53,10 +53,45 @@ export function Qhef() {
 /** Security Center — live checks, sessions, auth events. Never shows secret values. */
 export function SecurityCenter() {
   const { data, error, reload } = useApi('/api/security'); const [pw, setPw] = useState(''); const [area, setArea] = useState('All');
+  const backups = useApi<BackupStatus>('/api/backups', { every: 30_000 });
+  const [backupBusy, setBackupBusy] = useState(false); const [backupError, setBackupError] = useState<string | null>(null);
+  const backupData = backups.error || backupError ? null : backups.data;
+  const latest = backupData?.latest; const verification = latest?.restoreTest;
+  const runBackup = async (restore: boolean) => {
+    const id = backups.data?.latest?.id;
+    if (restore && !id) throw new Error('No backup to test.');
+    setBackupBusy(true); setBackupError(null);
+    let manifest: BackupManifest;
+    try {
+      manifest = await api<BackupManifest>(restore ? `/api/backups/${encodeURIComponent(id!)}/restore-test` : '/api/backups', { body: {} });
+    } catch (e: any) {
+      setBackupError(e.message); throw e;
+    } finally {
+      await Promise.all([backups.reload(), reload()]); setBackupBusy(false);
+    }
+    if (restore && !manifest.restoreTest?.ok) throw new Error(manifest.restoreTest?.error?.message ?? 'Restore test failed. See verification details.');
+  };
   const areas = ['All', ...new Set<string>((data?.checks ?? []).map((c: any) => c.area))];
   const checks = (data?.checks ?? []).filter((c: any) => area === 'All' || c.area === area);
   return <Page title="Security Center" sub="Live security checks, sessions and sign-in activity. Secrets are reported as configured or not, never shown.">
     <ErrorLine e={error} />
+    <div style={{ marginBottom: 14 }}><Card title="Backups" right={<Badge v={!backupData ? 'UNKNOWN' : verification?.ok === false ? 'FAIL' : backupData.check.status} />}>
+      <ErrorLine e={backups.error || backupError} />
+      <div className="hint">{backupData?.check.detail ?? 'Backup status is unknown.'}</div>
+      <div className="kv" style={{ margin: '12px 0' }}>
+        <span>Schedule</span><span>{backupData ? `${backupData.enabled ? `Every ${fmt.num(backupData.intervalMs / 3600_000, 1)}h` : 'Disabled'} · keep ${backupData.keep}${backupData.running ? ' · running' : ''}` : 'UNKNOWN'}</span>
+        <span>Latest</span><span>{latest ? <>{fmt.ago(latest.createdAt)} · {fmt.big(latest.bytes)} bytes · <Badge v={latest.encrypted ? 'ENCRYPTED' : 'PLAINTEXT'} /></> : backupData ? 'No backups yet.' : 'UNKNOWN'}</span>
+        <span>Encryption key</span><span>{backupData ? backupData.encryptionKeyConfigured ? 'Configured' : 'Not configured' : 'UNKNOWN'}</span>
+        <span>Restore verification</span><span><Badge v={verification ? verification.ok ? 'PASS' : 'FAIL' : 'UNKNOWN'} /> {verification ? <>{fmt.time(verification.at)} · integrity {verification.integrity} · schema {verification.schemaVersion ?? 'unknown'}<br />Audit <Badge v={verification.auditOk ? 'OK' : 'FAIL'} /> · {verification.auditEntries} entries · reconciliation <Badge v={verification.reconcileOk ? 'OK' : 'FAIL'} /><div className="hint">{verification.reconcileDetail}</div>{verification.error && <div className="err">{verification.error.code}: {verification.error.message}</div>}</> : backupData ? 'Not tested.' : 'Status unavailable.'}</span>
+      </div>
+      {backupData?.lastError && <div className="banner stale"><Badge v="FAIL" /> {fmt.time(backupData.lastError.at)} · {backupData.lastError.code}: {backupData.lastError.message}</div>}
+      <div className="row" style={{ marginBottom: 12 }}>
+        <Action label="Back up now" disabled={backupBusy || !!backups.data?.running} run={() => runBackup(false)} />
+        <Action label="Run restore test" disabled={backupBusy || !!backups.data?.running || !backups.data?.latest} run={() => runBackup(true)} />
+      </div>
+      <div className="tablewrap" style={{ maxHeight: 220 }}><table><thead><tr><th>Created</th><th>File</th><th className="num">Size</th><th>Encryption</th><th>Restore test</th></tr></thead><tbody>{(backupData?.backups ?? []).map((b) => <tr key={b.id}><td style={{ whiteSpace: 'nowrap' }}>{fmt.time(b.createdAt)}</td><td className="mono">{b.file}</td><td className="num">{fmt.big(b.bytes)} bytes</td><td><Badge v={b.encrypted ? 'ENCRYPTED' : 'PLAINTEXT'} /></td><td><Badge v={b.restoreTest ? b.restoreTest.ok ? 'PASS' : 'FAIL' : 'UNKNOWN'} /> {fmt.time(b.restoreTest?.at ?? b.restoreTestedAt)}</td></tr>)}</tbody></table>{!backupData?.backups.length && <Empty>{backupData ? 'No backups yet.' : 'UNKNOWN — backup list unavailable.'}</Empty>}</div>
+      <div className="hint" style={{ marginTop: 8 }}>Restore tests use a temporary database, never the running one. Recovery is offline; see README → Backups and restore.</div>
+    </Card></div>
     <div className="grid g3" style={{ marginBottom: 14 }}><Stat k="Passing" v={data?.summary.pass ?? '—'} tone="up" /><Stat k="Warnings" v={data?.summary.warn ?? '—'} tone={data?.summary.warn ? 'warn' : undefined} /><Stat k="Failing" v={data?.summary.fail ?? '—'} tone={data?.summary.fail ? 'down' : undefined} /></div>
     <Card title="Security checks" flush right={<select value={area} onChange={(e) => setArea(e.target.value)} aria-label="Area">{areas.map((a) => <option key={a}>{a}</option>)}</select>}>
       <table><tbody>{checks.map((c: any) => <tr key={c.id}><td className="mono faint">{c.id}</td><td>{c.area}</td><td><b>{c.name}</b><div className="hint">{c.detail}</div></td><td><Badge v={c.status} tone={c.status === 'PASS' ? 'b-good' : c.status === 'FAIL' ? 'b-bad' : c.status === 'WARN' ? 'b-warn' : 'b-neutral'} /></td></tr>)}</tbody></table></Card>
@@ -70,6 +105,15 @@ export function SecurityCenter() {
     <Card title="More" className="" ><div className="row"><Link to="/qa">Release gates & audit log →</Link><Link to="/wallet">Withdrawal freeze →</Link><Link to="/risk">Emergency controls →</Link></div></Card>
   </Page>;
 }
+
+type BackupManifest = {
+  id: string; file: string; createdAt: number; bytes: number; encrypted: boolean; restoreTestedAt: number | null;
+  restoreTest: { at: number; ok: boolean; integrity: string; schemaVersion: number | null; auditEntries: number; auditOk: boolean; reconcileOk: boolean; reconcileDetail: string; error: { code: string; message: string } | null } | null;
+};
+type BackupStatus = {
+  enabled: boolean; intervalMs: number; keep: number; encryptionKeyConfigured: boolean; running: boolean;
+  lastError: { at: number; code: string; message: string } | null; latest: BackupManifest | null; backups: BackupManifest[]; check: { status: string; detail: string };
+};
 
 /** Copy Trading — honest dependency state; no simulated wallets. */
 export function CopyTrading() {

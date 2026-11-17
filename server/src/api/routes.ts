@@ -42,6 +42,7 @@ import { securityOverview, revokeOtherSessions } from '../security/security.js';
 import { discover } from '../market/discover.js';
 import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js';
 import { provider } from '../providers/http.js';
+import { backupStatus, createBackup, restoreTest } from '../backup/backup.js';
 
 const COOKIE = 'mia_session';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
@@ -201,6 +202,9 @@ export async function routes(app: FastifyInstance) {
   // ── Phase 1 workspaces ──
   app.get('/api/qhef', async () => qhefReport());
   app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
+  app.get('/api/backups', async () => backupStatus());
+  app.post('/api/backups', async () => createBackup());
+  app.post('/api/backups/:id/restore-test', async (req) => restoreTest(z.object({ id: z.string().regex(/^\d{6}-[0-9a-f]{4}$/) }).parse(req.params).id));
   app.post('/api/security/sessions/revoke-others', async (req) => { stepUp(req.body); return revokeOtherSessions(tokenOf(req)); });
   app.get('/api/discover', async (req) => discover(Number((req.query as any).minVolume ?? 1e6)));
   const histFilter = (q: any): HistoryFilter => z.object({ from: z.coerce.number().int().positive().optional(), to: z.coerce.number().int().positive().optional(),

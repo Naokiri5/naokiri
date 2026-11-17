@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 const env = process.env;
 /** Repository root, derived from this file's location (NOT the shell's cwd), so any launch directory works. */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const dataDir = env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data');
 
 /**
  * Inside containers / Codespaces / dev containers / WSL-forwarded or cloud sessions, a port forwarder connects to the
@@ -20,7 +21,12 @@ export function inContainer() {
 export const config = {
   port: Number(env.MIA_PORT ?? 8787),
   host: env.MIA_HOST ?? (inContainer() ? '0.0.0.0' : '127.0.0.1'),
-  dataDir: env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data'),
+  dataDir,
+  backup: {
+    dir: env.MIA_BACKUP_DIR ? resolve(env.MIA_BACKUP_DIR) : resolve(dataDir, 'backups'),
+    intervalMs: Number(env.MIA_BACKUP_INTERVAL_MS ?? 6 * 3600_000),
+    keep: Math.max(1, Math.floor(Number(env.MIA_BACKUP_KEEP) || 14)),
+  },
   /** Disable all outbound polling (tests / offline). */
   offline: env.MIA_OFFLINE === '1',
   /** Number of deep-tier (T2) instruments to analyze with candles + books. */

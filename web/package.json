@@ -24,6 +24,6 @@
     "react-router-dom": "^7.18.5"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=22.16"
   }
 }

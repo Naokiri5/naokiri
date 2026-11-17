@@ -6,13 +6,14 @@ import { networkInterfaces } from 'node:os';
 import { config, inContainer } from './config.js';
 
 const [maj, min] = process.versions.node.split('.').map(Number);
-if (maj < 22 || (maj === 22 && min < 13)) {
-  console.error(`\n✖ MIA requires Node.js 22.13 or newer (found ${process.versions.node}).\n  It uses the built-in node:sqlite module. Install Node 22 LTS or newer: https://nodejs.org/\n`);
+if (maj < 22 || (maj === 22 && min < 16)) {
+  console.error(`\n✖ MIA requires Node.js 22.16 or newer (found ${process.versions.node}).\n  It uses the built-in node:sqlite module. Install Node 22 LTS or newer: https://nodejs.org/\n`);
   process.exit(1);
 }
 
 const { buildApp } = await import('./index.js');
 const { startBot, stopBot } = await import('./bot/bot.js');
+const { startBackups, stopBackups } = await import('./backup/backup.js');
 
 const app = await buildApp();
 try {
@@ -36,5 +37,6 @@ lines.push(`  ➜ Data:      ${config.dataDir}`, config.offline ? '  ➜ OFFLINE
 console.log(lines.filter(Boolean).join('\n') + '\n');
 
 startBot();
-const shutdown = async () => { stopBot(); await app.close(); process.exit(0); };
+startBackups();
+const shutdown = async () => { stopBackups(); stopBot(); await app.close(); process.exit(0); };
 process.on('SIGINT', shutdown); process.on('SIGTERM', shutdown);

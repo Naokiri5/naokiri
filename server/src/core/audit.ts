@@ -1,4 +1,5 @@
-import { all, get, run } from '../db/db.js';
+import type { DatabaseSync } from 'node:sqlite';
+import { all, get, getDb, run } from '../db/db.js';
 import { sha256, now } from './util.js';
 
 /** Append-only, hash-chained audit log (tamper-evident; Part 24.8 / 29.8). */
@@ -9,8 +10,8 @@ export function audit(actor: string, action: string, detail?: unknown) {
   const hash = sha256(`${prev?.hash ?? 'GENESIS'}|${ts}|${actor}|${action}|${d ?? ''}`);
   run('INSERT INTO audit_log(ts, actor, action, detail, prev_hash, hash) VALUES (?,?,?,?,?,?)', ts, actor, action, d, prev?.hash ?? null, hash);
 }
-export function verifyAuditChain() {
-  const rows = all<any>('SELECT * FROM audit_log ORDER BY id');
+export function verifyAuditChain(db: DatabaseSync = getDb()) {
+  const rows = db.prepare('SELECT * FROM audit_log ORDER BY id').all();
   let prev = 'GENESIS';
   for (const r of rows) {
     const h = sha256(`${prev}|${r.ts}|${r.actor}|${r.action}|${r.detail ?? ''}`);
