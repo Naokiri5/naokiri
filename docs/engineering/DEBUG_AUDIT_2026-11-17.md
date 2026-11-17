@@ -11,7 +11,7 @@ Work order: `MIA_4_1_50_Agent_Debug_Crash_Hunt_Master_Prompt.md`. The 50 "specia
 | Runtime | Node 22.23, Linux cloud container, isolated temp `MIA_DATA_DIR`s, offline providers for regression tests |
 | Top-three risks | **SEC-SETUP** reproduced and fixed with tests. **SEC-LOCKOUT** reproduced and left open for an owner decision. **CERT-EVIDENCE** reproduced; the fix is in Capy's open PR #13 (review notes in §5). |
 | New confirmed defect | **MIA-WEB-001**: sign-out that fails on the network showed the sign-in screen while the server session stayed valid. Reproduced in a real browser and fixed with a browser test. |
-| Batch B | 32 reviewer findings checked, plus 1 found while verifying them; 19 fixed (16 with a regression test). See §8. |
+| Batch B | 32 reviewer findings checked, plus 1 found while verifying them; 19 fixed (14 with an automated regression test; 5 verified by code review or a manual run). See §8. |
 | Overall | Suitable to continue **PAPER-only** development. Not certified for unattended hosted use until SEC-LOCKOUT is decided, PR #13 is completed and a 24 h hosted soak is run. **Real-money execution remains disabled.** |
 
 ## 2. Coverage (honest)
