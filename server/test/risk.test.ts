@@ -77,3 +77,32 @@ describe('Risk gate (Part 17)', () => {
     expect(() => updateControl('trader-joe', { pausedNewOrders: false })).toThrow();
   });
 });
+
+describe('stale position marks fail closed (MIA-RISK-001)', () => {
+  beforeEach(() => { freshDb(); market.reset(); });
+  it('a frozen feed on an open position blocks new entries on other instruments', async () => {
+    const { run } = await import('../src/db/db.js');
+    const { inst: x, last: lx } = seedInstrument('XRPUSDT', { seed: 4 }) as any;
+    const { inst: y, last: ly } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    run(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,planned_risk)
+      VALUES ('pos_x',?,?,'crypto','long','trend_pullback',10,?,?,?,'[]','OPEN',?,0,0,10)`, PAPER_ACCOUNT, x.id, lx, lx * 0.97, lx * 0.97, Date.now());
+    expect(evaluateRisk(prop(y.id, ly)).reasonCodes.join()).not.toMatch(/POSITION_MARKS_MISSING/); // fresh: fine
+    // X stops updating (delisted/halted): its last ticker and book are now 10 minutes old.
+    const old = Date.now() - 600_000;
+    market.tickers.get(x.id)!.receivedAt = old; market.deep.get(x.id)!.book!.ts = old;
+    const r = evaluateRisk(prop(y.id, ly));
+    expect(r.decision).toBe('DENY');
+    expect(r.reasonCodes.join()).toMatch(/POSITION_MARKS_MISSING:crypto:binance:XRPUSDT/);
+    expect(accountState().marksMissing).toEqual([x.id]);
+  });
+  it('a future-dated mark is not trusted either', async () => {
+    const { run } = await import('../src/db/db.js');
+    const { inst: x, last: lx } = seedInstrument('XRPUSDT', { seed: 4 }) as any;
+    run(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,planned_risk)
+      VALUES ('pos_x',?,?,'crypto','long','trend_pullback',10,?,?,?,'[]','OPEN',?,0,0,10)`, PAPER_ACCOUNT, x.id, lx, lx * 0.97, lx * 0.97, Date.now());
+    const t = Date.now() + 60_000; market.tickers.get(x.id)!.receivedAt = t; market.deep.get(x.id)!.book!.ts = t;
+    expect(market.price(x.id)!.ts).toBe(t); // the store still returns it…
+    expect(accountState().marksMissing).toEqual([x.id]); // …but the ledger does not trust it
+  });
+});

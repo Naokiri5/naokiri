@@ -1,6 +1,7 @@
 import { all, get, run } from '../db/db.js';
 import { uid } from '../core/util.js';
 import { market } from '../market/store.js';
+import { quoteAgeOk } from '../market/quality.js';
 import { getSetting, setSetting } from '../core/settings.js';
 
 export const PAPER_ACCOUNT = 'paper-bot';
@@ -28,7 +29,10 @@ export function accountState(account = PAPER_ACCOUNT, nowTs = Date.now()): Accou
   const cash = cashBalance(account); const pos = openPositions(account);
   let value = 0, unreal = 0, openRisk = 0; const missing: string[] = [];
   for (const p of pos) {
-    const m = markPrice(p.instrument);
+    // MIA-RISK-001: a mark must be fresh, not just present. A frozen feed (delisted/halted symbol) used to keep its last
+    // price forever, so equity, loss breakers and open risk were computed from stale data and the gate failed open.
+    // A stale, future-dated or non-positive mark now counts as missing: the gate denies (POSITION_MARKS_MISSING).
+    const px = market.price(p.instrument); const m = px && Number.isFinite(px.price) && px.price > 0 && quoteAgeOk(px.ts, nowTs) ? px.price : null;
     if (m == null) { missing.push(p.instrument); value += p.qty * p.entry_price; continue; }
     value += p.qty * m; unreal += p.qty * (m - p.entry_price);
     openRisk += Math.max(0, p.qty * (Math.min(m, p.entry_price) - p.stop_price));

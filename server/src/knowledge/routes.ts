@@ -8,6 +8,11 @@ import { search, ask, citation } from './search.js';
 import { runExperiment, listExperiments, experimentDetail, compareStrategies, paperExperimentStatus, candleInventory } from './research.js';
 import { memoryOverview } from './memory.js';
 import { domainKnowledge } from './integration.js';
+import { limiter } from '../core/ratelimit.js';
+
+/** MIA-SEC-003: research runs fetch history and replay strategies (CPU + provider requests). They had no limit at all;
+ *  /api/lab/backtest is limited to 6/min, so these match it, and a comparison (every strategy at once) is stricter. */
+export const RESEARCH_LIMITS = { experiment: limiter(6, 2), comparison: limiter(2, 1) };
 
 /**
  * Academy API. Registered inside the authenticated API plugin, so every route inherits the session check and the
@@ -72,11 +77,12 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   const interval = z.enum(['15m', '1h', '4h']);
   app.post('/api/academy/experiments', async (req) => {
     const b = z.object({ kind: z.enum(['volatility_clustering', 'return_autocorrelation', 'strategy_walkforward']), symbol: z.string().regex(/^[A-Z0-9]{5,20}$/), interval, bars: z.number().int().min(500).max(8000).optional(), strategyId: z.string().max(60).optional(), conceptId: id.optional(), seed: z.number().int().min(0).max(2 ** 31).optional() }).strict().parse(req.body);
+    RESEARCH_LIMITS.experiment.take('owner', 'research experiments');
     return runExperiment('owner', b);
   });
   app.get('/api/academy/experiments', async () => listExperiments());
   app.get('/api/academy/experiments/:id', async (req) => experimentDetail(pid(req)) ?? Promise.reject(notFound('experiment')));
-  app.post('/api/academy/strategy-comparison', async (req) => { const b = z.object({ symbol: z.string().regex(/^[A-Z0-9]{5,20}$/), interval: interval.default('1h'), bars: z.number().int().min(1500).max(8000).default(4000) }).strict().parse(req.body); return compareStrategies('owner', b.symbol, b.interval, b.bars); });
+  app.post('/api/academy/strategy-comparison', async (req) => { RESEARCH_LIMITS.comparison.take('owner', 'strategy comparison'); const b = z.object({ symbol: z.string().regex(/^[A-Z0-9]{5,20}$/), interval: interval.default('1h'), bars: z.number().int().min(1500).max(8000).default(4000) }).strict().parse(req.body); return compareStrategies('owner', b.symbol, b.interval, b.bars); });
   app.get('/api/academy/paper-experiment', async () => paperExperimentStatus());
   app.get('/api/academy/candles', async () => candleInventory());
   app.get('/api/academy/memory', async () => memoryOverview());

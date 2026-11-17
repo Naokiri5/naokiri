@@ -1,4 +1,5 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
+import { safeHttpUrl } from '../core/util.js';
 registerProvider({
   id: 'dexscreener', name: 'DEX Screener (public API)', sourceClass: 'dex', markets: ['crypto-dex'],
   license: 'DEX Screener API Terms — rate-limited public use.', realtime: 'NEAR_REALTIME', requiresCredentials: false,
@@ -13,7 +14,7 @@ export interface DexPair {
 }
 function mapPair(p: any): DexPair {
   return {
-    chainId: p.chainId, dexId: p.dexId, pairAddress: p.pairAddress, url: p.url, baseSymbol: p.baseToken?.symbol ?? '?', baseName: p.baseToken?.name ?? '?',
+    chainId: p.chainId, dexId: p.dexId, pairAddress: p.pairAddress, url: safeHttpUrl(p.url), baseSymbol: p.baseToken?.symbol ?? '?', baseName: p.baseToken?.name ?? '?',
     baseAddress: p.baseToken?.address ?? '', quoteSymbol: p.quoteToken?.symbol ?? '?', priceUsd: +(p.priceUsd ?? 0), liquidityUsd: +(p.liquidity?.usd ?? 0),
     fdv: +(p.fdv ?? 0), marketCap: +(p.marketCap ?? 0), volume24h: +(p.volume?.h24 ?? 0), volume1h: +(p.volume?.h1 ?? 0),
     buys24h: +(p.txns?.h24?.buys ?? 0), sells24h: +(p.txns?.h24?.sells ?? 0), buys1h: +(p.txns?.h1?.buys ?? 0), sells1h: +(p.txns?.h1?.sells ?? 0),

@@ -175,11 +175,20 @@ function epub(bytes: Buffer): Extracted {
   const spine = [...opf.matchAll(/<itemref\b[^>]*idref="([^"]+)"/g)].map((m) => manifest.get(m[1])).filter(Boolean) as string[];
   if (!spine.length) throw new ExtractionError('EPUB spine is empty', 'EMPTY');
   const warnings: string[] = []; const units: TextUnit[] = [];
-  spine.forEach((href) => {
-    const name = decodeURIComponent(base + href.split('#')[0]); const e = entries.find((x) => x.name === name);
-    if (!e) { warnings.push(`spine item missing: ${href}`); return; }
-    const t = htmlToText(zipRead(bytes, e).toString('utf8')).text; if (t.trim()) units.push({ page: null, text: t });
-  });
+  // MIA-KB-001: a spine may list the same file many times (a 2 KB EPUB repeating one chapter 120× produced 65 MB of
+  // text). Each file is read once, and inflated bytes and text are budgeted as they accumulate, so an archive is
+  // rejected before it can exhaust memory or block the event loop — not after everything is in memory.
+  const seen = new Set<string>(); let inflated = 0; let chars = 0;
+  for (const href of spine) {
+    const name = decodeURIComponent(base + href.split('#')[0]);
+    if (seen.has(name)) continue; seen.add(name);
+    const e = entries.find((x) => x.name === name);
+    if (!e) { warnings.push(`spine item missing: ${href}`); continue; }
+    inflated += e.size; if (inflated > LIMITS.maxZipTotalBytes) throw new ExtractionError('archive expands beyond the size limit', 'TOO_LARGE');
+    const t = htmlToText(zipRead(bytes, e).toString('utf8')).text;
+    chars += t.length; if (chars > LIMITS.maxTextChars) throw new ExtractionError('extracted text exceeds the size limit', 'TOO_LARGE');
+    if (t.trim()) units.push({ page: null, text: t });
+  }
   if (opf.includes('encryption') || entries.some((x) => x.name === 'META-INF/encryption.xml')) {
     // Encrypted resources decode to binary noise, so judge by readable text, not by whether bytes were present.
     if (!units.some((u) => (u.text.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= 20)) throw new ExtractionError('EPUB content is DRM-encrypted; MIA cannot and will not bypass DRM', 'ENCRYPTED');

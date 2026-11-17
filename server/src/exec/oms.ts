@@ -36,7 +36,8 @@ type Deferred = (() => void)[];
 const floorStep = (q: number, step: number) => (step > 0 ? Number((Math.floor(q / step + 1e-9) * step).toFixed(12)) : q);
 
 /** A quote is usable only when its age is finite, non-negative (not future-dated) and within the execution limit. */
-export const quoteAgeOk = (ts: number | undefined, nowTs: number) => { const age = nowTs - Number(ts); return Number.isFinite(age) && age >= 0 && age <= QUALITY_LIMITS.maxExecQuoteAgeMs; };
+export { quoteAgeOk } from '../market/quality.js'; // moved so the ledger can share it without an import cycle
+import { quoteAgeOk } from '../market/quality.js';
 /** Freshest top-of-book quote for a side; null when missing, non-finite or older than the execution limit. */
 function execQuote(instrumentId: string, side: 'BUY' | 'SELL', nowTs: number) {
   const px = market.price(instrumentId); if (!px) return null;

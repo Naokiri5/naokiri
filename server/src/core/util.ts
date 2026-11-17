@@ -25,3 +25,11 @@ export function withDeadline<T>(p: Promise<T>, ms: number): Promise<T> {
     p.then((v) => { clearTimeout(t); res(v); }, (e) => { clearTimeout(t); rej(e); });
   });
 }
+
+/** Keep a provider-supplied link only if it is an absolute http(s) URL; anything else (javascript:, data:, relative)
+ *  becomes ''. Provider strings are untrusted data and end up in <a href> on the dashboard. */
+export function safeHttpUrl(u: unknown): string {
+  if (typeof u !== 'string' || u.length > 2048) return '';
+  try { const x = new URL(u.trim()); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : ''; } catch { return ''; }
+}
+export const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
