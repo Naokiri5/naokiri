@@ -32,7 +32,8 @@ export function Bot() {
         <StepUp value={pw} onChange={setPw} />
         {!s?.policyAccepted && <div className="hint warn">Accept a risk policy in the <Link to="/risk">Risk Center</Link> before paper execution.</div>}
         <div className="row"><Action className="danger" label="Pause new orders" run={async () => { await api('/api/emergency/pause', { body: {} }); reload(); }} />
-          {s?.paused && !s?.emergency && <Action label="Resume" run={async () => { await api('/api/control', { body: { pausedNewOrders: false } }); reload(); }} />}</div>
+          {s?.paused && !s?.emergency && <Action label="Resume" run={async () => { await api('/api/control', { body: { pausedNewOrders: false, password: pw } }); reload(); }} />}</div>
+        {s?.paused && !s?.emergency && <div className="hint">Resuming needs the owner passphrase above (step-up).</div>}
       </div></Card>
       <Card title="Paper allocation"><div className="col">
         <div className="hint">Funding the paper bot is a simulated deposit into the isolated paper account. It does not authorize trading — the mode does.</div>
@@ -48,12 +49,13 @@ export function Bot() {
     <PositionsTable rows={data?.positions ?? []} onChange={reload} />
     <div style={{ height: 14 }} />
     <Card title="Strategies" right={<Link to="/lab">Strategy Lab →</Link>} flush><table><thead><tr><th>Strategy</th><th>Status</th><th className="num">OOS trades</th><th className="num">OOS expectancy</th><th className="num">Paper trades</th><th className="num">Paper expectancy</th><th>Bot permission</th></tr></thead>
-      <tbody>{(data?.strategies ?? []).map((st: any) => { const disabled = data?.status && (data as any).status && false; void disabled; return <tr key={st.id}><td><b>{st.name}</b> <span className="faint">v{st.version}</span></td><td><Badge v={st.status} /></td><td className="num">{st.stats?.trades ?? '—'}</td><td className="num">{st.stats ? `${st.stats.expectancyR.toFixed(3)}R` : '—'}</td><td className="num">{st.live?.trades ?? 0}</td><td className="num">{st.live ? `${st.live.expectancyR.toFixed(2)}R` : '—'}</td><td><StrategyToggle id={st.id} onChange={reload} /></td></tr>; })}</tbody></table></Card>
+      <tbody>{(data?.strategies ?? []).map((st: any) => { const disabled = data?.status && (data as any).status && false; void disabled; return <tr key={st.id}><td><b>{st.name}</b> <span className="faint">v{st.version}</span></td><td><Badge v={st.status} /></td><td className="num">{st.stats?.trades ?? '—'}</td><td className="num">{st.stats ? `${st.stats.expectancyR.toFixed(3)}R` : '—'}</td><td className="num">{st.live?.trades ?? 0}</td><td className="num">{st.live ? `${st.live.expectancyR.toFixed(2)}R` : '—'}</td><td><StrategyToggle id={st.id} pw={pw} onChange={reload} /></td></tr>; })}</tbody></table></Card>
   </Page>;
 }
-function StrategyToggle({ id, onChange }: { id: string; onChange: () => void }) {
+/** Revoking reduces risk and needs no passphrase; re-enabling increases it and uses the step-up passphrase entered above. */
+function StrategyToggle({ id, pw, onChange }: { id: string; pw: string; onChange: () => void }) {
   const shell = useApi('/api/shell'); const dis: string[] = shell.data?.control.disabledStrategies ?? []; const off = dis.includes(id);
-  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { await api('/api/control', { body: { disabledStrategies: off ? dis.filter((x) => x !== id) : [...dis, id] } }); shell.reload(); onChange(); }} />;
+  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { await api('/api/control', { body: off ? { disabledStrategies: dis.filter((x) => x !== id), password: pw } : { disabledStrategies: [...dis, id] } }); shell.reload(); onChange(); }} />;
 }
 export function PositionsTable({ rows, onChange }: { rows: any[]; onChange: () => void }) {
   return <Card title={`Open positions (${rows.length})`} flush>{rows.length ? <div className="tablewrap"><table><thead><tr><th>Instrument</th><th>Strategy</th><th className="num">Qty</th><th className="num">Entry</th><th className="num">Mark</th><th className="num">Stop</th><th>Targets</th><th className="num">Unrealized</th><th>Opened</th><th /></tr></thead>

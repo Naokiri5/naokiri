@@ -61,8 +61,9 @@ export function addAddress(actor: string, label: string, networkId: string, addr
   audit(actor, 'addressbook.add', { id, networkId, address: v.normalized });
   return { id, warnings: v.warnings };
 }
-export function removeAddress(actor: string, id: string) { if (actor !== 'owner') throw new Error('owner only'); run('DELETE FROM address_book WHERE id=?', id); audit(actor, 'addressbook.remove', { id }); }
-export function verifyAddress(actor: string, id: string) { if (actor !== 'owner') throw new Error('owner only'); run('UPDATE address_book SET verified_at=? WHERE id=?', Date.now(), id); audit(actor, 'addressbook.verify', { id }); }
+const notFound = () => Object.assign(new Error('address not found'), { statusCode: 404 });
+export function removeAddress(actor: string, id: string) { if (actor !== 'owner') throw new Error('owner only'); if (!Number(run('DELETE FROM address_book WHERE id=?', id).changes)) throw notFound(); audit(actor, 'addressbook.remove', { id }); }
+export function verifyAddress(actor: string, id: string) { if (actor !== 'owner') throw new Error('owner only'); if (!Number(run('UPDATE address_book SET verified_at=? WHERE id=?', Date.now(), id).changes)) throw notFound(); audit(actor, 'addressbook.verify', { id }); }
 export const listAddresses = () => all('SELECT * FROM address_book ORDER BY created_at DESC');
 export const withdrawalFrozen = () => getSetting('withdrawalFreeze', false);
 export function setWithdrawalFreeze(actor: string, on: boolean) { if (actor !== 'owner' && !on) throw new Error('only the owner may lift the freeze'); setSetting('withdrawalFreeze', on); audit(actor, 'withdrawal.freeze', { on }); }
@@ -86,7 +87,8 @@ export function previewWithdrawal(actor: string, input: { network: string; asset
   const gate = releaseGates(); if (!gate.liveAllowed) reasons.push('BLOCKED_BY_RELEASE_GATE: no isolated signing service is certified (Part 12.7 / 24.6)');
   const id = uid('wd');
   run('INSERT INTO withdrawal_requests(id,created_at,network,asset,amount,address_id,status,reasons) VALUES (?,?,?,?,?,?,?,?)', id, Date.now(), input.network, input.asset, input.amount, input.addressId, 'BLOCKED_BY_RELEASE_GATE', J(reasons));
-  audit(actor, 'withdrawal.preview', { id, ...input, status: 'BLOCKED_BY_RELEASE_GATE' });
+  // Named fields only: spreading the request body copied the owner's step-up passphrase into the audit log.
+  audit(actor, 'withdrawal.preview', { id, network: input.network, asset: input.asset, amount: input.amount, addressId: input.addressId, status: 'BLOCKED_BY_RELEASE_GATE' });
   return { id, status: 'BLOCKED_BY_RELEASE_GATE', preview: { network: n?.name, asset: input.asset, amount: input.amount, destination: addr?.address ?? null, fee: null, netReceipt: null }, reasons };
 }
 export const listWithdrawals = () => all<any>('SELECT * FROM withdrawal_requests ORDER BY created_at DESC LIMIT 100').map((r) => ({ ...r, reasons: P(r.reasons) }));

@@ -12,10 +12,12 @@ export function Terminal() {
   const watch = useApi('/api/markets', { every: 30_000 });
   const [ana, setAna] = useState<any>(null);
   const t = data?.ticker; const f = data?.features;
+  // The API answers 404 (unknown symbol) / 503 (data not loaded) with a reason; with nothing loaded yet, show it as the banner.
+  const gone: string | null = data?.unavailable ? data.reason : !data && error ? error : null;
   return <Page title={`Market Terminal · ${data?.instrument?.base ?? symbol}`} sub={data?.instrument ? `${data.instrument.symbol} · Binance spot (public market data) · cross-venue checks: ${Object.keys(data.cross).join(', ') || 'none'}` : ''}
-    right={<><Freshness at={t?.receivedAt} label="quote" /><Action className="primary" label="Run full analysis" disabled={!!data?.unavailable} run={async () => setAna(await api('/api/analyze', { body: { symbol } }))} /></>}>
-    <ErrorLine e={error} />
-    {data?.unavailable ? <div className="banner info">No data for {symbol}: {data.reason}</div> :
+    right={<><Freshness at={t?.receivedAt} label="quote" /><Action className="primary" label="Run full analysis" disabled={!!gone} run={async () => setAna(await api('/api/analyze', { body: { symbol } }))} /></>}>
+    <ErrorLine e={gone ? null : error} />
+    {gone ? <div className="banner info">No data for {symbol}: {gone}</div> :
     <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px' }}>
       <div className="col" style={{ gap: 14 }}>
         <Card title={<span className="row"><span className="mono" style={{ fontSize: 18 }}>{fmt.px(t?.last)}</span><Chg v={t?.changePct} /><span className="hint">H {fmt.px(t?.high)} · L {fmt.px(t?.low)} · Vol {fmt.big(t?.quoteVolume)}</span></span>}

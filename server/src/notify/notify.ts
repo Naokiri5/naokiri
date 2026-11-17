@@ -30,4 +30,5 @@ async function sendTelegram(id: string, text: string) {
 const rank = (s: Severity) => ({ INFO: 0, WARNING: 1, CRITICAL: 2 })[s];
 function inQuiet(q: [number, number] | null, s: Severity) { if (!q || s === 'CRITICAL') return false; const h = new Date().getUTCHours(); return q[0] <= q[1] ? h >= q[0] && h < q[1] : h >= q[0] || h < q[1]; }
 export const listNotifications = (limit = 200) => all('SELECT * FROM notifications ORDER BY ts DESC LIMIT ?', limit);
-export const markRead = (id?: string) => (id ? run('UPDATE notifications SET read=1 WHERE id=?', id) : run('UPDATE notifications SET read=1'));
+/** Mark one notification read, or all when `id` is exactly undefined. A falsy-but-present id no longer marks everything. */
+export const markRead = (id?: string) => (id === undefined ? run('UPDATE notifications SET read=1') : run('UPDATE notifications SET read=1 WHERE id=?', id));

@@ -4,6 +4,7 @@ import { buildApp } from '../src/index.js';
 import { DEFAULT_POLICY } from '../src/risk/policy.js';
 import { commandMode, JOE_TOOL_NAMES } from '../src/joe/joe.js';
 import { getControl } from '../src/core/mode.js';
+import { failureGate } from '../src/core/ratelimit.js';
 
 describe('HTTP API (auth, permissions, release gate)', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
@@ -43,5 +44,54 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     await commandMode('pause'); expect(getControl().pausedNewOrders).toBe(true);
     const r = await app.inject({ method: 'POST', url: '/api/joe', headers: H(), payload: { message: 'help' } });
     expect(r.json().mode).toBe('COMMAND');
+  });
+});
+
+describe('HTTP hardening (auth gate, validation, error classes, step-up limits)', () => {
+  let app: Awaited<ReturnType<typeof buildApp>>; let cookie = ''; const PW = 'hardening passphrase';
+  const H = () => ({ cookie, 'x-mia-csrf': '1' });
+  beforeAll(async () => {
+    closeDb(); openDb(':memory:'); failureGate.reset(); app = await buildApp();
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: PW } }); cookie = String(r.headers['set-cookie']).split(';')[0];
+  });
+  it('a percent-encoded path cannot skip the session check', async () => {
+    for (const url of ['/%61pi/shell', '/%61pi/audit', '/%2561pi/audit', '/api/%61udit']) {
+      const r = await app.inject({ url });
+      // 401 (gate), 404 (no route) or the 503 'UI not built' page are all refusals; what matters is no data leaks.
+      expect(r.statusCode, url).not.toBe(200);
+      expect(r.body, url).not.toContain('"action"');
+    }
+    expect((await app.inject({ method: 'POST', url: '/%61pi/emergency/stop', headers: { 'x-mia-csrf': '1' } })).statusCode).not.toBe(200);
+  });
+  it('health stays public with a query string', async () => {
+    expect((await app.inject({ url: '/api/health?probe=1' })).statusCode).toBe(200);
+  });
+  it('invalid query parameters are 400 with a message, not a crash or an empty 200', async () => {
+    for (const url of ['/api/instrument/BTCUSDT?interval=5m', '/api/instrument/BTCUSDT?interval=__proto__', '/api/bubbles?limit=abc', '/api/bubbles?minVolume=-1', '/api/discover?minVolume=x', '/api/calendar?month=2026-13', '/api/calendar?month=foo']) {
+      const r = await app.inject({ url, headers: { cookie } });
+      expect(r.statusCode, url).toBe(400); expect(typeof r.json().error, url).toBe('string');
+    }
+    expect((await app.inject({ url: '/api/calendar?month=2026-01', headers: { cookie } })).statusCode).toBe(200);
+  });
+  it('unknown resources are 404 and unknown emergency actions are 404', async () => {
+    expect((await app.inject({ method: 'POST', url: '/api/emergency/launch', headers: H(), payload: {} })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'POST', url: '/api/analyze', headers: H(), payload: { symbol: 'NOPEUSDT' } })).statusCode).toBe(404);
+  });
+  it('resuming after a pause needs the passphrase', async () => {
+    expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { pausedNewOrders: true } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { pausedNewOrders: false } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { pausedNewOrders: false, password: PW } })).statusCode).toBe(200);
+  });
+  it('step-up guesses are rate limited like logins (429 with Retry-After)', async () => {
+    failureGate.reset();
+    for (let i = 0; i < 5; i++) expect((await app.inject({ method: 'POST', url: '/api/wallet/freeze', headers: H(), payload: { on: false, password: `guess-${i}` } })).statusCode).toBe(403);
+    const locked = await app.inject({ method: 'POST', url: '/api/wallet/freeze', headers: H(), payload: { on: false, password: PW } });
+    expect(locked.statusCode).toBe(429); expect(Number(locked.headers['retry-after'])).toBeGreaterThan(0);
+    failureGate.reset();
+  });
+  it('API responses are not cacheable and the CSP forbids framing', async () => {
+    const r = await app.inject({ url: '/api/shell', headers: { cookie } });
+    expect(r.headers['cache-control']).toBe('no-store');
+    expect(String(r.headers['content-security-policy'])).toContain("frame-ancestors 'none'");
   });
 });
