@@ -162,3 +162,18 @@ test('mobile layout has no horizontal overflow', async ({ browser }) => {
   await expect(m.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=live]')).toBeInViewport();
   await ctx.close();
 });
+
+test('sign-out that fails on the network keeps the session and says so (MIA-WEB-001)', async () => {
+  await page.goto('/');
+  await page.route('**/api/auth/logout', (r) => r.abort('failed'));
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Sign-out failed' })).toBeVisible();
+  await expect(page.locator('.mode')).toBeVisible(); // still in the app, matching the server session
+  expect((await page.evaluate(async () => (await fetch('/api/auth/state')).json())).authenticated).toBe(true);
+  await page.unroute('**/api/auth/logout');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  expect((await page.evaluate(async () => (await fetch('/api/auth/state')).json())).authenticated).toBe(false);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible(); // a reload does not sign back in
+});

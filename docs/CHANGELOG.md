@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased: Debug audit Batch A (2026-11-17)
+- **SEC-13 fixed.** First-owner setup from a non-local browser (forwarded port, container, LAN) now needs a one-time code printed in the server console. A loopback socket that carries proxy headers counts as remote. Tests: `server/test/auth-setup.test.ts`, `e2e/auth.spec.ts`.
+- **MIA-WEB-001 fixed.** Sign-out only leaves the app after the server confirms; a failed sign-out says the session is still active.
+- **Audit report.** `docs/engineering/DEBUG_AUDIT_2026-11-17.md` holds the bug register, the CR-01–CR-20 matrix, and review notes for Capy PR #13.
+- **SEC-14 (global lockout) reproduced** and left open for an owner decision.
+
 ## Unreleased: Autopilot Phase 1 (24/7 PAPER-only server)
 - **Single-runner engine lease.** Migration v5 adds `runtime_leases`. Only the lease holder scans and manages paper positions, and a second copy waits on STANDBY.
 - **Readiness.** `GET /api/ready` is unauthenticated and returns 200 or 503.

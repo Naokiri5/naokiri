@@ -43,7 +43,7 @@ import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.j
 import { all, get, P } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
-import { config, inContainer } from '../config.js';
+import { config } from '../config.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { qhefReport } from '../qhef/qhef.js';
 import { securityOverview, revokeOtherSessions } from '../security/security.js';
@@ -122,12 +122,21 @@ export async function routes(app: FastifyInstance) {
   // Readiness (unauthenticated, states and ages only): 200 when every check passes, 503 otherwise.
   app.get('/api/ready', async (_req, reply) => { const r = readiness(botStatus); return reply.code(r.ready ? 200 : 503).send(r); });
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
-  app.get('/api/auth/state', async (req) => ({ setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)) }));
+  app.get('/api/auth/state', async (req) => {
+    const codeRequired = !auth.isSetup() && setupAccess(req) === 'code';
+    if (codeRequired) auth.ensureSetupCode(); // created (and printed once) on the first remote visit
+    return { setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: codeRequired };
+  });
   app.post('/api/auth/setup', async (req, reply) => {
-    // First-run setup is only accepted from this machine: on a 0.0.0.0 bind any visitor could otherwise claim ownership.
-    // Containers/Codespaces reach MIA through a port forwarder (never loopback), so they are allowed too.
-    if (!auth.isSetup() && !isLoopback(req.ip) && !inContainer() && process.env.MIA_ALLOW_REMOTE_SETUP !== '1') throw httpError(403, 'first-time setup must be done from the machine running MIA (open http://localhost:' + config.port + '/), or set MIA_ALLOW_REMOTE_SETUP=1');
-    const { password } = z.object({ password: PW }).parse(req.body); auth.setupOwner(password); return issue(reply, auth.login(password, req.ip));
+    // SEC-SETUP: first-run setup is open only to a direct loopback connection (no proxy headers) or when the owner
+    // explicitly sets MIA_ALLOW_REMOTE_SETUP=1. Everyone else — including forwarded ports and containers, which used to
+    // be allowed by location alone — must enter the one-time code printed in the server console.
+    const { password, setupCode } = z.object({ password: PW, setupCode: z.string().max(64).optional() }).strict().parse(req.body);
+    if (!auth.isSetup() && setupAccess(req) === 'code') {
+      auth.ensureSetupCode();
+      if (!auth.checkSetupCode(setupCode)) { audit('anonymous', 'auth.setup.code_rejected', { ip: req.ip }); throw httpError(403, 'first-time setup from another device needs the one-time setup code printed in the MIA server console (terminal or service log)'); }
+    }
+    auth.setupOwner(password); auth.clearSetupCode(); return issue(reply, auth.login(password, req.ip));
   });
   app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip)); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
@@ -338,3 +347,9 @@ export async function routes(app: FastifyInstance) {
 }
 const slim = (r: any) => ({ id: r.id, asset: r.asset, instrumentId: r.instrumentId, strategy: r.strategy, regime: r.regime, decision: r.decision, finalDecision: r.finalDecision, score: r.opportunity.score, consensus: r.consensus, createdAt: r.createdAt, entryCondition: r.entryCondition, invalidation: r.invalidation, stopLoss: r.stopLoss, takeProfit: r.takeProfit, risk: r.risk ? { decision: r.risk.decision, reasonCodes: r.risk.reasonCodes } : null, missing: r.missingInformation });
 const isLoopback = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+/** A loopback socket carrying proxy headers is a forwarded remote visitor (port forwarder, reverse proxy), not a local one. */
+const PROXY_HEADERS = ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip'];
+const isDirectLocal = (req: FastifyRequest) => isLoopback(req.ip) && !PROXY_HEADERS.some((h) => req.headers[h] !== undefined);
+function setupAccess(req: FastifyRequest): 'open' | 'code' {
+  return isDirectLocal(req) || process.env.MIA_ALLOW_REMOTE_SETUP === '1' ? 'open' : 'code';
+}

@@ -12,17 +12,17 @@ import { SideNav, GroupTabs, MobileNav } from './Navigation';
 
 
 export default function App() {
-  const [auth, setAuth] = useState<{ setup: boolean; authenticated: boolean } | null>(null);
+  const [auth, setAuth] = useState<{ setup: boolean; authenticated: boolean; setupCodeRequired?: boolean } | null>(null);
   useEffect(() => { api('/api/auth/state').then(setAuth).catch(() => setAuth({ setup: true, authenticated: false })); const f = () => setAuth((a) => (a ? { ...a, authenticated: false } : a)); window.addEventListener('mia:unauthorized', f); return () => window.removeEventListener('mia:unauthorized', f); }, []);
   useEffect(() => { if (auth?.authenticated) connectStream(); else disconnectStream(); }, [auth?.authenticated]);
   if (!auth) return null;
-  if (!auth.authenticated) return <Login setup={auth.setup} onDone={() => setAuth({ setup: true, authenticated: true })} />;
+  if (!auth.authenticated) return <Login setup={auth.setup} codeRequired={!!auth.setupCodeRequired} onDone={() => setAuth({ setup: true, authenticated: true })} />;
   return <Shell onLogout={() => setAuth({ setup: true, authenticated: false })} />;
 }
 
-function Login({ setup, onDone }: { setup: boolean; onDone: () => void }) {
-  const [p, setP] = useState(''); const [p2, setP2] = useState(''); const [err, setErr] = useState<string | null>(null);
-  const submit = async (e: React.FormEvent) => { e.preventDefault(); setErr(null); if (!setup && p !== p2) return setErr('passphrases do not match'); try { await api(setup ? '/api/auth/login' : '/api/auth/setup', { body: { password: p } }); onDone(); } catch (x: any) { setErr(x.message); } };
+function Login({ setup, codeRequired, onDone }: { setup: boolean; codeRequired: boolean; onDone: () => void }) {
+  const [p, setP] = useState(''); const [p2, setP2] = useState(''); const [code, setCode] = useState(''); const [err, setErr] = useState<string | null>(null);
+  const submit = async (e: React.FormEvent) => { e.preventDefault(); setErr(null); if (!setup && p !== p2) return setErr('passphrases do not match'); try { await api(setup ? '/api/auth/login' : '/api/auth/setup', { body: setup || !codeRequired ? { password: p } : { password: p, setupCode: code } }); onDone(); } catch (x: any) { setErr(x.message); } };
   return <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 16 }}>
     <form onSubmit={submit} className="card" style={{ width: 'min(400px, 100%)' }}>
       <div className="hd"><div className="row"><div className="logo">M</div><h2>MIA 4.1 {setup ? 'Sign in' : 'Owner setup'}</h2></div></div>
@@ -30,6 +30,8 @@ function Login({ setup, onDone }: { setup: boolean; onDone: () => void }) {
         {!setup && <div className="hint">Create the owner passphrase (≥10 characters). It protects mode changes, risk limits and withdrawals. MIA never asks for seed phrases or private keys.</div>}
         <label className="col" style={{ gap: 4 }}>Passphrase<input type="password" autoFocus value={p} onChange={(e) => setP(e.target.value)} autoComplete={setup ? 'current-password' : 'new-password'} /></label>
         {!setup && <label className="col" style={{ gap: 4 }}>Confirm<input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" /></label>}
+        {!setup && codeRequired && <label className="col" style={{ gap: 4 }}>Setup code<input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" spellCheck={false} placeholder="XXXXX-XXXXX-XXXXX-XXXXX" />
+          <span className="hint">You are not on the machine running MIA, so creating the owner needs the one-time code printed in the MIA server console (the terminal running <code>npm start</code>, or the service log).</span></label>}
         <ErrorLine e={err} /><button className="primary" type="submit">{setup ? 'Sign in' : 'Create owner'}</button>
       </div>
     </form>
@@ -37,6 +39,10 @@ function Login({ setup, onDone }: { setup: boolean; onDone: () => void }) {
 }
 
 function Shell({ onLogout }: { onLogout: () => void }) {
+  // Sign out only after the server confirms the session is gone. A failed request used to show the sign-in screen while
+  // the HttpOnly session cookie stayed valid, so a reload silently signed the user back in (MIA-WEB-001).
+  const [signOutErr, setSignOutErr] = useState<string | null>(null);
+  const signOut = async () => { setSignOutErr(null); try { await api('/api/auth/logout', { body: {} }); onLogout(); } catch (e: any) { setSignOutErr(e?.message ?? 'network error'); } };
   const shell = useApi<ShellDto>('/api/shell', { topics: ['mode', 'bot', 'notification', 'position', 'health'], every: 15_000 });
   const [palette, setPalette] = useState(false);
   useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
@@ -58,10 +64,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       <Search />
       <button className="pill" onClick={() => nav('/notifications')} aria-label="Notifications">🔔 {s?.unread ?? 0}</button>
       <button className="ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
-      <button className="ghost sm" onClick={async () => { await api('/api/auth/logout', { body: {} }).catch(() => {}); onLogout(); }}>Sign out</button>
+      <button className="ghost sm" onClick={signOut}>Sign out</button>
     </header>
     <main>
       <StaleBanner shell={shell} />
+      {signOutErr && <div className="banner stale" role="alert">Sign-out failed ({signOutErr}). You are still signed in on the server — try again before leaving this device.</div>}
       {s?.control.emergency && <div className="banner stale">⛔ EMERGENCY STOP active — new orders blocked. Existing positions are still monitored. Resolve in the Risk Center.</div>}
       {s && s.dataHealth.stale && <div className="banner stale">⚠ Market data is stale or disconnected (last update {fmt.ago(s.dataHealth.tickersAt)}). New entries are blocked by the data-quality gate.</div>}
       {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}

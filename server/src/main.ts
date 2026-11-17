@@ -36,6 +36,8 @@ if (config.host === '0.0.0.0' || config.host === '::') {
 lines.push(`  ➜ Data:      ${config.dataDir}`, config.offline ? '  ➜ OFFLINE mode: market data polling disabled' : '');
 console.log(lines.filter(Boolean).join('\n') + '\n');
 
+// SEC-SETUP: until an owner exists, print the one-time code a non-local browser needs to create one.
+{ const auth = await import('./api/auth.js'); if (!auth.isSetup()) auth.ensureSetupCode(true); }
 startBot();
 // Graceful drain: stop starting lanes, let in-flight ones finish, release the engine lease, stop HTTP, close SQLite.
 // A second signal (or a stuck drain past the hard limit) exits immediately; the lease then simply expires.

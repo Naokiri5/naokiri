@@ -60,6 +60,11 @@ Development with hot reload: `npm run dev` starts the backend (8787) and Vite (h
 `MIA_HOST` and `MIA_PORT` always override the defaults. Binding `0.0.0.0` exposes the login page to the network; MIA
 requires the owner passphrase for every API call, but put it behind TLS before exposing it beyond a trusted network.
 
+**First-time setup from another device.** If you open MIA through a forwarded URL, a container or another computer, the
+setup screen asks for a **setup code**. It is printed in the terminal running MIA (or the service log) as
+`First-time setup code: XXXXX-XXXXX-XXXXX-XXXXX`. Only someone who can see the server output can create the owner, so a
+stranger who finds the URL first cannot. Setup in a browser on the same machine (`http://localhost:8787/`) needs no code.
+
 ### Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -67,6 +72,7 @@ requires the owner passphrase for every API call, but put it behind TLS before e
 | `✖ Port 8787 is already in use` | another MIA instance or program | stop it, or `MIA_PORT=8788 npm start` (PowerShell: `$env:MIA_PORT=8788; npm start`) |
 | Browser shows "connection refused" via a forwarded port | server bound to loopback only | `MIA_HOST=0.0.0.0 npm start` |
 | Page says "MIA API is running … UI not built" | `web/dist` missing | `npm run build` |
+| Setup screen asks for a setup code | you are not on the machine running MIA | copy the code from the MIA terminal or service log (`journalctl -u mia`) |
 | `✖ MIA requires Node.js 22.13 or newer` | old Node | install Node 22 LTS+ (`nvm use`) |
 | `✖ Dependencies are not installed` | skipped `npm install` | run `npm install` in the repository root |
 | Market data never loads behind a corporate proxy | proxy env | set `HTTPS_PROXY`; the launcher enables `NODE_USE_ENV_PROXY` for Node's fetch |
