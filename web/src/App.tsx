@@ -5,7 +5,7 @@ import { ErrorLine } from './ui';
 import { JoeDrawer } from './pages/Joe';
 import * as P from './pages';
 import { CommandPalette } from './palette';
-import { StatusRibbon, useRibbon } from './StatusRibbon';
+import { StaleBanner, StatusRibbon } from './StatusRibbon';
 import type { ShellDto } from './status';
 
 const NAV: { grp: string; items: [string, string, string][] }[] = [
@@ -49,7 +49,6 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('mia-theme', theme); } catch { /* */ } }, [theme]);
   const loc = useLocation(); useEffect(() => setMobOpen(false), [loc.pathname]);
   const s = shell.data; const nav = useNavigate();
-  const ribbon = useRibbon(shell);
   return <div className={`shell ${collapsed ? 'collapsed' : ''}`}>
     <aside className={`side ${mobOpen ? 'open' : ''}`} aria-label="Primary">
       <div className="brand"><div className="logo">M</div><div className="bname"><div style={{ fontWeight: 600 }}>MIA 4.1</div><div className="hint">paper · read-only data</div></div></div>
@@ -58,14 +57,14 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     </aside>
     <header className="top">
       <button className="ghost sm mob-only" onClick={() => setMobOpen(!mobOpen)} aria-label="Menu">☰</button>
-      <StatusRibbon model={ribbon} shell={s} onRetry={shell.reload} />
+      <StatusRibbon shell={shell} />
       <Search />
       <button className="pill" onClick={() => nav('/notifications')} aria-label="Notifications">🔔 {s?.unread ?? 0}</button>
       <button className="ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
       <button className="ghost sm" onClick={async () => { await api('/api/auth/logout', { body: {} }).catch(() => {}); onLogout(); }}>Sign out</button>
     </header>
     <main>
-      {ribbon.stale && <div className="banner stale" role="alert">⚠ Lost contact with the MIA server — status last confirmed {ribbon.lastConfirmedAgo ?? 'never'} ago. Everything on screen may be out of date; nothing here is live until the link recovers.</div>}
+      <StaleBanner shell={shell} />
       {s?.control.emergency && <div className="banner stale">⛔ EMERGENCY STOP active — new orders blocked. Existing positions are still monitored. Resolve in the Risk Center.</div>}
       {s && s.dataHealth.stale && <div className="banner stale">⚠ Market data is stale or disconnected (last update {fmt.ago(s.dataHealth.tickersAt)}). New entries are blocked by the data-quality gate.</div>}
       {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}

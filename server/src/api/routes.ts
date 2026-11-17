@@ -73,6 +73,7 @@ export async function routes(app: FastifyInstance) {
   // ── live stream (SSE) ──
   app.get('/api/stream', (req, reply) => {
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
+    reply.raw.write(': connected\n\n'); // flush headers now so the browser's EventSource reports open before the first event
     const send = (e: { topic: string; payload: unknown }) => reply.raw.write(`event: ${e.topic}\ndata: ${JSON.stringify(e.payload)}\n\n`);
     bus.on('*', send); const ka = setInterval(() => reply.raw.write(': ka\n\n'), 20_000);
     req.raw.on('close', () => { bus.off('*', send); clearInterval(ka); });
@@ -82,10 +83,10 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/shell', async () => {
     const ctl = getControl(); const acct = accountState(); const pv = providers(); const gates = releaseGates(); const pol = currentPolicy()?.policy;
     const stale = market.tickersFetchedAt ? Date.now() - market.tickersFetchedAt > 60_000 : true;
-    return { mode: ctl.mode, display: displayMode(ctl), control: ctl, bot: botStatusView(), account: { equity: acct.equity, dailyPnlPct: acct.dailyPnlPct, drawdownPct: acct.drawdownPct, openRiskPct: acct.openRiskPct, openCount: acct.openCount, deposits: acct.deposits },
-      policyAccepted: !!pol, riskLimits: pol ? { dailyLossPct: pol.dailyLossPct, drawdownWarnPct: pol.drawdownWarnPct, drawdownHaltPct: pol.drawdownHaltPct, maxOpenRiskPct: pol.maxOpenRiskPct } : null,
+    return { mode: ctl.mode, display: displayMode(ctl), control: ctl, bot: botStatusView(), account: { equity: acct.equity, dailyPnlPct: acct.dailyPnlPct, weeklyPnlPct: acct.weeklyPnlPct, drawdownPct: acct.drawdownPct, openRiskPct: acct.openRiskPct, openCount: acct.openCount, deposits: acct.deposits, consecutiveLosses: acct.consecutiveLosses, marksMissing: acct.marksMissing.length },
+      policyAccepted: !!pol, riskLimits: pol ? { dailyLossPct: pol.dailyLossPct, weeklyLossPct: pol.weeklyLossPct, drawdownWarnPct: pol.drawdownWarnPct, drawdownHaltPct: pol.drawdownHaltPct, maxOpenRiskPct: pol.maxOpenRiskPct, maxConsecutiveLosses: pol.maxConsecutiveLosses } : null,
       dataHealth: { stale, tickersAt: market.tickersFetchedAt, scanAt: market.lastScanAt, live: pv.filter((p) => p.status === 'LIVE').length, degraded: pv.filter((p) => p.status === 'DEGRADED' || p.status === 'DOWN').length },
-      unread: get<{ n: number }>('SELECT COUNT(*) n FROM notifications WHERE read=0')!.n, gates: gates.summary, liveAllowed: gates.liveAllowed, offline: config.offline, scanIntervalMs: config.scanIntervalMs, serverTime: Date.now() };
+      unread: get<{ n: number }>('SELECT COUNT(*) n FROM notifications WHERE read=0')!.n, gates: gates.summary, liveAllowed: gates.liveAllowed, offline: config.offline, scanIntervalMs: config.scanIntervalMs, tickerIntervalMs: config.tickerIntervalMs, serverTime: Date.now() };
   });
   app.get('/api/overview', async () => {
     const b = bubbleMap({ limit: 60 }); const btc = market.deep.get('crypto:binance:BTCUSDT')?.engines['1h'].last ?? null;

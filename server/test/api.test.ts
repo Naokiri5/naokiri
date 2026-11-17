@@ -36,8 +36,10 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     const s = (await app.inject({ url: '/api/shell', headers: { cookie } })).json();
     expect(s.serverTime).toBeGreaterThanOrEqual(before);
     expect(s.liveAllowed).toBe(false); expect(s.gates).toMatch(/live execution LOCKED/);
-    expect(s.riskLimits).toEqual({ dailyLossPct: DEFAULT_POLICY.dailyLossPct, drawdownWarnPct: DEFAULT_POLICY.drawdownWarnPct, drawdownHaltPct: DEFAULT_POLICY.drawdownHaltPct, maxOpenRiskPct: DEFAULT_POLICY.maxOpenRiskPct });
-    expect(s.scanIntervalMs).toBeGreaterThan(0);
+    const { dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses } = DEFAULT_POLICY;
+    expect(s.riskLimits).toEqual({ dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses });
+    expect(s.account).toMatchObject({ weeklyPnlPct: 0, consecutiveLosses: 0, marksMissing: 0 });
+    expect(s.scanIntervalMs).toBeGreaterThan(0); expect(s.tickerIntervalMs).toBeGreaterThan(0);
     expect(s.offline).toBe(true); expect(s.bot.running).toBe(false);
     expect(s.dataHealth.stale).toBe(true); expect(s.dataHealth.tickersAt).toBe(0);
   });

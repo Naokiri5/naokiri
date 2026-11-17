@@ -25,6 +25,19 @@ test('owner setup and sign-in', async () => {
   await expect(page.getByText('Market data is stale or disconnected')).toBeVisible(); // offline ⇒ honest stale banner
 });
 
+test('status ribbon tells the truth about an offline server', async () => {
+  const ribbon = page.getByRole('group', { name: 'Autopilot status' });
+  await expect(ribbon.locator('[data-seg=live]')).toHaveText(/LOCKED/);
+  await expect(ribbon.locator('[data-seg=data]')).toHaveText(/OFFLINE/);
+  await expect(ribbon.locator('[data-seg=data]')).toHaveAttribute('data-tone', 'bad');
+  await expect(ribbon.locator('[data-seg=engine]')).toHaveText(/OFF \(OFFLINE\)/);
+  await expect(ribbon.locator('[data-seg=risk]')).toHaveText(/NO POLICY/);
+  for (const id of ['mode', 'live', 'data', 'engine', 'risk']) await expect(ribbon.locator(`[data-seg=${id}]`)).not.toHaveAttribute('data-tone', 'ok');
+  await ribbon.locator('[data-seg=live]').click(); await expect(page).toHaveURL(/\/qa$/);
+  await ribbon.locator('[data-seg=risk]').click(); await expect(page).toHaveURL(/\/risk$/);
+  await ribbon.locator('[data-seg=engine]').click(); await expect(page).toHaveURL(/\/bot$/);
+});
+
 test('accept risk policy (step-up) → fund → PAPER mode', async () => {
   await page.goto('/risk'); await page.getByPlaceholder('Owner passphrase (step-up)').last().fill(PW);
   await page.getByRole('button', { name: 'Accept policy' }).click(); await expect(page.getByText(/Risk policy v1/)).toBeVisible();
@@ -46,6 +59,26 @@ test('BOUNDED LIVE cannot be enabled', async () => {
   const extra = errors.splice(before); expect(extra.every((e) => /status of 400/.test(e)), extra.join('\n')).toBe(true);
 });
 
+test('status ribbon goes STALE (never green) when the server stops answering, then recovers', async ({ browser }) => {
+  const ctx = await browser.newContext({ storageState: await page.context().storageState() }); // own tab: aborted requests are expected noise here
+  const p = await ctx.newPage();
+  await p.clock.install();
+  await p.goto('/');
+  const ribbon = p.getByRole('group', { name: 'Autopilot status' });
+  await expect(ribbon.locator('[data-seg=mode] .mode')).toHaveText('PAPER');
+  await p.route('**/api/shell', (r) => r.abort());
+  await p.clock.fastForward('01:00');
+  await expect(p.getByRole('alert').filter({ hasText: 'Lost contact with the MIA server' })).toBeVisible();
+  await expect(ribbon.locator('[data-seg=link]')).toHaveText(/LOST/);
+  await expect(ribbon.locator('[data-seg=mode] .mode')).toHaveText('PAPER · STALE');
+  await expect(ribbon.locator('[data-tone=ok]')).toHaveCount(0);
+  await p.unroute('**/api/shell');
+  await p.clock.fastForward('00:16');
+  await expect(p.getByText('Lost contact with the MIA server')).toHaveCount(0);
+  await expect(ribbon.locator('[data-seg=mode] .mode')).toHaveText('PAPER');
+  await ctx.close();
+});
+
 for (const r of ROUTES) {
   test(`renders ${r}`, async () => {
     await page.goto(r); await expect(page.locator('h1')).toBeVisible(); await page.waitForTimeout(400);
@@ -59,7 +92,7 @@ test('command palette navigates and runs a risk-reducing action', async () => {
   await box.getByRole('textbox', { name: 'Command', exact: true }).fill('security'); await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/security$/); await expect(page.locator('h1')).toHaveText('Security Center');
   await page.keyboard.press('Control+k'); await page.getByRole('textbox', { name: 'Command', exact: true }).fill('pause new'); await page.keyboard.press('Enter');
-  await expect(page.locator('.mode')).toHaveText('PAUSED');
+  await expect(page.locator('.mode')).toHaveText('PAUSED · PAPER');
 });
 
 test('trading history CSV export downloads', async () => {
@@ -74,5 +107,6 @@ test('mobile layout has no horizontal overflow', async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
   const m = await ctx.newPage();
   for (const r of ['/', '/scanner', '/risk', '/qhef', '/history']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
+  await expect(m.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=live]')).toBeInViewport();
   await ctx.close();
 });

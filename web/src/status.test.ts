@@ -6,14 +6,15 @@ function shell(over: Partial<ShellDto> = {}): ShellDto {
   return {
     mode: 'PAPER', display: 'PAPER', control: { emergency: false, pausedNewOrders: false },
     bot: { running: true, cycles: 12, lastScanAt: NOW - 30_000, lastTickerAt: NOW - 5_000, lastError: null },
-    account: { equity: 10_000, dailyPnlPct: 0.2, drawdownPct: 0.5, openRiskPct: 0.4, openCount: 1, deposits: 10_000 },
-    policyAccepted: true, riskLimits: { dailyLossPct: 2, drawdownWarnPct: 5, drawdownHaltPct: 8, maxOpenRiskPct: 2 },
+    account: { equity: 10_000, dailyPnlPct: 0.2, weeklyPnlPct: 0.4, drawdownPct: 0.5, openRiskPct: 0.4, openCount: 1, deposits: 10_000, consecutiveLosses: 0, marksMissing: 0 },
+    policyAccepted: true, riskLimits: { dailyLossPct: 2, weeklyLossPct: 4, drawdownWarnPct: 5, drawdownHaltPct: 8, maxOpenRiskPct: 2, maxConsecutiveLosses: 3 },
     dataHealth: { stale: false, tickersAt: NOW - 10_000, scanAt: NOW - 30_000, live: 7, degraded: 0 },
-    unread: 0, gates: '6/14 gates passed — live execution LOCKED', liveAllowed: false, offline: false, scanIntervalMs: 60_000, serverTime: NOW,
+    unread: 0, gates: '6/14 gates passed — live execution LOCKED', liveAllowed: false, offline: false, scanIntervalMs: 60_000, tickerIntervalMs: 15_000, serverTime: NOW,
     ...over,
   };
 }
-const base = { fetchedAt: NOW, error: null, streamConnected: true, now: NOW };
+const MONO = 5_000; // monotonic clock origin, unrelated to wall time
+const base = { requestedAt: MONO, error: null, streamConnected: true, now: MONO };
 const seg = (segs: Segment[], id: Segment['id']) => segs.find((s) => s.id === id)!;
 
 describe('status ribbon model', () => {
@@ -29,14 +30,43 @@ describe('status ribbon model', () => {
     expect(m.segments.map((s) => s.id)).toEqual(['mode', 'live', 'data', 'engine', 'risk', 'link']);
   });
 
-  it('no response yet: everything UNKNOWN/CHECKING, nothing ok', () => {
-    const m = deriveStatus({ ...base, shell: null, fetchedAt: null });
-    expect(m.segments.every((s) => s.tone === 'unknown')).toBe(true);
+  it('no response yet: CHECKING/UNKNOWN, nothing ok; the build-level LIVE LOCKED label stays', () => {
+    const m = deriveStatus({ ...base, shell: null, requestedAt: null });
+    expect(m.segments.filter((s) => s.id !== 'live').every((s) => s.tone === 'unknown')).toBe(true);
     expect(seg(m.segments, 'mode').value).toBe('CHECKING');
+    expect(seg(m.segments, 'live')).toMatchObject({ value: 'LOCKED', tone: 'locked' });
+  });
+
+  it('malformed or partial payloads are UNKNOWN and never throw or go green', () => {
+    const bad: unknown[] = [{}, { ...shell(), serverTime: undefined }, { ...shell(), scanIntervalMs: 0 }, { ...shell(), account: { ...shell().account, openRiskPct: null } },
+      { ...shell(), account: { ...shell().account, dailyPnlPct: undefined } }, { ...shell(), dataHealth: { ...shell().dataHealth, tickersAt: 'x' } }, 'nope'];
+    for (const b of bad) {
+      const m = deriveStatus({ ...base, shell: b });
+      expect(m.segments.some((s) => s.tone === 'ok'), JSON.stringify(b).slice(0, 80)).toBe(false);
+      expect(seg(m.segments, 'data').value).toBe('UNKNOWN');
+    }
+  });
+
+  it('ticker age keeps advancing between responses and expires on its own', () => {
+    const s = shell({ dataHealth: { stale: false, tickersAt: NOW - 59_000, scanAt: 0, live: 7, degraded: 0 } });
+    expect(seg(deriveStatus({ ...base, shell: s }).segments, 'data').tone).toBe('ok');
+    const later = deriveStatus({ ...base, shell: s, now: MONO + 2_000 });
+    expect(seg(later.segments, 'data')).toMatchObject({ value: 'STALE · 1m', tone: 'bad' });
+    expect(seg(later.segments, 'risk').tone).toBe('unknown');
+  });
+
+  it('future ticker timestamps and zero live feeds are not healthy', () => {
+    expect(seg(deriveStatus({ ...base, shell: shell({ dataHealth: { stale: false, tickersAt: NOW + 60_000, scanAt: 0, live: 7, degraded: 0 } }) }).segments, 'data')).toMatchObject({ value: 'CLOCK?', tone: 'unknown' });
+    expect(seg(deriveStatus({ ...base, shell: shell({ dataHealth: { stale: false, tickersAt: NOW - 1_000, scanAt: 0, live: 0, degraded: 0 } }) }).segments, 'data').tone).toBe('unknown');
+  });
+
+  it('freshness uses the monotonic clock: a snapshot older than the window is stale whatever the wall clock says', () => {
+    expect(deriveStatus({ ...base, shell: shell(), requestedAt: 1_000, now: 1_000 + SHELL_STALE_MS + 1 }).stale).toBe(true);
+    expect(deriveStatus({ ...base, shell: shell(), requestedAt: 1_000, now: 0 }).stale).toBe(false); // clock never runs backwards, but never negative either
   });
 
   it('server unreachable before first response: UNKNOWN and link OFFLINE', () => {
-    const m = deriveStatus({ ...base, shell: null, fetchedAt: null, error: 'HTTP 502' });
+    const m = deriveStatus({ ...base, shell: null, requestedAt: null, error: 'HTTP 502' });
     expect(m.stale).toBe(true);
     expect(seg(m.segments, 'data')).toMatchObject({ value: 'UNKNOWN', tone: 'unknown' });
     expect(seg(m.segments, 'link')).toMatchObject({ value: 'OFFLINE', tone: 'bad' });
@@ -44,7 +74,7 @@ describe('status ribbon model', () => {
   });
 
   it('last good response older than the stale window: every segment STALE, never green', () => {
-    const m = deriveStatus({ ...base, shell: shell(), now: NOW + SHELL_STALE_MS + 1, error: 'Failed to fetch' });
+    const m = deriveStatus({ ...base, shell: shell(), now: MONO + SHELL_STALE_MS + 1, error: 'Failed to fetch' });
     expect(m.stale).toBe(true);
     expect(m.segments.some((s) => s.tone === 'ok')).toBe(false);
     expect(seg(m.segments, 'mode')).toMatchObject({ value: 'PAPER · STALE', tone: 'unknown' });
@@ -53,7 +83,7 @@ describe('status ribbon model', () => {
   });
 
   it('a failed poll inside the window keeps values but marks the link RETRYING', () => {
-    const m = deriveStatus({ ...base, shell: shell(), now: NOW + 20_000, error: 'HTTP 500' });
+    const m = deriveStatus({ ...base, shell: shell(), now: MONO + 20_000, error: 'HTTP 500' });
     expect(m.stale).toBe(false);
     expect(seg(m.segments, 'link')).toMatchObject({ value: 'RETRYING', tone: 'warn' });
   });
@@ -83,7 +113,8 @@ describe('status ribbon model', () => {
     const b = shell().bot;
     expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, running: false } }) }).segments, 'engine')).toMatchObject({ value: 'STOPPED', tone: 'bad' });
     expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastScanAt: 0 } }) }).segments, 'engine')).toMatchObject({ value: 'STARTING', tone: 'unknown' });
-    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastScanAt: NOW - 181_000 } }) }).segments, 'engine')).toMatchObject({ value: 'STALLED · 3m', tone: 'bad' });
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastScanAt: NOW - 181_000 } }) }).segments, 'engine')).toMatchObject({ value: 'SCAN STALLED · 3m', tone: 'bad' });
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastTickerAt: NOW - 181_000 } }) }).segments, 'engine')).toMatchObject({ value: 'MONITOR STALLED · 3m', tone: 'bad' });
     expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastError: 'scan: boom' } }) }).segments, 'engine').detail).toMatch(/scan: boom/);
   });
 
@@ -93,12 +124,20 @@ describe('status ribbon model', () => {
     const a = shell().account;
     expect(seg(deriveStatus({ ...base, shell: shell({ account: { ...a, dailyPnlPct: -2.1 } }) }).segments, 'risk').tone).toBe('bad');
     expect(seg(deriveStatus({ ...base, shell: shell({ account: { ...a, drawdownPct: 8 } }) }).segments, 'risk').value).toMatch(/^BREAKER/);
+    expect(seg(deriveStatus({ ...base, shell: shell({ account: { ...a, weeklyPnlPct: -4 } }) }).segments, 'risk').value).toMatch(/^BREAKER/);
+    expect(seg(deriveStatus({ ...base, shell: shell({ account: { ...a, marksMissing: 1 } }) }).segments, 'risk')).toMatchObject({ value: 'MARKS MISSING · 1', tone: 'unknown' });
+    expect(seg(deriveStatus({ ...base, shell: shell({ account: { ...a, consecutiveLosses: 3 } }) }).segments, 'risk')).toMatchObject({ value: 'LOSS STREAK · 3', tone: 'warn' });
     expect(seg(deriveStatus({ ...base, shell: shell({ account: { ...a, drawdownPct: 5.5 } }) }).segments, 'risk').tone).toBe('warn');
     expect(seg(deriveStatus({ ...base, shell: shell({ control: { emergency: false, pausedNewOrders: true }, display: 'PAUSED' }) }).segments, 'risk').tone).toBe('warn');
   });
 
   it('if release gates ever report live eligible, the ribbon warns instead of going green', () => {
     expect(seg(deriveStatus({ ...base, shell: shell({ liveAllowed: true }) }).segments, 'live')).toMatchObject({ value: 'GATES PASSED', tone: 'warn' });
+  });
+
+  it('paused or emergency keeps the PAPER / READ-ONLY identity visible', () => {
+    expect(seg(deriveStatus({ ...base, shell: shell({ mode: 'OBSERVE', display: 'PAUSED', control: { emergency: false, pausedNewOrders: true } }) }).segments, 'mode').value).toBe('PAUSED · READ-ONLY');
+    expect(seg(deriveStatus({ ...base, shell: shell({ display: 'EMERGENCY', control: { emergency: true, pausedNewOrders: true } }) }).segments, 'mode').value).toBe('EMERGENCY · PAPER');
   });
 
   it('READ-ONLY and EMERGENCY mode labels', () => {

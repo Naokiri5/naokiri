@@ -118,6 +118,6 @@ pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; margin: 
   .mob-only { display: inline-block; }
   .mobnav { display: flex; justify-content: space-around; border-top: 1px solid var(--line); background: var(--bg2); padding: 6px 0; }
   .mobnav a { color: var(--muted); font-size: 11px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  .top .ribbon { order: 3; width: 100%; } .seg .k { display: none; }
+  .top .ribbon { order: 3; width: 100%; }
   main { padding: 14px 16px 30px; } .g2, .g4 { grid-template-columns: 1fr; } .top { padding: 8px 12px; } .fab { bottom: 70px; }
 }
