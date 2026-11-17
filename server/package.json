@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run",
-    "qa": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run --reporter=default --reporter=json --outputFile.json=../data/qa/test-results.json",
+    "qa": "node scripts/qa.mjs",
     "test:live": "cross-env NODE_USE_ENV_PROXY=1 MIA_LIVE_TESTS=1 NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run test/live"
   },
   "dependencies": {

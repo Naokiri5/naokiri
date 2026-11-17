@@ -1,4 +1,5 @@
 import { readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, posix } from 'node:path';
 import { config, REPO_ROOT } from '../config.js';
 import { all, get } from '../db/db.js';
@@ -112,6 +113,18 @@ export function evaluateTestEvidence(report: unknown, refs: readonly TestRef[]):
   return { status: 'PASS', evidence: `${counts.numPassedTests}/${counts.numTotalTests} automated tests passed, ${counts.numPendingTests + counts.numTodoTests} skipped/pending/todo (${new Date(report.startTime).toISOString()}); ${evidence.map(item => item.detail).join('; ')}` };
 }
 
+/**
+ * Run-level outcome written by scripts/qa.mjs next to the report (CodeRabbit PR #13). The Vitest JSON report does not
+ * record failures outside assertions (e.g. an unhandled rejection), so a report is accepted only when the run that
+ * produced it exited 0 and the recorded sha256 matches the report text on disk. Returns a reason, or null when valid.
+ */
+export function runOutcomeProblem(outcome: unknown, reportText: string): string | null {
+  if (!isRecord(outcome)) return 'run outcome missing or unreadable (data/qa/test-run.json); run `npm run qa -w server`';
+  if (outcome.exitCode !== 0) return `QA run did not succeed (exit code ${String(outcome.exitCode)}${outcome.signal ? `, signal ${String(outcome.signal)}` : ''})`;
+  if (typeof outcome.reportSha256 !== 'string' || outcome.reportSha256 !== createHash('sha256').update(reportText).digest('hex')) return 'run outcome does not belong to this report (sha256 mismatch)';
+  return null;
+}
+
 export function releaseGates(report?: unknown) {
   const g: Gate[] = [];
   const resPath = join(config.dataDir, 'qa', 'test-results.json');
@@ -123,6 +136,12 @@ export function releaseGates(report?: unknown) {
     if (json !== undefined) {
       try { report = JSON.parse(json) as unknown; }
       catch { loadError = `report malformed JSON: ${resPath}`; }
+      if (!loadError) {
+        let outcome: unknown = null;
+        try { outcome = JSON.parse(readFileSync(join(config.dataDir, 'qa', 'test-run.json'), 'utf8')); } catch { /* missing → reported below */ }
+        const problem = runOutcomeProblem(outcome, json);
+        if (problem) loadError = problem;
+      }
     }
   }
   const testGate = (id: keyof typeof TEST_GATE_REQUIREMENTS): Pick<Gate, 'status' | 'evidence'> => {

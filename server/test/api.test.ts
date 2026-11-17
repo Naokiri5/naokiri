@@ -85,6 +85,10 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(getControl()).toMatchObject({ emergency: false, pausedNewOrders: false });
 
     expect((await post(statusUrl, { status: 'SUSPENDED' })).statusCode).toBe(200);
+    // Lifting a suspension by demoting it is still risk-increasing (CodeRabbit PR #13): it removes the strategy from the list.
+    failureGate.reset(); // each denied() is two failed passphrase attempts; keep the per-client lockout out of this check
+    await denied(statusUrl, { status: 'RESEARCH' }); await denied(statusUrl, { status: 'BACKTESTED' });
+    failureGate.reset();
     await denied(statusUrl, { status: 'PAPER' });
     const noBacktest = await post(statusUrl, { status: 'PAPER', password });
     expect(noBacktest.statusCode).toBe(400); expect(noBacktest.json().error).toMatch(/backtest/);
@@ -96,10 +100,14 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     await denied(statusUrl, { status: 'PAPER' });
     expect((await post(statusUrl, { status: 'PAPER', password })).statusCode).toBe(200);
     expect(getSetting<string[]>('suspendedStrategies', [])).not.toContain(id);
+    expect((await post(statusUrl, { status: 'BACKTESTED' })).statusCode).toBe(200); // demoting an unsuspended strategy stays password-free
     await denied(statusUrl, { status: 'LIVE_CANDIDATE' });
     const beforeLive = snapshot(); const live = await post(statusUrl, { status: 'LIVE_CANDIDATE', password });
     expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/release-gate/); expect(snapshot()).toEqual(beforeLive);
-    for (const status of ['SUSPENDED', 'RETIRED', 'RESEARCH', 'BACKTESTED']) expect((await post(statusUrl, { status })).statusCode).toBe(200);
+    for (const status of ['SUSPENDED', 'RETIRED']) expect((await post(statusUrl, { status })).statusCode).toBe(200); // risk-reducing: no passphrase
+    failureGate.reset(); await denied(statusUrl, { status: 'RESEARCH' }); failureGate.reset(); // leaving RETIRED lifts the suspension
+    expect((await post(statusUrl, { status: 'RESEARCH', password })).statusCode).toBe(200);
+    expect((await post(statusUrl, { status: 'BACKTESTED' })).statusCode).toBe(200); // no longer suspended: demotion is password-free
 
     quarantined.add(worker);
     try {

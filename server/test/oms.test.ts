@@ -154,6 +154,15 @@ describe('Order-book freshness and fill accounting', () => {
     expect(all("SELECT id FROM protection_incidents WHERE status='OPEN'")).toHaveLength(0);
     expect(reconcile().ok).toBe(true);
   });
+  it('a stale monitor cannot overwrite newer excursion values (CodeRabbit PR #16: mfe/mae in the CAS guard)', async () => {
+    const { setCrashHook } = await import('../src/exec/crashpoint.js');
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    // Another monitor commits a newer mfe after this pass took its snapshot (qty, stop and targets unchanged).
+    setCrashHook((p) => { if (p === 'monitor.preTx') { run('UPDATE positions SET mfe=? WHERE id=?', 123.456, pos.id); setCrashHook(null); } });
+    try { setBook(id, last * 1.01); monitorPositions(); } finally { setCrashHook(null); }
+    expect(get<any>('SELECT mfe FROM positions WHERE id=?', pos.id).mfe).toBe(123.456); // stale pass was skipped, not written
+  });
   it('never fills an exit from a thin book at top-of-book or an invented price: waits for real depth', () => {
     // CLAUDE.md invariant #4 (PR #4): sufficient fresh depth or no fill. Originally (PR #3) this booked a partial
     // fill plus a synthetic remainder below the worst visible bid.

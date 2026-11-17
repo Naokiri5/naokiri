@@ -227,7 +227,9 @@ export function monitorPositions(nowTs = Date.now()) {
       tx(() => {
         // Compare-and-set against the snapshot the exits were computed from, so a concurrent monitor or manual close cannot
         // make this pass sell the same target twice or act on a position that is no longer open.
-        const cas = run("UPDATE positions SET stop_price=?, targets=?, mfe=?, mae=? WHERE id=? AND status='OPEN' AND qty=? AND stop_price=? AND targets=?", st.stop, J(meta), st.mfe, st.mae, p.id, p.qty, p.stop_price, p.targets);
+        // mfe/mae are part of the guard (CodeRabbit PR #16): they can change and return while qty/stop/targets match, and a
+        // stale monitor would otherwise overwrite the newer excursion values. `IS` compares NULLs correctly.
+        const cas = run("UPDATE positions SET stop_price=?, targets=?, mfe=?, mae=? WHERE id=? AND status='OPEN' AND qty=? AND stop_price=? AND targets=? AND mfe IS ? AND mae IS ?", st.stop, J(meta), st.mfe, st.mae, p.id, p.qty, p.stop_price, p.targets, p.mfe ?? null, p.mae ?? null);
         if (Number(cas.changes) !== 1) throw new StaleSnapshot();
         crashpoint('monitor.state');
         if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id); crashpoint('monitor.stop'); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }

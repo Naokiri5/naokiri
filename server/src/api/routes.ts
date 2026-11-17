@@ -303,7 +303,11 @@ export async function routes(app: FastifyInstance) {
     const id = idOf(req);
     const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional(), password: PW.optional() }).strict().parse(req.body);
     const current = get<{ status: lab.StrategyStatus }>('SELECT status FROM strategies WHERE id=?', id);
-    if (b.status === 'LIVE_CANDIDATE' || (b.status === 'PAPER' && (current?.status !== 'PAPER' || getSetting<string[]>('suspendedStrategies', []).includes(id)))) stepUp(req, b);
+    // Step-up for anything that increases risk (CodeRabbit PR #13): promotion to PAPER/LIVE_CANDIDATE, and ANY transition
+    // that lifts a suspension — moving a suspended strategy to RESEARCH or BACKTESTED also removes it from the list.
+    const suspended = getSetting<string[]>('suspendedStrategies', []).includes(id) || current?.status === 'SUSPENDED' || current?.status === 'RETIRED';
+    const liftsSuspension = suspended && b.status !== 'SUSPENDED' && b.status !== 'RETIRED';
+    if (b.status === 'LIVE_CANDIDATE' || liftsSuspension || (b.status === 'PAPER' && current?.status !== 'PAPER')) stepUp(req, b);
     lab.setStrategyStatus('owner', id, b.status, b.note); return { ok: true };
   });
 
