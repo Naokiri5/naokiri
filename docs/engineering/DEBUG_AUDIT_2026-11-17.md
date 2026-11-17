@@ -169,7 +169,7 @@ Against §6 of the work order it still lacks:
 
 ## 8. Batch B: full read-through and verified fixes (2026-11-17, later the same day)
 
-Four read-only reviewers (subagents) each read one area line by line: trading core; API, security and knowledge; DITAS, ops and bot; web. They reported **37 candidate findings**. The lead (Claude Code) reproduced or traced every finding before fixing it.
+Four read-only reviewers (subagents) each read one area line by line: trading core; API, security and knowledge; DITAS, ops and bot; web. They reported **32 candidate findings** (trading 8, security 6, ops 10, web 8). The lead (Claude Code) reproduced or traced every finding before fixing it.
 
 **Rules for every fix below:**
 - It has a regression test, and that test was run against the old code and **failed**. The exceptions are noted.
