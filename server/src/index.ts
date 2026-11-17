@@ -20,6 +20,13 @@ export async function buildApp() {
     if (req.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
     return payload;
   });
+  // Root-level safety net for anything outside the API plugin (static files, future plugins): Fastify's default
+  // handler would echo internal error messages. Client errors keep their message; server faults never do.
+  app.setErrorHandler((err: any, req, reply) => {
+    const code = Number.isInteger(err?.statusCode) && err.statusCode >= 400 && err.statusCode < 600 ? err.statusCode : 500;
+    if (code >= 500) { req.log.error({ err }, 'unhandled server error'); return reply.code(code).send({ error: 'internal server error', requestId: req.id }); }
+    return reply.code(code).send({ error: String(err?.message ?? 'request failed') });
+  });
   await app.register(routes);
   if (existsSync(config.webDist)) {
     await app.register(fastifyStatic, { root: config.webDist });
