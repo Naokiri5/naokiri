@@ -64,6 +64,50 @@ test('DITAS remains usable on mobile', async ({ page }) => {
   await expect(page.getByText('Implementation coverage', { exact: true })).toBeVisible();
 });
 
+test('execution quality displays paper fills and preserves unknown and stale states', async ({ page }) => {
+  let response: 'filled' | 'empty' | 'error' = 'filled';
+  let requests = 0;
+  await page.route('**/api/ditas/execution?limit=100', route => {
+    requests++;
+    if (response === 'error') return route.fulfill({ status: 503, json: { error: 'Execution records unavailable' } });
+    return route.fulfill({ json: {
+      label: 'PAPER', limitations: ['Local timestamps do not measure exchange acknowledgement latency.'],
+      orders: response === 'empty' ? [] : [
+        { orderId: 'order-filled', instrumentId: 'fixture:BTC', strategyId: 'trend', side: 'BUY', purpose: 'ENTRY', status: 'PARTIALLY_FILLED', requestedQty: 2, filledQty: 1, averageFillPrice: 101, expectedPrice: 100, adverseSlippageBps: 100, fees: 0.2, fillCount: 1, firstFillDelayMs: 5, lastRecordedFillDelayMs: 10, rejectReason: null },
+        { orderId: 'order-rejected', instrumentId: 'fixture:ETH', strategyId: null, side: 'SELL', purpose: 'EXIT', status: 'REJECTED', requestedQty: 1, filledQty: 0, averageFillPrice: null, expectedPrice: null, adverseSlippageBps: null, fees: 0, fillCount: 0, firstFillDelayMs: null, lastRecordedFillDelayMs: null, rejectReason: 'Insufficient depth' }
+      ]
+    } });
+  });
+  await page.goto('/ditas');
+  await expect(page.getByRole('heading', { name: 'DITAS · Decision intelligence' })).toBeVisible();
+  expect(requests).toBe(0);
+  await page.getByRole('tab', { name: 'Execution quality' }).click();
+  const filled = page.getByRole('row').filter({ hasText: 'order-filled' });
+  await expect(filled).toContainText('trend');
+  await expect(filled).toContainText('101.0000');
+  await expect(filled).toContainText('100.0 bps');
+  await expect(filled).toContainText('$0.2000');
+  await expect(filled).toContainText('1 fill');
+  await expect(filled).toContainText('5 ms');
+  await expect(filled).toContainText('10 ms');
+  const rejected = page.getByRole('row').filter({ hasText: 'order-rejected' });
+  await expect(rejected).toContainText('Strategy unavailable');
+  await expect(rejected).toContainText('Insufficient depth');
+  await expect(rejected).toContainText('0 fills');
+  await expect(rejected.getByRole('cell').nth(5)).toHaveText('—');
+  await expect(rejected.getByRole('cell').nth(7)).toHaveText('n/a');
+  await expect(page.getByText(/Fill delays are local recording delays/)).toBeVisible();
+  response = 'error';
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Execution records unavailable');
+  await expect(page.getByText('Refresh failed; the previous records are shown.')).toBeVisible();
+  await expect(filled).toBeVisible();
+  response = 'empty';
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByText('No paper orders yet.')).toBeVisible();
+  await expect(page.getByText('Refresh failed; the previous records are shown.')).toHaveCount(0);
+});
+
 test('DITAS evaluates only the selected exact forecast cohort', async ({ page }) => {
   const cohort = '["crypto","strategy-v1","1h"]';
   await page.route(/\/api\/ditas(?:\?|$)/, route => {

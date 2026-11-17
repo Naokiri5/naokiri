@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
 
-const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Foundation coverage'];
+const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Foundation coverage'];
 const count = (v: unknown) => Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0;
 
 /** Read-only DITAS evidence. No control, strategy promotion, simulation or execution authority. */
@@ -11,6 +11,7 @@ export function Ditas() {
   const [cohort, setCohort] = useState('');
   const { data, error, loading, reload } = useApi(`/api/ditas${cohort ? `?cohort=${encodeURIComponent(cohort)}` : ''}`, { topics: ['scan', 'decision', 'order', 'position', 'mode'], every: 30_000 });
   const [tab, setTab] = useState(tabs[0]);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [detail, setDetail] = useState<{ title: string; value: unknown } | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
@@ -23,7 +24,7 @@ export function Ditas() {
   const counts = data?.counts;
   const calibration = data?.calibration;
   return <Page title="DITAS · Decision intelligence" sub="Inspect the evidence behind decisions, strategy health and hypothetical alternatives. Every result is tied to stored records."
-    right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={reload} disabled={loading}>Refresh</button></>}>
+    right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={() => { void reload(); setRefreshKey(k => k + 1); }} disabled={loading}>Refresh</button></>}>
     <ErrorLine e={error} /><ErrorLine e={detailError} />
     <div className="banner info">Research and paper trading. Decision Twin results are hypothetical simulations; rule strength and specialist agreement are not calibrated win probabilities. Live execution remains locked.</div>
     <div className="grid g4" style={{ marginBottom: 14 }}>
@@ -67,6 +68,7 @@ export function Ditas() {
     {data && tab === 'Strategy passports' && <div className="col" style={{ gap: 14 }}>{(data.passports ?? []).map((p: any) => <Card key={p.id ?? p.strategyId} title={`${p.name ?? p.id ?? p.strategyId} · v${p.version ?? p.strategyVersion}`} right={<Badge v={p.ditasState ?? p.currentStatus ?? 'RESEARCH'} />}>
       <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
+    {tab === 'Execution quality' && <ExecutionQuality refreshKey={refreshKey} />}
     {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibration?.status ?? 'UNCALIBRATED'} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
@@ -89,4 +91,36 @@ export function Ditas() {
     </tbody></table></div><div style={{ padding: 14 }} className="hint">A passing test suite does not certify live trading, calibrated forecasts or strategy profitability. See the release gates for outstanding evidence.</div></Card>}
     {detail && <Modal title={detail.title} onClose={() => setDetail(null)}><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '65vh', overflowY: 'auto', fontSize: 12 }}>{JSON.stringify(detail.value, null, 2)}</pre></Modal>}
   </Page>;
+}
+
+type ExecutionQualityData = {
+  label: 'PAPER';
+  orders: Array<{
+    orderId: string; instrumentId: string; strategyId: string | null; side: string; purpose: string;
+    status: string; rejectReason: string | null; filledQty: number; requestedQty: number;
+    averageFillPrice: number | null; expectedPrice: number | null; adverseSlippageBps: number | null;
+    fees: number; fillCount: number; firstFillDelayMs: number | null; lastRecordedFillDelayMs: number | null;
+  }>;
+  limitations: string[];
+};
+
+/** Read-only paper execution quality (actual paper OMS orders and fills only; never hypothetical Twin results). */
+function ExecutionQuality({ refreshKey }: { refreshKey: number }) {
+  const { data, error, loading, reload } = useApi<ExecutionQualityData>('/api/ditas/execution?limit=100', { topics: ['order', 'position'] });
+  useEffect(() => { if (refreshKey) reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the page Refresh button also reloads this panel
+  const rows = data?.orders ?? [];
+  return <Card title="Paper execution quality" right={<Badge v={data?.label ?? 'PAPER'} tone="b-violet" />} flush>
+    <ErrorLine e={error} />
+    {error && data && <div className="hint warn">Refresh failed; the previous records are shown.</div>}
+    {!data && loading && <div role="status" aria-live="polite"><Empty>Loading paper execution records…</Empty></div>}
+    <div className="tablewrap"><table><thead><tr><th>Order</th><th>Strategy</th><th>Purpose</th><th>Status</th><th>Filled</th><th>Avg fill</th><th>Expected</th><th>Adverse slippage</th><th>Fees</th><th>First fill delay</th><th>Last recorded fill delay</th></tr></thead><tbody>
+      {rows.map((o) => <tr key={o.orderId}><td><b>{o.instrumentId.split(':').pop()}</b> <Badge v={o.side} /><div className="hint mono">{o.orderId}</div></td><td>{o.strategyId || 'Strategy unavailable'}</td><td>{o.purpose}</td><td><Badge v={o.status} />{o.rejectReason && <div className="hint">{o.rejectReason}</div>}</td>
+        <td className="mono">{fmt.num(o.filledQty, 6)} / {fmt.num(o.requestedQty, 6)}<div className="hint">{o.fillCount} {o.fillCount === 1 ? 'fill' : 'fills'}</div></td><td className="mono">{fmt.px(o.averageFillPrice)}</td><td className="mono">{fmt.px(o.expectedPrice)}</td>
+        <td className="mono">{o.adverseSlippageBps == null ? <span className="hint">n/a</span> : `${fmt.num(o.adverseSlippageBps, 1)} bps`}</td><td className="mono">{fmt.usd(o.fees, 4)}</td>
+        <td className="mono">{o.firstFillDelayMs == null ? '—' : `${o.firstFillDelayMs} ms`}</td><td className="mono">{o.lastRecordedFillDelayMs == null ? '—' : `${o.lastRecordedFillDelayMs} ms`}</td></tr>)}
+    </tbody></table></div>
+    {data && !rows.length && <Empty>No paper orders yet.</Empty>}
+    {data && <div className="hint" style={{ padding: '8px 28px' }}>Fill delays are local recording delays, not exchange acknowledgement times. The last recorded fill does not imply order completion.</div>}
+    {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
+  </Card>;
 }
