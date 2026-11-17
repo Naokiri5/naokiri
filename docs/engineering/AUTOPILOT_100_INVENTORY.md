@@ -8,14 +8,14 @@ Summary: BLOCKED 4, DONE 21, LOCKED 6, MISSING 20, PARTIAL 49.
 
 | # | Status | Evidence / gap |
 |---:|---|---|
-| 001 | PARTIAL | Top-bar mode badge and Overview risk/pipeline panels (web/src/App.tsx, pages/Overview.tsx). No persistent ribbon that also shows feed freshness and engine role. |
+| 001 | PARTIAL | Top-bar mode badge and Overview risk/pipeline panels. A persistent status ribbon is in progress by Capy in **open PR #9** (`capy/status-ribbon`), not yet on main. |
 | 002 | PARTIAL | Overview has a summary plus detail panels; e2e/navigation.spec.ts covers mobile navigation. No dedicated density test. |
 | 003 | MISSING | No Document Picture-in-Picture. This is Phase 2 (floating cockpit). |
 | 004 | MISSING · OWNER | No desktop companion. Needs an approved packaging and update approach. |
 | 005 | MISSING | There is no widget yet, so no widget presets. |
-| 006 | PARTIAL | Freshness/age display exists on pages. There is no widget yet to carry the stale and reconnect badges. |
+| 006 | PARTIAL | Freshness/age display on pages. The stale and link indicator in the ribbon is in Capy's open PR #9. No widget yet. |
 | 007 | MISSING | No privacy masking of amounts. |
-| 008 | PARTIAL | PAPER mode badge and paper labels in the UI. LIVE stays locked. Exports are not watermarked everywhere (see 84). |
+| 008 | PARTIAL | PAPER mode badge and paper labels. LIVE stays locked. A live-lock ribbon is in Capy's open PR #9. Exports are not watermarked everywhere (see 84). |
 | 009 | PARTIAL | /terminal/:symbol deep links exist. Preserving the timeframe across the link is not verified. |
 | 010 | PARTIAL | Notifications carry INFO/WARNING/CRITICAL severity. The Overview feed hides INFO. No contextual explainers. |
 | 011 | BLOCKED · OWNER | The code is ready for an always-on host (supervisor, systemd unit, readiness, backups). Deploying needs an owner-approved host. Nothing is deployed. |
@@ -79,7 +79,7 @@ Summary: BLOCKED 4, DONE 21, LOCKED 6, MISSING 20, PARTIAL 49.
 | 069 | MISSING | No anomalous-login detection. |
 | 070 | PARTIAL | Hash-chained audit log, HMAC evidence packets, and backups that verify the chain. No periodic signed checkpoints exported off the machine. |
 | 071 | MISSING | No PiP yet (Phase 2). |
-| 072 | PARTIAL | A headless soak ran in this session and was shorter than 24 h (docs/engineering/PHASE1_SOAK.md). A 24 h run needs a host. |
+| 072 | PARTIAL | A headless soak of about 6.5 min ran in the container (docs/engineering/PHASE1_SOAK.md): forced crash, restart, standby and handover all observed. A 24 h run needs a host. |
 | 073 | PARTIAL | Process crash and restart are tested (supervisor). No crash injection inside the OMS steps. |
 | 074 | MISSING | No 429 or rate-limit simulation. |
 | 075 | PARTIAL | Most domain functions take an injectable nowTs. No frozen-clock integration suite. |
@@ -112,3 +112,11 @@ Summary: BLOCKED 4, DONE 21, LOCKED 6, MISSING 20, PARTIAL 49.
 ## Selected milestone
 
 Phase 1 (24/7 PAPER-only server) was implemented on `claude/blissful-planck-lazglg`. It covers items 12, 13, 14, 18, 19 (partial) and 20, and the soak covers part of 72. Hosting (11) and the 24-hour soak on a real host need an owner-approved host. Phase 2 (the floating cockpit, items 3, 5, 6, 7 and 71) is next only if the owner selects it.
+
+## Parallel work by Capy (capy.ai)
+Capy works on its own `capy/*` branches and pull requests. To avoid duplicate implementations:
+- **PR #9 (open), status ribbon** (items 001, 006, 008). Not duplicated here. The ribbon could show the new `role` and `/api/ready` states once both are on main.
+- **PR #10 (closed, not merged), verified backups (018), and PR #11 (closed, not merged), headless engine lease and readiness (012/013/014/020).** These overlapped with the Phase 1 work that merged into main via PR #7. They were closed, so main has a single implementation of each. Ideas from them worth porting later as small follow-ups:
+  - a cross-process lease test with two real OS processes
+  - fenced writes, which reject a write from a holder whose lease has lapsed
+  - staged restore verification before a restored database is promoted
