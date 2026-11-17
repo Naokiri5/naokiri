@@ -1,4 +1,5 @@
 import { ditasRoutes } from '../ditas/routes.js';
+import { knowledgeRoutes } from '../knowledge/routes.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -99,6 +100,7 @@ export async function routes(app: FastifyInstance) {
   const limit = (req: FastifyRequest, l: keyof typeof LIMITS, what: string) => LIMITS[l].take(sha256(tokenOf(req) ?? req.ip), what);
 
   await ditasRoutes(app);
+  await knowledgeRoutes(app);
 
   // ── auth ──
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));

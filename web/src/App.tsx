@@ -7,7 +7,7 @@ import * as P from './pages';
 import { CommandPalette } from './palette';
 
 const NAV: { grp: string; items: [string, string, string][] }[] = [
-  { grp: 'Command', items: [['/', '◎', 'Overview'], ['/ditas', '◫', 'DITAS Decision Intelligence'], ['/terminal', '▤', 'Market Terminal'], ['/scanner', '⌖', 'AI Scanner'], ['/discover', '✧', 'Asset Discovery'], ['/intelligence', '✦', 'AI Intelligence'], ['/qhef', '⚡', 'QHEF Performance'], ['/joe', '☺', 'Trader Joe']] },
+  { grp: 'Command', items: [['/', '◎', 'Overview'], ['/ditas', '◫', 'DITAS Decision Intelligence'], ['/terminal', '▤', 'Market Terminal'], ['/scanner', '⌖', 'AI Scanner'], ['/discover', '✧', 'Asset Discovery'], ['/intelligence', '✦', 'AI Intelligence'], ['/academy', '❖', 'Quant Academy'], ['/qhef', '⚡', 'QHEF Performance'], ['/joe', '☺', 'Trader Joe']] },
   { grp: 'Markets', items: [['/bubbles', '◍', 'Market Bubble Map'], ['/whales', '◈', 'Whale & Launch Monitor'], ['/copy', '⧉', 'Copy Trading'], ['/holders', '⬡', 'Holder Map'], ['/news', '☰', 'News & Events']] },
   { grp: 'Trading', items: [['/bot', '⚙', 'Bot Account'], ['/risk', '⛨', 'Risk Center'], ['/portfolio', '◔', 'Portfolio'], ['/history', '≣', 'Trading History'], ['/journal', '✎', 'Trade Journal'], ['/calendar', '▦', 'Profit Calendar'], ['/lab', '⚗', 'Strategy Lab']] },
   { grp: 'Account', items: [['/wallet', '⬗', 'Wallet & Withdrawals'], ['/security', '🛡', 'Security Center'], ['/connections', '⇄', 'Connections Hub'], ['/notifications', '🔔', 'Notifications'], ['/qa', '✓', 'Pre-flight / Release Gates'], ['/settings', '⚙', 'Settings']] },
@@ -77,6 +77,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       <Routes>
         <Route path="/" element={<P.Overview />} />
         <Route path="/ditas" element={<P.Ditas />} />
+        <Route path="/academy" element={<P.Academy />} />
         <Route path="/terminal" element={<P.Terminal />} /><Route path="/terminal/:symbol" element={<P.Terminal />} />
         <Route path="/scanner" element={<P.Scanner />} /><Route path="/intelligence" element={<P.Intelligence />} />
         <Route path="/joe" element={<P.JoePage />} /><Route path="/bubbles" element={<P.Bubbles />} /><Route path="/whales" element={<P.Whales />} />

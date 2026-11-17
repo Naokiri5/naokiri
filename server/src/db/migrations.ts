@@ -65,13 +65,46 @@ const MIGRATIONS: string[] = [
   CREATE TRIGGER ${table}_no_update BEFORE UPDATE ON ${table} BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
   CREATE TRIGGER ${table}_no_delete BEFORE DELETE ON ${table} BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;`).join('')}
   `,
+  /* 3 — Quantitative Trading Intelligence Academy: knowledge store, taxonomy, research experiments, candle history.
+     Sources are never overwritten: re-processing replaces derived chunks only and is recorded in kb_document_events. */ `
+  CREATE TABLE kb_documents (id TEXT PRIMARY KEY, sha256 TEXT UNIQUE NOT NULL, filename TEXT NOT NULL, format TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL, title TEXT, authors TEXT, edition TEXT, publisher TEXT, published TEXT, discipline TEXT,
+    catalog_id TEXT, evidence_class TEXT NOT NULL DEFAULT 'AUTHOR_INTERPRETATION', status TEXT NOT NULL, error TEXT,
+    pages INTEGER, unreadable_pages TEXT NOT NULL DEFAULT '[]', text_hash TEXT, duplicate_of TEXT,
+    progress TEXT NOT NULL DEFAULT '{}', extractor_version TEXT, uploaded_at INTEGER NOT NULL, processed_at INTEGER);
+  CREATE TABLE kb_document_files (document_id TEXT PRIMARY KEY REFERENCES kb_documents(id), bytes BLOB NOT NULL);
+  CREATE TABLE kb_document_events (id INTEGER PRIMARY KEY AUTOINCREMENT, document_id TEXT NOT NULL, ts INTEGER NOT NULL, event TEXT NOT NULL, detail TEXT);
+  CREATE TABLE kb_chunks (id TEXT PRIMARY KEY, document_id TEXT NOT NULL REFERENCES kb_documents(id), seq INTEGER NOT NULL,
+    chapter TEXT, heading TEXT, page_start INTEGER, page_end INTEGER, kind TEXT NOT NULL, text TEXT NOT NULL, hash TEXT NOT NULL,
+    tokens INTEGER NOT NULL, extractor_version TEXT NOT NULL, UNIQUE(document_id, seq));
+  CREATE INDEX kb_chunks_hash ON kb_chunks(hash);
+  CREATE VIRTUAL TABLE kb_chunks_fts USING fts5(text, heading, chunk_id UNINDEXED, tokenize='porter unicode61');
+  CREATE TABLE kb_embeddings (chunk_id TEXT PRIMARY KEY REFERENCES kb_chunks(id), provider TEXT NOT NULL, dim INTEGER NOT NULL, vector BLOB NOT NULL);
+  CREATE TABLE kb_catalog (id TEXT PRIMARY KEY, title TEXT NOT NULL, authors TEXT NOT NULL, discipline TEXT NOT NULL, priority INTEGER,
+    document_id TEXT, notes TEXT, added_at INTEGER NOT NULL, UNIQUE(title, authors));
+  CREATE TABLE kb_concepts (id TEXT PRIMARY KEY, name TEXT UNIQUE NOT NULL, discipline TEXT NOT NULL, origin TEXT NOT NULL,
+    evidence_class TEXT NOT NULL, card TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+  CREATE TABLE kb_concept_sources (concept_id TEXT NOT NULL REFERENCES kb_concepts(id), chunk_id TEXT NOT NULL REFERENCES kb_chunks(id),
+    relation TEXT NOT NULL, score REAL NOT NULL, PRIMARY KEY(concept_id, chunk_id));
+  CREATE TABLE kb_claims (id TEXT PRIMARY KEY, concept_id TEXT NOT NULL REFERENCES kb_concepts(id), proposition TEXT NOT NULL,
+    stance TEXT NOT NULL CHECK(stance IN ('SUPPORTS','CONTRADICTS','QUALIFIES')), evidence_class TEXT NOT NULL,
+    chunk_id TEXT REFERENCES kb_chunks(id), document_id TEXT, page INTEGER, quote TEXT, origin TEXT NOT NULL, created_at INTEGER NOT NULL);
+  CREATE TABLE research_experiments (id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, kind TEXT NOT NULL, concept_id TEXT,
+    hypothesis TEXT NOT NULL, spec TEXT NOT NULL, dataset TEXT NOT NULL, data_hash TEXT NOT NULL, results TEXT NOT NULL,
+    verdict TEXT NOT NULL, limitations TEXT NOT NULL, code_version TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE TRIGGER research_experiments_no_update BEFORE UPDATE ON research_experiments BEGIN SELECT RAISE(ABORT, 'research experiments are immutable'); END;
+  CREATE TABLE research_candles (instrument TEXT NOT NULL, interval TEXT NOT NULL, t INTEGER NOT NULL, o REAL NOT NULL, h REAL NOT NULL,
+    l REAL NOT NULL, c REAL NOT NULL, v REAL NOT NULL, close_time INTEGER, source TEXT NOT NULL, fetched_at INTEGER NOT NULL,
+    PRIMARY KEY(instrument, interval, t));
+  `,
 ];
 
-export function migrate(db: DatabaseSync) {
+/** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
+export function migrate(db: DatabaseSync, target = MIGRATIONS.length) {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
   const row = db.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number | null };
   const current = row?.v ?? 0;
-  for (let i = current; i < MIGRATIONS.length; i++) {
+  for (let i = current; i < Math.min(target, MIGRATIONS.length); i++) {
     db.exec('BEGIN');
     try {
       db.exec(MIGRATIONS[i]);

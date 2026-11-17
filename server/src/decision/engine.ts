@@ -11,6 +11,7 @@ import { uid, iso } from '../core/util.js';
 import { record } from '../core/latency.js';
 import { bus } from '../core/bus.js';
 import { readIndicators } from '../workers/indicators.js';
+import { strategyKnowledge, type KnowledgeRef } from '../knowledge/integration.js';
 
 /** Part 8 central decision engine — the only component that can produce a trade decision. */
 export type DecisionState = 'APPROVED_FOR_MONITORING' | 'WAIT_FOR_CONFIRMATION' | 'PAPER_TRADE' | 'APPROVED_FOR_USER_CONFIRMATION' | 'APPROVED_FOR_BOUNDED_EXECUTION' | 'REJECTED' | 'INSUFFICIENT_DATA';
@@ -27,6 +28,8 @@ export interface DecisionReport {
   opportunity: OpportunityScore; consensus: { id: string; state: string; support: number; opposition: number; expiresAt: string };
   risk: RiskDecision | null; decision: DecisionState; finalDecision: 'ENTER' | 'WAIT' | 'REJECT' | 'MONITOR';
   steps: PipelineStep[]; indicators: ReturnType<typeof readIndicators>;
+  /** Explanatory knowledge references (Academy). Never read by the risk gate or OMS. */
+  knowledge?: { refs: KnowledgeRef[]; authority: string };
   disclaimer: string;
 }
 
@@ -84,7 +87,7 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
     missingInformation: [...qci.missing_inputs, ...opp.missing.map((m) => `score factor missing: ${m}`)],
     dataFreshness: { quoteAgeMs: q.quoteAgeMs, candleAgeMs: q.candleAgeMs, bookAgeMs: q.bookAgeMs, status: q.status },
     opportunity: opp, consensus: { id: qci.consensus_id, state: expired ? 'EXPIRED' : qci.state, support: qci.weighted_support, opposition: qci.weighted_opposition, expiresAt: qci.expires_at },
-    risk, decision, finalDecision: final, steps, indicators: readIndicators(ctx.f),
+    risk, decision, finalDecision: final, steps, indicators: readIndicators(ctx.f), knowledge: strategyKnowledge(cand.strategyId),
     disclaimer: 'Opportunity score and consensus are evidence summaries, not probabilities of profit. Paper trading only.',
   };
   record('decision.engine', performance.now() - t0);

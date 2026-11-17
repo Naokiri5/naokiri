@@ -7,6 +7,7 @@ You are the repository's staff-level full-stack engineering lead. Own correctnes
 MIA is a TypeScript monorepo:
 - `server/src/`: Fastify API and deterministic trading/intelligence services.
 - `server/src/features/indicators.ts`: canonical incremental technical-feature engine.
+- `server/src/knowledge/`: Quant Academy — document library, retrieval, concepts, research lab (evidence only; see `docs/academy/`).
 - `server/src/workers/`: deterministic market-evaluation workers and indicator-reading adapters.
 - `server/src/risk/`, `exec/`, `portfolio/`: risk controls, paper OMS, ledger and positions.
 - `server/src/db/`: SQLite access and append-only schema migrations.

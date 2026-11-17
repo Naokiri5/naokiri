@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased: Quant Academy (knowledge & research subsystem)
+- New `server/src/knowledge/` module and `/academy` page. It covers:
+  - ingesting PDF, EPUB, DOCX, HTML, Markdown and TXT, with resumable PDF processing
+  - keyword, vector and hybrid search with cited sources
+  - concept cards, source-conflict tracking and evidence classes
+  - an immutable, reproducible research lab with volatility clustering, autocorrelation and purged/embargoed
+    walk-forward experiments
+  - a memory map for categories A–F
+- Migration 3 (append-only) adds the `kb_*` and `research_*` tables.
+- Decision reports carry explanatory `knowledge.refs`. Trader Joe gains a read-only `search_knowledge` tool. Neither
+  has any trading authority.
+- Fix: text-sniffed document metadata no longer overwrites container metadata (for example, the EPUB `dc:date`).
+- `migrate(db, target)` accepts an optional target version, for upgrade tests.
+- 31 new unit/integration tests and 1 new browser flow. See `docs/academy/`.
+
 ## Unreleased: production-repair integration (branch `claude/blissful-planck-lazglg`, PR to `main`)
 Integrates the four open pull requests into one tested branch without removing any of their work:
 PR #3 `claude/mia-production-repair`, PR #4 `fix/mia-4.1-audit-repairs`, PR #5 `feat/global-chart-intelligence`,

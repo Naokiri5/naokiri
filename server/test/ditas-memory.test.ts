@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { freshDb, seedInstrument } from './helpers.js';
 import { all, closeDb, get, getDb, openDb, run, tx } from '../src/db/db.js';
+import { SCHEMA_VERSION } from '../src/db/migrations.js';
 import { correctEvent, memoryDetail, memoryEvents, recordOpportunity, verifyMemory } from '../src/ditas/memory.js';
 import { market } from '../src/market/store.js';
 import { analyzeInstrument, buildContext } from '../src/market/scanner.js';
@@ -166,7 +167,7 @@ describe('DITAS permanent decision memory', () => {
     closeDb(); market.reset(); openDb(dbPath);
     expect(memoryDetail(event.id)).toEqual(before);
     expect(verifyMemory()).toEqual({ ok: true, entries: 1 });
-    expect(all('SELECT version FROM schema_migrations')).toHaveLength(2);
+    expect(all('SELECT version FROM schema_migrations')).toHaveLength(SCHEMA_VERSION);
   });
 
   it('records manual no-signal analysis from the seeded closed cache without network calls', async () => {

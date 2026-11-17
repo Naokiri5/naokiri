@@ -7,7 +7,7 @@ import { test, expect, type Page } from '@playwright/test';
  */
 const PW = 'e2e owner passphrase';
 const ROUTES = ['/', '/terminal/BTCUSDT', '/scanner', '/discover', '/intelligence', '/qhef', '/joe', '/bubbles', '/whales', '/copy', '/holders', '/news',
-  '/bot', '/risk', '/portfolio', '/history', '/journal', '/calendar', '/lab', '/wallet', '/security', '/connections', '/notifications', '/qa', '/settings'];
+  '/bot', '/risk', '/portfolio', '/history', '/journal', '/calendar', '/lab', '/wallet', '/security', '/connections', '/notifications', '/qa', '/settings', '/academy'];
 const errors: string[] = [];
 function watch(page: Page) {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`${page.url()} :: ${m.text()}`); });
@@ -86,11 +86,30 @@ test('terminal displays chart intelligence evidence and invalidation', async () 
   await page.unroute('**/api/instrument/CHARTFIXTURE?interval=1h');
 });
 
+test('academy: upload a document, see it indexed, search it with a cited source', async () => {
+  await page.goto('/academy');
+  await expect(page.getByText('Knowledge is evidence, not authority')).toBeVisible();
+  await expect(page.getByRole('cell', { name: 'Trading and Exchanges' })).toBeVisible(); // catalog, AWAITING DOCUMENT
+  await page.getByRole('tab', { name: 'Library' }).click();
+  // Synthetic study note written for this test.
+  await page.getByLabel('Document file').setInputFiles({ name: 'e2e-notes.md', mimeType: 'text/markdown', buffer: Buffer.from('# E2E Volatility Notes\n\nVolatility clustering means large price changes tend to be followed by large changes, and quiet periods by quiet periods.') });
+  await page.getByRole('button', { name: 'Upload' }).click();
+  await expect(page.getByText('Uploaded — processing in the background.')).toBeVisible();
+  await expect(page.getByRole('cell', { name: /E2E Volatility Notes/ })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('INDEXED', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+  await page.getByRole('tab', { name: 'Search & ask' }).click();
+  await page.getByLabel('Query').fill('volatility clustering');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect(page.getByText(/E2E Volatility Notes, chapter/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'What does the research say?' }).click();
+  await expect(page.getByText(/Extractive mode|LLM answer/)).toBeVisible();
+});
+
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });
 
 test('mobile layout has no horizontal overflow', async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
   const m = await ctx.newPage();
-  for (const r of ['/', '/scanner', '/risk', '/qhef', '/history']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
+  for (const r of ['/', '/scanner', '/risk', '/qhef', '/history', '/academy']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
   await ctx.close();
 });
