@@ -13,7 +13,7 @@
     "start": "npm run start -w server",
     "start:supervised": "npm run start:supervised -w server",
     "backup": "npm run backup -w server --",
-    "test": "npm test -w server",
+    "test": "npm test -w server && npm test -w web",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "test:e2e": "npm run build -w web && playwright test -c e2e/playwright.config.ts",
     "test:all": "npm run typecheck && npm test && npm run test:e2e",

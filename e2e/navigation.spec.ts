@@ -26,7 +26,7 @@ test.beforeAll(async ({ browser }) => { page = await browser.newPage(); await lo
 test('every original route is reachable from its destination and keeps its URL', async () => {
   const side = page.getByRole('navigation', { name: 'Main' });
   await page.goto('/'); await expect(side.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('.mode')).not.toHaveText('…'); const modeBefore = await page.locator('.mode').textContent();
+  await expect(page.locator('.mode')).not.toHaveText(/^(…|CHECKING)$/); const modeBefore = await page.locator('.mode').textContent();
   for (const [group, paths] of GROUPS) {
     const btn = side.getByRole('button', { name: group });
     if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click();
