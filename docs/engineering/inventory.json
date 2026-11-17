@@ -1,6 +1,6 @@
 {
   "generatedFrom": {
-    "commit": "62e67f01ade8e1098210a29bef7bf0e5d5de27a4",
+    "commit": "e47ecd23f73c9296328a4f7854d0abb6981fbd6f",
     "note": "static scan of the working tree at this commit; uncommitted changes would also be included"
   },
   "runtime": {
@@ -12,10 +12,10 @@
   },
   "summary": {
     "modules": 88,
-    "routes": 106,
+    "routes": 105,
     "tables": 38,
     "testFiles": 26,
-    "testCases": 231,
+    "testCases": 241,
     "pages": 9
   },
   "areas": {
@@ -706,7 +706,7 @@
     {
       "path": "server/src/ditas/service.ts",
       "area": "ditas",
-      "lines": 99,
+      "lines": 101,
       "imports": [
         "../db/db.js",
         "../core/util.js",
@@ -781,7 +781,7 @@
     {
       "path": "server/src/exec/oms.ts",
       "area": "exec",
-      "lines": 334,
+      "lines": 354,
       "imports": [
         "../db/db.js",
         "../core/util.js",
@@ -921,7 +921,7 @@
     {
       "path": "server/src/knowledge/chunk.ts",
       "area": "knowledge",
-      "lines": 79,
+      "lines": 88,
       "imports": [
         "./extract.js"
       ],
@@ -940,7 +940,7 @@
     {
       "path": "server/src/knowledge/concepts.ts",
       "area": "knowledge",
-      "lines": 160,
+      "lines": 163,
       "imports": [
         "../db/db.js",
         "../core/util.js",
@@ -967,7 +967,7 @@
     {
       "path": "server/src/knowledge/extract.ts",
       "area": "knowledge",
-      "lines": 217,
+      "lines": 241,
       "imports": [],
       "exports": [
         "EXTRACTOR_VERSION",
@@ -978,6 +978,7 @@
         "Extracted",
         "ExtractionError",
         "detectFormat",
+        "replaceElements",
         "decodeEntities",
         "htmlToText",
         "sniffMeta",
@@ -1020,7 +1021,7 @@
     {
       "path": "server/src/knowledge/providers.ts",
       "area": "knowledge",
-      "lines": 84,
+      "lines": 89,
       "imports": [
         "../config.js",
         "../providers/http.js"
@@ -1036,6 +1037,7 @@
         "Passage",
         "ReasonedAnswer",
         "ReasoningProvider",
+        "fenceSafe",
         "claudeReasoner"
       ],
       "routes": []
@@ -1043,7 +1045,7 @@
     {
       "path": "server/src/knowledge/research.ts",
       "area": "knowledge",
-      "lines": 201,
+      "lines": 212,
       "imports": [
         "../db/db.js",
         "../core/util.js",
@@ -1083,7 +1085,7 @@
     {
       "path": "server/src/knowledge/routes.ts",
       "area": "knowledge",
-      "lines": 82,
+      "lines": 85,
       "imports": [
         "./taxonomy.js",
         "./extract.js",
@@ -1102,7 +1104,6 @@
         "GET /api/academy/disciplines",
         "GET /api/academy/catalog",
         "POST /api/academy/catalog/import",
-        "POST /api/academy/documents",
         "GET /api/academy/documents",
         "GET /api/academy/documents/:id",
         "POST /api/academy/documents/:id/reprocess",
@@ -1154,7 +1155,7 @@
     {
       "path": "server/src/knowledge/store.ts",
       "area": "knowledge",
-      "lines": 221,
+      "lines": 223,
       "imports": [
         "../db/db.js",
         "../core/util.js",
@@ -1334,7 +1335,7 @@
     {
       "path": "server/src/market/fabric.ts",
       "area": "market",
-      "lines": 195,
+      "lines": 210,
       "imports": [
         "../providers/binance.js",
         "../providers/coinbase.js",
@@ -1346,6 +1347,7 @@
         "../chart/analysis.js",
         "./types.js",
         "../core/bus.js",
+        "../features/indicators.js",
         "../core/latency.js",
         "../config.js",
         "../portfolio/ledger.js",
@@ -1357,6 +1359,7 @@
         "refreshTickers",
         "selectUniverse",
         "validateCandleBatch",
+        "REBUILD_MIN_BARS",
         "ingestCandleBatch",
         "refreshDeep",
         "refreshBooks",
@@ -2100,7 +2103,7 @@
     },
     {
       "path": "server/test/ditas-api.test.ts",
-      "cases": 9
+      "cases": 10
     },
     {
       "path": "server/test/ditas-calibration.test.ts",
@@ -2140,7 +2143,7 @@
     },
     {
       "path": "server/test/knowledge.test.ts",
-      "cases": 31
+      "cases": 37
     },
     {
       "path": "server/test/lab.test.ts",
@@ -2164,11 +2167,11 @@
     },
     {
       "path": "server/test/quality.test.ts",
-      "cases": 19
+      "cases": 20
     },
     {
       "path": "server/test/repair.test.ts",
-      "cases": 11
+      "cases": 13
     },
     {
       "path": "server/test/risk.test.ts",

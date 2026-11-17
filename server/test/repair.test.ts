@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
-import { closeDb, openDb, get, run, tx, inTransaction } from '../src/db/db.js';
+import { closeDb, openDb, get, all, run, tx, inTransaction } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -81,6 +81,25 @@ describe('R-PR7: CodeRabbit-verified fail-closed fixes', () => {
     const after = openPositions()[0];
     expect(after.qty).toBe(before.qty); expect(get<{ n: number }>("SELECT COUNT(*) n FROM fills")!.n).toBe(1); // entry only
     expect(JSON.parse(after.targets).targets.every((t: any) => !t.done)).toBe(true);
+  });
+  it('exits in one pass consume book depth in order: the second target is priced from the lower level', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const q = openPositions()[0].qty;
+    setBook(id, last * 1.10); const b = market.deep.get(id)!.book!;
+    b.bids = [[last * 1.10, q * 0.5], [last * 1.08, q * 0.6]]; // first level holds exactly one target
+    monitorPositions();
+    const exits = all<{ price: number; qty: number }>("SELECT f.price, f.qty FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.purpose<>'ENTRY' ORDER BY f.ts, f.rowid");
+    expect(exits).toHaveLength(2);
+    expect(exits[1].price).toBeLessThan(exits[0].price); // previously both filled at the top level
+  });
+  it('a take-profit slice smaller than one lot is not marked done (it sold nothing) and stays eligible', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    market.instruments.get(id)!.stepSize = pos.qty * 0.6; // T1 slice (50%) now rounds below one lot
+    setBook(id, last * 1.05); monitorPositions();
+    const after = openPositions()[0];
+    expect(after.qty).toBe(pos.qty); // nothing sold
+    expect(JSON.parse(after.targets).targets[0].done).toBe(false);
   });
   it('protection reconciliation requires a fresh book deep enough for the stop', () => {
     expect(submitEntry(report(id, last), 'bot').ok).toBe(true);

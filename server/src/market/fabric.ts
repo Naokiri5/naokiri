@@ -8,6 +8,7 @@ import { market, type DeepState } from './store.js';
 import { validateCandles } from '../chart/analysis.js';
 import { INTERVAL_MS, type Candle, type Instrument, type Interval } from './types.js';
 import { bus } from '../core/bus.js';
+import { FeatureEngine } from '../features/indicators.js';
 import { timed } from '../core/latency.js';
 import { config } from '../config.js';
 import { openPositions } from '../portfolio/ledger.js';
@@ -93,12 +94,26 @@ export function validateCandleBatch(candles: readonly Candle[], interval: Interv
   return { closed, forming: forming[0], issues: [...issues] };
 }
 
+/** Minimum validated contiguous closed candles needed to rebuild an engine after an unbridgeable gap (EMA200 + margin). */
+export const REBUILD_MIN_BARS = 300;
 /** Bad source batches never alter indicators; the quality gate remains failed until recovery. */
 export function ingestCandleBatch(state: DeepState, interval: Interval, candles: readonly Candle[], nowTs: number, closedBefore = nowTs) {
   const result = validateCandleBatch(candles, interval, nowTs, closedBefore);
   const engine = state.engines[interval];
   const firstNew = result.closed.find(c => c.t > engine.lastT);
-  if (engine.lastT >= 0 && firstNew && firstNew.t !== engine.lastT + INTERVAL_MS[interval]) result.issues.push('missing candles between cached history and source batch');
+  const gap = engine.lastT >= 0 && !!firstNew && firstNew.t !== engine.lastT + INTERVAL_MS[interval];
+  // Explicit recovery policy: after an outage longer than one fetch window the gap can never be bridged by appending.
+  // A batch that is itself fully valid, contiguous, entirely newer than the cache and long enough to warm every
+  // indicator (EMA200) REBUILDS the engine from that window. Anything less keeps the quality gate failed.
+  if (gap && !result.issues.length && result.closed.length >= REBUILD_MIN_BARS && result.closed[0].t > engine.lastT) {
+    const fresh = new FeatureEngine(); fresh.ingest(result.closed); state.engines[interval] = fresh;
+    state.integrityIssues ??= {}; state.integrityIssues[interval] = []; state.candleFetchedAt[interval] = nowTs;
+    if (result.forming) state.forming[interval] = result.forming; else delete state.forming[interval];
+    bus.publish('health', { type: 'market-data-integrity', instrumentId: state.instrument.id, interval, source: state.instrument.venue, at: nowTs, status: 'REBUILT',
+      issues: [`history rebuilt from ${result.closed.length} validated candles after a gap since ${new Date(engine.lastT).toISOString()}`] });
+    return result.closed.length;
+  }
+  if (gap) result.issues.push('missing candles between cached history and source batch');
   const previousIssues = state.integrityIssues?.[interval] ?? [];
   state.integrityIssues ??= {};
   state.integrityIssues[interval] = result.issues;

@@ -56,9 +56,9 @@ A code search (`grep` for `INSERT`/`UPDATE` statements) shows that only `exec/om
 | 5 | Medium | An unexitable position produced an in-memory alert only. Its 10-minute repeat timer reset on restart, nothing persisted, and nothing stopped new entries on the instrument. | No durable incident model | `incidents.test.ts` (7 cases, including restart) | Fixed: migration v4 |
 | 6 | Medium | The Market breadth worker always abstained even though the data existed | Not implemented | `workers-effectiveness.test.ts` | Fixed |
 | 7 | Medium | Registered worker count presented as if all workers were productive | No capability or productivity accounting | `workers-effectiveness.test.ts` | Fixed (reporting). R-12 is open for a QCI policy decision. |
-| 8 | Medium | Tiny take-profit slice below one lot is marked done without a sale | `stepExit` marks done before lot rounding | R-19 | Open: needs backtester parity tests |
-| 9 | Medium | No automatic recovery after more than 400 missed candles | Fetch window is fixed | R-20 | Open (it fails closed) |
-| 10 | Medium | DITAS cohort can mix forecasts with different remaining horizons | Cohort key lacks a horizon bucket | R-37 | Open |
+| 8 | Medium | Tiny take-profit slice below one lot is marked done without a sale | `stepExit` marks done before lot rounding | `repair.test.ts` | Fixed in OMS (backtester unchanged) |
+| 9 | Medium | No automatic recovery after more than 400 missed candles | Fetch window is fixed | `quality.test.ts` | Fixed: explicit rebuild policy |
+| 10 | Medium | DITAS cohort can mix forecasts with different remaining horizons | Cohort key lacks a horizon bucket | `ditas-api.test.ts` | Fixed |
 | 11 | Security | First-run setup open in containers or behind a local proxy | Container exemption; no `trustProxy` | R-35 | **Owner decision** |
 | 12 | Security | Unauthenticated users can trigger a 15-minute lockout that also blocks step-up | One global failure gate | R-36 | **Owner decision** |
 

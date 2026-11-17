@@ -17,8 +17,8 @@ describe('DITAS authenticated API and persisted service integration', () => {
   let app: Awaited<ReturnType<typeof buildApp>>, cookie: string;
   const headers = () => ({ cookie, 'x-mia-csrf': '1' });
   const post = (url: string, payload: any) => app.inject({ method: 'POST', url, headers: headers(), payload });
-  const createEvent = (opts: { kind?: 'PROPOSAL' | 'NO_SIGNAL' | 'REJECTED'; badData?: boolean; suffix?: string } = {}) => {
-    const { inst } = seedInstrument('DITASUSDT', { drift: 0, vol: 0 });
+  const createEvent = (opts: { kind?: 'PROPOSAL' | 'NO_SIGNAL' | 'REJECTED'; badData?: boolean; suffix?: string; symbol?: string } = {}) => {
+    const { inst } = seedInstrument(opts.symbol ?? 'DITASUSDT', { drift: 0, vol: 0 });
     if (opts.badData) market.tickers.get(inst.id)!.providerTs = T - HOUR;
     const kind = opts.kind ?? 'PROPOSAL';
     const candidate: Candidate = { id: `candidate-${opts.suffix ?? 'one'}`, eventId: `fixture-${opts.suffix ?? 'one'}`, traceId: 'fixture-trace', instrumentId: inst.id, symbol: inst.symbol, base: inst.base, market: inst.market, venue: inst.venue, strategyId: 'trend_pullback', strategyVersion: '1.0.0', interval: '1h', regime: 'TREND_UP', createdAt: Date.now(),
@@ -130,6 +130,18 @@ describe('DITAS authenticated API and persisted service integration', () => {
     expect(all('SELECT * FROM ditas_forecasts')).toHaveLength(0);
     vi.setSystemTime(T + 60_000);
     expect((await post('/api/ditas/forecasts', payload)).statusCode).toBe(200);
+  });
+
+  it('keeps proposals early and late in the same bar in separate cohorts (different remaining horizon)', async () => {
+    const early = createEvent({ suffix: 'early' });
+    const payload = { eventId: early.id, probability: 0.5, targetAt: opening + HOUR, referencePrice: 100, modelVersion: 'phase-fixture-v1', promptVersion: 'phase-prompt-v1' };
+    const first = (await post('/api/ditas/forecasts', payload)).json();
+    vi.setSystemTime(T + 59 * 60_000); // same 1h bar, 59 minutes later
+    const late = createEvent({ suffix: 'late', symbol: 'DITASBUSDT' }); // another instrument: cohorts pool across instruments
+    const r = await post('/api/ditas/forecasts', { ...payload, eventId: late.id }); expect(r.statusCode, r.body).toBe(200); const second = r.json();
+    expect(first.horizonBars).toBe(second.horizonBars); expect(first.registrationLagBucket).toBe(second.registrationLagBucket);
+    expect(first.remainingQuarterBars).toBeGreaterThan(second.remainingQuarterBars);
+    expect(first.cohort).not.toBe(second.cohort);
   });
 
   it('keeps otherwise matching forecast horizons separate across registration-lag buckets', async () => {

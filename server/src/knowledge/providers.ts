@@ -56,12 +56,17 @@ const SYSTEM = `You answer questions for MIA's Quantitative Trading Intelligence
 - Nothing you write is a trading signal or authorization. Be concise.`;
 
 /** Claude-backed reasoning, enabled only when ANTHROPIC_API_KEY is set. Timeouts, retries and citation validation. */
+/**
+ * Untrusted document text must not be able to close the passage fence or the outer <untrusted_passages> wrapper.
+ * Removal repeats until stable, so split tags like "</pa</passagessage" cannot reassemble.
+ */
+export function fenceSafe(t: string) { let prev: string; do { prev = t; t = t.replace(/<\s*\/?\s*(?:passage|untrusted_passages)[^<>]{0,200}>?/gi, ''); } while (t !== prev); return t; }
 export const claudeReasoner: ReasoningProvider = {
   id: `anthropic:${config.joeModel}`,
   available: () => !!config.anthropicApiKey,
   async answer(question, passages) {
     const client = new Anthropic({ apiKey: config.anthropicApiKey, timeout: 60_000, maxRetries: 2 });
-    const docs = passages.map((p) => `<passage n="${p.n}" source="${p.source.replace(/"/g, "'")}">\n${p.text.replace(/<\/?passage/gi, '')}\n</passage>`).join('\n');
+    const docs = passages.map((p) => `<passage n="${p.n}" source="${fenceSafe(p.source).replace(/["<>]/g, "'")}">\n${fenceSafe(p.text)}\n</passage>`).join('\n');
     const p = provider('anthropic');
     try {
       const res = await client.beta.messages.create({

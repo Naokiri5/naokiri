@@ -38,11 +38,13 @@ const POS = /\b(evidence (?:shows|suggests|supports)|robust|persistent|well[- ]d
 const NEG = /\b(no (?:evidence|support)|not (?:supported|significant|robust|profitable)|fails?|failed|does not (?:hold|work|persist)|spurious|disappear(?:s|ed)?|myth|overstated)\b/i;
 
 /** Link one document's passages to every concept by keyword (FTS), record definitions, and extract CANDIDATE claims. */
-export function linkDocumentConcepts(documentId: string) {
-  const concepts = all<any>('SELECT * FROM kb_concepts');
+/** Idempotent: re-linking replaces this document's AUTO_CANDIDATE claims for the concepts being linked (owner claims are kept). */
+export function linkDocumentConcepts(documentId: string, conceptIds?: string[]) {
+  const concepts = conceptIds ? all<any>(`SELECT * FROM kb_concepts WHERE id IN (${conceptIds.map(() => '?').join(',') || "''"})`, ...conceptIds) : all<any>('SELECT * FROM kb_concepts');
   const doc = get<any>('SELECT evidence_class FROM kb_documents WHERE id=?', documentId);
   tx(() => {
     for (const c of concepts) {
+      run("DELETE FROM kb_claims WHERE document_id=? AND concept_id=? AND origin='AUTO_CANDIDATE'", documentId, c.id);
       const card: ConceptCard = P(c.card);
       const rows = all<any>(`SELECT k.id, k.text, k.page_start, bm25(kb_chunks_fts) s FROM kb_chunks_fts f JOIN kb_chunks k ON k.id = f.chunk_id
         WHERE kb_chunks_fts MATCH ? AND k.document_id = ? ORDER BY s LIMIT 25`, ftsQuery(card.keywords), documentId);
@@ -64,7 +66,8 @@ export function unlinkDocument(documentId: string) {
   run('UPDATE kb_claims SET chunk_id=NULL WHERE document_id=?', documentId); // owner claims keep quote + page as provenance
   run('DELETE FROM kb_concept_sources WHERE chunk_id IN (SELECT id FROM kb_chunks WHERE document_id=?)', documentId);
 }
-function relinkAll(_conceptId: string) { for (const d of all<{ id: string }>("SELECT id FROM kb_documents WHERE status NOT IN ('FAILED','INGESTION_PENDING','PROCESSING')")) linkDocumentConcepts(d.id); }
+/** Link one (new) concept across all indexed documents without touching other concepts' claims. */
+function relinkAll(conceptId: string) { for (const d of all<{ id: string }>("SELECT id FROM kb_documents WHERE status NOT IN ('FAILED','INGESTION_PENDING','PROCESSING')")) linkDocumentConcepts(d.id, [conceptId]); }
 
 /** Owner-recorded claim from a specific passage (the reliable path; auto candidates are only hints). */
 export function addClaim(actor: string, input: { conceptId: string; chunkId: string; proposition: string; stance: 'SUPPORTS' | 'CONTRADICTS' | 'QUALIFIES'; evidenceClass: EvidenceClass; quote: string }) {

@@ -21,8 +21,6 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   const filters = z.object({ documentId: id.optional(), author: z.string().max(200).optional(), discipline: discipline.optional(), chapter: z.string().max(200).optional(), conceptId: id.optional(), evidenceClass: evidence.optional() });
   const notFound = (what: string) => Object.assign(new Error(`${what} not found`), { statusCode: 404 });
 
-  // Binary uploads: raw bytes with the filename in a header. Scoped to this route's content type only.
-  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: LIMITS.maxUploadBytes }, (_req, body, done) => done(null, body));
 
   app.get('/api/academy/stats', async () => libraryStats());
   app.get('/api/academy/disciplines', async () => DISCIPLINES);
@@ -31,11 +29,16 @@ export async function knowledgeRoutes(app: FastifyInstance) {
     const rows = z.array(z.object({ title: z.string().trim().min(1).max(300), authors: z.string().trim().min(1).max(300), discipline, notes: z.string().max(1000).optional() }).strict()).min(1).max(500).parse(req.body);
     return importCatalog('owner', rows);
   });
-  app.post('/api/academy/documents', { bodyLimit: LIMITS.maxUploadBytes }, async (req) => {
-    if (!Buffer.isBuffer(req.body)) throw Object.assign(new Error('send the file as application/octet-stream'), { statusCode: 415 });
-    const q = z.object({ catalogId: id.optional(), discipline: discipline.optional(), evidenceClass: evidence.optional() }).parse(req.query);
-    const raw = req.headers['x-filename']; const filename = z.string().min(1).max(500).parse(typeof raw === 'string' ? decodeURIComponent(raw) : undefined);
-    return uploadDocument('owner', req.body, filename, q);
+  // Binary uploads: the octet-stream parser lives in a child scope with only this route, so no other route (notably the
+  // unauthenticated /api/auth/* routes) will buffer large raw bodies. The child inherits the session/CSRF hook.
+  await app.register(async (upload) => {
+    upload.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: LIMITS.maxUploadBytes }, (_req, body, done) => done(null, body));
+    upload.post('/api/academy/documents', { bodyLimit: LIMITS.maxUploadBytes }, async (req) => {
+      if (!Buffer.isBuffer(req.body)) throw Object.assign(new Error('send the file as application/octet-stream'), { statusCode: 415 });
+      const q = z.object({ catalogId: id.optional(), discipline: discipline.optional(), evidenceClass: evidence.optional() }).parse(req.query);
+      const raw = req.headers['x-filename']; const filename = z.string().min(1).max(500).parse(typeof raw === 'string' ? decodeURIComponent(raw) : undefined);
+      return uploadDocument('owner', req.body, filename, q);
+    });
   });
   app.get('/api/academy/documents', async () => listDocuments());
   app.get('/api/academy/documents/:id', async (req) => documentDetail(pid(req)) ?? Promise.reject(notFound('document')));

@@ -19,16 +19,19 @@ interface Block { kind: ChunkKind | 'heading'; level?: number; text: string; pag
 function blocks(units: TextUnit[]): Block[] {
   const out: Block[] = [];
   for (const u of units) {
-    const paras = u.text.replace(/\r/g, '').split(/\n{2,}/);
+    // Isolate heading lines (markdown, "Chapter N", "References") so a heading followed by body text without a blank
+    // line still splits into heading + body instead of being swallowed or dropped.
+    const paras = u.text.replace(/\r/g, '').replace(/^(#{1,6}\s+.+|(?:references|bibliography|works cited)\s*:?\s*)$/gim, '\n\n$1\n\n')
+      .replace(/^(.{0,100})$/gm, (l) => (CHAPTER_LINE.test(l.trim()) ? `\n\n${l}\n\n` : l)).split(/\n{2,}/);
     for (const raw of paras) {
       const p = raw.trim(); if (!p) continue;
       const lines = p.split('\n');
       const md = p.match(/^(#{1,6})\s+(.+)$/);
       if (md && lines.length === 1) { out.push({ kind: 'heading', level: md[1].length, text: md[2].trim(), page: u.page }); continue; }
-      if (lines.length <= 2 && CHAPTER_LINE.test(lines[0].trim())) { out.push({ kind: 'heading', level: 1, text: lines.join(' ').trim(), page: u.page }); continue; }
+      if (lines.length === 1 && lines[0].trim().length <= 100 && CHAPTER_LINE.test(lines[0].trim())) { out.push({ kind: 'heading', level: 1, text: lines[0].trim(), page: u.page }); continue; }
       if (/^\$\$[\s\S]*\$\$$/.test(p)) { out.push({ kind: 'equation', text: p.replace(/^\$\$|\$\$$/g, '').trim(), page: u.page }); continue; }
       if (lines.length >= 2 && lines.every((l) => /^\s*\|.*\|\s*$/.test(l))) { out.push({ kind: 'table', text: p, page: u.page }); continue; }
-      if (/^(references|bibliography|works cited)\b/i.test(lines[0])) { out.push({ kind: 'heading', level: 2, text: lines[0].trim(), page: u.page }); if (lines.length > 1) out.push({ kind: 'references', text: lines.slice(1).join('\n'), page: u.page }); continue; }
+      if (/^(references|bibliography|works cited)\s*:?\s*$/i.test(lines[0].trim())) { out.push({ kind: 'heading', level: 2, text: lines[0].trim(), page: u.page }); if (lines.length > 1) out.push({ kind: 'references', text: lines.slice(1).join('\n'), page: u.page }); continue; }
       // PDF pages arrive as one paragraph per line run: split them into lines but keep short display equations apart.
       if (u.page != null && lines.length > 1) {
         let buf: string[] = [];
@@ -43,6 +46,12 @@ function blocks(units: TextUnit[]): Block[] {
       }
       out.push({ kind: 'text', text: lines.join('\n'), page: u.page });
     }
+  }
+  // Text after a References/Bibliography heading is a reference list until the next heading.
+  let inRefs = false;
+  for (const b of out) {
+    if (b.kind === 'heading') inRefs = /^(references|bibliography|works cited)\b/i.test(b.text);
+    else if (inRefs && b.kind === 'text') b.kind = 'references';
   }
   return out;
 }

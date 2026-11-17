@@ -75,6 +75,28 @@ function zipText(buf: Buffer, entries: ZipEntry[], name: string): string | null 
 }
 
 // ── markup helpers ───────────────────────────────────────────────────────────
+/**
+ * Linear-time element replacement for UNTRUSTED markup. Lazy regexes like /<script[\s\S]*?<\/script>/ rescan the rest of
+ * the input for every unclosed opener (quadratic: a crafted file can stall the event loop). Here each opener's closing
+ * tag is found with one indexOf, and an unclosed element ends the scan (its remainder is dropped when `dropUnclosed`).
+ */
+export function replaceElements(s: string, tags: string[], fn: (inner: string, tag: string, open: string) => string, dropUnclosed = false): string {
+  const lower = s.toLowerCase(); const open = new RegExp(`<(${tags.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?=[\\s>/])[^<>]{0,2000}>`, 'gi');
+  let out = ''; let i = 0;
+  for (;;) {
+    open.lastIndex = i; const m = open.exec(s); if (!m) break;
+    const tag = m[1].toLowerCase(); const close = `</${tag}>`; const end = lower.indexOf(close, m.index + m[0].length);
+    if (end < 0) return out + s.slice(i, m.index) + (dropUnclosed ? ' ' : s.slice(m.index));
+    out += s.slice(i, m.index) + fn(s.slice(m.index + m[0].length, end), tag, m[0]); i = end + close.length;
+  }
+  return out + s.slice(i);
+}
+/** Linear-time removal of <!-- comments -->; an unclosed comment drops the remainder. */
+function stripComments(s: string) {
+  let out = ''; let i = 0;
+  for (;;) { const a = s.indexOf('<!--', i); if (a < 0) return out + s.slice(i); const b = s.indexOf('-->', a + 4); if (b < 0) return out + s.slice(i, a); out += s.slice(i, a) + ' '; i = b + 3; }
+}
+const flat = (t: string) => t.replace(/<[^<>]{0,2000}>/g, ' ').replace(/\s+/g, ' ').trim();
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', ndash: '–', mdash: '—', hellip: '…', rsquo: '’', lsquo: '‘', rdquo: '”', ldquo: '“', minus: '−', times: '×', le: '≤', ge: '≥', sigma: 'σ', mu: 'μ', alpha: 'α', beta: 'β' };
 export function decodeEntities(s: string) {
   return s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
@@ -82,19 +104,18 @@ export function decodeEntities(s: string) {
     return ENTITIES[e.toLowerCase()] ?? m;
   });
 }
-const xmlTag = (xml: string, tag: string) => { const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i')); return m ? decodeEntities(m[1].replace(/<[^>]+>/g, '')).trim() || undefined : undefined; };
-const xmlTags = (xml: string, tag: string) => [...xml.matchAll(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'gi'))].map((m) => decodeEntities(m[1].replace(/<[^>]+>/g, '')).trim()).filter(Boolean);
+const xmlTags = (xml: string, tag: string) => { const out: string[] = []; replaceElements(xml, [tag], (t) => { const v = decodeEntities(t.replace(/<[^<>]{0,2000}>/g, '')).trim(); if (v) out.push(v); return ''; }); return out; };
+const xmlTag = (xml: string, tag: string) => xmlTags(xml, tag)[0] || undefined;
 
 /** HTML/XHTML → structured plain text. Scripts, styles, forms and comments are discarded, never interpreted. */
 export function htmlToText(html: string): { title?: string; text: string } {
   const title = xmlTag(html, 'title');
-  let s = html.replace(/<!--[\s\S]*?-->/g, ' ').replace(/<(script|style|noscript|svg|form|iframe|object)[\s\S]*?<\/\1>/gi, ' ');
-  s = s.replace(/<head[\s\S]*?<\/head>/i, ' ');
-  s = s.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, l: string, t: string) => `\n${'#'.repeat(Number(l))} ${t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()}\n`);
-  s = s.replace(/<math[\s\S]*?<\/math>/gi, (m) => `\n$$ ${m.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()} $$\n`);
-  s = s.replace(/<tr[^>]*>([\s\S]*?)<\/tr>/gi, (_m, r: string) => `\n| ${[...r.matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi)].map((c) => c[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()).join(' | ')} |`);
+  let s = replaceElements(stripComments(html), ['script', 'style', 'noscript', 'svg', 'form', 'iframe', 'object', 'head'], () => ' ', true);
+  s = replaceElements(s, ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'], (t, tag) => `\n${'#'.repeat(Number(tag[1]))} ${flat(t)}\n`);
+  s = replaceElements(s, ['math'], (t) => `\n$$ ${flat(t)} $$\n`);
+  s = replaceElements(s, ['tr'], (r) => { const cells: string[] = []; replaceElements(r, ['th', 'td'], (c) => { cells.push(flat(c)); return ''; }); return `\n| ${cells.join(' | ')} |`; });
   s = s.replace(/<(br|hr)\s*\/?>/gi, '\n').replace(/<\/(p|div|li|section|article|blockquote|table|pre|dd|dt)>/gi, '\n\n').replace(/<li[^>]*>/gi, '\n- ');
-  s = decodeEntities(s.replace(/<[^>]+>/g, ' ')).replace(/[ \t\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n');
+  s = decodeEntities(s.replace(/<[^<>]{1,2000}>/g, ' ')).replace(/[ \t\f\v]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n');
   return { title, text: s.trim() };
 }
 
@@ -127,14 +148,17 @@ function docx(bytes: Buffer): Extracted {
   if (!xml) throw new ExtractionError('DOCX has no word/document.xml', 'CORRUPT');
   const core = zipText(bytes, entries, 'docProps/core.xml') ?? '';
   const out: string[] = [];
-  const body = xml.replace(/<w:tbl>[\s\S]*?<\/w:tbl>/g, (tbl) => `<w:p><w:r><w:t>${[...tbl.matchAll(/<w:tr[\s\S]*?<\/w:tr>/g)].map((r) => `| ${[...r[0].matchAll(/<w:tc>[\s\S]*?<\/w:tc>/g)].map((c) => [...c[0].matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((t) => t[1]).join('').trim()).join(' | ')} |`).join('\u2028')}</w:t></w:r></w:p>`);
-  for (const p of body.matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)) {
-    const style = p[0].match(/<w:pStyle w:val="([^"]+)"/)?.[1] ?? '';
-    const text = decodeEntities([...p[0].matchAll(/<w:t[^>]*>([^<]*)<\/w:t>|<w:tab\/>|<w:br\/>/g)].map((m) => (m[1] !== undefined ? m[1] : m[0] === '<w:tab/>' ? '\t' : '\n')).join('')).replace(/\u2028/g, '\n');
+  // Tables become one paragraph of "| a | b |" rows; all scans are linear (see replaceElements).
+  const texts = (x: string) => { const t: string[] = []; replaceElements(x, ['w:t'], (v) => { t.push(v); return ''; }); return t.join(''); };
+  const body = replaceElements(xml, ['w:tbl'], (tbl) => { const rows: string[] = []; replaceElements(tbl, ['w:tr'], (r) => { const cells: string[] = []; replaceElements(r, ['w:tc'], (c) => { cells.push(texts(c).trim()); return ''; }); rows.push(`| ${cells.join(' | ')} |`); return ''; }); return `<w:p><w:r><w:t>${rows.join('\u2028')}</w:t></w:r></w:p>`; });
+  const paras: string[] = []; replaceElements(body, ['w:p'], (inner, _t, open) => { paras.push(open + inner); return ''; });
+  for (const para of paras) {
+    const style = para.match(/<w:pStyle w:val="([^"]+)"/)?.[1] ?? '';
+    const text = decodeEntities([...para.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>|<w:tab\/>|<w:br\/>/g)].map((m) => (m[1] !== undefined ? m[1] : m[0] === '<w:tab/>' ? '\t' : '\n')).join('')).replace(/\u2028/g, '\n');
     const level = style.match(/^(?:Heading|heading)(\d)$/)?.[1] ?? (style === 'Title' ? '1' : null);
     if (!text.trim()) continue;
     out.push(level ? `${'#'.repeat(Number(level))} ${text.trim()}` : text);
-    if (p[0].includes('<m:oMath')) out.push(`$$ ${xmlTags(p[0], 'm:t').join(' ')} $$`);
+    if (para.includes('<m:oMath')) out.push(`$$ ${xmlTags(para, 'm:t').join(' ')} $$`);
   }
   const text = out.join('\n\n');
   return { format: 'docx', meta: sniffMeta(text, { title: xmlTag(core, 'dc:title'), authors: xmlTag(core, 'dc:creator'), published: xmlTag(core, 'dcterms:created')?.slice(0, 10) }),

@@ -9,6 +9,11 @@ import { Action, Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '
 const TABS = ['Overview', 'Library', 'Search & ask', 'Concepts', 'Conflicts', 'Research lab', 'Disciplines', 'Memory'];
 const STATUS_TONE: Record<string, string> = { INDEXED: 'b-good', PARTIALLY_INDEXED: 'b-warn', NEEDS_REVIEW: 'b-warn', FAILED: 'b-bad', PROCESSING: 'b-info', INGESTION_PENDING: 'b-info', AWAITING_DOCUMENT: 'b-neutral' };
 const VERDICT_TONE: Record<string, string> = { SUPPORTED: 'b-good', SUPPORTED_MOMENTUM: 'b-good', SUPPORTED_MEAN_REVERSION: 'b-good', INCONCLUSIVE: 'b-warn', INSUFFICIENT_EVIDENCE: 'b-warn', NOT_SUPPORTED: 'b-bad' };
+/** Clickable table row that is also reachable and operable from the keyboard (Enter / Space). */
+const rowProps = (onOpen: () => void, label: string) => ({ role: 'button', tabIndex: 0, 'aria-label': label, style: { cursor: 'pointer' },
+  onClick: onOpen, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } } });
+/** Runs a detail request and reports a failure instead of leaving an unhandled rejection. */
+const opener = (setErr: (e: string | null) => void) => (load: () => Promise<void>) => () => { setErr(null); load().catch((e: any) => setErr(e.message)); };
 const Status = ({ v }: { v: string }) => <Badge v={v.replace(/_/g, ' ')} tone={STATUS_TONE[v] ?? VERDICT_TONE[v] ?? 'b-neutral'} />;
 
 export function Academy() {
@@ -52,11 +57,12 @@ function Library({ onChange }: { onChange: () => void }) {
   const docs = useApi<any[]>('/api/academy/documents', { topics: ['knowledge'] });
   const cat = useApi<any[]>('/api/academy/catalog');
   const [file, setFile] = useState<File | null>(null); const [catalogId, setCatalogId] = useState(''); const [msg, setMsg] = useState<string | null>(null);
-  const [detail, setDetail] = useState<any>(null);
+  const [detail, setDetail] = useState<any>(null); const [err, setErr] = useState<string | null>(null); const open = opener(setErr);
   const upload = async () => {
     if (!file) throw new Error('choose a file first');
     const r = await uploadFile(`/api/academy/documents${catalogId ? `?catalogId=${encodeURIComponent(catalogId)}` : ''}`, file);
-    setMsg(r.duplicate ? `Already in the library (status ${r.status}).` : 'Uploaded — processing in the background.'); docs.reload(); onChange();
+    setMsg(r.duplicate ? `Already in the library (status ${r.status}).` : 'Uploaded — processing in the background.');
+    setCatalogId(''); docs.reload(); cat.reload(); onChange(); // the linked title is no longer available for linking
   };
   return <div className="col" style={{ gap: 14 }}>
     <Card title="Upload a document" right={<span className="hint">PDF · EPUB · DOCX · HTML · Markdown · TXT</span>}>
@@ -72,14 +78,14 @@ function Library({ onChange }: { onChange: () => void }) {
       <div className="hint" style={{ marginTop: 8 }}>Upload only material you are entitled to use. Files are stored unmodified; DRM-protected files are refused, never decrypted. Scanned PDFs without a text layer are reported as unreadable (OCR is not configured).</div>
     </Card>
     <Card title="Documents" flush>
-      <ErrorLine e={docs.error} />
+      <ErrorLine e={docs.error} /><ErrorLine e={err} />
       <div className="tablewrap"><table><thead><tr><th>Document</th><th>Format</th><th>Status</th><th>Pages</th><th>Passages</th><th>Uploaded</th><th /></tr></thead><tbody>
         {(docs.data ?? []).map((d) => <tr key={d.id}>
           <td><b>{d.title ?? d.filename}</b><div className="hint">{d.authors ?? 'author unknown'}{d.error && <span className="down"> · {d.error}</span>}</div></td>
           <td>{d.format}</td><td><Status v={d.status} />{d.progress?.totalPages && d.status === 'PROCESSING' ? <div className="hint">page {d.progress.lastPage}/{d.progress.totalPages}</div> : null}</td>
           <td className="mono">{d.pages ?? '—'}{d.unreadable_pages?.length ? <span className="warn"> ({d.unreadable_pages.length} unreadable)</span> : null}</td>
           <td className="mono">{d.chunks}</td><td>{fmt.ago(d.uploaded_at)}</td>
-          <td className="row"><button className="sm ghost" onClick={async () => setDetail(await api(`/api/academy/documents/${d.id}`))}>Details</button>
+          <td className="row"><button className="sm ghost" onClick={open(async () => setDetail(await api(`/api/academy/documents/${d.id}`)))}>Details</button>
             <Action className="sm ghost" label="Re-process" confirm="Re-extract this document with the current extractor? The original file is kept." run={async () => { await api(`/api/academy/documents/${d.id}/reprocess`, { body: {} }); docs.reload(); }} /></td>
         </tr>)}
       </tbody></table></div>
@@ -132,11 +138,11 @@ function SearchAsk() {
 
 function Concepts() {
   const list = useApi<any[]>('/api/academy/concepts', { topics: ['knowledge'] });
-  const [open, setOpen] = useState<any>(null);
+  const [open, setOpen] = useState<any>(null); const [err, setErr] = useState<string | null>(null); const load = opener(setErr);
   return <Card title="Concept cards" flush>
-    <ErrorLine e={list.error} />
+    <ErrorLine e={list.error} /><ErrorLine e={err} />
     <div className="tablewrap"><table><thead><tr><th>Concept</th><th>Discipline</th><th>Evidence class</th><th>Sources</th><th>Claims</th><th>Experiments</th></tr></thead><tbody>
-      {(list.data ?? []).map((c) => <tr key={c.id} style={{ cursor: 'pointer' }} onClick={async () => setOpen(await api(`/api/academy/concepts/${c.id}`))}>
+      {(list.data ?? []).map((c) => <tr key={c.id} {...rowProps(load(async () => setOpen(await api(`/api/academy/concepts/${c.id}`))), `Open concept ${c.name}`)}>
         <td><b>{c.name}</b><div className="hint">{c.explanation?.slice(0, 110)}</div></td><td>{c.discipline}</td><td><Badge v={c.evidence_class} tone="b-neutral" /></td>
         <td className="mono">{c.sources}</td><td className="mono">{c.claims}</td><td className="mono">{c.experiments}</td></tr>)}
     </tbody></table></div>
@@ -171,7 +177,7 @@ function ResearchLab() {
   const exps = useApi<any[]>('/api/academy/experiments');
   const paper = useApi('/api/academy/paper-experiment', { every: 60_000 });
   const [form, setForm] = useState({ kind: 'volatility_clustering', symbol: 'BTCUSDT', interval: '1h', strategyId: 'trend_pullback', bars: 3000 });
-  const [open, setOpen] = useState<any>(null);
+  const [open, setOpen] = useState<any>(null); const [err, setErr] = useState<string | null>(null); const load = opener(setErr);
   const run = async () => {
     const conceptId = form.kind === 'volatility_clustering' ? 'con_volatility_clustering' : form.kind === 'return_autocorrelation' ? 'con_mean_reversion' : 'con_walk_forward_validation';
     const r = await api('/api/academy/experiments', { body: { ...form, conceptId, strategyId: form.kind === 'strategy_walkforward' ? form.strategyId : undefined } });
@@ -190,9 +196,9 @@ function ResearchLab() {
       </div>
       <div className="hint" style={{ marginTop: 8 }}>Results are historical evidence only. A supported result does not promote a strategy; promotion still requires the Strategy Lab gate, the risk engine and paper trading.</div>
     </Card>
-    <Card title="Experiments" flush><ErrorLine e={exps.error} />
+    <Card title="Experiments" flush><ErrorLine e={exps.error} /><ErrorLine e={err} />
       <div className="tablewrap"><table><thead><tr><th>When</th><th>Experiment</th><th>Dataset</th><th>Verdict</th></tr></thead><tbody>
-        {(exps.data ?? []).map((e) => <tr key={e.id} style={{ cursor: 'pointer' }} onClick={async () => setOpen(await api(`/api/academy/experiments/${e.id}`))}><td>{fmt.time(e.created_at)}</td><td><b>{e.kind}</b><div className="hint">{e.hypothesis}</div></td><td className="mono">{e.dataset.symbol} {e.dataset.interval} · {e.dataset.bars} bars</td><td><Status v={e.verdict} /></td></tr>)}
+        {(exps.data ?? []).map((e) => <tr key={e.id} {...rowProps(load(async () => setOpen(await api(`/api/academy/experiments/${e.id}`))), `Open experiment ${e.kind}`)}><td>{fmt.time(e.created_at)}</td><td><b>{e.kind}</b><div className="hint">{e.hypothesis}</div></td><td className="mono">{e.dataset.symbol} {e.dataset.interval} · {e.dataset.bars} bars</td><td><Status v={e.verdict} /></td></tr>)}
       </tbody></table></div>
       {exps.data && !exps.data.length && <Empty>No experiments yet.</Empty>}
     </Card>

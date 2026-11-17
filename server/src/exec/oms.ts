@@ -70,10 +70,21 @@ function simulateEntryFill(instrumentId: string, qty: number, nowTs: number): { 
  *  - book missing or stale             → freshest bid minus the policy's conservative stop-fill buffer.
  * A stale book is never walked: it would price the exit at levels that no longer exist.
  */
-function simulateExitFill(instrumentId: string, qty: number, bufferPct: number, nowTs: number): SimFill | null {
+/**
+ * `consumedQty` is depth already taken by earlier exits in the same pass: this fill is priced from the levels BELOW
+ * it (marginal cost of walking consumed+qty minus consumed), so two exits never both fill against the same bids.
+ */
+function simulateExitFill(instrumentId: string, qty: number, bufferPct: number, nowTs: number, consumedQty = 0): SimFill | null {
   const q = execQuote(instrumentId, 'SELL', nowTs); if (!q) return null;
   const book = market.deep.get(instrumentId)?.book ?? null; const age = bookAge(book, nowTs);
   const haircut = 1 - Math.max(0, bufferPct) / 100;
+  if (consumedQty > 0) {
+    const all = bookFreshForExecution(book, nowTs) ? walkBook(book, 'sell', consumedQty + qty) : null;
+    const prev = all ? walkBook(book, 'sell', consumedQty) : null;
+    if (!all?.filledFully || !prev?.filledFully) return { price: q.ref * haircut, impactBps: (1 - haircut) * 1e4, spreadBps: null, bookAgeMs: age, quoteAgeMs: q.quoteAgeMs, basis: 'QUOTE_BUFFERED' };
+    const marginal = (all.avgPrice * (consumedQty + qty) - prev.avgPrice * consumedQty) / qty; const slip = Math.max(0, (all.best - marginal) / all.best);
+    return { price: q.ref * (1 - slip), impactBps: ((all.mid - marginal) / all.mid) * 1e4, spreadBps: all.spreadBps, bookAgeMs: age, quoteAgeMs: q.quoteAgeMs, basis: 'BOOK' };
+  }
   const w = bookFreshForExecution(book, nowTs) ? walkBook(book, 'sell', qty) : null;
   if (w?.filledFully) return { price: q.ref * (1 - w.slipFrac), impactBps: w.impactBps, spreadBps: w.spreadBps, bookAgeMs: age, quoteAgeMs: q.quoteAgeMs, basis: 'BOOK' };
   if (w) {
@@ -188,6 +199,7 @@ export function monitorPositions(nowTs = Date.now()) {
     const meta = P<any>(p.targets);
     const st: ExitState = { entry: p.entry_price, stop: p.stop_price, initialStop: p.initial_stop, qtyLeft: p.qty, qtyInit: meta.qtyInit, targets: meta.targets, trailAfterR: meta.trailAfterR, barsHeld: 0, maxHoldBars: Infinity, mfe: p.mfe, mae: p.mae };
     const last = meta.lastPx ?? p.entry_price; const bid = px.bid || px.price;
+    const doneBefore = (meta.targets as { done: boolean }[]).map((t) => t.done);
     const fills = stepExit(st, { o: last, h: Math.max(last, bid), l: Math.min(last, bid), c: bid }, 0, false);
     if (st.qtyLeft > 1e-12 && p.max_hold_ms && nowTs - p.opened_at >= p.max_hold_ms) { fills.push({ reason: 'TIME', price: bid, qty: st.qtyLeft }); st.qtyLeft = 0; }
     meta.targets = st.targets; meta.lastPx = bid;
@@ -203,7 +215,15 @@ export function monitorPositions(nowTs = Date.now()) {
       tx(() => {
         run('UPDATE positions SET stop_price=?, targets=?, mfe=?, mae=? WHERE id=?', st.stop, J(meta), st.mfe, st.mae, p.id);
         if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }
-        for (const f of fills) if (!applyExit(p.id, f.qty, f.reason, pol.feeRate, nowTs, after)) throw new ExitUnavailable();
+        let consumed = 0; // depth already taken by earlier exits in this pass
+        // stepExit (shared with the backtester) marks a target done before lot rounding; a target whose slice rounds to
+        // zero sold nothing, so it is reopened here and stays eligible on later passes.
+        const newlyDone = st.targets.map((t, i) => (t.done && !doneBefore[i] ? i : -1)).filter((i) => i >= 0); let k = 0; let reopened = false;
+        for (const f of fills) {
+          const r = applyExit(p.id, f.qty, f.reason, pol.feeRate, nowTs, after, consumed); if (!r) throw new ExitUnavailable(); consumed += r.qty;
+          if (f.reason === 'TARGET') { const idx = newlyDone[k++]; if (r.qty === 0 && idx != null) { meta.targets[idx].done = false; reopened = true; } }
+        }
+        if (reopened) run('UPDATE positions SET targets=? WHERE id=?', J(meta), p.id);
       });
       after.forEach((fn) => fn());
       markRecovered(p.id, nowTs); // evaluated with fresh executable data this pass
@@ -221,7 +241,7 @@ function flagUnprotected(p: PositionRow, why: string) { reportUnprotected(p, why
  * Order/fill/ledger/position rows are written together; journal, autopsy and bus events are deferred to `after`
  * so nothing is announced for a transaction that rolls back.
  */
-function applyExit(positionId: string, wantQty: number, reason: string, fr: number, nowTs: number, after: Deferred) {
+function applyExit(positionId: string, wantQty: number, reason: string, fr: number, nowTs: number, after: Deferred, consumedQty = 0) {
   const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId);
   if (!p || p.status !== 'OPEN' || !(p.qty > 0)) return null;
   const inst = market.instruments.get(p.instrument); const step = inst?.stepSize ?? 0;
@@ -231,7 +251,7 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   if (remaining < Math.max(step, inst?.minQty ?? 0, 1e-12) - 1e-12) { qty = p.qty; remaining = 0; }
   if (!(qty > 0)) return { price: 0, pnl: 0, closed: false, qty: 0 }; // slice below one lot: nothing to sell yet
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
-  const fill = simulateExitFill(p.instrument, qty, pol.stopFillBufferPct, nowTs);
+  const fill = simulateExitFill(p.instrument, qty, pol.stopFillBufferPct, nowTs, consumedQty);
   if (!fill) return null;
   // Project invariant (CLAUDE.md #4, PR #4): never invent a fill from a ticker fallback. Every exit — protective or
   // not — is booked only against a fresh book that absorbs the full size. Otherwise the position stays open and

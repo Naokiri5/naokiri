@@ -13,6 +13,9 @@ describe('HTTP API (auth, permissions, release gate)', () => {
   beforeAll(async () => { closeDb(); openDb(':memory:'); app = await buildApp(); });
   it('requires auth and a strong passphrase', async () => {
     expect((await app.inject({ url: '/api/shell' })).statusCode).toBe(401);
+    // Raw binary bodies are accepted only by the authenticated Academy upload route, never by unauthenticated auth routes.
+    expect((await app.inject({ method: 'POST', url: '/api/auth/login', headers: { 'content-type': 'application/octet-stream' }, payload: Buffer.alloc(1024) })).statusCode).toBe(415);
+    expect((await app.inject({ method: 'POST', url: '/api/academy/documents', headers: { 'content-type': 'application/octet-stream', 'x-mia-csrf': '1' }, payload: Buffer.from('x') })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'short' } })).statusCode).toBe(400);
     const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'correct horse battery' } });
     expect(r.statusCode).toBe(200); cookie = String(r.headers['set-cookie']).split(';')[0];

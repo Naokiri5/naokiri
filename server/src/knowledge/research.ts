@@ -33,7 +33,7 @@ export function storedCandles(instrument: string, interval: Interval, limit = 10
 export async function researchCandles(symbol: string, interval: Interval, bars: number): Promise<{ candles: Candle[]; origin: 'PROVIDER+STORE' | 'STORE_ONLY' }> {
   if (!/^[A-Z0-9]{5,20}$/.test(symbol)) throw new Error('invalid symbol');
   if (!INTERVALS.includes(interval)) throw new Error('interval must be 15m, 1h or 4h');
-  if (!config.offline) { try { storeCandles(symbol, interval, await fetchHistory(symbol, interval, bars)); } catch (e: any) { if (!storedCandles(symbol, interval, 1).length) throw new Error(`no stored history and provider failed: ${e.message}`); } }
+  if (!config.offline) { try { storeCandles(symbol, interval, await fetchHistory(symbol, interval, bars + 1)); } catch (e: any) { if (!storedCandles(symbol, interval, 1).length) throw new Error(`no stored history and provider failed: ${e.message}`); } }
   const candles = storedCandles(symbol, interval, bars).filter((c) => (c.closeTime ?? c.t + INTERVAL_MS[interval]) < Date.now());
   const gaps = candles.slice(1).filter((c, i) => c.t - candles[i].t !== INTERVAL_MS[interval]).length;
   if (gaps) throw new Error(`stored history for ${symbol} ${interval} has ${gaps} gap(s); refresh it before research`);
@@ -129,6 +129,7 @@ function strategyWalkforward(c: Candle[], interval: Interval, strategyId: string
   const segLen = Math.floor(c.length / (windows + 1)); const bounds = Array.from({ length: windows + 2 }, (_, i) => c[Math.min(c.length - 1, i * segLen)].t);
   bounds[bounds.length - 1] = c[c.length - 1].t + INTERVAL_MS[interval];
   const embargoMs = embargoBars * INTERVAL_MS[interval]; let purged = 0, embargoed = 0;
+  const keptByWindow: BtTrade[][] = [];
   const win = (i: number) => {
     const lo = bounds[i], hi = bounds[i + 1];
     const inWin = bt.trades.filter((t) => t.entryT >= lo && t.entryT < hi);
@@ -136,11 +137,13 @@ function strategyWalkforward(c: Candle[], interval: Interval, strategyId: string
     const startPx = c.find((x) => x.t >= lo)!.o; const endPx = [...c].reverse().find((x) => x.t < hi)!.c;
     const regimes = (() => { const e = new FeatureEngine(); const counts: Record<string, number> = {}; for (const x of c) { if (x.t >= hi) break; e.ingest([x]); if (x.t >= lo) { const r = classifyRegime(e.last).regime; counts[r] = (counts[r] ?? 0) + 1; } } return counts; })();
     const bars = c.filter((x) => x.t >= lo && x.t < hi).length;
+    keptByWindow[i] = kept;
     return { window: i, from: lo, to: hi, role: i === 0 ? 'TRAINING (warm-up, fixed parameters — reported, not used to select)' : 'OUT_OF_SAMPLE', bars,
       metrics: performanceMetrics(kept, pol.riskPerTradePct, bars, interval, seed + i), benchmarkBuyHold: round(endPx / startPx - 1), regimeBars: regimes };
   };
   const all_ = Array.from({ length: windows + 1 }, (_, i) => win(i)); const oos = all_.slice(1);
-  const oosTrades = bt.trades.filter((t) => t.entryT >= bounds[1] && !(t.exitT >= bounds[bounds.findIndex((b) => b > t.entryT)]));
+  // Aggregate, verdict and regime breakdown use exactly the trades that survived purge AND embargo in each OOS window.
+  const oosTrades = keptByWindow.slice(1).flat();
   const positiveWindows = oos.filter((w) => w.metrics.trades > 0 && w.metrics.expectancyR > 0).length;
   const agg = performanceMetrics(oosTrades, pol.riskPerTradePct, c.length - segLen, interval, seed);
   const verdict = agg.trades < 30 ? 'INSUFFICIENT_EVIDENCE' : positiveWindows === windows && (agg.expectancyR95CI?.[0] ?? -1) > 0 ? 'SUPPORTED' : agg.expectancyR > 0 ? 'INCONCLUSIVE' : 'NOT_SUPPORTED';
@@ -155,21 +158,29 @@ export async function runExperiment(actor: string, input: RunInput) {
   if (actor !== 'owner') throw new Error('only the owner may run research experiments');
   const seed = input.seed ?? 42; const bars = Math.min(8000, Math.max(500, input.bars ?? 3000));
   const concept = input.conceptId ? findConcept(input.conceptId) : null; if (input.conceptId && !concept) throw new Error('concept not found');
-  const spec = concept ? researchSpec(concept.id, { symbol: input.symbol, interval: input.interval, strategyId: input.strategyId }) : null;
+  const strategyId = input.kind === 'strategy_walkforward' ? input.strategyId ?? 'trend_pullback' : undefined;
+  if (concept) {
+    const kind = P<{ experiment?: ExperimentKind }>(concept.card).experiment;
+    // The record is immutable, so a hypothesis from a different test must never be attached to these results.
+    if (kind !== input.kind) throw new Error(`concept "${concept.name}" is tested by ${kind ?? 'no defined experiment'}, not ${input.kind}`);
+  }
+  const spec = concept ? researchSpec(concept.id, { symbol: input.symbol, interval: input.interval, strategyId }) : null;
   const { candles, origin } = await researchCandles(input.symbol.toUpperCase(), input.interval, bars);
   const out = input.kind === 'volatility_clustering' ? volatilityClustering(candles, seed) : input.kind === 'return_autocorrelation' ? returnAutocorrelation(candles, seed)
-    : strategyWalkforward(candles, input.interval, input.strategyId ?? 'trend_pullback', seed);
+    : strategyWalkforward(candles, input.interval, strategyId!, seed);
   const priorTrials = get<{ n: number }>("SELECT COUNT(*) n FROM research_experiments WHERE kind=? AND json_extract(dataset,'$.symbol')=? AND json_extract(dataset,'$.interval')=? AND COALESCE(json_extract(spec,'$.strategyId'),'')=?",
-    input.kind, input.symbol.toUpperCase(), input.interval, input.strategyId ?? '')!.n;
+    input.kind, input.symbol.toUpperCase(), input.interval, strategyId ?? '')!.n;
   const dataset = { symbol: input.symbol.toUpperCase(), interval: input.interval, bars: candles.length, from: candles[0]?.t, to: candles[candles.length - 1]?.t, source: 'Binance public klines', origin };
   const hypothesis = spec?.hypothesis ?? `${input.kind} on ${dataset.symbol} ${input.interval}`;
   const limitations = [...out.limitations, ...(priorTrials ? [`${priorTrials} earlier run(s) of this test on the same data: repeated testing raises false-discovery risk.`] : []), 'Historical evidence does not establish future profitability.'];
-  const rec = { id: uid('exp'), created_at: Date.now(), kind: input.kind, concept_id: concept?.id ?? null, hypothesis, spec: J({ ...(spec ?? {}), strategyId: input.strategyId ?? null, seed }), dataset: J(dataset),
+  const rec = { id: uid('exp'), created_at: Date.now(), kind: input.kind, concept_id: concept?.id ?? null, hypothesis, spec: J({ ...(spec ?? {}), strategyId: strategyId ?? null, seed }), dataset: J(dataset),
     data_hash: dataHash(candles), results: J({ ...out.results, trialNumber: priorTrials + 1 }), verdict: out.verdict, limitations: J(limitations), code_version: `${RESEARCH_VERSION}+${process.env.MIA_GIT_SHA ?? 'local'}` };
   const hash = sha(J(rec));
-  run('INSERT INTO research_experiments(id,created_at,kind,concept_id,hypothesis,spec,dataset,data_hash,results,verdict,limitations,code_version,hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    rec.id, rec.created_at, rec.kind, rec.concept_id, rec.hypothesis, rec.spec, rec.dataset, rec.data_hash, rec.results, rec.verdict, rec.limitations, rec.code_version, hash);
-  audit(actor, 'research.experiment', { id: rec.id, kind: rec.kind, verdict: rec.verdict });
+  tx(() => { // experiment and its audit entry commit together, so a failed audit never leaves an orphan trial
+    run('INSERT INTO research_experiments(id,created_at,kind,concept_id,hypothesis,spec,dataset,data_hash,results,verdict,limitations,code_version,hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      rec.id, rec.created_at, rec.kind, rec.concept_id, rec.hypothesis, rec.spec, rec.dataset, rec.data_hash, rec.results, rec.verdict, rec.limitations, rec.code_version, hash);
+    audit(actor, 'research.experiment', { id: rec.id, kind: rec.kind, verdict: rec.verdict });
+  });
   return experimentDetail(rec.id)!;
 }
 export function listExperiments(limit = 100) {

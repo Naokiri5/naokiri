@@ -77,10 +77,12 @@ export function addForecast(eventId: string, probability: number, targetAt: numb
   const duration = INTERVAL_MS[c.interval as keyof typeof INTERVAL_MS];
   if (targetAt % duration !== 0) throw new Error('forecast target must be a closed timeframe boundary');
   const horizonBars = (targetAt - Math.floor(d.event.createdAt / duration) * duration) / duration;
+  // Remaining time to target in quarter-bars: proposals early and late in the same bar have different real horizons.
+  const remainingQuarterBars = Math.ceil((targetAt - d.event.createdAt) / (duration / 4));
   if (referencePrice !== c.signal.entryRef) throw new Error('forecast reference must equal frozen proposal entryRef');
   const dedupeKey = sha256(J([c.instrumentId, c.strategyId, c.strategyVersion, c.interval, targetAt, modelVersion, promptVersion]));
-  const cohort = J([c.market, c.strategyId, c.strategyVersion, c.interval, modelVersion, promptVersion, 'CLOSE_ABOVE_REFERENCE', horizonBars, registrationLagBucket]);
-  const payload = { target: 'CLOSE_ABOVE_REFERENCE', referencePrice, horizonBars, registrationLagBucket, modelVersion, promptVersion, instrumentId: c.instrumentId, strategyId: c.strategyId, strategyVersion: c.strategyVersion, timeframe: c.interval, provenance: 'OWNER_REGISTERED_PROBABILITY', note: 'Probability is explicitly supplied, never inferred from QCI votes. No execution authority.' };
+  const cohort = J([c.market, c.strategyId, c.strategyVersion, c.interval, modelVersion, promptVersion, 'CLOSE_ABOVE_REFERENCE', horizonBars, remainingQuarterBars, registrationLagBucket]);
+  const payload = { target: 'CLOSE_ABOVE_REFERENCE', referencePrice, horizonBars, remainingQuarterBars, registrationLagBucket, modelVersion, promptVersion, instrumentId: c.instrumentId, strategyId: c.strategyId, strategyVersion: c.strategyVersion, timeframe: c.interval, provenance: 'OWNER_REGISTERED_PROBABILITY', note: 'Probability is explicitly supplied, never inferred from QCI votes. No execution authority.' };
   // Duplicates are a client error (400), detected explicitly: raw SQLite constraint errors are server faults (500).
   if (get('SELECT 1 FROM ditas_forecasts WHERE dedupe_key=?', dedupeKey)) throw new Error('duplicate forecast: this target/model/prompt is already registered for the proposal');
   const id = uid('forecast'); run('INSERT INTO ditas_forecasts(id,dedupe_key,event_id,created_at,target_at,probability,cohort,payload) VALUES (?,?,?,?,?,?,?,?)', id, dedupeKey, eventId, now, targetAt, probability, cohort, J(payload));

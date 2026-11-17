@@ -110,9 +110,11 @@ export async function processDocument(id: string) {
       while (from <= total) {
         const r: Extracted = await extract(bytes, doc.filename, { fromPage: from, toPage: from + PDF_BATCH_PAGES - 1, allowEmpty: true });
         total = r.pages ?? 0; pages = total; meta = { ...r.meta, ...meta }; unreadable = [...unreadable, ...r.unreadablePages];
-        const res = chunkDocument(r.units, state); state = res.state; storeChunks(id, res.chunks);
+        const res = chunkDocument(r.units, state); state = res.state;
         const lastPage = Math.min(total, from + PDF_BATCH_PAGES - 1);
-        run('UPDATE kb_documents SET progress=?, pages=? WHERE id=?', J({ lastPage, totalPages: total, state, unreadable }), total, id);
+        // Chunks and the resume checkpoint commit together: a crash can never store a batch without its progress
+        // (which would duplicate passages on resume) or advance progress past uncommitted passages.
+        tx(() => { storeChunks(id, res.chunks); run('UPDATE kb_documents SET progress=?, pages=? WHERE id=?', J({ lastPage, totalPages: total, state, unreadable }), total, id); });
         bus.publish('knowledge', { id, status: 'PROCESSING', page: lastPage, total });
         from = lastPage + 1;
         await new Promise((r2) => setImmediate(r2)); // keep the event loop responsive between batches

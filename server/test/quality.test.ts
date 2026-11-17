@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ingestCandleBatch, validateCandleBatch } from '../src/market/fabric.js';
+import { ingestCandleBatch, validateCandleBatch, REBUILD_MIN_BARS } from '../src/market/fabric.js';
 import { market } from '../src/market/store.js';
 import { assessQuality, bookImpact } from '../src/market/quality.js';
 import { parseRss } from '../src/providers/googlenews.js';
@@ -154,6 +154,19 @@ describe('raw candle batch integrity and recovery', () => {
     expect(ingestCandleBatch(d, '1h', cs, newer)).toBe(0);
     expect(d.integrityIssues?.['1h']?.join()).toMatch(/between cached history/);
     expect(d.engines['1h'].last).toEqual(before);
+  });
+  it('rebuilds from a full validated window after an outage longer than one fetch, but never from a short batch', () => {
+    const d = market.deep.get(inst.id)!; const H = 3_600_000; const lastT = d.engines['1h'].lastT;
+    const later = lastT + 500 * H; // 500 missed bars: more than one 400-candle fetch window
+    const short = synthCandles(50, { t0: later - 50 * H });
+    expect(ingestCandleBatch(d, '1h', short, later + H)).toBe(0); // too short to warm indicators: stays failed
+    expect(d.integrityIssues?.['1h']?.join()).toMatch(/between cached history/);
+    const full = synthCandles(REBUILD_MIN_BARS + 20, { t0: later - (REBUILD_MIN_BARS + 20) * H });
+    expect(ingestCandleBatch(d, '1h', full, later + H)).toBe(REBUILD_MIN_BARS + 20);
+    expect(d.integrityIssues?.['1h']).toEqual([]);
+    expect(d.engines['1h'].lastT).toBe(full[full.length - 1].t);
+    const bad = synthCandles(REBUILD_MIN_BARS + 20, { t0: later + 600 * H }); bad[5].h = -1; // invalid window never rebuilds
+    expect(ingestCandleBatch(d, '1h', bad, later + 1000 * H)).toBe(0); expect(d.engines['1h'].lastT).toBe(full[full.length - 1].t);
   });
   it('allows repeated history across refreshes without duplicate indicator updates', () => {
     const d = market.deep.get(inst.id)!;
