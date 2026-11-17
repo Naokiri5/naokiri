@@ -34,6 +34,16 @@ export function Terminal() {
           <Card title="Cross-venue prices"><div className="kv mono" style={{ fontSize: 12 }}><span>binance</span><span>{fmt.px(t?.last)}</span>{Object.entries(data?.cross ?? {}).map(([v, q]: any) => <><span key={v}>{v}</span><span key={v + 'p'}>{fmt.px(q.price)} <span className="faint">{t ? fmt.pct((q.price / t.last - 1) * 100, 3) : ''}</span></span></>)}</div>
             {data?.impact && <div className="hint" style={{ marginTop: 8 }}>$10k market buy: spread {fmt.num(data.impact.spreadBps, 2)}bps, impact {fmt.num(data.impact.impactBps, 2)}bps, depth ±1% {fmt.usd(data.impact.depth1pct, 0)}</div>}</Card>
         </div>
+        <Card title="Chart intelligence · closed candles">
+          {data?.chartIntelligence && <div className="col">
+            <div className="row"><Badge v={data.chartIntelligence.status} /><Badge v={data.chartIntelligence.trend} /><Badge v="NO TRADE" /></div>
+            <div className="hint">{data.chartIntelligence.note}</div>
+            {data.chartIntelligence.issues.length > 0 && <div className="hint warn">{data.chartIntelligence.issues.join('; ')}</div>}
+            <div className="tablewrap"><table><thead><tr><th>Detection</th><th>Boundaries</th><th>Evidence</th><th>Invalidation</th></tr></thead><tbody>
+              {data.chartIntelligence.detections.map((d: any) => <tr key={d.kind}><td>{d.kind}<div className="hint">{Math.round(d.confidence * 100)}% rule strength · {d.calibration}</div></td><td>{fmt.px(d.boundaries.low)}–{fmt.px(d.boundaries.high)}</td><td>{d.evidence.join('; ')}<div className="hint">{d.method}</div></td><td>{d.invalidation}<div className="hint">Expires {fmt.time(d.expiresAt)}</div></td></tr>)}
+            </tbody></table></div>
+          </div>}
+        </Card>
         <Card title="50 indicator specialists"><IndicatorGrid list={data?.indicators ?? []} /></Card>
       </div>
       <div className="col" style={{ gap: 14 }}>

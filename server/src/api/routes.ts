@@ -1,3 +1,5 @@
+import { analyzeChart } from '../chart/analysis.js';
+import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import * as auth from './auth.js';
@@ -98,11 +100,17 @@ export async function routes(app: FastifyInstance) {
     const i = market.bySymbol((req.params as any).symbol);
     if (!i) return reply.code(200).send({ unavailable: true, reason: market.instruments.size ? 'Symbol is not a listed Binance spot pair.' : config.offline ? 'Market data is disabled (offline mode).' : 'Market data is still loading — try again in a few seconds.' });
     if (!market.deep.has(i.id) && !config.offline) { const { refreshDeep } = await import('../market/fabric.js'); await refreshDeep([i.id]); }
-    const d = market.deep.get(i.id); const iv = ((req.query as any).interval ?? '1h') as '15m' | '1h' | '4h';
+    const d = market.deep.get(i.id); const iv = z.enum(['15m', '1h', '4h']).default('1h').parse((req.query as any).interval);
     const f = d ? { '15m': d.engines['15m'].last, '1h': d.engines['1h'].last, '4h': d.engines['4h'].last } : {};
-    return { instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
+    return { chartIntelligence: analyzeChart(i.id, iv, d?.engines[iv].candles ?? [], Date.now()), instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
       quality: assessQuality(i.id), safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };
+  });
+  // Bounded research-only replay. Uses owner-supplied history and the existing auth/CSRF gate.
+  app.post('/api/chart/replay', async (req) => {
+    const candle = z.object({ t: z.number().finite().nonnegative(), o: z.number().positive(), h: z.number().positive(), l: z.number().positive(), c: z.number().positive(), v: z.number().nonnegative(), closeTime: z.number().finite().optional() });
+    const b = z.object({ instrument: z.string().min(1).max(100), timeframe: z.enum(['15m', '1h', '4h']), candles: z.array(candle).min(1).max(2000), visibleBars: z.number().int().positive().max(2000) }).parse(req.body);
+    return replayChart(b.instrument, b.timeframe, b.candles, b.visibleBars);
   });
   app.get('/api/fx', async () => ({ series: market.fx, asOf: market.fxFetchedAt, note: 'ECB daily reference rates via Frankfurter — not tradeable quotes.' }));
   app.get('/api/bubbles', async (req) => bubbleMap({ limit: Number((req.query as any).limit ?? 150), minVolume: Number((req.query as any).minVolume ?? 1e6) }));

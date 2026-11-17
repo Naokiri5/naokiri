@@ -15,7 +15,12 @@ function watch(page: Page) {
 }
 test.describe.configure({ mode: 'serial' });
 let page: Page;
-test.beforeAll(async ({ browser }) => { page = await browser.newPage(); watch(page); });
+test.beforeAll(async ({ browser }) => {
+  page = await browser.newPage();
+  // Offline suite must not depend on Google Fonts availability or external TLS certificates.
+  await page.context().route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
+  watch(page);
+});
 
 test('owner setup and sign-in', async () => {
   await page.goto('/');
@@ -66,6 +71,19 @@ test('trading history CSV export downloads', async () => {
   await page.goto('/history');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export orders CSV' }).click()]);
   expect(dl.suggestedFilename()).toBe('mia-orders-paper.csv');
+});
+
+test('terminal displays chart intelligence evidence and invalidation', async () => {
+  await page.route('**/api/instrument/CHARTFIXTURE?interval=1h', async route => route.fulfill({ json: {
+    instrument: { base: 'CHARTFIXTURE', symbol: 'CHARTFIXTURE' }, cross: {}, candles: [], indicators: [],
+    chartIntelligence: { status: 'VALID', trend: 'UNKNOWN', note: 'Fixture evidence only; confidence is not calibrated.', issues: [], detections: [{ kind: 'BREAKOUT_UP', confidence: 0.6, calibration: 'NOT_CALIBRATED', boundaries: { low: 100, high: 105 }, evidence: ['close=105'], method: 'Prior 20-bar high', invalidation: 'Close back below 100', expiresAt: 3600000 }] }
+  } }));
+  await page.goto('/terminal/CHARTFIXTURE');
+  await expect(page.getByText('Chart intelligence · closed candles')).toBeVisible();
+  await expect(page.getByRole('cell', { name: /BREAKOUT_UP/ })).toBeVisible();
+  await expect(page.getByText('Close back below 100')).toBeVisible();
+  await expect(page.getByText(/60% rule strength/)).toBeVisible();
+  await page.unroute('**/api/instrument/CHARTFIXTURE?interval=1h');
 });
 
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });

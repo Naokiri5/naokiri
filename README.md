@@ -102,3 +102,7 @@ Start with `docs/PROJECT_STATUS.md` (plain-language status) and `docs/SETUP_GUID
 | `docs/KNOWN_LIMITATIONS.md` | what does not work yet and why |
 | `docs/QHEF_LATENCY_BASELINE.md` | measured performance |
 | `docs/CHANGELOG.md` | history |
+
+## Global Chart Intelligence
+
+The first phased increment adds closed-candle chart evidence to the Market Terminal and a bounded blind historical replay API. See [implementation status and Claude handoff](docs/chart-intelligence/IMPLEMENTATION_STATUS.md) and [repository audit](docs/chart-intelligence/GLOBAL_CHART_INTELLIGENCE_AUDIT.md). Advanced phases remain tracked there; this increment does not certify strategies for live trading.

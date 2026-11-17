@@ -1,3 +1,4 @@
+import { seedInstrument } from './helpers.js';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { closeDb, openDb } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
@@ -36,6 +37,25 @@ describe('HTTP API (auth, permissions, release gate)', () => {
       expect((await app.inject({ url: u, headers: { cookie } })).statusCode, u).toBe(200);
     const intel = (await app.inject({ url: '/api/intelligence', headers: { cookie } })).json();
     expect(intel.workers).toHaveLength(100); expect(intel.indicatorSpecialists).toHaveLength(50);
+  });
+  it('analyzes the existing closed cache and rejects unsupported instrument intervals', async () => {
+    seedInstrument('CHARTUSDT');
+    const r = await app.inject({ url: '/api/instrument/CHARTUSDT?interval=1h', headers: { cookie } });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().chartIntelligence).toMatchObject({ status: 'VALID', decision: 'NO TRADE', timeframe: '1h' });
+    expect((await app.inject({ url: '/api/instrument/CHARTUSDT?interval=1m', headers: { cookie } })).statusCode).toBe(400);
+  });
+  it('protects replay, validates intervals, and returns only the visible prefix', async () => {
+    const candles = Array.from({ length: 30 }, (_, i) => ({ t: i * 3600000, o: 100, h: 102, l: 98, c: 101, v: 10 }));
+    const payload = { instrument: 'fixture', timeframe: '1h', candles, visibleBars: 25 };
+    expect((await app.inject({ method: 'POST', url: '/api/chart/replay', payload })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: '/api/chart/replay', headers: { cookie }, payload })).statusCode).toBe(403);
+    const r = await app.inject({ method: 'POST', url: '/api/chart/replay', headers: H(), payload });
+    expect(r.statusCode).toBe(200); expect(r.json().candles).toHaveLength(25);
+    expect(r.json().report.decision).toBe('NO TRADE');
+    expect((await app.inject({ method: 'POST', url: '/api/chart/replay', headers: H(), payload: { ...payload, timeframe: '1m' } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'POST', url: '/api/chart/replay', headers: H(), payload: { ...payload, visibleBars: 31 } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'POST', url: '/api/chart/replay', headers: H(), payload: { ...payload, candles: Array(2001).fill(candles[0]) } })).statusCode).toBe(400);
   });
   it('Trader Joe has no order/limit/mode/withdraw tools and refuses such commands', async () => {
     expect([...JOE_TOOL_NAMES].sort()).toEqual(['analyze_instrument', 'explain_decision', 'get_instrument', 'get_large_prints', 'get_market_overview', 'get_news', 'get_opportunities', 'get_portfolio', 'get_risk_status', 'get_status', 'pause_new_orders']);
