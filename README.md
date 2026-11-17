@@ -104,3 +104,11 @@ Start with `docs/PROJECT_STATUS.md` (plain-language status) and `docs/SETUP_GUID
 | `docs/CHANGELOG.md` | history |
 | `docs/CLAUDE_CODE_WORKFLOW.md` | Claude Code setup, specialist agents, slash skills and optional GitHub @claude workflow |
 | `docs/REFACTORING_BACKLOG.md` | evidence-based code-organization and duplication-removal plan |
+
+## Global Chart Intelligence
+
+The first phased increment adds closed-candle chart evidence to the Market Terminal and a bounded blind historical replay API. See [implementation status and Claude handoff](docs/chart-intelligence/IMPLEMENTATION_STATUS.md) and [repository audit](docs/chart-intelligence/GLOBAL_CHART_INTELLIGENCE_AUDIT.md). Advanced phases remain tracked there; this increment does not certify strategies for live trading.
+
+## DITAS decision intelligence
+
+Open **DITAS Decision Intelligence** in the sidebar for data health, immutable decision memory, Market DNA, strategy passports, separate paper/hypothetical records and exact-cohort calibration. Research APIs support frozen-decision Twin evaluation and explicit forecast/outcome records. See [DITAS implementation status](docs/ditas/IMPLEMENTATION_STATUS.md) for delivered scope, remaining phases and certification limits.

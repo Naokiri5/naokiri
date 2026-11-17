@@ -104,17 +104,21 @@ describe('Order-book freshness and fill accounting', () => {
     expect(openPositions()).toHaveLength(0);
     expect(accountState().cash).toBe(10_000);
   });
-  it('prices a stop-out from the fresh quote, never from a stale book', () => {
+  it('never prices a stop-out from a stale book or a ticker fallback: keeps it open and raises the alert', () => {
+    // CLAUDE.md invariant #4 (PR #4): no synthetic fills. Originally (PR #3) this exit filled at a quote-based price.
     expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
     const pos = openPositions()[0];
     market.deep.get(id)!.book!.ts = OLD(); // book still shows bids near `last`
     setTicker(last * 0.96); // the market has actually fallen through the stop
     monitorPositions();
+    expect(openPositions()).toHaveLength(1); // not closed at a fabricated price
+    expect(all("SELECT * FROM orders WHERE position_id=? AND purpose LIKE 'EXIT_%'", pos.id)).toHaveLength(0);
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM notifications WHERE severity='CRITICAL'")!.n).toBeGreaterThan(0);
+    expect(reconcile().ok).toBe(true);
+    // once a fresh book arrives, the stop executes against real depth
+    setBook(id, last * 0.96); monitorPositions();
     expect(openPositions()).toHaveLength(0);
-    const closed = get<any>('SELECT * FROM positions WHERE id=?', pos.id);
-    expect(closed.exit_reason).toBe('STOP');
-    expect(closed.exit_price).toBeLessThanOrEqual(last * 0.96); // not the stale book's ~last
-    expect(closed.realized_pnl).toBeLessThan(0);
+    expect(get<any>('SELECT exit_reason FROM positions WHERE id=?', pos.id).exit_reason).toBe('STOP');
     expect(reconcile().ok).toBe(true);
   });
   it('partial take-profit keeps position, protective stop, fills and cash in step, and is not repeated', () => {
@@ -139,15 +143,20 @@ describe('Order-book freshness and fill accounting', () => {
     expect(reconcile().ok).toBe(true);
     expect(all("SELECT id FROM orders WHERE purpose='PROTECTIVE_STOP' AND status='ACTIVE'")).toHaveLength(0);
   });
-  it('completes an exit on a thin book below the worst visible bid instead of assuming top-of-book', () => {
+  it('never fills an exit from a thin book at top-of-book or an invented price: waits for real depth', () => {
+    // CLAUDE.md invariant #4 (PR #4): sufficient fresh depth or no fill. Originally (PR #3) this booked a partial
+    // fill plus a synthetic remainder below the worst visible bid.
     expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
     const pos = openPositions()[0]; const mid = last * 0.96; const ts = Date.now();
     market.deep.get(id)!.book = { bids: [[mid, pos.qty / 10], [mid * 0.999, pos.qty / 10]], asks: [[mid * 1.0002, 50]], ts };
     setTicker(mid, ts - 1);
     monitorPositions();
+    expect(get<any>('SELECT status, qty FROM positions WHERE id=?', pos.id)).toMatchObject({ status: 'OPEN', qty: pos.qty });
+    expect(sells()).toHaveLength(0);
+    expect(reconcile().ok).toBe(true);
+    setBook(id, mid); monitorPositions(); // real depth returns → the stop executes against it, below top-of-book
     const closed = get<any>('SELECT * FROM positions WHERE id=?', pos.id);
-    expect(closed.status).toBe('CLOSED'); expect(closed.qty).toBe(0);
-    expect(closed.exit_price).toBeLessThan(mid * 0.999);
+    expect(closed.status).toBe('CLOSED'); expect(closed.exit_price).toBeLessThanOrEqual(mid);
     expect(reconcile().ok).toBe(true);
   });
   it('manual close is refused when no fresh price exists, and changes nothing', () => {

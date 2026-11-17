@@ -12,6 +12,9 @@ export interface Candidate {
   strategyId: string; strategyVersion: string; interval: Interval; signal: Signal; regime: Regime; createdAt: number;
 }
 export interface WorkerContext {
+  /** Immutable evidence captured before asynchronous QCI review. */
+  memorySnapshotId?: string;
+  frameQuality?: Record<string, DataQuality>;
   candidate: Candidate;
   f: Partial<Record<Interval, FeatureSnapshot | null>>;
   btc1h: FeatureSnapshot | null; btc4h: FeatureSnapshot | null;

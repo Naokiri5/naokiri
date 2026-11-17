@@ -1,0 +1,9 @@
+# Permanent decision memory
+
+Migration 2 adds ditas_snapshots and ditas_events alongside the existing decisions/consensus/OMS tables. Snapshot IDs are content hashes; snapshot payloads preserve source/receipt times, raw closed OHLCV, features, book/cross quotes, exact worker ticker and BTC features, quality, controls, known versions and null model/prompt/calibration lineage. No secrets/config/chat context are captured. Event kinds: NO_SIGNAL, REJECTED, PROPOSAL, DECISION, CORRECTION. Strategy identity/version is structured even without a proposal.
+
+Scanner terminal no-signal/rejections are idempotent per instrument/strategy/candle. Each asynchronous proposal attempt captures its own immutable snapshot before QCI. ctx.memorySnapshotId carries it into decide(), avoiding a later read of changed market data. Final decision insert and event append are in one SQLite transaction; capture failure prevents execution callback. Processed keys are marked only after durable completion. Explicit manual analysis records no-signal results too.
+
+DB triggers prohibit UPDATE/DELETE for the five DITAS tables. Events form a SHA256 chain; snapshots are hash-verifiable. This is tamper evidence and application immutability, not protection against a database administrator who removes triggers. Corrections append a parent-linked event and owner audit record. GET /api/ditas/verify performs explicit full verification; it is not run on every dashboard poll. Snapshots/events are immutable for new evaluations, not reconstructed legacy histories. Actual executions remain authoritative in orders/fills/positions/ledger; full immutable execution lifecycle extension remains pending.
+
+APIs: GET /api/ditas/events/:id; POST /api/ditas/events/:id/corrections {reason,correction}. Global owner session/CSRF apply. No deletion API.
