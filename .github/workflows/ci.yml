@@ -28,6 +28,8 @@ jobs:
         run: npm run typecheck
       - name: Unit & integration tests (offline, deterministic)
         run: npm run qa -w server
+      - name: Python execution API check (isolated and offline)
+        run: python3 scripts/verify-ditas-execution.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
