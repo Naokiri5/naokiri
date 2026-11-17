@@ -5,7 +5,8 @@ import { scoreOpportunity, type OpportunityScore } from './scoring.js';
 import { evaluateRisk, type RiskDecision } from '../risk/gate.js';
 import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
 import { getControl } from '../core/mode.js';
-import { run, J } from '../db/db.js';
+import { recordOpportunity } from '../ditas/memory.js';
+import { run, J, tx } from '../db/db.js';
 import { uid, iso } from '../core/util.js';
 import { record } from '../core/latency.js';
 import { bus } from '../core/bus.js';
@@ -87,8 +88,11 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
     disclaimer: 'Opportunity score and consensus are evidence summaries, not probabilities of profit. Paper trading only.',
   };
   record('decision.engine', performance.now() - t0);
-  run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,risk_decision,consensus_id,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-    report.id, cand.id, cand.instrumentId, cand.market, report.direction, cand.strategyId, decision, opp.score, risk?.decision ?? null, qci.consensus_id, Date.now(), J(report));
+  tx(() => {
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,risk_decision,consensus_id,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      report.id, cand.id, cand.instrumentId, cand.market, report.direction, cand.strategyId, decision, opp.score, risk?.decision ?? null, qci.consensus_id, Date.now(), J(report));
+    recordOpportunity({ kind: 'DECISION', instrumentId: cand.instrumentId, strategyId: cand.strategyId, interval: cand.interval, dedupeKey: `decision:${report.id}`, reason: report.reason, candidate: cand, ctx, report });
+  });
   bus.publish('decision', { id: report.id, asset: report.asset, decision, score: opp.score, strategy: cand.strategyId });
   return report;
 }
