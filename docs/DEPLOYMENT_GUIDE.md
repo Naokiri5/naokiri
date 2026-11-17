@@ -9,6 +9,24 @@
 - Secrets only via environment variables (`.env.example`). They never reach the browser, logs (redacted), or LLM prompts.
 
 ## Backup & restore
+- The existing `npm run backup -- create|verify <file>|list` CLI uses the same `server/src/ops/backup.ts` implementation
+  as the leader's scheduled backups (`MIA_BACKUP_INTERVAL_H`, default 24 hours; `MIA_BACKUP_KEEP`, default 14).
+  Scheduled runs verify immediately. The latest failed snapshot is kept and its failure is recorded. Retention runs
+  after every creation, keeping the newest N plus the last verified good configured backup (at most N+1 snapshots), so
+  persistent failures cannot grow storage without limit. CLI `create` and `verify` also persist the latest result in `settings`.
+- CLI `verify` records into `$MIA_DATA_DIR/mia.db`, opening/creating and migrating that database if needed. When
+  verifying an off-site copy on a recovery machine, use a separate `MIA_DATA_DIR` for this verification record. It
+  replaces the latest status even for files outside `MIA_BACKUP_DIR`, but does not change which local good backup
+  retention protects. The `verifyBackup` library function itself remains read-only.
+- Security Center's **DATA-3** check and authenticated `GET /api/security` (`backup.lastVerify`) expose that result,
+  including ledger reconciliation on the snapshot. Missing/deleted snapshots warn, failed verification fails, and
+  either a snapshot or verification older than twice the interval (capped at seven days) warns. With scheduling
+  disabled, the freshness window is 48 hours. Rechecking an old snapshot does not make its creation date recent.
+- With `MIA_BACKUP_KEY` set, snapshot/decryption plaintext uses a private 0700 OS temporary directory, cleaned on
+  success and failure; only ciphertext is written into the backup directory. The existing MIAB1 format and hex/base64
+  key support are unchanged. The OS temp area (`TMPDIR` on Unix) needs space for a full plaintext database copy.
+  Keep the encryption key and `data/evidence.key` separately; SQLite snapshots do not
+  include either key or Academy source-document files outside the database.
 - Data lives in `$MIA_DATA_DIR/mia.db` (SQLite WAL). Back up with `sqlite3 data/mia.db ".backup data/backup-$(date +%F).db"`
   while running. Restore by stopping the server and replacing `mia.db` (delete `-wal`/`-shm`).
 - Migrations are append-only (`server/src/db/migrations.ts`). Roll back code by redeploying the previous commit together

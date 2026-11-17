@@ -14,8 +14,7 @@ import { config } from '../config.js';
 import type { DecisionReport } from '../decision/engine.js';
 import { tryAcquireLease, releaseLease } from '../ops/lease.js';
 import { checkScanStall } from '../ops/readiness.js';
-import { maybeScheduledBackup, verifyBackup, backupDir } from '../ops/backup.js';
-import { join } from 'node:path';
+import { maybeScheduledBackup } from '../ops/backup.js';
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
@@ -92,7 +91,7 @@ let lastBackupAlertAt = 0;
 function backupPass() {
   try {
     const m = maybeScheduledBackup(); if (!m) return;
-    const v = verifyBackup(join(backupDir(), m.file));
+    const v = m.verification;
     journal('SYSTEM', `Backup ${m.file} written (${m.encrypted ? 'encrypted' : 'not encrypted'}); restore check ${v.ok ? 'passed' : 'FAILED'}`);
     if (!v.ok) throw new Error(`restore check failed: ${v.checks.filter((c) => !c.ok).map((c) => c.name).join(', ')}`);
   } catch (e: any) {
