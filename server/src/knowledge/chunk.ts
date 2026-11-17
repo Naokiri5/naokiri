@@ -16,15 +16,34 @@ export const hashText = (s: string) => createHash('sha256').update(normalizeText
 export const tokenCount = (s: string) => (s.match(/\S+/g) ?? []).length;
 
 interface Block { kind: ChunkKind | 'heading'; level?: number; text: string; page: number | null }
-function blocks(units: TextUnit[]): Block[] {
+const HEADING_LINE = /^(#{1,6}\s+.+|(?:references|bibliography|works cited)\s*:?\s*)$/i;
+const FENCE = /^\s*(```|~~~)/;
+/**
+ * Split text into paragraphs. Heading lines (markdown, "Chapter N", "References") become their own paragraph even when
+ * body text follows on the next line. Fenced code (``` or ~~~) is kept whole and never classified, so a "# comment"
+ * inside an example is not mistaken for a heading.
+ */
+function splitParas(text: string): { text: string; code: boolean }[] {
+  const out: { text: string; code: boolean }[] = []; let cur: string[] = []; let fence: string | null = null;
+  const flush = (code = false) => { if (cur.length) out.push({ text: cur.join('\n'), code }); cur = []; };
+  for (const line of text.replace(/\r/g, '').split('\n')) {
+    const f = line.match(FENCE)?.[1];
+    if (fence) { cur.push(line); if (f === fence) { flush(true); fence = null; } continue; }
+    if (f) { flush(); fence = f; cur.push(line); continue; }
+    if (!line.trim()) { flush(); continue; }
+    if (HEADING_LINE.test(line.trim()) || (line.trim().length <= 100 && CHAPTER_LINE.test(line.trim()))) { flush(); cur.push(line); flush(); continue; }
+    cur.push(line);
+  }
+  flush(fence != null); // an unterminated fence is still kept whole
+  return out;
+}
+function blocks(units: TextUnit[], inRefsAtStart = false): { blocks: Block[]; inRefs: boolean } {
   const out: Block[] = [];
   for (const u of units) {
-    // Isolate heading lines (markdown, "Chapter N", "References") so a heading followed by body text without a blank
-    // line still splits into heading + body instead of being swallowed or dropped.
-    const paras = u.text.replace(/\r/g, '').replace(/^(#{1,6}\s+.+|(?:references|bibliography|works cited)\s*:?\s*)$/gim, '\n\n$1\n\n')
-      .replace(/^(.{0,100})$/gm, (l) => (CHAPTER_LINE.test(l.trim()) ? `\n\n${l}\n\n` : l)).split(/\n{2,}/);
-    for (const raw of paras) {
-      const p = raw.trim(); if (!p) continue;
+    const paras = splitParas(u.text);
+    for (const para of paras) {
+      if (para.code) { out.push({ kind: 'text', text: para.text, page: u.page }); continue; }
+      const p = para.text.trim(); if (!p) continue;
       const lines = p.split('\n');
       const md = p.match(/^(#{1,6})\s+(.+)$/);
       if (md && lines.length === 1) { out.push({ kind: 'heading', level: md[1].length, text: md[2].trim(), page: u.page }); continue; }
@@ -48,16 +67,16 @@ function blocks(units: TextUnit[]): Block[] {
     }
   }
   // Text after a References/Bibliography heading is a reference list until the next heading.
-  let inRefs = false;
+  let inRefs = inRefsAtStart; // carried across PDF batches via ChunkState
   for (const b of out) {
     if (b.kind === 'heading') inRefs = /^(references|bibliography|works cited)\b/i.test(b.text);
     else if (inRefs && b.kind === 'text') b.kind = 'references';
   }
-  return out;
+  return { blocks: out, inRefs };
 }
 
 /** Carried between PDF page batches so resumed ingestion keeps chapter context and sequence numbers. */
-export interface ChunkState { seq: number; chapter: string | null; heading: string | null }
+export interface ChunkState { seq: number; chapter: string | null; heading: string | null; inRefs?: boolean }
 export function chunkDocument(units: TextUnit[], start: ChunkState = { seq: 0, chapter: null, heading: null }): { chunks: Chunk[]; state: ChunkState } {
   const out: Chunk[] = []; let chapter: string | null = start.chapter; let heading: string | null = start.heading;
   let cur: { texts: string[]; kind: ChunkKind; pageStart: number | null; pageEnd: number | null } | null = null;
@@ -66,7 +85,8 @@ export function chunkDocument(units: TextUnit[], start: ChunkState = { seq: 0, c
     if (!text) return;
     out.push({ seq: start.seq + out.length, chapter, heading, pageStart: ps, pageEnd: pe, kind, text, hash: hashText(text), tokens: tokenCount(text) });
   };
-  for (const b of blocks(units)) {
+  const bl = blocks(units, !!start.inRefs);
+  for (const b of bl.blocks) {
     if (b.kind === 'heading') {
       emit();
       if ((b.level ?? 2) <= 1) { chapter = b.text.slice(0, 200); heading = null; } else heading = b.text.slice(0, 200);
@@ -83,5 +103,5 @@ export function chunkDocument(units: TextUnit[], start: ChunkState = { seq: 0, c
     }
   }
   emit();
-  return { chunks: out, state: { seq: start.seq + out.length, chapter, heading } };
+  return { chunks: out, state: { seq: start.seq + out.length, chapter, heading, inRefs: bl.inRefs } };
 }

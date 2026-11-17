@@ -74,10 +74,29 @@ describe('extraction by format', () => {
     expect(text).toContain('References to prior work'); // a sentence starting with "References" is not a heading
     expect(chunks.find((c) => c.text.startsWith('Smith'))?.kind).toBe('references');
   });
-  it('extraction stays linear on adversarial unclosed markup (no event-loop stall)', () => {
-    for (const unit of ['<script ', '<!--', '<h1>', '<tr>', '<title>', '<style']) {
-      const t = performance.now(); htmlToText(unit.repeat(80_000)); expect(performance.now() - t, unit).toBeLessThan(1500);
-    }
+  it('adversarial unclosed markup is handled without dropping or inventing text (deterministic)', () => {
+    expect(htmlToText('<p>keep</p><script>evil(); never closed ' + 'x'.repeat(1000)).text).toBe('keep'); // unclosed script: remainder dropped, never executed
+    expect(htmlToText('<p>keep</p><!-- never closed ' + 'x'.repeat(1000)).text).toBe('keep');
+    expect(htmlToText('<h1>A</h1>' + '<tr>'.repeat(500)).text).toContain('# A');
+  });
+  // Timing is checked only in the opt-in benchmark (MIA_BENCH=1): wall-clock thresholds do not belong in the default suite.
+  it.runIf(process.env.MIA_BENCH === '1')('benchmark: linear time on 80k unclosed openers', () => {
+    for (const unit of ['<script ', '<!--', '<h1>', '<tr>', '<title>', '<style']) { const t = performance.now(); htmlToText(unit.repeat(80_000)); expect(performance.now() - t, unit).toBeLessThan(1500); }
+  });
+  it('keeps the following DOCX paragraph when an earlier one contains a character whose lowercase form is longer (İ)', async () => {
+    const r = await extract(docx('Unicode', 'U. Author', [{ text: 'İstanbul İzmir İnönü quantitative notes on markets.' }, { text: 'Second paragraph about volatility clustering survives.' }]), 'u.docx');
+    expect(r.units[0].text).toContain('Second paragraph about volatility clustering survives.');
+  });
+  it('fenced code is preserved whole and its # comments are not headings', () => {
+    const { chunks } = chunkDocument([{ page: null, text: '# Costs\n\nIntro text about costs and execution.\n\n```python\n# Transaction costs\nfee = 0.001\n\nprint(fee)\n```\n\nAfter the example.' }]);
+    const code = chunks.find((c) => c.text.includes('fee = 0.001'))!;
+    expect(code.text).toContain('# Transaction costs'); expect(code.text).toContain('print(fee)');
+    expect(chunks.every((c) => c.chapter === 'Costs')).toBe(true);
+  });
+  it('a reference list that continues into the next PDF batch stays classified as references', () => {
+    const first = chunkDocument([{ page: 40, text: 'Body text of the final chapter goes here and is long enough.\nReferences\nSmith, J. (2001). A paper on markets.' }]);
+    const next = chunkDocument([{ page: 41, text: 'Jones, K. (2005). Another paper on volatility.' }], first.state);
+    expect(next.chunks[0].kind).toBe('references');
   });
   it('reads HTML and discards scripts', async () => {
     const r = await extract(Buffer.from('<!doctype html><html><head><title>Page</title><script>alert("x")</script></head><body><h1>Spread</h1><p>The bid–ask spread is the cost of immediacy paid by liquidity takers.</p><script>evil()</script></body></html>'), 'page.html');

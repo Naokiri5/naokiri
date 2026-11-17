@@ -81,7 +81,8 @@ function zipText(buf: Buffer, entries: ZipEntry[], name: string): string | null 
  * tag is found with one indexOf, and an unclosed element ends the scan (its remainder is dropped when `dropUnclosed`).
  */
 export function replaceElements(s: string, tags: string[], fn: (inner: string, tag: string, open: string) => string, dropUnclosed = false): string {
-  const lower = s.toLowerCase(); const open = new RegExp(`<(${tags.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?=[\\s>/])[^<>]{0,2000}>`, 'gi');
+  // ASCII-only folding keeps offsets aligned with `s` (Unicode lowercasing can change string length).
+  const lower = s.replace(/[A-Z]+/g, (m) => m.toLowerCase()); const open = new RegExp(`<(${tags.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?=[\\s>/])[^<>]{0,2000}>`, 'gi');
   let out = ''; let i = 0;
   for (;;) {
     open.lastIndex = i; const m = open.exec(s); if (!m) break;
