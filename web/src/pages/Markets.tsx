@@ -57,7 +57,7 @@ export function Terminal() {
     {ana && <Modal title="Full pipeline analysis" onClose={() => setAna(null)}>{ana.decision ? <DecisionView report={ana} /> : <div className="banner info">{ana.reason}</div>}</Modal>}
   </Page>;
 }
-function CandleChart({ candles, features }: { candles: any[]; features: any }) {
+export function CandleChart({ candles, features }: { candles: any[]; features: any }) {
   const ref = useRef<HTMLDivElement>(null); const chart = useRef<IChartApi | null>(null); const series = useRef<any>({});
   useEffect(() => {
     if (!ref.current) return;

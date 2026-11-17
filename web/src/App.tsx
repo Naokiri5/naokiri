@@ -7,6 +7,8 @@ import * as P from './pages';
 import { CommandPalette } from './palette';
 import { StaleBanner, StatusRibbon } from './StatusRibbon';
 import type { ShellDto } from './status';
+import { PresentationProvider, PresentationSelector } from './presentation';
+import { MiniCockpit } from './components/MiniCockpit';
 import { ALL_PAGES } from './nav';
 import { SideNav, GroupTabs, MobileNav } from './Navigation';
 
@@ -17,7 +19,7 @@ export default function App() {
   useEffect(() => { if (auth?.authenticated) connectStream(); else disconnectStream(); }, [auth?.authenticated]);
   if (!auth) return null;
   if (!auth.authenticated) return <Login setup={auth.setup} codeRequired={!!auth.setupCodeRequired} onDone={() => setAuth({ setup: true, authenticated: true })} />;
-  return <Shell onLogout={() => setAuth({ setup: true, authenticated: false })} />;
+  return <PresentationProvider><Shell onLogout={() => setAuth({ setup: true, authenticated: false })} /></PresentationProvider>;
 }
 
 function Login({ setup, codeRequired, onDone }: { setup: boolean; codeRequired: boolean; onDone: () => void }) {
@@ -62,6 +64,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       <button className="ghost sm mob-only" onClick={() => setMobOpen(!mobOpen)} aria-label="Menu">☰</button>
       <StatusRibbon shell={shell} />
       <Search />
+      <PresentationSelector />
+      <MiniCockpit snapshot={shell.data} error={shell.error} receivedAt={shell.updatedAt} />
       <button className="pill" onClick={() => nav('/notifications')} aria-label="Notifications">🔔 {s?.unread ?? 0}</button>
       <button className="ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
       <button className="ghost sm" onClick={signOut}>Sign out</button>

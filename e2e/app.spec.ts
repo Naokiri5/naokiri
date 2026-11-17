@@ -207,6 +207,7 @@ test('academy: upload a document, see it indexed, search it with a cited source'
 
 test('overview dashboard shows account, market intelligence, risk monitor, data sources and activity from the backend', async () => {
   await page.goto('/');
+  await page.getByLabel('Presentation mode').selectOption('analyst');
   for (const t of ['Paper account', 'Market intelligence', 'Risk monitor', 'Data sources', 'Activity', 'Trader Joe daily briefing']) await expect(page.getByText(t, { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Equity', { exact: true })).toBeVisible();
   await expect(page.getByRole('meter', { name: 'Daily loss' })).toBeVisible(); // policy accepted earlier in this suite
