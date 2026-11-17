@@ -16,6 +16,7 @@ import { classifyRegime } from '../regime/regime.js';
 import { readIndicators, INDICATOR_SPECIALISTS } from '../workers/indicators.js';
 import { WORKERS, DOMAINS, REQUIRED_DOMAINS } from '../workers/registry.js';
 import { POOL, quarantined, releaseQuarantine } from '../workers/runtime.js';
+import { workerEffectiveness } from '../workers/effectiveness.js';
 import { QCI_POLICY, DOMAIN_WEIGHTS } from '../qci/coordinator.js';
 import { providers } from '../providers/http.js';
 import { latencyReport } from '../core/latency.js';
@@ -25,6 +26,7 @@ import { accountState, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio
 import { correlation } from '../portfolio/correlation.js';
 import { calendar, reconcile } from '../portfolio/calendar.js';
 import * as oms from '../exec/oms.js';
+import { listIncidents, acknowledgeIncident, IncidentError } from '../exec/incidents.js';
 import { listJournal } from '../journal/journal.js';
 import { recentNews, refreshNews } from '../news/news.js';
 import { recentPrints, printThreshold } from '../whales/prints.js';
@@ -79,6 +81,7 @@ export async function routes(app: FastifyInstance) {
       return reply.code(err.status === 404 ? 404 : err.status === 429 ? 503 : 502).send({ error: `upstream market-data provider unavailable (${err.providerId})` });
     }
     if (err instanceof oms.OmsError) return reply.code(409).send({ error: err.message });
+    if (err instanceof IncidentError) return reply.code(err.statusCode).send({ error: err.message });
     if (Number.isInteger(err?.statusCode) && err.statusCode >= 400 && err.statusCode < 500) return reply.code(err.statusCode).send({ error: String(err.message ?? err) });
     if (isServerFault(err) || (Number.isInteger(err?.statusCode) && err.statusCode >= 500)) {
       req.log.error({ err }, 'unhandled server error');
@@ -101,6 +104,13 @@ export async function routes(app: FastifyInstance) {
 
   await ditasRoutes(app);
   await knowledgeRoutes(app);
+  // ── protection incidents (persistent; owner acknowledgement) ──
+  app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
+  app.post('/api/risk/incidents/:id/ack', async (req) => {
+    const { id } = z.object({ id: z.string().min(1).max(80) }).parse(req.params);
+    const { note } = z.object({ note: z.string().trim().min(3).max(1000) }).strict().parse(req.body);
+    return acknowledgeIncident('owner', id, note);
+  });
 
   // ── auth ──
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
@@ -190,7 +200,8 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/intelligence', async () => {
     const stats = new Map(all<any>('SELECT * FROM worker_stats').map((s) => [s.worker_id, s]));
     const recs = all<any>('SELECT id, instrument, state, created_at, record FROM consensus_records ORDER BY created_at DESC LIMIT 40').map((r) => { const x = P<any>(r.record); delete x.packets; return x; });
-    return { workers: WORKERS.map((w) => ({ id: w.id, name: w.name, domain: w.domain, version: w.version, dependencyGroup: w.dependencyGroup, sources: w.sourceIds, mandatory: !!w.mandatory, canVeto: !!w.canVeto, quarantined: quarantined.has(w.id), stats: stats.get(w.id) ?? null, pending: w.sourceIds.some((s) => ['evm_rpc', 'x_api', 'pending'].includes(s)) })),
+    return { workers: WORKERS.map((w) => ({ id: w.id, name: w.name, domain: w.domain, version: w.version, dependencyGroup: w.dependencyGroup, sources: w.sourceIds, mandatory: !!w.mandatory, canVeto: !!w.canVeto, quarantined: quarantined.has(w.id), stats: stats.get(w.id) ?? null, capability: w.capability, pending: w.capability === 'PROVIDER_BLOCKED' })),
+      effectiveness: workerEffectiveness().summary,
       indicatorSpecialists: [...INDICATOR_SPECIALISTS.map((x) => ({ id: x.id, name: x.s.name, interval: x.iv })), { id: 'IND-49', name: 'EMA20 vs EMA50', interval: '1h' }, { id: 'IND-50', name: 'EMA50 vs EMA200', interval: '4h' }],
       domains: DOMAINS.map((d) => ({ domain: d, weight: DOMAIN_WEIGHTS[d], required: REQUIRED_DOMAINS.includes(d), workers: WORKERS.filter((w) => w.domain === d).length })), policy: QCI_POLICY, pool: POOL, consensus: recs,
       note: 'Workers are deterministic, versioned evaluators running in a bounded pool — not LLM agents. Confidence is NOT_CALIBRATED until walk-forward calibration is performed.' };
@@ -202,7 +213,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/risk', async () => {
     const acct = accountState(); const pos = openPositions();
     const corr = pos.map((a) => pos.map((b) => correlation(a.instrument, b.instrument)));
-    return { policy: currentPolicy(), defaults: DEFAULT_POLICY, history: policyHistory().slice(0, 20), account: acct, control: getControl(), display: displayMode(), positions: pos, correlation: { instruments: pos.map((p) => p.instrument), matrix: corr }, protection: oms.protectPositions(), gates: releaseGates() };
+    return { policy: currentPolicy(), defaults: DEFAULT_POLICY, history: policyHistory().slice(0, 20), account: acct, control: getControl(), display: displayMode(), positions: pos, correlation: { instruments: pos.map((p) => p.instrument), matrix: corr }, protection: oms.protectPositions(), incidents: listIncidents(), gates: releaseGates() };
   });
   app.post('/api/risk/policy', async (req) => { const b = req.body as any; stepUp(req, b); return acceptPolicy('owner', b?.policy); });
   app.post('/api/control', async (req) => {

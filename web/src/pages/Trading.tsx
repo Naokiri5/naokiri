@@ -71,6 +71,21 @@ const POLICY_FIELDS: [string, string, string][] = [
   ['maxCostR', 'Max round-trip cost (R)', '0.01–0.5'], ['maxPriceDeviationPct', 'Max price deviation at submit (%)', '0.05–3'], ['stopFillBufferPct', 'Conservative stop-fill buffer (%)', '0.1–5'], ['feeRate', 'Fee rate (fraction)', '0–0.005'],
   ['maxCorrelatedPositions', 'Max correlated positions', '1–10'], ['correlationThreshold', 'Correlation threshold', '0.3–0.99'], ['minOpportunityScore', 'Min opportunity score', '40–95'],
 ];
+/** Persistent protection incidents: visible until the owner acknowledges them after executable data has returned. */
+function IncidentsCard({ incidents, reload }: { incidents: any[]; reload: () => void }) {
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  if (!incidents.length) return null;
+  return <Card title="Protection incidents" right={<Badge v={`${incidents.filter((i) => i.status === 'OPEN').length} OPEN`} tone="b-bad" />} flush>
+    <table><tbody>{incidents.map((i) => <tr key={i.id}>
+      <td><b>{i.instrument.split(':')[2] ?? i.instrument}</b><div className="hint">{i.reason}</div><div className="hint">since {fmt.time(i.opened_at)} · seen {i.occurrences}× · last {fmt.ago(i.last_seen_at)}</div></td>
+      <td><Badge v={i.status} tone={i.status === 'OPEN' ? 'b-bad' : 'b-warn'} /></td>
+      <td>{i.status === 'OPEN' ? <span className="hint">Position kept open — no synthetic fill. New entries on this instrument are blocked until a fresh, deep order book returns.</span>
+        : <div className="row"><input aria-label="Acknowledgement note" placeholder="Action taken" value={notes[i.id] ?? ''} onChange={(e) => setNotes({ ...notes, [i.id]: e.target.value })} style={{ width: 160 }} />
+          <Action className="sm" label="Acknowledge" run={async () => { await api(`/api/risk/incidents/${i.id}/ack`, { body: { note: notes[i.id] ?? '' } }); reload(); }} /></div>}</td>
+    </tr>)}</tbody></table>
+  </Card>;
+}
+
 export function Risk() {
   const { data, error, reload } = useApi('/api/risk', { topics: ['position', 'mode', 'risk'], every: 20_000 });
   const [draft, setDraft] = useState<any>(null); const [pw, setPw] = useState(''); const [confirm, setConfirm] = useState(''); const [result, setResult] = useState<any>(null);
@@ -97,6 +112,7 @@ export function Risk() {
           <StepUp value={pw} onChange={setPw} />
           {result && <div className="card"><div className="bd"><div className="row">Result: <Badge v={result.state ?? 'CONFIRMED'} /></div><pre className="hint">{JSON.stringify(result, null, 1).slice(0, 1200)}</pre></div></div>}
         </div></Card>
+        <IncidentsCard incidents={data?.incidents ?? []} reload={reload} />
         <Card title="Position protection" flush>{data?.protection.positions.length ? <table><tbody>{data.protection.positions.map((x: any) => <tr key={x.positionId}><td>{x.instrument.split(':')[2]}</td><td>{x.protected ? <Badge v="PROTECTED" tone="b-good" /> : <Badge v="UNVERIFIED" tone="b-bad" />}</td><td className="muted">{x.issue ?? `stop ${fmt.px(x.stop)}`}</td></tr>)}</tbody></table> : <Empty>No open positions.</Empty>}</Card>
       </div>
       <div className="col" style={{ gap: 14 }}>

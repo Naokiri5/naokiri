@@ -8,6 +8,7 @@ import { correlation } from '../portfolio/correlation.js';
 import { all, get } from '../db/db.js';
 import { iso } from '../core/util.js';
 import { getSetting } from '../core/settings.js';
+import { openIncidentFor } from '../exec/incidents.js';
 
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
@@ -43,6 +44,9 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
 
   const inst = market.instruments.get(p.instrumentId);
   if (!inst) { deny.push('INSTRUMENT_UNKNOWN'); return out(); }
+  // An instrument where an open paper position cannot currently be exited must not receive new exposure.
+  const incident = openIncidentFor(p.instrumentId);
+  if (incident) deny.push(`PROTECTION_INCIDENT_OPEN:${incident.id}`);
   if (!pol.approvedMarkets.includes(inst.market as any)) deny.push(`MARKET_NOT_APPROVED:${inst.market}`);
   const safety = assessCexAsset(p.instrumentId); ev.safety = safety.status;
   if (!safety.eligibleForAutomation) deny.push(`ASSET_INELIGIBLE:${safety.status}`);

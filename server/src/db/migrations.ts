@@ -97,6 +97,16 @@ const MIGRATIONS: string[] = [
     l REAL NOT NULL, c REAL NOT NULL, v REAL NOT NULL, close_time INTEGER, source TEXT NOT NULL, fetched_at INTEGER NOT NULL,
     PRIMARY KEY(instrument, interval, t));
   `,
+  // v4 — persistent protection incidents: a paper position that cannot be exited (stale/missing/thin market data)
+  // stays visible across restarts until the owner acknowledges it.
+  `
+  CREATE TABLE protection_incidents (id TEXT PRIMARY KEY, position_id TEXT NOT NULL, instrument TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('OPEN','RECOVERED','ACKNOWLEDGED')), reason TEXT NOT NULL,
+    opened_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, last_notified_at INTEGER NOT NULL, occurrences INTEGER NOT NULL,
+    recovered_at INTEGER, acknowledged_at INTEGER, acknowledged_by TEXT, ack_note TEXT);
+  CREATE UNIQUE INDEX protection_incidents_one_active ON protection_incidents(position_id) WHERE status IN ('OPEN','RECOVERED');
+  CREATE INDEX protection_incidents_instrument ON protection_incidents(instrument, status);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */

@@ -13,6 +13,7 @@ import { getControl, updateControl } from '../core/mode.js';
 import { stepExit, newExitState, type ExitState } from '../lab/exits.js';
 import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
+import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 
 /**
  * Paper OMS (Part 26 / 32.6). Fills are simulated by walking the LIVE Binance order book
@@ -180,6 +181,7 @@ class ExitUnavailable extends Error {}
  */
 export function monitorPositions(nowTs = Date.now()) {
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
+  sweepClosedPositions(nowTs);
   for (const p of openPositions()) {
     const px = market.price(p.instrument);
     if (!px || !quoteAgeOk(px.ts, nowTs)) { flagUnprotected(p, 'stale, future-dated or missing price — stop cannot be evaluated'); continue; }
@@ -204,18 +206,14 @@ export function monitorPositions(nowTs = Date.now()) {
         for (const f of fills) if (!applyExit(p.id, f.qty, f.reason, pol.feeRate, nowTs, after)) throw new ExitUnavailable();
       });
       after.forEach((fn) => fn());
+      markRecovered(p.id, nowTs); // evaluated with fresh executable data this pass
     } catch (e: any) {
       flagUnprotected(p, e instanceof ExitUnavailable ? 'no fresh executable price for exit' : `exit failed: ${String(e?.message ?? e).slice(0, 160)}`);
     }
   }
 }
-function flagUnprotected(p: PositionRow, why: string) {
-  const key = `unprot:${p.id}`; if ((flagged.get(key) ?? 0) > Date.now() - 600_000) return;
-  flagged.set(key, Date.now());
-  notify('CRITICAL', `Protection unverified: ${p.instrument}`, `${why}. New entries are blocked by the data-quality gate until prices recover.`, 'risk');
-  journal('RISK', `Protection unverified for ${p.instrument}: ${why}`, p.id);
-}
-const flagged = new Map<string, number>();
+/** Persistent, de-duplicated protection incident (survives restarts; see exec/incidents.ts). */
+function flagUnprotected(p: PositionRow, why: string) { reportUnprotected(p, why); }
 
 /**
  * Apply one exit fill. MUST run inside tx(): it re-reads the position there, so the quantity it sells is the
