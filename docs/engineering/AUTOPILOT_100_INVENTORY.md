@@ -79,7 +79,7 @@ Summary: BLOCKED 4, DONE 21, LOCKED 6, MISSING 20, PARTIAL 49.
 | 069 | MISSING | No anomalous-login detection. |
 | 070 | PARTIAL | Hash-chained audit log, HMAC evidence packets, and backups that verify the chain. No periodic signed checkpoints exported off the machine. |
 | 071 | MISSING | No PiP yet (Phase 2). |
-| 072 | PARTIAL | A headless soak of about 6.5 min ran in the container (docs/engineering/PHASE1_SOAK.md): forced crash, restart, standby and handover all observed. A 24 h run needs a host. |
+| 072 | PARTIAL | A headless soak of about 6.6 min ran in the container (planned for 15 min, stopped early) (docs/engineering/PHASE1_SOAK.md): forced crash, restart, standby and handover all observed. A 24 h run needs a host. |
 | 073 | PARTIAL | Process crash and restart are tested (supervisor). No crash injection inside the OMS steps. |
 | 074 | MISSING | No 429 or rate-limit simulation. |
 | 075 | PARTIAL | Most domain functions take an injectable nowTs. No frozen-clock integration suite. |

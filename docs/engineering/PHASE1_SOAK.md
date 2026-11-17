@@ -1,6 +1,6 @@
 # Phase 1 headless soak — 2026-11-17
 
-**This is not the 24-hour soak (item 072).** It was a short run, about 6.5 minutes, inside the development container. It was cut short when the recording script was interrupted. It proves the lifecycle mechanics. It does not prove long-run stability, memory behaviour over hours, or uptime on a hosted server. Nothing was deployed.
+**This is not the 24-hour soak (item 072).** It was a short run, about 6.6 minutes, inside the development container. It was planned for 15 minutes. It ended early because the operator, Claude, stopped the supervisor at 14:22:45, wrongly believing the recording loop had died. Samples recorded after that moment show the server as down (HTTP 000) because it had been stopped on purpose; they are excluded below. It proves the lifecycle mechanics. It does not prove long-run stability, memory behaviour over hours, or uptime on a hosted server. Nothing was deployed.
 
 ## Setup
 - Built server (`npm run build -w server`) started with `node server/scripts/supervise.mjs`. Settings: `NODE_ENV=production`, `MIA_HOST=127.0.0.1`, port 8799, a fresh `MIA_DATA_DIR`, and `MIA_BACKUP_INTERVAL_H=1`.
@@ -21,7 +21,7 @@
 | 14:22:45 | Supervisor sent SIGTERM | Server: "draining engine lanes… Stopped cleanly". Supervisor: `stopped (0)`. `runtime_leases` was empty afterwards (lease released). |
 
 ## Numbers
-- **Readiness samples:** 26. 25 returned HTTP 200. The one non-200 was the sample taken before the server had bound its port at t=0. No sample reported `ready:false`.
+- **Readiness samples while the server was up:** 27 (t = 0–391 s). 26 returned HTTP 200. The one non-200 was the sample taken before the server had bound its port at t=0. No sample reported `ready:false`.
 - **Readiness check failures:** none (no stale ticker or scanner).
 - **Restarts:** 1, the forced one. No unplanned crashes.
 - **RSS, first process:** 168–226 MB over 20 samples. That is too short to judge leaks.
