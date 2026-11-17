@@ -93,6 +93,11 @@ describe('extraction by format', () => {
     expect(code.text).toContain('# Transaction costs'); expect(code.text).toContain('print(fee)');
     expect(chunks.every((c) => c.chapter === 'Costs')).toBe(true);
   });
+  it('fences close only on a matching marker (CommonMark): a shorter or labelled inner fence stays inside', () => {
+    const { chunks } = chunkDocument([{ page: null, text: '# Guide\n\nIntro paragraph explaining the example below.\n\n````md\n```python\n# not a heading\n```\n````\n\nAfter.' }]);
+    const code = chunks.find((c) => c.text.includes('# not a heading'))!;
+    expect(code).toBeTruthy(); expect(code.text).toContain('````md'); expect(chunks.every((c) => c.heading !== 'not a heading' && c.chapter === 'Guide')).toBe(true);
+  });
   it('a reference list that continues into the next PDF batch stays classified as references', () => {
     const first = chunkDocument([{ page: 40, text: 'Body text of the final chapter goes here and is long enough.\nReferences\nSmith, J. (2001). A paper on markets.' }]);
     const next = chunkDocument([{ page: 41, text: 'Jones, K. (2005). Another paper on volatility.' }], first.state);

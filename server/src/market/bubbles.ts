@@ -7,9 +7,10 @@ import { assessCexAsset } from '../safety/safety.js';
 export function marketBreadth(minVolume = 1_000_000) {
   // Only rows from the latest batch, with a provider timestamp that is neither stale nor future-dated (same limits as
   // the quote-quality gate), so a stale row can never be reported under the fresh batch timestamp.
-  const L = QUALITY_LIMITS; const batch = market.tickersFetchedAt;
+  const L = QUALITY_LIMITS; const batch = market.tickersFetchedAt; const now = Date.now();
   const rows = [...market.tickers.values()].filter((t) => t.receivedAt === batch && Number.isFinite(t.providerTs) && t.providerTs <= t.receivedAt + L.clockSkewMs
-    && t.receivedAt - t.providerTs <= L.maxQuoteAgeMs && isEligibleSpot(t.base, t.quote) && t.quoteVolume >= minVolume && Number.isFinite(t.changePct));
+    && now - t.providerTs <= L.maxQuoteAgeMs && // age measured when breadth is used, like the quote-quality gate
+    isEligibleSpot(t.base, t.quote) && t.quoteVolume >= minVolume && Number.isFinite(t.changePct));
   return { universe: rows.length, advancers: rows.filter((r) => r.changePct > 0).length, decliners: rows.filter((r) => r.changePct < 0).length, asOf: market.tickersFetchedAt || null };
 }
 /** Part 25.1/25.2 cross-market gainers/losers bubble data + breadth. Only real feeds are included. */

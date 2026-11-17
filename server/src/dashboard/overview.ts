@@ -9,7 +9,7 @@ import { getControl, displayMode } from '../core/mode.js';
 import { listNotifications } from '../notify/notify.js';
 import { providers } from '../providers/http.js';
 import { releaseGates } from '../qa/gates.js';
-import { listIncidents } from '../exec/incidents.js';
+import { listIncidents, type Incident } from '../exec/incidents.js';
 import { workerEffectiveness } from '../workers/effectiveness.js';
 import { dailyBriefing } from '../joe/joe.js';
 
@@ -70,7 +70,8 @@ export function activityFeed(limit = 25): Activity[] {
     if (n.severity === 'INFO') continue;
     items.push({ at: n.ts, kind: 'ALERT', title: `${n.severity} · ${n.title}`, detail: n.body, tone: n.severity === 'CRITICAL' ? 'bad' : 'warn', link: '/notifications' });
   }
-  for (const i of listIncidents(true, 20)) items.push({ at: i.last_seen_at, kind: 'INCIDENT', title: `Protection ${i.status} · ${sym(i.instrument)}`, detail: i.reason, tone: i.status === 'OPEN' ? 'bad' : 'warn', link: '/risk' });
+  // Feed window ordered by last_seen_at (the time shown), so a long-running OPEN incident is never pushed out by newer ones.
+  for (const i of all<Incident>('SELECT * FROM protection_incidents ORDER BY last_seen_at DESC LIMIT 20')) items.push({ at: i.last_seen_at, kind: 'INCIDENT', title: `Protection ${i.status} · ${sym(i.instrument)}`, detail: i.reason, tone: i.status === 'OPEN' ? 'bad' : 'warn', link: '/risk' });
   // Repeated identical events (e.g. the same rejection on every scan cycle) collapse into one row with a count, so a
   // single noisy instrument cannot push everything else out of the feed. The newest occurrence is kept.
   const grouped = new Map<string, Activity>();

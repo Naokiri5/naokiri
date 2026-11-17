@@ -17,7 +17,7 @@ export const tokenCount = (s: string) => (s.match(/\S+/g) ?? []).length;
 
 interface Block { kind: ChunkKind | 'heading'; level?: number; text: string; page: number | null }
 const HEADING_LINE = /^(#{1,6}\s+.+|(?:references|bibliography|works cited)\s*:?\s*)$/i;
-const FENCE = /^\s*(```|~~~)/;
+const FENCE = /^\s*(`{3,}|~{3,})/;
 /**
  * Split text into paragraphs. Heading lines (markdown, "Chapter N", "References") become their own paragraph even when
  * body text follows on the next line. Fenced code (``` or ~~~) is kept whole and never classified, so a "# comment"
@@ -28,7 +28,8 @@ function splitParas(text: string): { text: string; code: boolean }[] {
   const flush = (code = false) => { if (cur.length) out.push({ text: cur.join('\n'), code }); cur = []; };
   for (const line of text.replace(/\r/g, '').split('\n')) {
     const f = line.match(FENCE)?.[1];
-    if (fence) { cur.push(line); if (f === fence) { flush(true); fence = null; } continue; }
+    // CommonMark: a fence closes only on the same character, at least as long as the opener, with nothing after it.
+    if (fence) { cur.push(line); if (f && f[0] === fence[0] && f.length >= fence.length && line.trim() === f) { flush(true); fence = null; } continue; }
     if (f) { flush(); fence = f; cur.push(line); continue; }
     if (!line.trim()) { flush(); continue; }
     if (HEADING_LINE.test(line.trim()) || (line.trim().length <= 100 && CHAPTER_LINE.test(line.trim()))) { flush(); cur.push(line); flush(); continue; }

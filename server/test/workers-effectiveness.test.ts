@@ -51,5 +51,8 @@ describe('market breadth input', () => {
     t('FUTUSDT', 5, now, now + 600_000); // provider timestamp in the future
     t('STLUSDT', 5, now, now - 3_600_000); // provider timestamp an hour old
     expect(marketBreadth()).toMatchObject({ universe: 2, advancers: 1, decliners: 1, asOf: now });
+    // a batch that was fresh when received but is now older than the quote-age limit no longer counts
+    const later = now + 120_000; const spy = (await import('vitest')).vi.spyOn(Date, 'now').mockReturnValue(later);
+    try { expect(marketBreadth().universe).toBe(0); } finally { spy.mockRestore(); }
   });
 });

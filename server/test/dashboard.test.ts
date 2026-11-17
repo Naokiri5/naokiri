@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { rejections } from '../src/market/scanner.js';
@@ -19,7 +19,9 @@ function report(id: string, last: number): DecisionReport {
 }
 
 describe('overview dashboard snapshot', () => {
-  beforeEach(() => { freshDb(); market.reset(); rejections.splice(0); });
+  const T = Date.UTC(2026, 10, 10, 12, 0, 0); // fixed clock: fixtures and freshness checks see the same time
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(T); freshDb(); market.reset(); rejections.splice(0); });
+  afterEach(() => vi.useRealTimers());
   it('keeps the original contract and reports an unfunded, policy-less account honestly', () => {
     const o = overviewSnapshot();
     for (const k of ['breadth', 'btcRegime', 'account', 'opportunities', 'alerts', 'briefing', 'movers', 'asOf']) expect(o, k).toHaveProperty(k);
@@ -38,6 +40,12 @@ describe('overview dashboard snapshot', () => {
     expect(r.limits.openRiskPct.limit).toBe(DEFAULT_POLICY.maxOpenRiskPct); expect(r.limits.openRiskPct.used).toBeGreaterThan(0);
     const feed = activityFeed(); expect(feed.find((x) => x.kind === 'FILL')?.title).toMatch(/Paper BUY ETHUSDT · ENTRY/);
     expect(openPositions()).toHaveLength(1);
+  });
+  it('the feed keeps a long-running OPEN incident even after many newer incidents', async () => {
+    const { run } = await import('../src/db/db.js');
+    run(`INSERT INTO protection_incidents(id,position_id,instrument,status,reason,opened_at,last_seen_at,last_notified_at,occurrences) VALUES ('inc_old','pos_old','crypto:binance:OLDUSDT','OPEN','still no book',1,${T},1,9)`);
+    for (let i = 0; i < 25; i++) run(`INSERT INTO protection_incidents(id,position_id,instrument,status,reason,opened_at,last_seen_at,last_notified_at,occurrences,acknowledged_at) VALUES ('inc_${i}','pos_${i}','crypto:binance:X${i}USDT','ACKNOWLEDGED','old',${1000 + i},${1000 + i},1,1,2)`);
+    expect(activityFeed(100).some((x) => x.kind === 'INCIDENT' && x.title.includes('OLDUSDT') && x.title.includes('OPEN'))).toBe(true);
   });
   it('collapses repeated identical events into one row with a count, newest first', () => {
     const t = Date.now();

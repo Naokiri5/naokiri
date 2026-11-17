@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
@@ -11,6 +11,7 @@ export function Ditas() {
   const [cohort, setCohort] = useState('');
   const { data, error, loading, reload } = useApi(`/api/ditas${cohort ? `?cohort=${encodeURIComponent(cohort)}` : ''}`, { topics: ['scan', 'decision', 'order', 'position', 'mode'], every: 30_000 });
   const [tab, setTab] = useState(tabs[0]);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [detail, setDetail] = useState<{ title: string; value: unknown } | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
@@ -23,7 +24,7 @@ export function Ditas() {
   const counts = data?.counts;
   const calibration = data?.calibration;
   return <Page title="DITAS · Decision intelligence" sub="Inspect the evidence behind decisions, strategy health and hypothetical alternatives. Every result is tied to stored records."
-    right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={reload} disabled={loading}>Refresh</button></>}>
+    right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={() => { reload(); setRefreshKey((k) => k + 1); }} disabled={loading}>Refresh</button></>}>
     <ErrorLine e={error} /><ErrorLine e={detailError} />
     <div className="banner info">Research and paper trading. Decision Twin results are hypothetical simulations; rule strength and specialist agreement are not calibrated win probabilities. Live execution remains locked.</div>
     <div className="grid g4" style={{ marginBottom: 14 }}>
@@ -67,7 +68,7 @@ export function Ditas() {
     {data && tab === 'Strategy passports' && <div className="col" style={{ gap: 14 }}>{(data.passports ?? []).map((p: any) => <Card key={p.id ?? p.strategyId} title={`${p.name ?? p.id ?? p.strategyId} · v${p.version ?? p.strategyVersion}`} right={<Badge v={p.ditasState ?? p.currentStatus ?? 'RESEARCH'} />}>
       <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
-    {tab === 'Execution quality' && <ExecutionQuality />}
+    {tab === 'Execution quality' && <ExecutionQuality refreshKey={refreshKey} />}
     {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibration?.status ?? 'UNCALIBRATED'} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
@@ -93,11 +94,13 @@ export function Ditas() {
 }
 
 /** Read-only paper execution quality (actual paper OMS orders and fills only; never hypothetical Twin results). */
-function ExecutionQuality() {
-  const { data, error } = useApi<any>('/api/ditas/execution?limit=100', { topics: ['order', 'position'] });
+function ExecutionQuality({ refreshKey }: { refreshKey: number }) {
+  const { data, error, loading, reload } = useApi<any>('/api/ditas/execution?limit=100', { topics: ['order', 'position'] });
+  useEffect(() => { if (refreshKey) reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the page Refresh button also reloads this panel
   const rows: any[] = data?.orders ?? [];
   return <Card title="Paper execution quality" right={<Badge v={data?.label ?? 'PAPER'} tone="b-violet" />} flush>
     <ErrorLine e={error} />
+    {!data && loading && <div role="status" aria-live="polite"><Empty>Loading paper execution records…</Empty></div>}
     <div className="tablewrap"><table><thead><tr><th>Order</th><th>Purpose</th><th>Status</th><th>Filled</th><th>Avg fill</th><th>Expected</th><th>Adverse slippage</th><th>Fees</th><th>First fill</th></tr></thead><tbody>
       {rows.map((o) => <tr key={o.orderId}><td><b>{o.instrumentId.split(':').pop()}</b> <Badge v={o.side} /><div className="hint mono">{o.orderId}</div></td><td>{o.purpose}</td><td><Badge v={o.status} /></td>
         <td className="mono">{fmt.num(o.filledQty, 6)} / {fmt.num(o.requestedQty, 6)}</td><td className="mono">{fmt.px(o.averageFillPrice)}</td><td className="mono">{fmt.px(o.expectedPrice)}</td>
