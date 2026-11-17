@@ -19,7 +19,7 @@ export function listStrategies() {
 export function setStrategyStatus(actor: string, id: string, status: StrategyStatus, note?: string) {
   if (!strategyById(id)) throw new Error('unknown strategy');
   if (status === 'LIVE_CANDIDATE') throw new Error('LIVE_CANDIDATE requires release-gate certification (Part 12.7) — not available in this build');
-  if (status === 'PAPER' && actor !== 'owner') throw new Error('only the owner may promote a strategy');
+  if (actor !== 'owner' && status !== 'SUSPENDED' && status !== 'RETIRED') throw new Error('only the owner may promote or re-enable a strategy');
   if (status === 'PAPER' && !(strategyStats(id)?.trades)) throw new Error('promotion to PAPER requires at least one stored backtest');
   run('UPDATE strategies SET status=?, updated_at=?, note=COALESCE(?, note) WHERE id=?', status, Date.now(), note ?? null, id);
   const susp = new Set(getSetting<string[]>('suspendedStrategies', []));

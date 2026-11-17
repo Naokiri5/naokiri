@@ -14,6 +14,7 @@ import { stepExit, newExitState, type ExitState } from '../lab/exits.js';
 import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
+import { crashpoint } from './crashpoint.js';
 
 /**
  * Paper OMS (Part 26 / 32.6). Fills are simulated by walking the LIVE Binance order book
@@ -130,21 +131,28 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   const maxHoldMs = (strat === 'range_reversion' ? 24 : strat === 'trend_pullback' ? 48 : 72) * 3600_000;
   const trailAfterR = strat === 'trend_pullback' ? 1 : strat === 'donchian_breakout' ? 1.5 : null;
   let orderId: string;
+  crashpoint('entry.preTx');
   try { orderId = tx(() => {
     const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id });
     run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, Date.now(), oid);
+    crashpoint('entry.order');
     run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, fill.price, fee, 'TAKER', Date.now());
+    crashpoint('entry.fill');
     run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,max_hold_ms,decision_id,planned_risk) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       posId, PAPER_ACCOUNT, s.instrumentId, s.market, 'LONG', strat, qty, fill.price, s.stopLoss, s.stopLoss, J({ qtyInit: qty, trailAfterR, targets: st.targets, lastPx: fill.price }), 'OPEN', Date.now(), -fee, fee, maxHoldMs, s.id, qty * (fill.price - s.stopLoss * (1 - pol.stopFillBufferPct / 100)) + fee);
+    crashpoint('entry.position');
     // Protective stop: paper venue has no exchange-native stop; OMS monitors it. Recorded explicitly.
     insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: 'STOP_MARKET (OMS-monitored, paper)', qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId });
-    ledger(PAPER_ACCOUNT, 'BUY', -fill.price * qty, oid, `${s.asset} entry`); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee');
+    crashpoint('entry.stop');
+    ledger(PAPER_ACCOUNT, 'BUY', -fill.price * qty, oid, `${s.asset} entry`); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee');
+    crashpoint('entry.precommit');
     return oid;
   }); } catch (e: any) {
     // UNIQUE(client_order_id) is the last line of defence against a concurrent duplicate submission.
     if (/UNIQUE|constraint/i.test(String(e?.message))) return { ok: false, reason: `DUPLICATE: entry ${coid} was already submitted` };
     throw e;
   }
+  crashpoint('entry.committed');
   record('oms.submit', performance.now() - t0);
   journal('FILL', `BUY ${qty} ${s.asset} @ ${fill.price.toPrecision(6)} (${strat}) — stop ${s.stopLoss.toPrecision(6)}, slippage ${fill.impactBps.toFixed(1)}bps`, posId, { decisionId: s.id, fill, fee, risk: fresh, actor });
   notify('INFO', `Paper entry: ${s.asset}`, `${qty} @ ${fill.price.toPrecision(6)}, stop ${s.stopLoss.toPrecision(6)}, planned max loss $${fresh.sizing.plannedMaxLoss}`, 'oms');
@@ -186,6 +194,8 @@ export function expireApprovals() {
 }
 
 class ExitUnavailable extends Error {}
+/** Another writer changed the position after this pass read it; the pass is skipped and re-evaluated next tick. */
+class StaleSnapshot extends Error {}
 /**
  * Position monitoring (Part 17.4/26.4). Uses the shared exit capsule on successive bid snapshots. The exit state
  * (targets hit, trailed stop) and the fills it implies are committed in ONE transaction: if any fill cannot be
@@ -213,9 +223,14 @@ export function monitorPositions(nowTs = Date.now()) {
         const book = market.deep.get(p.instrument)?.book ?? null;
         if (!bookFreshForExecution(book, nowTs) || !walkBook(book!, 'sell', Math.min(exitQty, p.qty))?.filledFully) throw new ExitUnavailable();
       }
+      crashpoint('monitor.preTx');
       tx(() => {
-        run('UPDATE positions SET stop_price=?, targets=?, mfe=?, mae=? WHERE id=?', st.stop, J(meta), st.mfe, st.mae, p.id);
-        if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }
+        // Compare-and-set against the snapshot the exits were computed from, so a concurrent monitor or manual close cannot
+        // make this pass sell the same target twice or act on a position that is no longer open.
+        const cas = run("UPDATE positions SET stop_price=?, targets=?, mfe=?, mae=? WHERE id=? AND status='OPEN' AND qty=? AND stop_price=? AND targets=?", st.stop, J(meta), st.mfe, st.mae, p.id, p.qty, p.stop_price, p.targets);
+        if (Number(cas.changes) !== 1) throw new StaleSnapshot();
+        crashpoint('monitor.state');
+        if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id); crashpoint('monitor.stop'); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }
         let consumed = 0; // depth already taken by earlier exits in this pass
         // stepExit (shared with the backtester) marks a target done before lot rounding; a target whose slice rounds to
         // zero sold nothing, so it is reopened here and stays eligible on later passes.
@@ -228,7 +243,9 @@ export function monitorPositions(nowTs = Date.now()) {
           if (r.closed) break;
         }
         if (reopened) run('UPDATE positions SET targets=? WHERE id=?', J(meta), p.id);
+        crashpoint('monitor.precommit');
       });
+      crashpoint('monitor.committed');
       after.forEach((fn) => fn());
       // Recovery needs more than a fresh ticker: a fresh book must be able to absorb what is still open.
       const left = get<{ qty: number; status: string }>('SELECT qty, status FROM positions WHERE id=?', p.id);
@@ -236,6 +253,7 @@ export function monitorPositions(nowTs = Date.now()) {
       if (left?.status !== 'OPEN' || (bookFreshForExecution(book, nowTs) && walkBook(book!, 'sell', left.qty)?.filledFully)) markRecovered(p.id, nowTs);
       else flagUnprotected(p, 'order book missing, stale or too thin to execute the stop');
     } catch (e: any) {
+      if (e instanceof StaleSnapshot) continue;
       flagUnprotected(p, e instanceof ExitUnavailable ? 'no fresh executable price for exit' : `exit failed: ${String(e?.message ?? e).slice(0, 160)}`);
     }
   }
@@ -270,12 +288,16 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   // Deterministic client id: a second writer trying to record the same exit hits UNIQUE(client_order_id) and rolls back.
   const oid = insertOrder({ clientOrderId: `exit-${positionId}-${seq}`, instrument: p.instrument, side: 'SELL', type: 'MARKET', qty, status: 'FILLED', purpose: `EXIT_${reason}`, positionId, at: nowTs });
   run('UPDATE orders SET filled_qty=?, avg_price=?, fees=? WHERE id=?', qty, px, fee, oid);
+  crashpoint('exit.order');
   run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, px, fee, 'TAKER', nowTs);
-  ledger(PAPER_ACCOUNT, 'SELL', px * qty, oid, `${p.instrument} exit ${reason}`, nowTs); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'exit fee', nowTs);
+  crashpoint('exit.fill');
+  ledger(PAPER_ACCOUNT, 'SELL', px * qty, oid, `${p.instrument} exit ${reason}`, nowTs); crashpoint('exit.sell'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'exit fee', nowTs);
   run('UPDATE positions SET qty=?, realized_pnl=realized_pnl+?, fees=fees+?, status=?, closed_at=?, exit_price=?, exit_reason=? WHERE id=?',
     remaining, pnl, fee, closed ? 'CLOSED' : 'OPEN', closed ? nowTs : null, closed ? px : null, closed ? reason : null, positionId);
+  crashpoint('exit.position');
   if (closed) run("UPDATE orders SET status='CANCELLED', updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", nowTs, positionId);
   else run("UPDATE orders SET qty=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", remaining, nowTs, positionId);
+  crashpoint('exit.stop');
   after.push(() => {
     journal('EXIT', `SELL ${qty} ${p.instrument.split(':')[2]} @ ${px.toPrecision(6)} — ${reason}, PnL ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}${fill.basis === 'BOOK' ? '' : ` [${fill.basis}]`}`, positionId, { fill, fee, reason });
     if (closed) autopsy(positionId);
@@ -286,7 +308,9 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
 
 export function executeExit(positionId: string, qty: number, reason: string, fr = feeRate(), nowTs = Date.now()) {
   const after: Deferred = [];
-  const r = tx(() => applyExit(positionId, qty, reason, fr, nowTs, after));
+  crashpoint('exit.preTx');
+  const r = tx(() => { const e = applyExit(positionId, qty, reason, fr, nowTs, after); crashpoint('exit.precommit'); return e; });
+  crashpoint('exit.committed');
   if (r) after.forEach((fn) => fn());
   else { const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId); if (p?.status === 'OPEN') flagUnprotected(p, 'no fresh executable price for exit'); }
   return r;
