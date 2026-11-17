@@ -1,4 +1,5 @@
 import { recordOpportunity } from '../ditas/memory.js';
+import { marketBreadth } from './bubbles.js';
 import { market } from './store.js';
 import { assessQuality, bookImpact, bookFreshForExecution } from './quality.js';
 import { assessCexAsset, assessDexPair, type SafetyResult } from '../safety/safety.js';
@@ -62,6 +63,7 @@ export function buildContext(cand: Candidate): WorkerContext {
     quality: assessQuality(cand.instrumentId), safety: assessCexAsset(cand.instrumentId),
     news: newsContext(cand.base), prints: printContext(cand.instrumentId),
     corrToBtc: cand.instrumentId.endsWith('BTCUSDT') ? null : correlation(cand.instrumentId, 'crypto:binance:BTCUSDT'),
+    breadth: marketBreadth(),
     strategyStats: ss ? { trades: ss.trades, expectancyR: ss.expectancyR, profitFactor: ss.profitFactor } : null,
   };
 }

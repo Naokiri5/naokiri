@@ -1,4 +1,4 @@
-import type { WorkerDef, WorkerContext, WorkerResult, Domain } from './types.js';
+import type { WorkerDef, WorkerContext, WorkerResult, Domain, WorkerCapability } from './types.js';
 import type { FeatureSnapshot } from '../features/indicators.js';
 import { isNum } from '../features/indicators.js';
 import type { Interval } from '../market/types.js';
@@ -22,9 +22,11 @@ const ok = (f: FeatureSnapshot | null, ...k: (keyof FeatureSnapshot)[]) => !!f &
 const W: WorkerDef[] = [];
 let seq: Record<string, number> = {};
 const PREFIX: Record<Domain, string> = { trend: 'TRD', momentum: 'MOM', volatility: 'VOL', flow: 'FLW', liquidity: 'LIQ', structure: 'STR', regime: 'REG', news: 'NWS', onchain: 'ONC', risk: 'RSK', execution: 'EXE' };
-function add(domain: Domain, name: string, dependencyGroup: string, sourceIds: string[], evaluate: WorkerDef['evaluate'], o: { mandatory?: boolean; canVeto?: boolean } = {}) {
+const BLOCKED_SOURCES = ['evm_rpc', 'x_api', 'pending'];
+function add(domain: Domain, name: string, dependencyGroup: string, sourceIds: string[], evaluate: WorkerDef['evaluate'], o: { mandatory?: boolean; canVeto?: boolean; constant?: boolean; version?: string } = {}) {
   seq[domain] = (seq[domain] ?? 0) + 1;
-  W.push({ id: `W-${PREFIX[domain]}-${String(seq[domain]).padStart(2, '0')}`, name, domain, version: '1.0.0', dependencyGroup, sourceIds, evaluate, ...o });
+  const capability: WorkerCapability = sourceIds.some((x) => BLOCKED_SOURCES.includes(x)) ? 'PROVIDER_BLOCKED' : o.constant ? 'CONSTANT_RULE' : 'DATA_DRIVEN';
+  W.push({ id: `W-${PREFIX[domain]}-${String(seq[domain]).padStart(2, '0')}`, name, domain, version: o.version ?? '1.0.0', dependencyGroup, sourceIds, evaluate, capability, mandatory: o.mandatory, canVeto: o.canVeto });
 }
 const K = (iv: Interval) => [`binance.klines.${iv}`];
 
@@ -95,7 +97,12 @@ add('regime', 'BTC volatility shock', 'btc.1h', ['binance.klines.1h.BTC'], (c) =
 add('regime', 'Correlation to BTC', 'corr', ['binance.klines.1h'], (c) => c.corrToBtc == null ? ABSTAIN('correlation unavailable') : tri(c.corrToBtc, (v) => v < 0.85 || (c.btc1h != null && c.btc1h.ema20 > c.btc1h.ema50), (v) => v >= 0.85 && c.btc1h != null && c.btc1h.ema20 < c.btc1h.ema50, 'corrToBtc'));
 add('regime', 'Relative strength vs BTC 1h', 'btc.1h', ['binance.klines.1h.BTC'], (c) => { const f = F(c, '1h'); return ok(f, 'ret20') && ok(c.btc1h, 'ret20') ? tri(f!.ret20 - c.btc1h!.ret20, (v) => v > 0, (v) => v < -0.05, 'rsVsBtc20') : ABSTAIN('unavailable'); });
 add('regime', 'Higher-timeframe regime 4h', 'regime.4h', K('4h'), (c) => { const f = F(c, '4h'); return ok(f, 'ema50', 'ema200') ? vote(f!.ema50 > f!.ema200 || c.candidate.strategyId === 'range_reversion', {}, '4h regime constructive', '4h regime bearish') : ABSTAIN('4h warming up'); });
-add('regime', 'Market breadth', 'breadth', ['binance.ticker24h'], (c) => ABSTAIN('evaluated at portfolio level'));
+// Breadth over ≥30 liquid pairs from a ticker snapshot no older than 5 minutes; otherwise abstain (never guessed).
+add('regime', 'Market breadth', 'breadth', ['binance.ticker24h'], (c) => {
+  const b = c.breadth; if (!b || b.universe < 30) return ABSTAIN('breadth unavailable (fewer than 30 liquid pairs)');
+  if (!b.asOf || Date.now() - b.asOf > 300_000) return ABSTAIN('breadth snapshot stale');
+  return tri(b.advancers / b.universe, (v) => v >= 0.55, (v) => v <= 0.35, 'advancerShare', (v) => `${(v * 100).toFixed(0)}%`);
+}, { version: '1.1.0' });
 // ── NEWS (8) ──────────────────────────────────────────────────
 add('news', 'Asset headline sentiment', 'googlenews', ['googlenews'], (c) => { const n = c.news; if (!n || n.relevant === 0) return ABSTAIN('no recent asset headlines'); return tri(n.positive - n.negative, (v) => v > 0, (v) => v < 0, 'netSentimentCount', (v) => v.toFixed(0)); });
 add('news', 'Negative-event screen', 'googlenews', ['googlenews'], (c) => { const n = c.news; if (!n) return ABSTAIN('news feed unavailable'); return n.negative >= 2 ? { stance: 'OPPOSE', features: { negative: n.negative }, reasons: ['multiple negative headlines (hack/exploit/delisting/lawsuit)'] } : { stance: 'ABSTAIN', features: { negative: n.negative }, reasons: ['no material negative headlines'] }; });
@@ -113,7 +120,7 @@ add('risk', 'Stop below structure', 'swing.1h', K('1h'), (c) => { const f = F(c,
 add('risk', 'Max stop distance', 'signal', ['strategy'], (c) => tri((c.candidate.signal.entryRef - c.candidate.signal.stop) / c.candidate.signal.entryRef, (v) => v > 0.004 && v <= 0.06, (v) => v > 0.1 || v <= 0.002, 'stopPct', (v) => `${(v * 100).toFixed(2)}%`));
 add('risk', 'Strategy track record', 'strategyStats', ['backtest'], (c) => { const s = c.strategyStats; if (!s || s.trades < 20) return ABSTAIN('insufficient out-of-sample trades'); return tri(s.expectancyR, (v) => v > 0.05 && s.profitFactor > 1.1, (v) => v < 0, 'expectancyR'); });
 add('risk', 'Reward:risk', 'signal', ['strategy'], (c) => tri(c.candidate.signal.targets.reduce((a, t) => a + t.r * t.fraction, 0), (v) => v >= 1.5, (v) => v < 1, 'blendedR', (v) => v.toFixed(2)));
-add('risk', 'Liquidation/leverage', 'policy', ['policy'], () => ({ stance: 'SUPPORT', features: { leverage: 1 }, reasons: ['spot, no leverage'] }));
+add('risk', 'Liquidation/leverage', 'policy', ['policy'], () => ({ stance: 'SUPPORT', features: { leverage: 1 }, reasons: ['spot, no leverage'] }), { constant: true });
 // ── EXECUTION (8) ─────────────────────────────────────────────
 const costR = (c: WorkerContext) => { const s = c.candidate.signal; if (!c.impact) return null; const rt = 2 * c.feeRate + (c.impact.spreadBps + 2 * c.impact.impactBps) / 1e4; return (rt * s.entryRef) / (s.entryRef - s.stop); };
 add('execution', 'Round-trip cost in R', 'cost', ['binance.depth', 'fees'], (c) => tri(costR(c), (v) => v <= 0.1, (v) => v > 0.25, 'costR', (v) => v.toFixed(3)), { mandatory: true, canVeto: true });
@@ -121,9 +128,9 @@ add('execution', 'Min notional feasibility', 'rules', ['binance.exchangeInfo'], 
 add('execution', 'Quote age', 'quality', ['binance'], (c) => tri(c.quality.quoteAgeMs, (v) => v < 30_000, (v) => v > 60_000, 'quoteAgeMs', (v) => `${(v / 1000).toFixed(0)}s`));
 add('execution', 'Book age', 'quality', ['binance.depth'], (c) => tri(c.quality.bookAgeMs, (v) => v < 120_000, (v) => v > 180_000, 'bookAgeMs', (v) => `${(v / 1000).toFixed(0)}s`));
 add('execution', 'Entry still near signal', 'ticker', ['binance'], (c) => c.ticker ? tri(Math.abs(c.ticker.last / c.candidate.signal.entryRef - 1) / ((c.candidate.signal.entryRef - c.candidate.signal.stop) / c.candidate.signal.entryRef), (v) => v < 0.25, (v) => v > 0.5, 'driftInR', (v) => v.toFixed(2)) : ABSTAIN('no ticker'), { canVeto: false });
-add('execution', 'Stop executable (spot stop)', 'venue', ['venue'], () => ({ stance: 'SUPPORT', features: {}, reasons: ['spot stop monitored by OMS (paper)'] }));
+add('execution', 'Stop executable (spot stop)', 'venue', ['venue'], () => ({ stance: 'SUPPORT', features: {}, reasons: ['spot stop monitored by OMS (paper)'] }), { constant: true });
 add('execution', 'Cross-venue price agreement', 'cross', ['coinbase', 'kraken'], (c) => tri(c.quality.maxDeviationPct, (v) => v < 0.3, (v) => v > 1, 'maxDeviationPct', (v) => `${v.toFixed(2)}%`));
-add('execution', 'Fee tier', 'fees', ['fees'], (c) => tri(c.feeRate, (v) => v <= 0.001, (v) => v > 0.002, 'feeRate'));
+add('execution', 'Fee tier', 'fees', ['fees'], (c) => tri(c.feeRate, (v) => v <= 0.001, (v) => v > 0.002, 'feeRate'), { constant: true }); // fee rate is a policy constant within one policy version
 
 export const WORKERS: readonly WorkerDef[] = Object.freeze(W);
 export const DOMAINS: Domain[] = ['trend', 'momentum', 'volatility', 'flow', 'liquidity', 'structure', 'regime', 'news', 'onchain', 'risk', 'execution'];

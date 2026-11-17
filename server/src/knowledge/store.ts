@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
 import { all, get, run, tx, J, P } from '../db/db.js';
-import { uid } from '../core/util.js';
+import { uid, sha256 } from '../core/util.js';
 import { audit } from '../core/audit.js';
 import { bus } from '../core/bus.js';
 import { extract, detectFormat, ExtractionError, EXTRACTOR_VERSION, LIMITS, type DocMeta, type Extracted } from './extract.js';
@@ -16,7 +15,7 @@ import { linkDocumentConcepts, unlinkDocument } from './concepts.js';
  */
 export type DocStatus = 'INGESTION_PENDING' | 'PROCESSING' | 'INDEXED' | 'PARTIALLY_INDEXED' | 'FAILED' | 'NEEDS_REVIEW';
 export const PDF_BATCH_PAGES = 40;
-const sha = (b: Buffer | string) => createHash('sha256').update(b).digest('hex');
+const sha = sha256; // shared helper (core/util.ts)
 const event = (documentId: string, ev: string, detail?: unknown) => run('INSERT INTO kb_document_events(document_id, ts, event, detail) VALUES (?,?,?,?)', documentId, Date.now(), ev, detail === undefined ? null : J(detail));
 
 // ── catalog ─────────────────────────────────────────────────────────────────

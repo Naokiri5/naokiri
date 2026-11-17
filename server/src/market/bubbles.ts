@@ -2,6 +2,11 @@ import { market } from './store.js';
 import { isEligibleSpot } from './fabric.js';
 import { assessCexAsset } from '../safety/safety.js';
 
+/** Advance/decline breadth over liquid eligible spot pairs from the latest 24h tickers (real feed only). */
+export function marketBreadth(minVolume = 1_000_000) {
+  const rows = [...market.tickers.values()].filter((t) => isEligibleSpot(t.base, t.quote) && t.quoteVolume >= minVolume && Number.isFinite(t.changePct));
+  return { universe: rows.length, advancers: rows.filter((r) => r.changePct > 0).length, decliners: rows.filter((r) => r.changePct < 0).length, asOf: market.tickersFetchedAt || null };
+}
 /** Part 25.1/25.2 cross-market gainers/losers bubble data + breadth. Only real feeds are included. */
 export function bubbleMap(opts: { limit?: number; minVolume?: number } = {}) {
   const rows = [...market.tickers.values()].filter((t) => isEligibleSpot(t.base, t.quote) && t.quoteVolume >= (opts.minVolume ?? 1_000_000));

@@ -25,13 +25,18 @@ export interface WorkerContext {
   news: { relevant: number; positive: number; negative: number; highImpactMacro: number; headlines: string[] } | null;
   prints: { buyNotional: number; sellNotional: number; count: number } | null;
   corrToBtc: number | null;
+  /** Market advance/decline breadth (optional: older snapshots and fixtures may not carry it). */
+  breadth?: { universe: number; advancers: number; decliners: number; asOf: number | null } | null;
   strategyStats: { trades: number; expectancyR: number; profitFactor: number } | null;
 }
 export interface WorkerResult { stance: Stance; features: Record<string, number | string | boolean | null>; reasons: string[]; veto?: boolean }
+export type WorkerCapability = 'DATA_DRIVEN' | 'CONSTANT_RULE' | 'PROVIDER_BLOCKED';
 export interface WorkerDef {
   id: string; name: string; domain: Domain; version: string;
   /** Workers in the same dependency group share an upstream input and are NOT independent confirmations. */
   dependencyGroup: string; sourceIds: string[];
   mandatory?: boolean; canVeto?: boolean;
+  /** DATA_DRIVEN evaluates market data; CONSTANT_RULE returns a fixed verdict by construction; PROVIDER_BLOCKED needs a feed that is not connected. */
+  capability: WorkerCapability;
   evaluate(ctx: WorkerContext): WorkerResult;
 }

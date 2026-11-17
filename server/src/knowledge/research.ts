@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
 import { all, get, run, tx, J, P } from '../db/db.js';
-import { uid } from '../core/util.js';
+import { uid, sha256 } from '../core/util.js';
 import { audit } from '../core/audit.js';
 import { config } from '../config.js';
 import { fetchHistory } from '../lab/lab.js';
@@ -19,7 +18,7 @@ import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
  */
 export const RESEARCH_VERSION = 'kb-research@1.0.0';
 export type ExperimentKind = 'volatility_clustering' | 'return_autocorrelation' | 'strategy_walkforward';
-const sha = (s: string) => createHash('sha256').update(s).digest('hex');
+const sha = sha256; // shared helper (core/util.ts)
 const INTERVALS: Interval[] = ['15m', '1h', '4h'];
 
 // ── Project 1: historical market-data store ─────────────────────────────────

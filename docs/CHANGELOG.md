@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased: MIA 4.2 Phase 0 + P0/P1 slice
+- **Branch reconciliation:** PR #8 (read-only DITAS execution-quality report) was cherry-picked onto the integration
+  branch. It did not conflict with or duplicate anything.
+- **P0 execution safety:** persistent protection incidents (migration v4, `exec/incidents.ts`).
+  - An open paper position that cannot be exited creates a de-duplicated, restart-safe incident.
+  - The incident blocks new entries on that instrument until executable data returns.
+  - It moves to RECOVERED when data returns, then needs owner acknowledgement with a note.
+  - It appears as a Risk Center panel.
+- **Fail-closed OMS fixes:**
+  - Future-dated quotes are refused.
+  - Protection now requires fresh book depth.
+  - The combined multi-target exit size is checked against book depth.
+  - Nested `tx()` works on every supported Node version.
+- **Worker accounting:**
+  - The Market breadth worker uses real advance/decline data.
+  - Every worker is classified as data-driven, constant-rule or provider-blocked.
+  - Measured productivity is shown on the Intelligence page.
+- **Phase 0 engineering docs:** `docs/engineering/`, covering the inventory, the 40-row traceability CSV, the
+  duplication report and `scripts/inventory.mjs`.
+- The duplicate SHA-256 helpers were replaced by the shared `core/util.ts:sha256`.
+
 ## Unreleased: Quant Academy (knowledge & research subsystem)
 - New `server/src/knowledge/` module and `/academy` page. It covers:
   - ingesting PDF, EPUB, DOCX, HTML, Markdown and TXT, with resumable PDF processing
