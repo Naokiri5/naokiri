@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
-import { closeDb, openDb, get, run } from '../src/db/db.js';
+import { closeDb, openDb, get, run, tx, inTransaction } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js';
-import { submitEntry, monitorPositions, executeExit } from '../src/exec/oms.js';
+import { submitEntry, monitorPositions, executeExit, protectPositions } from '../src/exec/oms.js';
 import { reconcile } from '../src/portfolio/calendar.js';
 import type { DecisionReport } from '../src/decision/engine.js';
 
@@ -49,6 +49,44 @@ describe('R-OMS: order-book freshness', () => {
     expect(openPositions()).toHaveLength(0);
     expect(reconcile().ok).toBe(true);
     expect(get<{ n: number }>("SELECT COUNT(*) n FROM fills")!.n).toBe(3); // entry + T1 + stop, no duplicates
+  });
+});
+
+describe('R-PR7: CodeRabbit-verified fail-closed fixes', () => {
+  let id = ''; let last = 0;
+  beforeEach(() => {
+    freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+  });
+  it('nested tx joins the outer transaction and an inner failure rolls back everything (no isTransaction dependency)', () => {
+    expect(() => tx(() => { run("INSERT INTO journal(id,ts,kind,summary) VALUES ('a',1,'X','outer')"); tx(() => { expect(inTransaction()).toBe(true); run("INSERT INTO journal(id,ts,kind,summary) VALUES ('b',1,'X','inner')"); throw new Error('boom'); }); })).toThrow('boom');
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM journal WHERE kind='X'")!.n).toBe(0);
+    expect(inTransaction()).toBe(false);
+    tx(() => tx(() => run("INSERT INTO journal(id,ts,kind,summary) VALUES ('c',1,'X','ok')")));
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM journal WHERE kind='X'")!.n).toBe(1);
+  });
+  it('a future-dated quote cannot anchor an exit and the position stays open', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0]; const future = Date.now() + 10 * 60_000;
+    market.tickers.get(id)!.receivedAt = future; market.tickers.get(id)!.providerTs = future; market.deep.get(id)!.book!.ts = future;
+    expect(executeExit(pos.id, pos.qty, 'MANUAL_CLOSE')).toBeNull();
+    expect(openPositions()).toHaveLength(1);
+  });
+  it('two targets hit in one pass need combined book depth; otherwise nothing is booked and the position stays intact', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const before = openPositions()[0];
+    setBook(id, last * 1.10); // jumps through T1 and T2 at once
+    const b = market.deep.get(id)!.book!; b.bids = [[b.bids[0][0], before.qty * 0.6]]; // depth for one target only
+    monitorPositions();
+    const after = openPositions()[0];
+    expect(after.qty).toBe(before.qty); expect(get<{ n: number }>("SELECT COUNT(*) n FROM fills")!.n).toBe(1); // entry only
+    expect(JSON.parse(after.targets).targets.every((t: any) => !t.done)).toBe(true);
+  });
+  it('protection reconciliation requires a fresh book deep enough for the stop', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    expect(protectPositions().positions[0]).toMatchObject({ protected: true, issue: null });
+    market.deep.get(id)!.book!.bids = [[last * 0.999, 1e-6]];
+    expect(protectPositions().positions[0]).toMatchObject({ protected: false, issue: expect.stringMatching(/book/) });
   });
 });
 

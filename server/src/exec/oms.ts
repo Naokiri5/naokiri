@@ -34,12 +34,15 @@ export interface SimFill { price: number; impactBps: number; spreadBps: number |
 type Deferred = (() => void)[];
 const floorStep = (q: number, step: number) => (step > 0 ? Number((Math.floor(q / step + 1e-9) * step).toFixed(12)) : q);
 
+/** A quote is usable only when its age is finite, non-negative (not future-dated) and within the execution limit. */
+export const quoteAgeOk = (ts: number | undefined, nowTs: number) => { const age = nowTs - Number(ts); return Number.isFinite(age) && age >= 0 && age <= QUALITY_LIMITS.maxExecQuoteAgeMs; };
 /** Freshest top-of-book quote for a side; null when missing, non-finite or older than the execution limit. */
 function execQuote(instrumentId: string, side: 'BUY' | 'SELL', nowTs: number) {
   const px = market.price(instrumentId); if (!px) return null;
   const ref = side === 'BUY' ? px.ask || px.price : px.bid || px.price;
   const quoteAgeMs = nowTs - px.ts;
-  if (!Number.isFinite(ref) || !(ref > 0) || quoteAgeMs > QUALITY_LIMITS.maxExecQuoteAgeMs) return null;
+  // Fail closed on non-finite or future-dated quotes (negative age), not only stale ones.
+  if (!Number.isFinite(ref) || !(ref > 0) || !quoteAgeOk(px.ts, nowTs)) return null;
   return { ref, quoteAgeMs };
 }
 
@@ -179,7 +182,7 @@ export function monitorPositions(nowTs = Date.now()) {
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
   for (const p of openPositions()) {
     const px = market.price(p.instrument);
-    if (!px || nowTs - px.ts > QUALITY_LIMITS.maxExecQuoteAgeMs) { flagUnprotected(p, 'stale or missing price — stop cannot be evaluated'); continue; }
+    if (!px || !quoteAgeOk(px.ts, nowTs)) { flagUnprotected(p, 'stale, future-dated or missing price — stop cannot be evaluated'); continue; }
     const meta = P<any>(p.targets);
     const st: ExitState = { entry: p.entry_price, stop: p.stop_price, initialStop: p.initial_stop, qtyLeft: p.qty, qtyInit: meta.qtyInit, targets: meta.targets, trailAfterR: meta.trailAfterR, barsHeld: 0, maxHoldBars: Infinity, mfe: p.mfe, mae: p.mae };
     const last = meta.lastPx ?? p.entry_price; const bid = px.bid || px.price;
@@ -188,6 +191,13 @@ export function monitorPositions(nowTs = Date.now()) {
     meta.targets = st.targets; meta.lastPx = bid;
     const after: Deferred = [];
     try {
+      // Each applyExit walks the same book snapshot, so check that the book absorbs the COMBINED exit size first;
+      // otherwise two targets hit in one pass could each "fill" against depth that exists only once.
+      const exitQty = fills.reduce((sum, f) => sum + f.qty, 0);
+      if (exitQty > 0) {
+        const book = market.deep.get(p.instrument)?.book ?? null;
+        if (!bookFreshForExecution(book, nowTs) || !walkBook(book!, 'sell', Math.min(exitQty, p.qty))?.filledFully) throw new ExitUnavailable();
+      }
       tx(() => {
         run('UPDATE positions SET stop_price=?, targets=?, mfe=?, mae=? WHERE id=?', st.stop, J(meta), st.mfe, st.mae, p.id);
         if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }
@@ -287,8 +297,14 @@ export function protectPositions(log = false) {
   const res = openPositions().map((p) => {
     const stop = get<any>("SELECT * FROM orders WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", p.id);
     const px = market.price(p.instrument);
-    const ok = !!stop && Math.abs(stop.qty - p.qty) < 1e-9 && stop.stop_price === p.stop_price && !!px && Date.now() - px.ts < QUALITY_LIMITS.maxExecQuoteAgeMs;
-    return { positionId: p.id, instrument: p.instrument, protected: ok, stop: p.stop_price, qty: p.qty, issue: ok ? null : !stop ? 'no active protective stop' : !px ? 'no price' : 'stop/qty mismatch or stale price' };
+    const now = Date.now(); const book = market.deep.get(p.instrument)?.book ?? null;
+    const stopOk = !!stop && Math.abs(stop.qty - p.qty) < 1e-9 && stop.stop_price === p.stop_price;
+    const priceOk = !!px && quoteAgeOk(px.ts, now);
+    // Same executability rule as applyExit: a stop is only "protected" if a fresh book can absorb the full exit.
+    const depthOk = bookFreshForExecution(book, now) && !!walkBook(book!, 'sell', p.qty)?.filledFully;
+    const ok = stopOk && priceOk && depthOk;
+    const issue = ok ? null : !stop ? 'no active protective stop' : !stopOk ? 'stop/qty mismatch' : !px ? 'no price' : !priceOk ? 'stale or future-dated price' : 'order book missing, stale or too thin to execute the stop';
+    return { positionId: p.id, instrument: p.instrument, protected: ok, stop: p.stop_price, qty: p.qty, issue };
   });
   if (log) journal('RISK', `Protection reconciliation: ${res.filter((r) => r.protected).length}/${res.length} verified`);
   return { state: res.every((r) => r.protected) ? 'CONFIRMED' : 'PARTIALLY_COMPLETED', positions: res };

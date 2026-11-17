@@ -15,7 +15,7 @@ export interface MemoryEvent {
   id: string; kind: MemoryKind; instrumentId: string; strategyId: string | null; decisionId: string | null;
   createdAt: number; snapshotId: string | null; parentEventId: string | null; payload: any; hash: string;
 }
-const atomic = <T>(fn: () => T): T => getDb().isTransaction ? fn() : tx(fn);
+const atomic = <T>(fn: () => T): T => tx(fn); // tx joins an enclosing transaction
 
 const pick = (obj: any, keys: string) => Object.fromEntries(keys.split(' ').filter(k => obj[k] !== undefined).map(k => [k, obj[k]]));
 const feature = (f: any) => f ? pick(f, 't n close ema9 ema20 ema50 ema200 rsi14 atr14 atrPct macd macdSignal macdHist adx14 plusDI minusDI bbMid bbUpper bbLower bbWidth bbPctB donchHigh20 donchLow20 donchHigh55 donchLow55 obv obvSlope10 volZ20 relVol20 takerBuyRatio ret1 ret5 ret20 roc10 realizedVol20 stochK14 williamsR14 cci20 mfi14 vwap20 zscore20 swingHigh swingLow ema20Slope5 ema50Slope10 bbWidthPctile100 efficiencyRatio10') : null;
