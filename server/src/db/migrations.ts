@@ -107,6 +107,12 @@ const MIGRATIONS: string[] = [
   CREATE UNIQUE INDEX protection_incidents_one_active ON protection_incidents(position_id) WHERE status IN ('OPEN','RECOVERED');
   CREATE INDEX protection_incidents_instrument ON protection_incidents(instrument, status);
   `,
+  // v5 — renewable runtime leases: only the instance holding 'engine' runs the scheduler lanes, so two processes on
+  // the same database (a restart overlap, an accidental second copy) can never both scan or manage paper positions.
+  `
+  CREATE TABLE runtime_leases (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at INTEGER NOT NULL,
+    renewed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */

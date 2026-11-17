@@ -77,9 +77,10 @@ export function memoryDetail(id: string) {
   return { event: eventRow(r), snapshot: snapshot ? { id: snapshot.id, createdAt: snapshot.created_at, hash: snapshot.hash, ...P(snapshot.payload) } : null,
     relatedEvents: all<any>('SELECT * FROM ditas_events WHERE parent_event_id=? ORDER BY seq', id).map(eventRow) };
 }
-export function verifyMemory() {
-  let prev = 'GENESIS'; const events = all<any>('SELECT * FROM ditas_events ORDER BY seq');
+/** Verifies the event chain and snapshot hashes; rows may come from a backup snapshot instead of the live database. */
+export function verifyMemory(events: any[] = all<any>('SELECT * FROM ditas_events ORDER BY seq'), snapshots: any[] = all<any>('SELECT * FROM ditas_snapshots')) {
+  let prev = 'GENESIS';
   for (const r of events) { if (r.prev_hash !== prev || r.hash !== hashEvent(r)) return { ok: false, brokenAt: r.id }; prev = r.hash; }
-  for (const r of all<any>('SELECT * FROM ditas_snapshots')) if (sha256(r.payload) !== r.hash || r.id !== `snap_${r.hash}`) return { ok: false, brokenAt: r.id };
+  for (const r of snapshots) if (sha256(r.payload) !== r.hash || r.id !== `snap_${r.hash}`) return { ok: false, brokenAt: r.id };
   return { ok: true, entries: events.length };
 }

@@ -37,7 +37,8 @@ import * as wallet from '../wallet/wallet.js';
 import { listNotifications, markRead, notify } from '../notify/notify.js';
 import { releaseGates } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
-import { botStatusView } from '../bot/bot.js';
+import { botStatus, botStatusView } from '../bot/bot.js';
+import { readiness } from '../ops/readiness.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
 import { all, get, P } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
@@ -101,7 +102,7 @@ export async function routes(app: FastifyInstance) {
    */
   app.addHook('onRequest', async (req, reply) => {
     const route = req.routeOptions?.url ?? '';
-    if (route.startsWith('/api/auth/') || route === '/api/health') return;
+    if (route.startsWith('/api/auth/') || route === '/api/health' || route === '/api/ready') return;
     if (!auth.validSession(tokenOf(req))) return bad(reply, 401, 'authentication required');
     if (req.method !== 'GET' && req.headers['x-mia-csrf'] !== '1') return bad(reply, 403, 'missing CSRF header');
   });
@@ -118,6 +119,8 @@ export async function routes(app: FastifyInstance) {
   });
 
   // ── auth ──
+  // Readiness (unauthenticated, states and ages only): 200 when every check passes, 503 otherwise.
+  app.get('/api/ready', async (_req, reply) => { const r = readiness(botStatus); return reply.code(r.ready ? 200 : 503).send(r); });
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
   app.get('/api/auth/state', async (req) => ({ setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)) }));
   app.post('/api/auth/setup', async (req, reply) => {
