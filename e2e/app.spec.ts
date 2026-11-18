@@ -168,15 +168,22 @@ test('trading history CSV export downloads', async () => {
   expect(dl.suggestedFilename()).toBe('mia-orders-paper.csv');
 });
 
-test('terminal displays chart intelligence evidence and invalidation', async () => {
+test('terminal displays anchored VWAP, chart evidence and invalidation', async () => {
   await page.route('**/api/instrument/CHARTFIXTURE?interval=1h', async route => route.fulfill({ json: {
     instrument: { base: 'CHARTFIXTURE', symbol: 'CHARTFIXTURE' }, cross: {}, candles: [], indicators: [],
-    chartIntelligence: { status: 'VALID', trend: 'UNKNOWN', note: 'Fixture evidence only; confidence is not calibrated.', issues: [], detections: [{ kind: 'BREAKOUT_UP', confidence: 0.6, calibration: 'NOT_CALIBRATED', boundaries: { low: 100, high: 105 }, evidence: ['close=105'], method: 'Prior 20-bar high', invalidation: 'Close back below 100', expiresAt: 3600000 }] }
+    chartIntelligence: { status: 'VALID', trend: 'UNKNOWN', note: 'Fixture evidence only; confidence is not calibrated.', issues: [],
+      anchoredVwap: [
+        { anchor: 'UTC_DAY', anchorAt: 0, price: 100, deviationPct: 5 },
+        { anchor: 'UTC_WEEK', anchorAt: -259200000, price: null, deviationPct: null },
+      ],
+      detections: [{ kind: 'BREAKOUT_UP', confidence: 0.6, calibration: 'NOT_CALIBRATED', boundaries: { low: 100, high: 105 }, evidence: ['close=105'], method: 'Prior 20-bar high', invalidation: 'Close back below 100', expiresAt: 3600000 }] }
   } }));
   await page.goto('/terminal/CHARTFIXTURE');
   await expect(page.getByText('Chart intelligence · closed candles')).toBeVisible();
   await expect(page.getByRole('cell', { name: /BREAKOUT_UP/ })).toBeVisible();
   await expect(page.getByText('Close back below 100')).toBeVisible();
+  await expect(page.getByRole('row', { name: /UTC DAY/ })).toContainText('+5.00%');
+  await expect(page.getByRole('row', { name: /UTC WEEK/ })).toContainText('Unavailable');
   await expect(page.getByText(/60% rule strength/)).toBeVisible();
   await page.unroute('**/api/instrument/CHARTFIXTURE?interval=1h');
 });
