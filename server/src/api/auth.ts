@@ -74,8 +74,8 @@ export function validSession(token?: string) {
   return !!r && r.expires_at > Date.now();
 }
 export function logout(token?: string) { if (token) run('DELETE FROM sessions WHERE token_hash=?', sha256(token)); }
-export function changePassword(oldP: string, newP: string, client = 'local') {
-  verifyPassphrase(oldP, client, 'password.change');
+export function changePassword(oldP: string, newP: string, client = 'local', opts: { exemptFromGlobalLockout?: boolean } = {}) {
+  verifyPassphrase(oldP, client, 'password.change', opts);
   if (newP.length < 10) throw new Error('passphrase must be at least 10 characters');
   const salt = randomBytes(16).toString('hex'); setSetting('owner', { salt, hash: scryptSync(newP, salt, 64).toString('hex'), createdAt: Date.now() });
   run('DELETE FROM sessions'); audit('owner', 'auth.password.change');

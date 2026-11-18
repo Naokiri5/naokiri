@@ -150,7 +150,7 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
   app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; ${cookieFlags}; Max-Age=0`); return { ok: true }; });
-  app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, req.ip); return { ok: true }; });
+  app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, stepUpClient(req), { exemptFromGlobalLockout: true }); /* I-01: keyed by the authenticated session, like step-up */ return { ok: true }; });
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }
 
   // ── live stream (SSE) ──

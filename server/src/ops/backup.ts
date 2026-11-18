@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
@@ -71,6 +71,7 @@ export function createBackup(opts: { dir?: string; key?: Buffer | null; nowTs?: 
   try {
     rmSync(raw, { force: true });
     getDb().prepare('VACUUM INTO ?').run(raw);
+    chmodSync(raw, 0o600); // I-03: VACUUM INTO creates the file with the process umask; a backup holds credentials and the ledger
     if (key) { writeFileSync(`${raw}.enc`, encrypt(readFileSync(raw), key), { mode: 0o600 }); rmSync(raw); renameSync(`${raw}.enc`, final); }
     else renameSync(raw, final);
   } finally { rmSync(raw, { force: true }); rmSync(`${raw}.enc`, { force: true }); }

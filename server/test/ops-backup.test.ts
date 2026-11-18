@@ -65,5 +65,11 @@ describe('database backups', () => {
     expect(listBackups(dir)).toEqual([]); expect(verifyBackup(join(dir, m.file), null).ok).toBe(false);
     expect(existsSync(join(dir, m.file))).toBe(true);
   });
+  it('I-03: a plaintext backup file is owner-only (0600) even when the backup directory already existed', async () => {
+    const { statSync, chmodSync } = await import('node:fs');
+    chmodSync(dir, 0o755);
+    const m = createBackup({ dir, key: null, nowTs: 1_800_000_000_000 });
+    expect(statSync(join(dir, m.file)).mode & 0o777).toBe(0o600);
+  });
 });
 function sealHash(f: string) { return createHash('sha256').update(readFileSync(f)).digest('hex'); }
