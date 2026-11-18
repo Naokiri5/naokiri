@@ -29,6 +29,11 @@ Running the server unattended enables nothing live. It keeps scanning the market
   - Checks: the database schema is current, the engine is running, and ticker and scanner freshness are within 3 intervals. A fresh start gets the same grace period.
   - Provider and risk-policy status are reported as information. A STANDBY instance is reported as ready, with idle lanes.
   - Point uptime monitors here.
+- **Streaming order books (optional):** set `MIA_STREAMING=1` to keep sequence-checked Binance WebSocket books for open positions and the deep tier.
+  - The host must allow outbound `wss://data-stream.binance.vision` (public market data, no API key).
+  - REST polling remains the fallback. A symbol whose stream book is older than 2 s is refreshed by REST as before.
+  - `GET /api/bot` shows `depthStream` (connected, synced symbols, resyncs, reconnects). It is `null` when streaming is off.
+  - Details and test evidence: [`../engineering/BLUEPRINT_STATUS.md`](../engineering/BLUEPRINT_STATUS.md).
 - **Stall alarm:** the leader sends one CRITICAL "Scanner stalled" notification when scans stop completing, and one INFO when they recover.
 - **Graceful stop:** on SIGTERM/SIGINT no new lane starts and in-flight lanes finish (up to 20 s). Then the lease is released, HTTP is closed and SQLite is closed. A hard limit of 30 s applies, and a second signal exits immediately.
 

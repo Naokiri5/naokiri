@@ -1,4 +1,5 @@
-import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBooks } from '../market/fabric.js';
+import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBooks, syncDepthStreams, stopDepthStreams, depthStreamStatus } from '../market/fabric.js';
+import { market } from '../market/store.js';
 import { scanOnce } from '../market/scanner.js';
 import { monitorPositions, expireApprovals, submitEntry, queueForApproval } from '../exec/oms.js';
 import { refreshNews } from '../news/news.js';
@@ -122,6 +123,8 @@ async function backgroundLane() {
   try { if (holdEngine()) await backgroundPass(); } catch (e: any) { botStatus.lastError = `background lane: ${e.message}`; } finally { backgrounding = false; }
 }
 async function backgroundPass() {
+  // Streaming books for open positions + the deep tier (no-op unless MIA_STREAMING=1); REST stays the fallback.
+  try { syncDepthStreams([...openPositions().map((p) => p.instrument), ...market.deep.keys()]); } catch (e: any) { botStatus.lastError = `stream: ${e.message}`; }
   try { await refreshBackground(); } catch { /* tracked per provider */ }
   try { await scanPrints(); botStatus.lastPrintsAt = Date.now(); } catch { /* tracked */ }
   if (Date.now() - botStatus.lastNewsAt > 5 * 60_000) { try { await refreshNews(); botStatus.lastNewsAt = Date.now(); } catch { /* tracked */ } }
@@ -155,7 +158,7 @@ export function startBot() {
     setInterval(backgroundLane, 60_000),
   ];
 }
-export function stopBot() { timers.forEach(clearInterval); timers = []; botStatus.running = false; botStatus.role = 'STOPPED'; }
+export function stopBot() { timers.forEach(clearInterval); timers = []; botStatus.running = false; botStatus.role = 'STOPPED'; stopDepthStreams(); }
 /** Hand the engine lease to a successor now (graceful stop), instead of letting it expire. */
 export function releaseEngineLease() { try { releaseLease(ENGINE_LEASE, botStatus.instanceId); } catch { /* DB already closed: lease expires */ } }
 /** Lanes currently executing (graceful drain waits for these before the lease is released and the DB closed). */
@@ -178,6 +181,8 @@ export function botStatusView() {
   return {
     ...botStatus, display: displayMode(ctl), mode: ctl.mode, paused: ctl.pausedNewOrders, emergency: ctl.emergency,
     policyAccepted: !!currentPolicy(), funded: acct.deposits > 0, equity: acct.equity,
+    /** Streaming-book connection health (null when MIA_STREAMING is off: REST polling only). */
+    depthStream: depthStreamStatus(),
     state: ctl.emergency ? 'EMERGENCY' : ctl.pausedNewOrders ? 'PAUSED' : ctl.mode === 'OBSERVE' ? 'OBSERVING' : ctl.mode === 'PAPER' ? 'PAPER_TRADING' : ctl.mode === 'APPROVAL' ? 'AWAITING_APPROVAL' : 'BOUNDED_LIVE',
   };
 }

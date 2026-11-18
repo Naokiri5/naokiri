@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: Architecture blueprint (2026-11-18)
+- **Streaming order books (milestone 3), off by default.** With `MIA_STREAMING=1`, open positions and the deep tier get Binance WebSocket books that are checked update by update. Any gap, bad data or crossed book throws the local book away and re-syncs. REST polling stays the fallback. Live latency has not been measured yet.
+- **QA evidence is tied to the exact build (Q-01).** The release gate accepts a test report only from the same commit, a clean tree and a run at most 7 days old.
+- **Stale leader proven with two real processes (L-01).** An old leader's write fails after another process takes the lease.
+- **Draft PR #17 (autopilot cockpit) merged into this branch,** with its request-cancelling bug fixed.
+- **Status table:** `docs/engineering/BLUEPRINT_STATUS.md`.
+
 ## Unreleased: Debug audit Batch C (2026-11-17)
 - **Trading History no longer refetches in a loop.** It made 753 requests in 3 s before the fix.
 - **Strategy revoke/re-enable** is a single operation on the server's current list.

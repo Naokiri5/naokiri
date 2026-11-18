@@ -57,6 +57,8 @@ export const config = {
   dataDir: DATA_DIR,
   /** Disable all outbound polling (tests / offline). */
   offline: env.MIA_OFFLINE === '1',
+  /** Streaming order books (Binance diff-depth WebSocket, sequence-checked). Off by default; REST stays the fallback. */
+  streaming: env.MIA_STREAMING === '1',
   /** Number of deep-tier (T2) instruments to analyze with candles + books. */
   deepTierSize: intEnv('MIA_DEEP_TIER', 24, 5, 200),
   scanIntervalMs: intEnv('MIA_SCAN_INTERVAL_MS', 60_000, 10_000, 3_600_000),

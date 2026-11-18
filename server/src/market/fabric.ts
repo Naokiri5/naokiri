@@ -13,6 +13,7 @@ import { timed } from '../core/latency.js';
 import { config } from '../config.js';
 import { openPositions } from '../portfolio/ledger.js';
 import type { Book } from '../providers/binance.js';
+import { startDepthStream, binanceStreamUrl, type StreamBook, type StreamDeps } from './depthStream.js';
 
 /** Install a book snapshot unless it is older than the one already held (concurrent refreshes can land out of order). */
 function setBook(id: string, b: Book) {
@@ -179,9 +180,44 @@ async function refreshCross(ids: string[]) {
 }
 
 /** Refresh only the order books for the given instruments (hot lane: open positions; API: just before an owner action). */
+/** Last time a sequence-checked stream book was published per instrument (REST skips symbols the stream keeps fresh). */
+const streamBookAt = new Map<string, number>();
+export const STREAM_FRESH_MS = 2_000;
+export const streamFresh = (id: string, nowTs = Date.now()) => nowTs - (streamBookAt.get(id) ?? 0) <= STREAM_FRESH_MS;
+let depthStream: ReturnType<typeof startDepthStream> | null = null; let streamKey = '';
+/**
+ * Keep one combined depth stream for `ids` (open positions + deep tier). Restarted only when the set changes. Each
+ * published book goes through setBook, which already refuses an older lastUpdateId, so stream and REST books coexist.
+ */
+export function syncDepthStreams(ids: string[], seams: Partial<Pick<StreamDeps, 'WebSocketImpl' | 'snapshot'>> = {}) {
+  if (!config.streaming || config.offline) return null;
+  const symbols = [...new Set(ids.map((id) => market.instruments.get(id)?.symbol).filter((s): s is string => !!s))].sort().slice(0, 200);
+  const key = symbols.join(',');
+  if (key === streamKey && depthStream) return depthStream;
+  depthStream?.stop(); depthStream = null; streamKey = key;
+  if (!symbols.length) return null;
+  depthStream = startDepthStream(symbols, {
+    url: binanceStreamUrl,
+    WebSocketImpl: seams.WebSocketImpl,
+    snapshot: seams.snapshot ?? (async (sym) => {
+      const b = await binance.depth(sym, 100);
+      if (b.lastUpdateId == null) throw new Error('snapshot without lastUpdateId cannot be synchronized');
+      return { lastUpdateId: b.lastUpdateId, bids: b.bids, asks: b.asks };
+    }),
+    publish: (sym, b: StreamBook) => {
+      const id = `crypto:binance:${sym}`; const inst = market.instruments.get(id); if (!inst) return;
+      market.deepState(inst); setBook(id, { bids: b.bids, asks: b.asks, ts: b.ts, lastUpdateId: b.lastUpdateId }); streamBookAt.set(id, b.ts);
+    },
+  });
+  return depthStream;
+}
+export function stopDepthStreams() { depthStream?.stop(); depthStream = null; streamKey = ''; streamBookAt.clear(); }
+export const depthStreamStatus = () => depthStream?.status() ?? null;
+
 export async function refreshBooks(ids: string[]) {
   await Promise.all([...new Set(ids)].map(async (id) => {
     const inst = market.instruments.get(id); if (!inst) return;
+    if (streamFresh(id)) return; // the stream already keeps this book continuous and fresh
     try { market.deepState(inst); setBook(id, await timed('fabric.book', () => binance.depth(inst.symbol, 100))); }
     catch { /* provider health tracked; a book that could not be refreshed keeps its old timestamp and ages out */ }
   }));

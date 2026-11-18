@@ -8,6 +8,7 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | [`../README.md`](../README.md) | install, start the app, run the tests |
 | [`operations/SETUP_GUIDE_BEGINNER.md`](operations/SETUP_GUIDE_BEGINNER.md) | set up MIA step by step |
 | [`engineering/DEBUG_AUDIT_2026-11-17.md`](engineering/DEBUG_AUDIT_2026-11-17.md) | see the **current** bug register, test results, performance baseline and go/no-go |
+| [`engineering/BLUEPRINT_STATUS.md`](engineering/BLUEPRINT_STATUS.md) | see where each item of the architecture blueprint stands, with test evidence |
 | [`engineering/AUTOPILOT_100_INVENTORY.md`](engineering/AUTOPILOT_100_INVENTORY.md) | see what each of the 100 autopilot upgrades has: done, partial, missing or locked |
 | [`CHANGELOG.md`](CHANGELOG.md) | see what changed, newest first |
 
