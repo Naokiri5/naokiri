@@ -12,6 +12,8 @@ export function floorToStep(q: number, step: number) {
   if (r > q) r = Number((r - step).toFixed(12));
   return Math.max(0, r);
 }
+/** True when an ISO timestamp is at or before `nowTs`, OR missing/unparseable (fail closed: J-04, 100-agent audit). */
+export function expiredAt(isoTs: unknown, nowTs = Date.now()) { const t = typeof isoTs === 'string' ? Date.parse(isoTs) : NaN; return !Number.isFinite(t) || t <= nowTs; }
 export const round = (x: number, dp = 8) => { const f = 10 ** dp; return Math.round(x * f) / f; };
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export function mean(xs: number[]) { return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN; }

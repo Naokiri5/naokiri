@@ -251,7 +251,7 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/risk/policy', async (req) => { const b = z.object({ policy: z.unknown(), password: PW.optional() }).strict().parse(req.body ?? {}); stepUp(req, b); return acceptPolicy('owner', b.policy); });
   app.post('/api/control', async (req) => {
     const b = z.object({ mode: z.enum(['OBSERVE', 'PAPER', 'APPROVAL', 'BOUNDED_LIVE']).optional(), pausedNewOrders: z.boolean().optional(), emergency: z.boolean().optional(), disabledStrategies: z.array(z.string().max(60)).max(50).optional(),
-      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), password: PW.optional() }).parse(req.body);
+      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), password: PW.optional() }).strict().parse(req.body); // H-08: unknown keys are errors on the control endpoint
     const { password, disableStrategy, enableStrategy, ...patch } = b;
     // MIA-WEB-010: single-strategy operations computed from the server's CURRENT list. A client that sent a whole list
     // from a stale copy could re-enable a strategy the owner (or the health monitor) had just disabled.

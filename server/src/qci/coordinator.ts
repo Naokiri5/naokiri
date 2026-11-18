@@ -4,7 +4,7 @@ import { DOMAINS, REQUIRED_DOMAINS, WORKERS } from '../workers/registry.js';
 import { dispatch, flushWorkerStats } from '../workers/runtime.js';
 import { challengePanel } from './challenge.js';
 import type { WorkerContext } from '../workers/types.js';
-import { uid, iso } from '../core/util.js';
+import { uid, iso, expiredAt } from '../core/util.js';
 import { record } from '../core/latency.js';
 import { run, J } from '../db/db.js';
 
@@ -159,5 +159,5 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
   }
   return rec;
 }
-export const isExpired = (r: ConsensusRecord, nowTs = Date.now()) => Date.parse(r.expires_at) <= nowTs;
+export const isExpired = (r: ConsensusRecord, nowTs = Date.now()) => expiredAt(r.expires_at, nowTs); // J-04: missing/garbage = expired
 const round3 = (x: number) => Math.round(x * 1000) / 1000;

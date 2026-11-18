@@ -1,5 +1,5 @@
 import { all, get, run, tx, J, P } from '../db/db.js';
-import { uid, iso, floorToStep } from '../core/util.js';
+import { uid, iso, floorToStep, expiredAt } from '../core/util.js';
 import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
 import { evaluateRisk } from '../risk/gate.js';
@@ -117,7 +117,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   const ctl = getControl();
   if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
   if (actor === 'bot' && ctl.mode !== 'PAPER') return { ok: false, reason: `mode ${ctl.mode} does not permit automatic paper entries` };
-  if (Date.parse(report.consensus.expiresAt) <= nowTs) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data');
+  if (expiredAt(report.consensus?.expiresAt, nowTs)) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data (missing or past expiry)');
   // Last-moment revalidation: fresh risk evaluation on current data
   const fresh = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId }, nowTs);
   const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');
@@ -215,8 +215,10 @@ export function decideApproval(orderId: string, approve: boolean) {
 }
 export function expireApprovals() {
   for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.status='PENDING_APPROVAL'")) {
-    const r = P<DecisionReport>(o.report);
-    if (Date.parse(r.consensus.expiresAt) <= Date.now()) tx(() => { assertWriteFence(); run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), o.id); });
+    // J-04: an unreadable report or a missing/garbage expiry expires the approval (fail closed), and one bad row can no
+    // longer stop the rest of the loop.
+    let r: DecisionReport | null = null; try { r = P<DecisionReport>(o.report); } catch { r = null; }
+    if (expiredAt(r?.consensus?.expiresAt)) tx(() => { assertWriteFence(); run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed or unreadable', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), o.id); });
   }
 }
 

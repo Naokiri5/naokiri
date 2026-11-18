@@ -82,7 +82,7 @@ export async function knowledgeRoutes(app: FastifyInstance) {
   });
   app.get('/api/academy/experiments', async () => listExperiments());
   app.get('/api/academy/experiments/:id', async (req) => experimentDetail(pid(req)) ?? Promise.reject(notFound('experiment')));
-  app.post('/api/academy/strategy-comparison', async (req) => { RESEARCH_LIMITS.comparison.take('owner', 'strategy comparison'); const b = z.object({ symbol: z.string().regex(/^[A-Z0-9]{5,20}$/), interval: interval.default('1h'), bars: z.number().int().min(1500).max(8000).default(4000) }).strict().parse(req.body); return compareStrategies('owner', b.symbol, b.interval, b.bars); });
+  app.post('/api/academy/strategy-comparison', async (req) => { const b = z.object({ symbol: z.string().regex(/^[A-Z0-9]{5,20}$/), interval: interval.default('1h'), bars: z.number().int().min(1500).max(8000).default(4000) }).strict().parse(req.body); RESEARCH_LIMITS.comparison.take('owner', 'strategy comparison'); /* H-04: validate before spending the budget */ return compareStrategies('owner', b.symbol, b.interval, b.bars); });
   app.get('/api/academy/paper-experiment', async () => paperExperimentStatus());
   app.get('/api/academy/candles', async () => candleInventory());
   app.get('/api/academy/memory', async () => memoryOverview());

@@ -14,7 +14,9 @@ export function openDb(file?: string) {
   // The database holds the owner's passphrase hash, session hashes and the paper ledger: owner-only (0600). SQLite gives
   // the -wal/-shm files the same mode. Best effort: a file owned by another account (mounted volume) is left unchanged.
   if (path !== ':memory:') { try { chmodSync(path, 0o600); } catch { /* not our file to change */ } }
-  db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
+  // recursive_triggers (G-01, 100-agent audit): without it SQLite skips DELETE triggers when INSERT OR REPLACE removes the
+  // old row, so REPLACE silently rewrote "immutable" DITAS rows. Tables the app REPLACEs have no delete triggers.
+  db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA recursive_triggers=ON;');
   migrate(db);
   return db;
 }

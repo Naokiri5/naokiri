@@ -39,3 +39,21 @@ describe('exit edge cases', () => {
     expect(reconcile().ok).toBe(true);
   });
 });
+
+describe('consensus expiry fails closed (J-04)', () => {
+  beforeEach(() => { freshDb(); market.reset(); });
+  it('a missing or garbage expiry is expired: entries are rejected', () => {
+    const { inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    for (const bad of ['garbage', undefined]) {
+      const rep = report(id, last, [0.5, 0.5]); rep.consensus.expiresAt = bad;
+      const r = submitEntry(rep, 'bot'); expect(r.ok).toBe(false); expect(r.reason).toMatch(/CONSENSUS_EXPIRED/);
+    }
+    expect(openPositions()).toHaveLength(0);
+  });
+  it('expiredAt helper', async () => {
+    const { expiredAt } = await import('../src/core/util.js');
+    expect(expiredAt('garbage')).toBe(true); expect(expiredAt(undefined)).toBe(true);
+    expect(expiredAt(new Date(Date.now() + 60_000).toISOString())).toBe(false);
+  });
+});
