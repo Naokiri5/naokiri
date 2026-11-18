@@ -51,6 +51,7 @@ import { SCHEMA_VERSION } from '../db/migrations.js';
 import { qhefReport } from '../qhef/qhef.js';
 import { securityOverview, revokeOtherSessions } from '../security/security.js';
 import { timeZoneName } from '../core/time.js';
+import { readCexActivity } from '../market/cexActivity.js';
 import { marketCoverage } from '../market/coverage.js';
 import { discover } from '../market/discover.js';
 import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js';
@@ -194,7 +195,7 @@ export async function routes(app: FastifyInstance) {
     const timeframeAgreement = summarizeTimeframes(chartIntelligence, d);
     const selectedReading = timeframeAgreement.readings.find(reading => reading.timeframe === iv);
     const featuresResearch = selectedReading?.status === 'VALID' ? d?.engines[iv].research ?? null : null;
-    return { chartIntelligence, timeframeAgreement, featuresResearch,
+    return { chartIntelligence, timeframeAgreement, featuresResearch, cexActivity: readCexActivity(i.id, chartIntelligence.asOf),
       instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
       quality: assessQuality(i.id), safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };
@@ -212,7 +213,14 @@ export async function routes(app: FastifyInstance) {
   // ── scanner / decisions ──
   app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
   app.get('/api/decisions', async (req) => { const q = z.object({ decision: TOKEN.optional() }).parse(req.query); return all<any>(`SELECT id, instrument, strategy, decision, score, risk_decision, created_at FROM decisions ${q.decision ? 'WHERE decision=?' : ''} ORDER BY created_at DESC LIMIT 300`, ...(q.decision ? [q.decision] : [])); });
-  app.get('/api/decisions/:id', async (req, reply) => { const r = get<any>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found'); const c = get<any>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id); return { report: P(r.report), consensus: c ? P(c.record) : null }; });
+  app.get('/api/decisions/:id', async (req, reply) => {
+    const id = idOf(req);
+    const row = get<{ report: string; consensus_id: string | null; instrument: string }>(
+      'SELECT report, consensus_id, instrument FROM decisions WHERE id=?', id);
+    if (!row) return bad(reply, 404, 'not found');
+    const consensus = get<{ record: string }>('SELECT record FROM consensus_records WHERE id=?', row.consensus_id);
+    return { report: P(row.report), consensus: consensus ? P(consensus.record) : null, paperEntry: oms.paperEntryForDecision(id, row.instrument) };
+  });
   app.post('/api/analyze', async (req) => { const { symbol, strategyId } = z.object({ symbol: z.string().min(1).max(20), strategyId: z.string().max(60).optional() }).parse(req.body); const i = market.bySymbol(symbol); if (!i) throw httpError(404, 'unknown symbol'); limit(req, 'analyze', 'analysis'); return analyzeInstrument(i.id, strategyId); });
 
   // ── AI intelligence (workers / QCI) ──
@@ -264,7 +272,7 @@ export async function routes(app: FastifyInstance) {
   });
 
   // ── bot account / portfolio / orders ──
-  app.get('/api/bot', async () => ({ status: botStatusView(), account: accountState(), positions: oms.listPositions('OPEN'), pending: all("SELECT * FROM orders WHERE status='PENDING_APPROVAL' ORDER BY created_at DESC"), strategies: lab.listStrategies(), ledger: all('SELECT * FROM ledger_entries WHERE account=? ORDER BY ts DESC LIMIT 100', PAPER_ACCOUNT) }));
+  app.get('/api/bot', async () => ({ status: botStatusView(), account: accountState(), positions: oms.listPositions('OPEN'), pending: all("SELECT * FROM orders WHERE account=? AND venue=? AND status='PENDING_APPROVAL' ORDER BY created_at DESC", PAPER_ACCOUNT, oms.VENUE), strategies: lab.listStrategies(), ledger: all('SELECT * FROM ledger_entries WHERE account=? ORDER BY ts DESC LIMIT 100', PAPER_ACCOUNT) }));
   app.post('/api/bot/allocation', async (req) => {
     const b = z.object({ amount: z.number().positive().max(10_000_000), direction: z.enum(['DEPOSIT', 'WITHDRAW']) }).parse(req.body);
     if (b.direction === 'WITHDRAW' && b.amount > accountState().cash) throw new Error('cannot remove more than available paper cash');
@@ -273,7 +281,7 @@ export async function routes(app: FastifyInstance) {
   });
   app.get('/api/portfolio', async () => {
     const acct = accountState(); const pos = oms.listPositions();
-    const curve = all<any>("SELECT closed_at t, realized_pnl p FROM positions WHERE status='CLOSED' ORDER BY closed_at"); let eq = acct.deposits; const equityCurve = curve.map((c) => ({ t: c.t, equity: (eq += c.p) }));
+    const curve = all<{ t: number; p: number }>("SELECT closed_at t, realized_pnl p FROM positions WHERE account=? AND status='CLOSED' ORDER BY closed_at", PAPER_ACCOUNT); let eq = acct.deposits; const equityCurve = curve.map((c) => ({ t: c.t, equity: (eq += c.p) }));
     return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
   });
   app.get('/api/orders', async () => oms.listOrders(300));

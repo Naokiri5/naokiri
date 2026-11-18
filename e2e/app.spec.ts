@@ -171,6 +171,19 @@ test('trading history CSV export downloads', async () => {
 test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', async () => {
   await page.route('**/api/instrument/CHARTFIXTURE?interval=1h', async route => route.fulfill({ json: {
     instrument: { base: 'CHARTFIXTURE', symbol: 'CHARTFIXTURE' }, cross: {}, candles: [], indicators: [],
+    cexActivity: {
+      source: 'binance', baseAsset: 'BASE', quoteAsset: 'USDT',
+      volume: [
+        { window: '5m', status: 'UNAVAILABLE', reason: 'NO_CANDLE_FEED' },
+        { window: '1h', status: 'AVAILABLE', baseVolume: 400, closedAt: 43200000, relativeToMedian: 2,
+          baselineWindows: 5, changeVsPreviousPct: 100, aggressiveFlow: { deltaBase: 120, tradeCount: 100 } },
+      ],
+      book: {
+        status: 'AVAILABLE', spreadBps: 1, quoteAgeMs: 250, bidDepth1pctQuote: 3000, askDepth1pctQuote: 1000,
+        bidShare1pct: 0.75, exit: { conservativeBaseCapacity: 12 },
+        impactCurve: [{ side: 'sell', requestedQuote: 50000, filledFully: false }],
+      },
+    },
     featuresResearch: {
       candleOpenAt: 39600000, wma20: 104, hma20: 106, keltner: null, parabolicSar: null,
       ichimoku: { conversion9: 100, base26: 100, leadingA: 100, leadingB52: null, laggingClose: 105, displacementBars: 26 },
@@ -200,6 +213,10 @@ test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', 
   await expect(page.getByRole('row', { name: /UTC WEEK/ })).toContainText('Unavailable');
   await expect(page.getByText(/60% rule strength/)).toBeVisible();
   await expect(page.getByRole('row', { name: /Hull moving average/ })).toContainText('106.0000');
+  const activity = page.getByRole('table', { name: 'Binance closed-candle observations' });
+  await expect(activity.getByRole('row', { name: /5m/ })).toContainText('Unavailable');
+  await expect(activity.getByRole('row', { name: /1h/ })).toContainText('2.00×');
+  await expect(page.getByRole('row', { name: /sell 50,000/ })).toContainText('Insufficient visible depth');
   await page.unroute('**/api/instrument/CHARTFIXTURE?interval=1h');
 });
 
@@ -280,6 +297,29 @@ test('risk center shows research-only paper scenarios', async () => {
   await expect(page.getByText('Paper portfolio stress', { exact: true })).toBeVisible();
   await expect(page.getByRole('row', { name: /Flash crash/ })).toContainText('NO EXPOSURE');
   await expect(page.getByRole('row', { name: /USDT cash depeg/ })).toContainText('MODELED');
+});
+
+test('decision record displays a recorded paper rejection separately from strategy and risk', async () => {
+  const url = '**/api/decisions/omega-fixture';
+  await page.route(url, route => route.fulfill({ json: {
+    report: {
+      asset: 'OMEGA', market: 'crypto', venue: 'binance',
+      strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',
+      decision: 'PAPER_TRADE', finalDecision: 'ENTER', direction: 'LONG',
+      consensus: { id: 'q-fixture', state: 'STRONG_CONSENSUS' }, createdAt: '2026-06-01T00:00:00Z',
+      reason: 'Fixture strategy decision', disclaimer: 'Paper research fixture.', takeProfit: [],
+      expectedCosts: { funding: 'N/A' }, dataFreshness: { status: 'OK', quoteAgeMs: 500, bookAgeMs: 500 },
+      opportunity: { score: 70, version: 'fixture' }, riskAssessment: [], missingInformation: [],
+      supportingEvidence: [], opposingEvidence: [], risk: { decision: 'ALLOW', policyVersion: 1, traceId: 'fixture' },
+    },
+    paperEntry: { orderId: 'ord-omega-test', status: 'REJECTED', filledQty: 0, averageFillPrice: null, rejectReason: 'ORDER_BOOK_STALE' },
+  } }));
+  await page.goto('/decision/omega-fixture');
+  await expect(page.getByText('Defend · Risk assessment')).toBeVisible();
+  await expect(page.getByText('Execute · Paper OMS')).toBeVisible();
+  await expect(page.getByText('ord-omega-test')).toBeVisible();
+  await expect(page.getByText('ORDER_BOOK_STALE')).toBeVisible();
+  await page.unroute(url);
 });
 
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });
