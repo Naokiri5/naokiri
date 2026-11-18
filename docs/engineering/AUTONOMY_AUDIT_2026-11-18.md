@@ -185,3 +185,17 @@ On the old code all 6 fail (partly because the new exports are missing; the old 
 3. Add an upgrade test from v7 that keeps existing data.
 
 Any database created by the current PR #20 draft build will be refused by this guard. It must not be reused: start fresh, or restore a backup made by a PR #18 build.
+
+## 10. SAFE-03 result (the 23 open CodeRabbit threads on PR #18)
+
+| Threads | Outcome | Commit |
+|---|---|---|
+| #9 Number(null) deletes a level; #10 crossed or empty book stays SYNCED; #11 snapshot after stop() still publishes; #13 stream marked fresh after setBook rejected it | **Fixed**, 4 regression tests that fail on the old code | `869069f` |
+| #8 QA identity before and after the run; #14 stub fetch in the fabric test; #4 fixed clock; #5 read A's lease before the kill; #15 renew before the positive control; #21 `process.execPath` + tsx; #22 deterministic ids; #19 audit wording; #20 optional env file | **Fixed** | `a0789b4` |
+| #16 ref written during render; #17 monitor clock on response; #18 scanner age keeps advancing | **Fixed**. Covered by e2e only: the web unit setup has no DOM, and adding one needs a new package. | `9cd5dd9` |
+| #1, #2, #3, #12 (outdated) | Already fixed earlier (MA-16, MA-01/02, MA-23, MA-18) | — |
+| #0 setup code over a header-less forwarder | **Not changed: owner decision (MA-04).** Reply posted. | — |
+| #6 preserved owner blueprint document | **Not changed** (preserved source). Reply posted. | — |
+| #7 debounce clock in e2e | **Attempted.** The controlled clock made the test flaky (1 in 5), so the stable version was kept. Reply posted. | — |
+
+Verification: server 614 passed and 3 skipped; web unit ✓; e2e 76 passed; typecheck and build ✓. `qa.mjs` on a clean tree records the exact HEAD and `dirty: false`. The dirty-during-run case is covered by code review, not by an automated test.
