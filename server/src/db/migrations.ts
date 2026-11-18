@@ -113,6 +113,25 @@ const MIGRATIONS: string[] = [
   CREATE TABLE runtime_leases (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at INTEGER NOT NULL,
     renewed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   `,
+  // v6 — Telegram command hub (MIA-TG-01). Read-only except owner-approved pause of NEW entries. Chat identities are
+  // private: unlink clears them. Only ONE active link is allowed (single owner). NOTE: PR #18 also claims version 6;
+  // whichever PR merges second must renumber to the next free version.
+  `
+  CREATE TABLE telegram_links (id TEXT PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('PENDING','ACTIVE','REVOKED')),
+    code_hash TEXT, code_expires_at INTEGER, code_attempts INTEGER NOT NULL DEFAULT 0,
+    telegram_user_id INTEGER, telegram_chat_id INTEGER,
+    created_at INTEGER NOT NULL, linked_at INTEGER, revoked_at INTEGER);
+  CREATE UNIQUE INDEX telegram_links_one_active ON telegram_links(status) WHERE status = 'ACTIVE';
+  CREATE UNIQUE INDEX telegram_links_pending_code ON telegram_links(code_hash) WHERE status = 'PENDING';
+  CREATE TABLE telegram_update_dedupe (update_id INTEGER PRIMARY KEY, received_at INTEGER NOT NULL);
+  CREATE INDEX telegram_update_dedupe_age ON telegram_update_dedupe(received_at);
+  CREATE TABLE telegram_outbox (id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, text TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('QUEUED','PROVIDER_ACCEPTED','FAILED')),
+    attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL, last_error TEXT,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+  CREATE INDEX telegram_outbox_due ON telegram_outbox(status, next_attempt_at);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
