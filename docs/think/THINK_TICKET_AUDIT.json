@@ -1,7 +1,7 @@
 {
  "auditedRef": "54c1d2e4d2942c65e55176300713b00b64425493",
  "auditedAt": "2026-11-18",
- "note": "Audited committed HEAD only; uncommitted WIP present in tree (decision/certificate.ts, decision/profitLab.ts, test/think-certificate.test.ts, web ThinkCertificate.tsx) was excluded. Statuses reflect the code BEFORE THINK slice 1; thinkSlice1 lists what this PR adds (status should be re-audited after merge).",
+ "note": "Audited committed HEAD only; uncommitted WIP present in tree (decision/certificate.ts, decision/profitLab.ts, test/think-certificate.test.ts, web ThinkCertificate.tsx) was excluded. Statuses reflect the code BEFORE THINK slice 1; thinkSlice1 lists what this PR adds (status should be re-audited after merge). thinkSlice2 lists what THINK slice 2 adds.",
  "tickets": [
   {
    "id": "MIA-THINK-001",
@@ -15,7 +15,8 @@
    "owner": "server/src/market/store.ts",
    "weakness": "Ambiguous tickers",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-002",
@@ -29,7 +30,8 @@
    "owner": "server/src/market/quality.ts",
    "weakness": "Stale quotes disguised as current",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-003",
@@ -44,7 +46,8 @@
    "owner": "server/src/ditas/memory.ts",
    "weakness": "Look-ahead leakage",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-004",
@@ -58,7 +61,8 @@
    "owner": "server/src/market/quality.ts",
    "weakness": "Different venue prices silently averaged",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-005",
@@ -72,7 +76,8 @@
    "owner": "server/src/news/news.ts",
    "weakness": "Duplicate social/on-chain events",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-006",
@@ -86,7 +91,8 @@
    "owner": "server/src/market/quality.ts",
    "weakness": "Correlated vendors masquerade as independent",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-007",
@@ -98,7 +104,8 @@
    "owner": "server/src/safety/safety.ts",
    "weakness": "Manipulated exchange volume",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-008",
@@ -113,7 +120,8 @@
    "owner": "server/src/joe/joe.ts",
    "weakness": "Untrusted social text as commands",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-009",
@@ -127,7 +135,8 @@
    "owner": "server/src/market/quality.ts",
    "weakness": "Failed APIs replaced with estimated data",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-010",
@@ -141,7 +150,8 @@
    "owner": "server/src/ditas/memory.ts",
    "weakness": "No immutable research audit",
    "priority": "P0",
-   "thinkSlice1": "certificate commits to sha256 of stored report + consensus"
+   "thinkSlice1": "certificate commits to sha256 of stored report + consensus",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-011",
@@ -153,7 +163,8 @@
    "owner": "server/src/workers/runtime.ts",
    "weakness": "All 100 workers run on every asset",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-012",
@@ -166,7 +177,8 @@
    "owner": "server/src/market/scanner.ts",
    "weakness": "Network calls inside hot decision path",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-013",
@@ -179,7 +191,8 @@
    "owner": "server/src/bot/bot.ts",
    "weakness": "Slow large models block decisions",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-014",
@@ -191,7 +204,8 @@
    "owner": "server/src/bot/bot.ts",
    "weakness": "No priority for held positions",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-015",
@@ -205,7 +219,8 @@
    "owner": "server/src/workers/runtime.ts",
    "weakness": "Single worker exception crashes ensemble",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": "fault injection: crashing worker counted, coordinator survives; quarantine after 5 faults (worker-fault-injection.test.ts)"
   },
   {
    "id": "MIA-THINK-016",
@@ -219,7 +234,8 @@
    "owner": "server/src/qci/coordinator.ts",
    "weakness": "Timeouts are treated as agreement",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": "crashing/quarantined mandatory check => NO_QUORUM naming the check, never ENTER"
   },
   {
    "id": "MIA-THINK-017",
@@ -232,7 +248,8 @@
    "owner": "server/src/core/latency.ts",
    "weakness": "Unlimited cache growth",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-018",
@@ -246,7 +263,8 @@
    "owner": "server/src/workers/runtime.ts",
    "weakness": "Repeated identical calculations",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-019",
@@ -259,7 +277,8 @@
    "owner": "server/src/bot/bot.ts",
    "weakness": "CPU overload triggers latency spikes",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-020",
@@ -273,7 +292,8 @@
    "owner": "server/src/qhef/qhef.ts",
    "weakness": "Quantum speed claims cannot be measured",
    "priority": "P0",
-   "thinkSlice1": "scripts/benchmark-think.mjs compute-only baseline"
+   "thinkSlice1": "scripts/benchmark-think.mjs compute-only baseline",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-021",
@@ -286,7 +306,8 @@
    "owner": "server/src/workers/registry.ts",
    "weakness": "Worker names are mistaken for separate intelligent agents",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-022",
@@ -300,7 +321,8 @@
    "owner": "server/src/qci/schemas.ts",
    "weakness": "Evaluator output schemas drift",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": "malformed worker result rejected before aggregation (rejected_packets)"
   },
   {
    "id": "MIA-THINK-023",
@@ -314,7 +336,8 @@
    "owner": "server/src/qci/schemas.ts",
    "weakness": "Workers cast votes without adequate samples",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-024",
@@ -328,7 +351,8 @@
    "owner": "server/src/qci/coordinator.ts",
    "weakness": "Same indicator counted repeatedly",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-025",
@@ -341,7 +365,8 @@
    "owner": "server/src/workers/registry.ts",
    "weakness": "Hard-coded static thresholds fit one regime",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-026",
@@ -354,7 +379,8 @@
    "owner": "server/src/workers/runtime.ts",
    "weakness": "On-chain worker fires on CEX-only instruments",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-027",
@@ -367,7 +393,8 @@
    "owner": "server/src/workers/effectiveness.ts",
    "weakness": "Worker accuracy not measured",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-028",
@@ -380,7 +407,8 @@
    "owner": "server/src/qci/coordinator.ts",
    "weakness": "Worker failures hidden in aggregate score",
    "priority": "P1",
-   "thinkSlice1": "certificate shows failed/quarantined workers and missing required domains"
+   "thinkSlice1": "certificate shows failed/quarantined workers and missing required domains",
+   "thinkSlice2": "quarantined worker shown in certificate coverage + uncertainty; NO_QUORUM reason"
   },
   {
    "id": "MIA-THINK-029",
@@ -393,7 +421,8 @@
    "owner": "server/test (import-graph test over server/src/workers)",
    "weakness": "Workers acquire order authority",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": "repo-wide runtime import graph: evidence/research code cannot reach exec/, wallet/, portfolio/ (import-boundaries.test.ts)"
   },
   {
    "id": "MIA-THINK-030",
@@ -406,7 +435,8 @@
    "owner": "server/src/workers/registry.ts",
    "weakness": "Adding extra workers causes architectural duplication",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-031",
@@ -419,7 +449,8 @@
    "owner": "server/src/qci/coordinator.ts",
    "weakness": "Majority voting gives false certainty",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-032",
@@ -432,7 +463,8 @@
    "owner": "server/src/qci/challenge.ts",
    "weakness": "No explicit bear-case reviewer",
    "priority": "P0",
-   "thinkSlice1": "certificate bull/bear case incl. vetoes"
+   "thinkSlice1": "certificate bull/bear case incl. vetoes",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-033",
@@ -446,7 +478,8 @@
    "owner": "server/src/qci/coordinator.ts",
    "weakness": "Missing evidence incorrectly means neutral",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-034",
@@ -460,7 +493,8 @@
    "owner": "web/src/pages/Intel.tsx",
    "weakness": "Confidence confused with win probability",
    "priority": "P0",
-   "thinkSlice1": "score labelled HEURISTIC, win probability NO_VALID_FORECAST"
+   "thinkSlice1": "score labelled HEURISTIC, win probability NO_VALID_FORECAST",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-035",
@@ -474,7 +508,8 @@
    "owner": "server/src/risk/gate.ts",
    "weakness": "No hard veto independence",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-036",
@@ -487,7 +522,8 @@
    "owner": "server/src/decision/engine.ts",
    "weakness": "LLM hallucinations pollute decision",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-037",
@@ -499,7 +535,8 @@
    "owner": "server/src/qci/challenge.ts",
    "weakness": "Conflict between timeframe signals ignored",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-038",
@@ -512,7 +549,8 @@
    "owner": "server/src/decision/engine.ts",
    "weakness": "Research engine overtrades in uncertain regimes",
    "priority": "P0",
-   "thinkSlice1": "NO_TRADE reason codes on every certificate"
+   "thinkSlice1": "NO_TRADE reason codes on every certificate",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-039",
@@ -525,7 +563,8 @@
    "owner": "server/src/qci/challenge.ts",
    "weakness": "Agent debate runs forever",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-040",
@@ -537,7 +576,8 @@
    "owner": "server/src/decision/scoring.ts",
    "weakness": "Prior decisions bias the next evaluation",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-041",
@@ -550,7 +590,8 @@
    "owner": "server/src/decision/engine.ts",
    "weakness": "Profit shown as certain",
    "priority": "P1",
-   "thinkSlice1": "hypothetical scenario table, labelled"
+   "thinkSlice1": "hypothetical scenario table, labelled",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-042",
@@ -563,7 +604,8 @@
    "owner": "server/src/risk/gate.ts",
    "weakness": "Expected return ignores transaction costs",
    "priority": "P1",
-   "thinkSlice1": "two-sided fees + spread/slippage; gross-win-net-loss test"
+   "thinkSlice1": "two-sided fees + spread/slippage; gross-win-net-loss test",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-043",
@@ -576,7 +618,8 @@
    "owner": "server/src/lab/backtest.ts",
    "weakness": "Hit rate mistaken for edge",
    "priority": "P1",
-   "thinkSlice1": "expectancy with interval; 60%-win negative fixture"
+   "thinkSlice1": "expectancy with interval; 60%-win negative fixture",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-044",
@@ -589,7 +632,8 @@
    "owner": "server/src/lab/exits.ts",
    "weakness": "One profit target fits all market states",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-045",
@@ -603,7 +647,8 @@
    "owner": "server/src/risk/gate.ts",
    "weakness": "Stop assumed guaranteed",
    "priority": "P1",
-   "thinkSlice1": "2x gap and liquidity-pull stress scenarios"
+   "thinkSlice1": "2x gap and liquidity-pull stress scenarios",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-046",
@@ -616,7 +661,8 @@
    "owner": "server/src/ditas/calibration.ts",
    "weakness": "Profit estimate based on future data",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-047",
@@ -630,7 +676,8 @@
    "owner": "server/src/risk/gate.ts",
    "weakness": "Position sizing ignores venue filters",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-048",
@@ -642,7 +689,8 @@
    "owner": "server/src/risk/policy.ts",
    "weakness": "Leverage hides liquidation risk",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-049",
@@ -656,7 +704,8 @@
    "owner": "server/src/market/quality.ts",
    "weakness": "Market impact grows with position size",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-050",
@@ -668,7 +717,8 @@
    "owner": "server/src/decision/engine.ts",
    "weakness": "No uncertainty around estimated edge",
    "priority": "P1",
-   "thinkSlice1": "UNCERTAIN_EDGE when lower bound <= 0"
+   "thinkSlice1": "UNCERTAIN_EDGE when lower bound <= 0",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-051",
@@ -682,7 +732,8 @@
    "owner": "server/src/regime/regime.ts",
    "weakness": "Bull-market strategy runs during crashes",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-052",
@@ -694,7 +745,8 @@
    "owner": "server/src/risk/gate.ts",
    "weakness": "Volatility spike does not change sizing",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-053",
@@ -707,7 +759,8 @@
    "owner": "server/src/risk/gate.ts",
    "weakness": "Positions share hidden factor exposure",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-054",
@@ -721,7 +774,8 @@
    "owner": "server/src/exec/oms.ts",
    "weakness": "Stop monitor depends on inference model uptime",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-055",
@@ -735,7 +789,8 @@
    "owner": "server/src/exec/oms.ts",
    "weakness": "Exit reasoning waits for a new bullish vote",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-056",
@@ -749,7 +804,8 @@
    "owner": "server/src/exec/environment.ts",
    "weakness": "Venue outage is treated as flat position",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-057",
@@ -761,7 +817,8 @@
    "owner": "server/src/safety/safety.ts",
    "weakness": "DEX token may become unsellable",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-058",
@@ -775,7 +832,8 @@
    "owner": "server/src/risk/gate.ts",
    "weakness": "Liquidity illusion hides exit risk",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-059",
@@ -787,7 +845,8 @@
    "owner": "server/src/risk/gate.ts",
    "weakness": "News shocks hit multiple positions",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-060",
@@ -799,7 +858,8 @@
    "owner": "server/src/risk/policy.ts",
    "weakness": "Futures funding bleeds returns",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-061",
@@ -813,7 +873,8 @@
    "owner": "server/src/ditas/memory.ts",
    "weakness": "Memory stores only winning trades",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-062",
@@ -827,7 +888,8 @@
    "owner": "server/src/ditas/memory.ts",
    "weakness": "Incorrect outcomes get overwritten",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-063",
@@ -840,7 +902,8 @@
    "owner": "server/src/knowledge/store.ts",
    "weakness": "Memory facts lack source provenance",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-064",
@@ -853,7 +916,8 @@
    "owner": "server/src/lab/lab.ts",
    "weakness": "Recent profitable trades cause overconfidence",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-065",
@@ -866,7 +930,8 @@
    "owner": "server/src/ditas/passports.ts",
    "weakness": "Model performance deteriorates silently",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-066",
@@ -879,7 +944,8 @@
    "owner": "server/src/exec/oms.ts",
    "weakness": "Strategy updates occur during live orders",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-067",
@@ -894,7 +960,8 @@
    "owner": "server/src/ditas/service.ts",
    "weakness": "Counterfactual trades treated as real",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-068",
@@ -906,7 +973,8 @@
    "owner": "server/src/knowledge/research.ts",
    "weakness": "Repeated optimization mines noise",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-069",
@@ -916,7 +984,8 @@
    "owner": "server/src/lab/backtest.ts",
    "weakness": "Older data dominates changed market conditions",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-070",
@@ -929,7 +998,8 @@
    "owner": "server/src/ditas/passports.ts",
    "weakness": "No champion-challenger framework",
    "priority": "P1",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-071",
@@ -944,7 +1014,8 @@
    "owner": "web/src/status.ts",
    "weakness": "Offline claimed to mean live market access",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-072",
@@ -957,7 +1028,8 @@
    "owner": "server/src/ditas/memory.ts",
    "weakness": "No local data for disconnected research",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-073",
@@ -971,7 +1043,8 @@
    "owner": "server/src/market/quality.ts",
    "weakness": "Online feed loss silently freezes indicators",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-074",
@@ -985,7 +1058,8 @@
    "owner": "server/src/decision/engine.ts",
    "weakness": "Offline model requires cloud",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-075",
@@ -998,7 +1072,8 @@
    "owner": "server/src/ditas/memory.ts",
    "weakness": "Analysis cannot be reproduced without network",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-076",
@@ -1012,7 +1087,8 @@
    "owner": "server/src/market/fabric.ts",
    "weakness": "Disconnect causes duplicate event replay",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-077",
@@ -1026,7 +1102,8 @@
    "owner": "server/src/market/fabric.ts",
    "weakness": "Reconnect blindly trusts latest state",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-078",
@@ -1038,7 +1115,8 @@
    "owner": "server/src/exec/environment.ts",
    "weakness": "Cloud scanner outage disables protective exchange orders",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-079",
@@ -1052,7 +1130,8 @@
    "owner": "server/src/ditas/memory.ts",
    "weakness": "Offline memory grows without limits",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-080",
@@ -1065,7 +1144,8 @@
    "owner": "web/src/status.ts",
    "weakness": "Users cannot tell offline vs active",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-081",
@@ -1077,7 +1157,8 @@
    "owner": "server/src/whales/prints.ts",
    "weakness": "Whale transfer mislabeled buy",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-082",
@@ -1089,7 +1170,8 @@
    "owner": "server/src/news/news.ts",
    "weakness": "X/Telegram call treated as trusted trade signal",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-083",
@@ -1099,7 +1181,8 @@
    "owner": "server/src/news/news.ts",
    "weakness": "Edited/deleted calls erase losing evidence",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-084",
@@ -1112,7 +1195,8 @@
    "owner": "server/src/workers/registry.ts",
    "weakness": "Copy trades chase already-moved prices",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-085",
@@ -1122,7 +1206,8 @@
    "owner": "server/src/news/news.ts",
    "weakness": "Multiple KOL calls are one coordinated pump",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-086",
@@ -1134,7 +1219,8 @@
    "owner": "server/src/safety/safety.ts",
    "weakness": "Deployer wallets dump tokens unnoticed",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-087",
@@ -1147,7 +1233,8 @@
    "owner": "server/src/providers/dexscreener.ts",
    "weakness": "DEX contract spoofing",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-088",
@@ -1157,7 +1244,8 @@
    "owner": "",
    "weakness": "Flash-loan arbitrage margin ignores gas",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-089",
@@ -1170,7 +1258,8 @@
    "owner": "server/src/market/scanner.ts",
    "weakness": "News and filings are forwarded as order instructions",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-090",
@@ -1180,7 +1269,8 @@
    "owner": "",
    "weakness": "Prediction market odds mixed with spot probability",
    "priority": "P2",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-091",
@@ -1194,7 +1284,8 @@
    "owner": "server/test (import boundary)",
    "weakness": "User thinks THINK can authorize funds",
    "priority": "P0",
-   "thinkSlice1": "certificate/profitLab import guard; canAuthorizeTrade:false"
+   "thinkSlice1": "certificate/profitLab import guard; canAuthorizeTrade:false",
+   "thinkSlice2": "mutating functions (orders, mode, policy, wallet) importable only by an explicit allow-list"
   },
   {
    "id": "MIA-THINK-092",
@@ -1208,7 +1299,8 @@
    "owner": "server/src/joe/joe.ts",
    "weakness": "Trader Joe can alter risk via a prompt",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": "Trader Joe may import only pauseNewOrders from OMS (locked by test)"
   },
   {
    "id": "MIA-THINK-093",
@@ -1220,7 +1312,8 @@
    "owner": "scripts/",
    "weakness": "Untrusted code introduces wallet drainers",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-094",
@@ -1234,7 +1327,8 @@
    "owner": "server/src/ditas/service.ts",
    "weakness": "100-worker speed hides bad decisions",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-095",
@@ -1248,7 +1342,8 @@
    "owner": "server/src/core/mode.ts",
    "weakness": "No independent release gates",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-096",
@@ -1262,7 +1357,8 @@
    "owner": "server/src/ops/backup.ts",
    "weakness": "No disaster rollback",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-097",
@@ -1275,7 +1371,8 @@
    "owner": "server/src/portfolio/ledger.ts",
    "weakness": "No account boundary tests",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-098",
@@ -1290,7 +1387,8 @@
    "owner": "server/test/",
    "weakness": "No systematic adversarial testing",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-099",
@@ -1303,7 +1401,8 @@
    "owner": "web/src/",
    "weakness": "Research metrics marketed as guaranteed profit",
    "priority": "P0",
-   "thinkSlice1": "certificate language guard test"
+   "thinkSlice1": "certificate language guard test",
+   "thinkSlice2": ""
   },
   {
    "id": "MIA-THINK-100",
@@ -1317,7 +1416,8 @@
    "owner": ".github/workflows/ci.yml",
    "weakness": "No safe path from proposal to deployment",
    "priority": "P0",
-   "thinkSlice1": ""
+   "thinkSlice1": "",
+   "thinkSlice2": ""
   }
  ],
  "counts": {

@@ -126,6 +126,7 @@ Delivered so far:
 
 - **Reason-to-Trade Certificate** (`server/src/decision/certificate.ts`): `GET /api/decisions/:id/certificate`, plus a Certificate tab on the Decision record page.
 - **Profit Laboratory** (`server/src/decision/profitLab.ts`).
+- **Slice 2, boundaries and fault injection** (tests only): `server/test/import-boundaries.test.ts` locks who may import order, mode, policy and wallet mutators (Trader Joe may only pause), and keeps evidence code away from `exec/`, `wallet/` and `portfolio/`. `server/test/worker-fault-injection.test.ts` proves crashes become ABSTAIN or quarantine, and that a missing mandatory check is NO_QUORUM. Extend the allow-list only through review.
 
 Rules for further THINK work:
 
