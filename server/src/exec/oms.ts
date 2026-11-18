@@ -26,6 +26,7 @@ const feeRate = () => exitPolicy().feeRate;
 
 export class OmsError extends Error {}
 class DuplicatePosition extends Error {}
+class DuplicateOrder extends Error {}
 /**
  * Run journal/autopsy/bus callbacks AFTER a commit. Each is isolated: the fills are already committed, so a failing
  * notification must never be reported as a failed exit or surface as an error to the caller (MA-17).
@@ -147,6 +148,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     assertWriteFence();
     // MA-20: the gate's duplicate-instrument check ran before this transaction. Re-check inside it (BEGIN IMMEDIATE holds
     // the write lock), so a second writer that opened a position in between cannot produce two OPEN positions.
+    // Same decision submitted twice: report it as the duplicate ORDER it is (checked first, under the same lock).
+    const sameOrder = get<{ id: string }>('SELECT id FROM orders WHERE client_order_id=?', coid);
+    if (sameOrder && sameOrder.id !== existing?.id) throw new DuplicateOrder();
     if (get("SELECT 1 FROM positions WHERE account=? AND instrument=? AND status='OPEN' LIMIT 1", PAPER_ACCOUNT, s.instrumentId)) throw new DuplicatePosition();
     const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
     run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);
@@ -164,6 +168,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     return oid;
   }); } catch (e: any) {
     // UNIQUE(client_order_id) is the last line of defence against a concurrent duplicate submission.
+    if (e instanceof DuplicateOrder) return { ok: false, reason: `DUPLICATE: entry ${coid} was already submitted` };
     if (e instanceof DuplicatePosition) return reject('DUPLICATE_INSTRUMENT_POSITION: a position on this instrument opened concurrently');
     if (/UNIQUE|constraint/i.test(String(e?.message))) return { ok: false, reason: `DUPLICATE: entry ${coid} was already submitted` };
     throw e;
