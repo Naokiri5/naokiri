@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Locator } from '@playwright/test';
 
 /**
  * QA-02 Frontend Testing · end-to-end, in order: owner setup → risk policy → funding → PAPER mode →
@@ -12,6 +12,15 @@ const errors: string[] = [];
 function watch(page: Page) {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`${page.url()} :: ${m.text()}`); });
   page.on('pageerror', (e) => errors.push(`${page.url()} :: ${e.message}`));
+}
+async function refuseStepUp(button: Locator, passphrase: Locator, path: string) {
+  const before = errors.length;
+  await passphrase.fill('incorrect e2e passphrase');
+  const [response] = await Promise.all([page.waitForResponse((r) => r.url().endsWith(path) && r.request().method() === 'POST'), button.click()]);
+  expect(response.status()).toBe(403);
+  await expect(page.locator('.err').filter({ hasText: /step-up authentication failed/ })).toBeVisible();
+  await expect(passphrase).toHaveValue('');
+  const expectedErrors = errors.splice(before); expect(expectedErrors.every((e) => /status of 403/.test(e)), expectedErrors.join('\n')).toBe(true);
 }
 test.describe.configure({ mode: 'serial' });
 let page: Page;
@@ -100,6 +109,59 @@ test('command palette navigates and runs a risk-reducing action', async () => {
   await expect(page.locator('.mode')).toHaveText('PAUSED · PAPER');
 });
 
+test('Bot resume and strategy re-enable refuse a wrong passphrase, then succeed', async () => {
+  await page.goto('/bot'); const passphrase = page.getByPlaceholder('Owner passphrase (step-up)');
+  await expect(page.locator('.mode')).toHaveText('PAUSED · PAPER');
+  const resume = page.getByRole('button', { name: 'Resume', exact: true });
+  await refuseStepUp(resume, passphrase, '/api/control');
+  await expect(page.locator('.mode')).toHaveText('PAUSED · PAPER');
+  expect((await (await page.request.get('/api/shell')).json()).control.pausedNewOrders).toBe(true);
+  await passphrase.fill(PW); await resume.click();
+  await expect(page.locator('.mode')).toHaveText('PAPER'); await expect(passphrase).toHaveValue('');
+
+  const strategy = page.getByRole('row').filter({ hasText: 'Trend Pullback' });
+  await strategy.getByRole('button', { name: 'Revoke', exact: true }).click();
+  const reenable = strategy.getByRole('button', { name: 'Re-enable', exact: true }); await expect(reenable).toBeVisible();
+  await refuseStepUp(reenable, passphrase, '/api/control');
+  expect((await (await page.request.get('/api/shell')).json()).control.disabledStrategies).toContain('trend_pullback');
+  await passphrase.fill(PW); await reenable.click();
+  await expect(strategy.getByRole('button', { name: 'Revoke', exact: true })).toBeVisible(); await expect(passphrase).toHaveValue('');
+  expect((await (await page.request.get('/api/shell')).json()).control.disabledStrategies).not.toContain('trend_pullback');
+});
+
+test('Risk resume refuses a wrong passphrase, then succeeds', async () => {
+  await page.goto('/risk');
+  await page.getByRole('button', { name: 'Pause new orders', exact: true }).click(); await expect(page.locator('.mode')).toHaveText('PAUSED · PAPER');
+  const passphrase = page.getByPlaceholder('Owner passphrase (step-up)').first(); const resume = page.getByRole('button', { name: 'Resume new orders (step-up)', exact: true });
+  await refuseStepUp(resume, passphrase, '/api/control');
+  await expect(page.locator('.mode')).toHaveText('PAUSED · PAPER');
+  await passphrase.fill(PW); await resume.click(); await expect(page.locator('.mode')).toHaveText('PAPER'); await expect(passphrase).toHaveValue('');
+});
+
+test('Lab promotion refuses a wrong passphrase, then succeeds; suspension needs only a session', async () => {
+  await page.goto('/lab');
+  const strategy = page.getByRole('row').filter({ hasText: 'Trend Pullback' }); const passphrase = page.getByPlaceholder('Owner passphrase (step-up)');
+  await expect(strategy.getByText('RESEARCH', { exact: true })).toBeVisible();
+  const promote = strategy.getByRole('button', { name: 'Promote to paper', exact: true });
+  await refuseStepUp(promote, passphrase, '/api/lab/strategy/trend_pullback/status');
+  await expect(strategy.getByText('RESEARCH', { exact: true })).toBeVisible();
+  expect((await (await page.request.get('/api/lab')).json()).strategies.find((s: { id: string }) => s.id === 'trend_pullback').status).toBe('RESEARCH');
+  await passphrase.fill(PW); await promote.click(); await expect(strategy.getByText('PAPER', { exact: true })).toBeVisible(); await expect(passphrase).toHaveValue('');
+  await strategy.getByRole('button', { name: 'Suspend', exact: true }).click(); await expect(strategy.getByText('SUSPENDED', { exact: true })).toBeVisible();
+});
+
+test('Intelligence quarantine release refuses a wrong passphrase, then succeeds', async () => {
+  await page.goto('/intelligence');
+  const worker = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Release', exact: true }) }).first();
+  await expect(worker.getByText('QUARANTINED', { exact: true })).toBeVisible(); const id = await worker.getByRole('cell').first().innerText();
+  const passphrase = page.getByPlaceholder('Owner passphrase (step-up)'); const release = worker.getByRole('button', { name: 'Release', exact: true });
+  await refuseStepUp(release, passphrase, `/api/workers/${id}/release`);
+  expect((await (await page.request.get('/api/intelligence')).json()).workers.find((w: { id: string }) => w.id === id).quarantined).toBe(true);
+  await passphrase.fill(PW); await release.click(); await expect(page.getByRole('button', { name: 'Release', exact: true })).toHaveCount(0);
+  expect((await (await page.request.get('/api/intelligence')).json()).workers.find((w: { id: string }) => w.id === id).quarantined).toBe(false);
+  await expect(passphrase).toHaveCount(0);
+});
+
 test('trading history CSV export downloads', async () => {
   await page.goto('/history');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export orders CSV' }).click()]);
@@ -158,7 +220,7 @@ test('no console errors anywhere', async () => { expect(errors, errors.join('\n'
 test('mobile layout has no horizontal overflow', async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
   const m = await ctx.newPage();
-  for (const r of ['/', '/scanner', '/risk', '/qhef', '/history', '/academy']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
+  for (const r of ['/', '/scanner', '/bot', '/risk', '/lab', '/intelligence', '/qhef', '/history', '/academy']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
   await expect(m.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=live]')).toBeInViewport();
   await ctx.close();
 });

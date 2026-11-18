@@ -15,7 +15,7 @@ import { config } from '../config.js';
  */
 export type CheckStatus = 'pass' | 'fail' | 'skip' | 'info';
 export interface Check { name: string; status: CheckStatus; detail: string }
-export interface EngineView { running: boolean; role: 'STOPPED' | 'LEADER' | 'STANDBY'; startedAt: number; lastTickerAt: number; lastScanAt: number }
+export interface EngineView { running: boolean; role: 'STOPPED' | 'LEADER' | 'STANDBY'; startedAt: number; lastTickerAt: number; lastScanAt: number; lastMonitorAt: number; monitorFailing: boolean }
 
 /** A lane is stale after three of its intervals; a freshly started engine gets that much grace before its first run. */
 export const staleAfter = () => ({ tickerMs: config.tickerIntervalMs * 3, scanMs: config.scanIntervalMs * 3 });
@@ -47,6 +47,8 @@ export function readiness(e: EngineView, nowTs = Date.now()) {
   } else {
     checks.push({ name: 'engine', status: 'pass', detail: e.role === 'LEADER' ? 'leader' : 'starting' });
     checks.push(laneCheck('tickers', e.lastTickerAt, lim.tickerMs, e, nowTs));
+    // Position monitoring: fails while the latest monitorPositions() pass threw, or when none completed within the ticker window.
+    checks.push(e.monitorFailing ? { name: 'monitor', status: 'fail', detail: 'last position-monitor pass failed' } : laneCheck('monitor', e.lastMonitorAt, lim.tickerMs, e, nowTs));
     checks.push(laneCheck('scanner', e.lastScanAt, lim.scanMs, e, nowTs));
   }
   const ps = providers().filter((p) => p.status !== 'DISABLED');

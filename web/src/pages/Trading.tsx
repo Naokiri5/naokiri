@@ -28,11 +28,11 @@ export function Bot() {
     <div className="grid g2">
       <Card title="Automation mode (Part 26.2)"><div className="col">
         {MODES.map(([m, l, d]) => <label key={m} className="row" style={{ alignItems: 'flex-start', opacity: m === 'BOUNDED_LIVE' ? 0.6 : 1 }}><input type="radio" name="mode" checked={s?.mode === m} readOnly style={{ marginTop: 3 }} /><div style={{ flex: 1 }}><b>{l}</b> <span className="muted">— {d}</span></div>
-          {s?.mode !== m && <Action className="sm" label="Switch" run={async () => { await api('/api/control', { body: { mode: m, password: pw } }); reload(); }} />}</label>)}
+          {s?.mode !== m && <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}</label>)}
         <StepUp value={pw} onChange={setPw} />
         {!s?.policyAccepted && <div className="hint warn">Accept a risk policy in the <Link to="/risk">Risk Center</Link> before paper execution.</div>}
         <div className="row"><Action className="danger" label="Pause new orders" run={async () => { await api('/api/emergency/pause', { body: {} }); reload(); }} />
-          {s?.paused && !s?.emergency && <Action label="Resume" run={async () => { await api('/api/control', { body: { pausedNewOrders: false, password: pw } }); reload(); }} />}</div>
+          {s?.paused && !s?.emergency && <Action label="Resume" run={async () => { try { await api('/api/control', { body: { pausedNewOrders: false, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}</div>
         {s?.paused && !s?.emergency && <div className="hint">Resuming needs the owner passphrase above (step-up).</div>}
       </div></Card>
       <Card title="Paper allocation"><div className="col">
@@ -49,13 +49,13 @@ export function Bot() {
     <PositionsTable rows={data?.positions ?? []} onChange={reload} />
     <div style={{ height: 14 }} />
     <Card title="Strategies" right={<Link to="/lab">Strategy Lab →</Link>} flush><table><thead><tr><th>Strategy</th><th>Status</th><th className="num">OOS trades</th><th className="num">OOS expectancy</th><th className="num">Paper trades</th><th className="num">Paper expectancy</th><th>Bot permission</th></tr></thead>
-      <tbody>{(data?.strategies ?? []).map((st: any) => { const disabled = data?.status && (data as any).status && false; void disabled; return <tr key={st.id}><td><b>{st.name}</b> <span className="faint">v{st.version}</span></td><td><Badge v={st.status} /></td><td className="num">{st.stats?.trades ?? '—'}</td><td className="num">{st.stats ? `${st.stats.expectancyR.toFixed(3)}R` : '—'}</td><td className="num">{st.live?.trades ?? 0}</td><td className="num">{st.live ? `${st.live.expectancyR.toFixed(2)}R` : '—'}</td><td><StrategyToggle id={st.id} pw={pw} onChange={reload} /></td></tr>; })}</tbody></table></Card>
+      <tbody>{(data?.strategies ?? []).map((st: any) => { const disabled = data?.status && (data as any).status && false; void disabled; return <tr key={st.id}><td><b>{st.name}</b> <span className="faint">v{st.version}</span></td><td><Badge v={st.status} /></td><td className="num">{st.stats?.trades ?? '—'}</td><td className="num">{st.stats ? `${st.stats.expectancyR.toFixed(3)}R` : '—'}</td><td className="num">{st.live?.trades ?? 0}</td><td className="num">{st.live ? `${st.live.expectancyR.toFixed(2)}R` : '—'}</td><td><StrategyToggle id={st.id} pw={pw} clearPassphrase={() => setPw('')} onChange={reload} /></td></tr>; })}</tbody></table></Card>
   </Page>;
 }
 /** Revoking reduces risk and needs no passphrase; re-enabling increases it and uses the step-up passphrase entered above. */
-function StrategyToggle({ id, pw, onChange }: { id: string; pw: string; onChange: () => void }) {
+function StrategyToggle({ id, pw, clearPassphrase, onChange }: { id: string; pw: string; clearPassphrase: () => void; onChange: () => void }) {
   const shell = useApi('/api/shell'); const dis: string[] = shell.data?.control.disabledStrategies ?? []; const off = dis.includes(id);
-  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { await api('/api/control', { body: off ? { disabledStrategies: dis.filter((x) => x !== id), password: pw } : { disabledStrategies: [...dis, id] } }); shell.reload(); onChange(); }} />;
+  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { try { await api('/api/control', { body: off ? { disabledStrategies: dis.filter((x) => x !== id), password: pw || undefined } : { disabledStrategies: [...dis, id] } }); shell.reload(); onChange(); } finally { if (off) clearPassphrase(); } }} />;
 }
 export function PositionsTable({ rows, onChange }: { rows: any[]; onChange: () => void }) {
   return <Card title={`Open positions (${rows.length})`} flush>{rows.length ? <div className="tablewrap"><table><thead><tr><th>Instrument</th><th>Strategy</th><th className="num">Qty</th><th className="num">Entry</th><th className="num">Mark</th><th className="num">Stop</th><th>Targets</th><th className="num">Unrealized</th><th>Opened</th><th /></tr></thead>
@@ -106,8 +106,9 @@ export function Risk() {
           <Action label="Cancel pending entry orders" run={async () => { setResult(await api('/api/emergency/cancel-pending', { body: {} })); reload(); }} />
           <Action label="Verify / protect existing positions" run={async () => { setResult(await api('/api/emergency/protect', { body: {} })); reload(); }} />
           <Action className="danger" label="EMERGENCY STOP" confirm="Engage emergency stop? New orders are blocked and pending entries cancelled. Positions are not closed." run={async () => { setResult(await api('/api/emergency/stop', { body: {} })); reload(); }} />
-          {data?.control.emergency && <Action label="Clear emergency (step-up)" run={async () => { await api('/api/control', { body: { emergency: false, pausedNewOrders: false, password: pw } }); reload(); }} />}
-          <div className="row"><input placeholder='Type "CLOSE ALL"' value={confirm} onChange={(e) => setConfirm(e.target.value)} style={{ width: 150 }} /><Action className="danger" label="Close all positions" run={async () => { setResult(await api('/api/emergency/close-all', { body: { confirm, password: pw } })); reload(); }} /></div>
+          {data?.control.pausedNewOrders && !data?.control.emergency && <Action label="Resume new orders (step-up)" run={async () => { try { await api('/api/control', { body: { pausedNewOrders: false, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}
+          {data?.control.emergency && <Action label="Clear emergency (step-up)" run={async () => { try { await api('/api/control', { body: { emergency: false, pausedNewOrders: false, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}
+          <div className="row"><input placeholder='Type "CLOSE ALL"' value={confirm} onChange={(e) => setConfirm(e.target.value)} style={{ width: 150 }} /><Action className="danger" label="Close all positions" run={async () => { try { setResult(await api('/api/emergency/close-all', { body: { confirm, password: pw || undefined } })); reload(); } finally { setPw(''); } }} /></div>
           <StepUp value={pw} onChange={setPw} />
           {result && <div className="card"><div className="bd"><div className="row">Result: <Badge v={result.state ?? 'CONFIRMED'} /></div><pre className="hint">{JSON.stringify(result, null, 1).slice(0, 1200)}</pre></div></div>}
         </div></Card>
@@ -119,7 +120,7 @@ export function Risk() {
           {draft && <div className="col">
             <div className="grid g3" style={{ gap: 10 }}>{POLICY_FIELDS.map(([k, l, r]) => <label key={k} className="col" style={{ gap: 3 }}><span className="hint">{l} <span className="faint">[{r}]</span></span><input type="number" step="any" value={draft[k]} onChange={(e) => setDraft({ ...draft, [k]: e.target.value === '' ? '' : Number(e.target.value) })} /></label>)}</div>
             <div className="hint">Illustrative paper defaults from the spec — not financial advice. Hard bounds are enforced server-side; leverage is fixed at 1×. Limits are never raised automatically after profits.</div>
-            <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="primary" label={data?.policy ? 'Save new version' : 'Accept policy'} run={async () => { await api('/api/risk/policy', { body: { policy: draft, password: pw } }); reload(); }} /><button onClick={() => setDraft({ ...data.defaults })}>Reset to defaults</button></div>
+            <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="primary" label={data?.policy ? 'Save new version' : 'Accept policy'} run={async () => { try { await api('/api/risk/policy', { body: { policy: draft, password: pw || undefined } }); reload(); } finally { setPw(''); } }} /><button onClick={() => setDraft({ ...data.defaults })}>Reset to defaults</button></div>
           </div>}
         </Card>
         <Card title="Correlation of open positions (1h returns)" flush>{data?.correlation.instruments.length ? <table><thead><tr><th />{data.correlation.instruments.map((i: string) => <th key={i}>{i.split(':')[2].replace('USDT', '')}</th>)}</tr></thead><tbody>{data.correlation.matrix.map((row: any[], i: number) => <tr key={i}><td>{data.correlation.instruments[i].split(':')[2].replace('USDT', '')}</td>{row.map((c, j) => <td key={j} className="num" style={{ background: c == null ? undefined : `rgba(240,80,90,${Math.max(0, c) * 0.35})` }}>{c == null ? '?' : c.toFixed(2)}</td>)}</tr>)}</tbody></table> : <Empty>No open positions.</Empty>}</Card>
@@ -185,7 +186,7 @@ export function Calendar() {
 
 export function Lab() {
   const { data, error, reload } = useApi('/api/lab'); const [strat, setStrat] = useState('trend_pullback'); const [sym, setSym] = useState('BTCUSDT'); const [bars, setBars] = useState(3000);
-  const [res, setRes] = useState<any>(null);
+  const [res, setRes] = useState<any>(null); const [pw, setPw] = useState('');
   const S = (x: any) => x ? `${x.trades} trades · win ${(x.winRate * 100).toFixed(0)}% · E ${x.expectancyR.toFixed(3)}R · PF ${Number.isFinite(x.profitFactor) ? x.profitFactor.toFixed(2) : '∞'} · maxDD ${x.maxDrawdownR.toFixed(1)}R` : '—';
   return <Page title="Strategy Lab" sub="Point-in-time backtests on real Binance history with fees, spread, slippage, next-bar entries, conservative intrabar ordering and a chronological in-sample / out-of-sample split. Only OUT-OF-SAMPLE results feed live scoring.">
     <ErrorLine e={error} />
@@ -197,11 +198,11 @@ export function Lab() {
       <Action label="Run on whole deep tier" run={async () => { for (const s of (data?.universe ?? []).slice(0, 12)) { try { await api('/api/lab/backtest', { body: { strategyId: strat, symbol: s, bars } }); } catch { /* continue */ } } reload(); }} />
     </div>{res && <div className="col" style={{ marginTop: 12 }}><div className="kv"><span>In-sample</span><span className="mono">{S(res.inSample)}</span><span>Out-of-sample</span><span className="mono">{S(res.outOfSample)}</span><span>Period</span><span>{fmt.time(res.from)} → {fmt.time(res.to)} ({res.bars} bars)</span></div><Sparkline values={[0, ...res.equityR]} height={90} /><ul className="hint" style={{ margin: 0 }}>{res.warnings.map((w: string) => <li key={w}>{w}</li>)}</ul></div>}</Card>
     <div style={{ height: 14 }} />
-    <Card title="Strategy lifecycle (Part 18)" flush><table><thead><tr><th>Strategy</th><th>Status</th><th>OOS aggregate</th><th>Monte Carlo (100 trades @0.5%)</th><th>Paper</th><th>Actions</th></tr></thead>
+    <Card title="Strategy lifecycle (Part 18)" right={<StepUp value={pw} onChange={setPw} />} flush><table><thead><tr><th>Strategy</th><th>Status</th><th>OOS aggregate</th><th>Monte Carlo (100 trades @0.5%)</th><th>Paper</th><th>Actions</th></tr></thead>
       <tbody>{(data?.strategies ?? []).map((s: any) => <tr key={s.id}><td><b>{s.name}</b><div className="hint">{s.note}</div></td><td><Badge v={s.status} /></td><td className="mono" style={{ fontSize: 12 }}>{s.stats ? `${S(s.stats)} · ${s.stats.instruments} instr.` : '—'}</td>
         <td className="mono" style={{ fontSize: 12 }}>{s.stats?.monteCarlo ? `P5 ${fmt.pct(s.stats.monteCarlo.returnP5 * 100, 1)} · P50 ${fmt.pct(s.stats.monteCarlo.returnP50 * 100, 1)} · DD95 ${(s.stats.monteCarlo.maxDdP95 * 100).toFixed(1)}%` : '—'}</td>
         <td className="mono">{s.live ? `${s.live.trades} · ${s.live.expectancyR.toFixed(2)}R` : '—'}</td>
-        <td className="row">{s.status !== 'PAPER' && <Action className="sm" label="Promote to paper" run={async () => { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'PAPER' } }); reload(); }} />}{s.status !== 'SUSPENDED' && <Action className="sm" label="Suspend" run={async () => { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'SUSPENDED' } }); reload(); }} />}<Action className="sm" label="Live candidate" title="Blocked until release gates pass" run={async () => { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'LIVE_CANDIDATE' } }); }} /></td></tr>)}</tbody></table></Card>
+        <td className="row">{s.status !== 'PAPER' && <Action className="sm" label="Promote to paper" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'PAPER', password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}{s.status !== 'SUSPENDED' && <Action className="sm" label="Suspend" run={async () => { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'SUSPENDED' } }); reload(); }} />}<Action className="sm" label="Live candidate" title="Blocked until release gates pass" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'LIVE_CANDIDATE', password: pw || undefined } }); } finally { setPw(''); } }} /></td></tr>)}</tbody></table></Card>
     <div style={{ height: 14 }} />
     <Card title="Backtest history" flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Strategy</th><th>Instrument</th><th>Out-of-sample</th></tr></thead><tbody>{(data?.backtests ?? []).map((b: any) => <tr key={b.id} className="click" onClick={() => setRes(b)}><td className="faint">{fmt.ago(b.created_at)}</td><td>{b.strategyId}</td><td>{b.instrument.split(':')[2]}</td><td className="mono" style={{ fontSize: 12 }}>{S(b.outOfSample)} <Chg v={null} /></td></tr>)}</tbody></table>{!data?.backtests.length && <Empty>No backtests yet.</Empty>}</div></Card>
   </Page>;

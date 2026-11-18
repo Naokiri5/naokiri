@@ -163,11 +163,12 @@ export function backupVerificationStatus(nowTs = Date.now()): { lastVerify: Reco
 }
 
 /** Scheduled run (engine leader only): back up when the newest backup is older than the interval, then prune. */
-export function maybeScheduledBackup(nowTs = Date.now()): (BackupManifest & { verification: VerifyResult }) | null {
+export function maybeScheduledBackup(nowTs = Date.now()): (BackupManifest & { verification: VerifyResult; retentionWarning?: string }) | null {
   const every = backupIntervalMs(); if (every <= 0) return null;
   const last = listBackups()[0];
   if (last && nowTs - last.createdAt < every) return null;
   const m = createBackup({ nowTs }); const verification = verifyAndRecordBackup(join(backupDir(), m.file), undefined, nowTs);
-  pruneBackups();
+  try { pruneBackups(); }
+  catch { return { ...m, verification, retentionWarning: 'The new backup is stored, but older backups could not be pruned.' }; }
   return { ...m, verification };
 }

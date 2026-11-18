@@ -109,6 +109,15 @@ describe('status ribbon model', () => {
     expect(seg(deriveStatus({ ...base, shell: shell({ dataHealth: { stale: true, tickersAt: 0, scanAt: 0, live: 0, degraded: 0 } }) }).segments, 'data')).toMatchObject({ value: 'NO DATA', tone: 'unknown' });
   });
 
+  it('engine: the monitor is judged by lastMonitorAt and monitorFailing when the server sends them', () => {
+    const b = shell().bot;
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, monitorFailing: true, lastMonitorAt: NOW - 1_000 } }) }).segments, 'engine')).toMatchObject({ value: 'MONITOR FAILING', tone: 'bad' });
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastTickerAt: NOW - 1_000, lastMonitorAt: NOW - 181_000, monitorFailing: false } }) }).segments, 'engine')).toMatchObject({ value: 'MONITOR STALLED · 3m', tone: 'bad' });
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastMonitorAt: 0, monitorFailing: false } }) }).segments, 'engine')).toMatchObject({ value: 'STARTING', tone: 'unknown' });
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, lastMonitorAt: NOW - 1_000, monitorFailing: false } }) }).segments, 'engine').tone).toBe('ok');
+    expect(seg(deriveStatus({ ...base, shell: { ...shell(), bot: { ...b, monitorFailing: 'no' } } }).segments, 'engine').value).toBe('UNKNOWN');
+  });
+
   it('engine: stopped is bad, no scan yet is unknown, three missed scans is STALLED', () => {
     const b = shell().bot;
     expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...b, running: false } }) }).segments, 'engine')).toMatchObject({ value: 'STOPPED', tone: 'bad' });

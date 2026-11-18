@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Chg, Empty, ErrorLine, Page, Tabs, useSort, Action, Freshness, Modal } from '../ui';
+import { StepUp } from './Trading';
 
 export function Scanner() {
   const { data, error } = useApi('/api/scanner', { topics: ['scan', 'decision'], every: 30_000 });
@@ -94,7 +95,7 @@ export function ConsensusView({ c }: { c: any }) {
 
 export function Intelligence() {
   const { data, error, reload } = useApi('/api/intelligence', { topics: ['scan'], every: 60_000 });
-  const [tab, setTab] = useState('Market workers'); const [dom, setDom] = useState('all'); const [sel, setSel] = useState<any>(null);
+  const [tab, setTab] = useState('Market workers'); const [dom, setDom] = useState('all'); const [sel, setSel] = useState<any>(null); const [pw, setPw] = useState('');
   const workers = (data?.workers ?? []).filter((w: any) => dom === 'all' || w.domain === dom);
   return <Page title="AI Intelligence" sub={data?.note}><ErrorLine e={error} />
     <div className="grid g4" style={{ marginBottom: 14 }}>
@@ -104,11 +105,12 @@ export function Intelligence() {
       <div className="card stat"><div className="bd"><div className="k">Quorum policy</div><div className="v" style={{ fontSize: 15 }}>≥{data?.policy.supportThreshold} / ≤{data?.policy.maxOpposition}</div><div className="s">min response {((data?.policy.minResponseRatio ?? 0) * 100).toFixed(0)}% · valid {((data?.policy.validityMs ?? 0) / 60000).toFixed(0)} min · NOT_CALIBRATED</div></div></div>
     </div>
     <Tabs tabs={['Market workers', 'Indicator specialists', 'Consensus records', 'Domains']} value={tab} onChange={setTab} />
+    {tab === 'Market workers' && data?.workers.some((w: { quarantined: boolean }) => w.quarantined) && <div className="row" style={{ marginBottom: 14 }}><span className="hint">Releasing quarantine requires the owner passphrase.</span><StepUp value={pw} onChange={setPw} /></div>}
     {tab === 'Market workers' && <Card flush right={<select value={dom} onChange={(e) => setDom(e.target.value)}><option value="all">All domains</option>{data?.domains.map((d: any) => <option key={d.domain} value={d.domain}>{d.domain} ({d.workers})</option>)}</select>} title={`${workers.length} workers`}>
       <div className="tablewrap"><table><thead><tr><th>ID</th><th>Role</th><th>Domain</th><th>Dependency group</th><th>Flags</th><th className="num">↑</th><th className="num">↓</th><th className="num">○</th><th className="num">Fail</th><th>Health</th></tr></thead>
         <tbody>{workers.map((w: any) => <tr key={w.id}><td className="mono faint">{w.id}</td><td>{w.name}</td><td>{w.domain}</td><td className="faint mono">{w.dependencyGroup}</td><td>{w.mandatory && <Badge v="MANDATORY" tone="b-info" />} {w.canVeto && <Badge v="VETO" tone="b-bad" />}</td>
           <td className="num up">{w.stats?.support ?? 0}</td><td className="num down">{w.stats?.oppose ?? 0}</td><td className="num faint">{w.stats?.abstain ?? 0}</td><td className="num">{w.stats?.failed ?? 0}</td>
-          <td>{w.quarantined ? <span className="row"><Badge v="QUARANTINED" tone="b-bad" /><Action className="sm" label="Release" run={async () => { await api(`/api/workers/${w.id}/release`, { body: {} }); reload(); }} /></span> : w.pending ? <Badge v="PROVIDER PENDING" tone="b-neutral" /> : w.capability === 'CONSTANT_RULE' ? <Badge v="CONSTANT RULE" tone="b-warn" title="Fixed verdict by construction; adds no market information" /> : <Badge v="HEALTHY" tone="b-good" />}</td></tr>)}</tbody></table></div></Card>}
+          <td>{w.quarantined ? <span className="row"><Badge v="QUARANTINED" tone="b-bad" /><Action className="sm" label="Release" run={async () => { try { await api(`/api/workers/${w.id}/release`, { body: { password: pw || undefined } }); reload(); } finally { setPw(''); } }} /></span> : w.pending ? <Badge v="PROVIDER PENDING" tone="b-neutral" /> : w.capability === 'CONSTANT_RULE' ? <Badge v="CONSTANT RULE" tone="b-warn" title="Fixed verdict by construction; adds no market information" /> : <Badge v="HEALTHY" tone="b-good" />}</td></tr>)}</tbody></table></div></Card>}
     {tab === 'Indicator specialists' && <Card flush><div className="tablewrap"><table><thead><tr><th>ID</th><th>Indicator</th><th>Timeframe</th></tr></thead><tbody>{data?.indicatorSpecialists.map((x: any) => <tr key={x.id}><td className="mono faint">{x.id}</td><td>{x.name}</td><td>{x.interval}</td></tr>)}</tbody></table></div></Card>}
     {tab === 'Consensus records' && <Card flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Instrument</th><th>Strategy</th><th>State</th><th className="num">Support</th><th className="num">Opp.</th><th className="num">Resp.</th><th className="num">ms</th></tr></thead>
       <tbody>{data?.consensus.map((c: any) => <tr key={c.consensus_id} className="click" onClick={() => api(`/api/consensus/${c.consensus_id}`).then(setSel)}><td className="faint">{fmt.ago(c.created_at)}</td><td>{c.instrument_id.split(':')[2]}</td><td>{c.strategy_id}</td><td><Badge v={c.state} /></td><td className="num">{c.weighted_support}</td><td className="num">{c.weighted_opposition}</td><td className="num">{c.workers.responding}/{c.workers.eligible}</td><td className="num">{c.analysis_ms}</td></tr>)}</tbody></table>

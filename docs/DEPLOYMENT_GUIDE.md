@@ -36,6 +36,8 @@
 | Signal | Meaning | Response |
 |---|---|---|
 | Red "stale data" banner | ticker feed > 60 s old | New entries auto-blocked by the data-quality gate. Check Connections Hub. |
+| CRITICAL "Engine stopped: integrity check failed" | a takeover found a failed check (quick_check, schema, audit or decision-memory chain, ledger reconcile, protective stops); the engine released its lease and stopped, `/api/ready` stays 503 | Read the failed checks in the journal entry and `lastError` on the Autopilot page. Preserve the database and investigate before restarting; restarting alone re-runs the same checks and alerts again. |
+| `/api/ready` check `monitor` failing | the leader's last position-monitor pass threw, or none completed within three ticker intervals | Open positions are not being evaluated. Check `lastError`, then Risk Center → Verify/protect. |
 | CRITICAL "Protection unverified" | an open position has no fresh price | Risk Center → Verify/protect. Consider Close if the venue is unreliable. |
 | Daily/weekly/drawdown breaker | loss limit reached | Entries blocked until the next boundary or review. Do not raise limits to bypass. |
 | Strategy auto-suspended | paper expectancy decayed | Review in Strategy Lab; re-promote only after revalidation. |

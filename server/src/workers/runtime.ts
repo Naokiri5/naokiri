@@ -75,4 +75,7 @@ export function flushWorkerStats() {
     pendingStats.clear();
   } catch { /* best-effort stats */ }
 }
-export function releaseQuarantine(id: string) { quarantined.delete(id); failures.set(id, 0); }
+export function releaseQuarantine(actor: string, id: string) {
+  if (actor !== 'owner') throw new Error('only the owner may release a quarantined worker');
+  quarantined.delete(id); failures.set(id, 0);
+}

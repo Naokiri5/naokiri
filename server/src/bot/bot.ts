@@ -14,6 +14,7 @@ import { config } from '../config.js';
 import type { DecisionReport } from '../decision/engine.js';
 import { tryAcquireLease, releaseLease } from '../ops/lease.js';
 import { checkScanStall } from '../ops/readiness.js';
+import { takeoverIntegrity } from '../ops/integrity.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -22,16 +23,20 @@ import { randomUUID } from 'node:crypto';
 export const botStatus = {
   startedAt: 0, running: false, cycles: 0, lastTickerAt: 0, lastScanAt: 0, lastNewsAt: 0, lastPrintsAt: 0,
   lastError: null as string | null, entriesToday: 0, decisionsTotal: 0,
+  /** Last position-monitor pass that completed without an error; monitorFailing is true while the latest pass threw. */
+  lastMonitorAt: 0, monitorFailing: false,
   /** Single-runner lock: only the LEADER (holder of the 'engine' lease) runs the lanes; a STANDBY copy keeps retrying. */
   role: 'STOPPED' as 'STOPPED' | 'LEADER' | 'STANDBY', instanceId: `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`,
 };
 export const ENGINE_LEASE = 'engine';
 /** Lease lifetime: three ticker intervals (minimum 45 s), so one slow tick never hands the engine to another copy. */
-export const engineLeaseTtlMs = () => Math.max(45_000, config.tickerIntervalMs * 3);
+export const engineLeaseTtlMs = () => (config.offline && config.engineLeaseTtlMs) || Math.max(45_000, config.tickerIntervalMs * 3);
 /** Acquire or renew the engine lease before any lane runs; a lane that does not hold it does nothing (fail closed). */
 function holdEngine(): boolean {
+  if (takeoverRefused) return false; // integrity checks failed: no lease until the owner restarts the engine
   let ok = false;
   try { ok = tryAcquireLease(ENGINE_LEASE, botStatus.instanceId, engineLeaseTtlMs()); } catch (e: any) { botStatus.lastError = `lease: ${e.message}`; }
+  if (ok && botStatus.running && botStatus.role !== 'LEADER' && !takeoverAllowed()) return false;
   const role = ok ? 'LEADER' : 'STANDBY';
   if (botStatus.running && role !== botStatus.role) {
     journal('SYSTEM', role === 'LEADER' ? `Engine lease acquired by ${botStatus.instanceId}` : `Engine lease held by another instance; ${botStatus.instanceId} is on standby`);
@@ -40,9 +45,32 @@ function holdEngine(): boolean {
   if (botStatus.running) botStatus.role = role;
   return ok;
 }
+let takeoverRefused = false;
+/**
+ * Integrity gate on every takeover (STOPPED or STANDBY → LEADER): a corrupt or inconsistent database never gets a
+ * scheduler. On failure the lease is released, the engine stops and the reason is recorded; nothing is repaired.
+ */
+function takeoverAllowed(): boolean {
+  const r = takeoverIntegrity(); if (r.ok) return true;
+  takeoverRefused = true;
+  const failed = r.checks.filter((c) => !c.ok);
+  try { releaseLease(ENGINE_LEASE, botStatus.instanceId); } catch { /* lease simply expires */ }
+  stopBot(); botStatus.lastError = `integrity: ${failed.map((c) => `${c.name}: ${c.detail}`).join('; ')}`;
+  try {
+    journal('SYSTEM', `Engine refused takeover: integrity checks failed (${failed.map((c) => c.name).join(', ')})`, undefined, { checks: r.checks });
+    notify('CRITICAL', 'Engine stopped: integrity check failed', `${failed.map((c) => c.name).join(', ')} failed before ${botStatus.instanceId} could take over the engine. Nothing was repaired; open paper positions are not monitored until the owner investigates and restarts.`, 'engine-lease');
+  } catch { /* database unusable: lastError still records why */ }
+  return false;
+}
+/** Synchronous lease re-check right before a write that follows awaited network calls. A DB error counts as lost (fail closed). */
+function stillLeader(): boolean {
+  try { return holdEngine(); } catch (e: any) { botStatus.lastError = `lease: ${e.message}`; return false; }
+}
 let timers: NodeJS.Timeout[] = []; let scanning = false; let ticking = false; let backgrounding = false;
 
 function onDecision(r: DecisionReport) {
+  // scanOnce awaits consensus before every decision: re-check the lease synchronously right before any OMS write.
+  if (!stillLeader()) return;
   botStatus.decisionsTotal++;
   const ctl = getControl();
   if (r.decision === 'PAPER_TRADE' && ctl.mode === 'PAPER') { const res = submitEntry(r, 'bot'); if (res.ok) botStatus.entriesToday++; }
@@ -59,7 +87,11 @@ async function hotLane() {
     try { await refreshTickers(); botStatus.lastTickerAt = Date.now(); } catch (e: any) { botStatus.lastError = `ticker: ${e.message}`; }
     // Exits are priced against the book: keep the books of open positions as fresh as the tickers that trigger them.
     try { await refreshBooks(openPositions().map((p) => p.instrument)); } catch (e: any) { botStatus.lastError = `books: ${e.message}`; }
-    try { monitorPositions(); expireApprovals(); } catch (e: any) { botStatus.lastError = `monitor: ${e.message}`; }
+    // The awaits above can outlast the lease: re-check synchronously before writing; a copy that lost it skips to STANDBY.
+    if (!stillLeader()) return;
+    try { monitorPositions(); botStatus.lastMonitorAt = Date.now(); botStatus.monitorFailing = false; }
+    catch (e: any) { botStatus.lastError = `monitor: ${e.message}`; botStatus.monitorFailing = true; }
+    try { expireApprovals(); } catch (e: any) { botStatus.lastError = `approvals: ${e.message}`; }
     try { checkScanStall(botStatus); } catch (e: any) { botStatus.lastError = `watchdog: ${e.message}`; }
   }
   finally { ticking = false; }
@@ -82,6 +114,7 @@ async function backgroundPass() {
   try { await refreshBackground(); } catch { /* tracked per provider */ }
   try { await scanPrints(); botStatus.lastPrintsAt = Date.now(); } catch { /* tracked */ }
   if (Date.now() - botStatus.lastNewsAt > 5 * 60_000) { try { await refreshNews(); botStatus.lastNewsAt = Date.now(); } catch { /* tracked */ } }
+  if (!stillLeader()) return; // backups and strategy suspension write: only the current leader, re-checked after the awaits
   backupPass();
   try { const s = checkStrategyHealth(); if (s.length) notify('WARNING', 'Strategy auto-suspended', s.join(', '), 'strategy-health'); } catch { /* */ }
 }
@@ -93,6 +126,10 @@ function backupPass() {
     const m = maybeScheduledBackup(); if (!m) return;
     const v = m.verification;
     journal('SYSTEM', `Backup ${m.file} written (${m.encrypted ? 'encrypted' : 'not encrypted'}); restore check ${v.ok ? 'passed' : 'FAILED'}`);
+    if (m.retentionWarning) {
+      journal('SYSTEM', `Backup retention warning for ${m.file}: ${m.retentionWarning}`);
+      notify('WARNING', 'Backup retention failed', m.retentionWarning, 'backup');
+    }
     if (!v.ok) throw new Error(`restore check failed: ${v.checks.filter((c) => !c.ok).map((c) => c.name).join(', ')}`);
   } catch (e: any) {
     botStatus.lastError = `backup: ${e.message}`;
@@ -102,7 +139,7 @@ function backupPass() {
 
 export function startBot() {
   if (botStatus.running || config.offline) return;
-  botStatus.running = true; botStatus.startedAt = Date.now();
+  botStatus.running = true; botStatus.startedAt = Date.now(); botStatus.monitorFailing = false; takeoverRefused = false;
   journal('SYSTEM', `MIA engine started in ${displayMode()} mode`);
   hotLane().then(() => backgroundLane()).then(() => scanLane());
   timers = [
@@ -135,4 +172,4 @@ export function botStatusView() {
     state: ctl.emergency ? 'EMERGENCY' : ctl.pausedNewOrders ? 'PAUSED' : ctl.mode === 'OBSERVE' ? 'OBSERVING' : ctl.mode === 'PAPER' ? 'PAPER_TRADING' : ctl.mode === 'APPROVAL' ? 'AWAITING_APPROVAL' : 'BOUNDED_LIVE',
   };
 }
-export const _test = { onDecision, holdEngine, hotLane, scanLane, backgroundLane };
+export const _test = { onDecision, holdEngine, hotLane, scanLane, backgroundLane, resetTakeoverRefusal: () => { takeoverRefused = false; } };
