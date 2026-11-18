@@ -125,17 +125,18 @@ for (const variant of ['stale', 'future', 'missing'] as const) {
 
 test('late old-asset response cannot erase or relabel the new monitor chart', async ({ page }) => {
   await fixtures(page); await disablePip(page);
-  let finish: (() => void) | undefined;
+  let finish: (() => void) | undefined; let settled = false;
   await page.route('**/api/instrument/BTCUSDT?interval=1h', async route => {
     await new Promise<void>(resolve => { finish = resolve; });
     try { await route.fulfill({ json: fixtureInstrument('BTCUSDT') }); } catch { /* Aborted obsolete request is expected. */ }
+    settled = true;
   });
   await page.goto('/'); await page.getByRole('button', { name: 'Float monitor', exact: true }).click();
   await expect.poll(() => !!finish).toBe(true);
   const panel = monitor(page);
   await panel.getByRole('combobox', { name: 'Monitor asset' }).selectOption('ETHUSDT');
   await expect(panel.getByRole('img', { name: 'Candlestick price chart' })).toBeVisible();
-  finish!(); await page.waitForTimeout(150);
+  finish!(); await expect.poll(() => settled).toBe(true); await page.waitForLoadState('networkidle'); // the late response has been delivered
   await expect(panel.getByRole('combobox', { name: 'Monitor asset' })).toHaveValue('ETHUSDT');
   await expect(panel.getByRole('img', { name: 'Candlestick price chart' })).toBeVisible();
 });

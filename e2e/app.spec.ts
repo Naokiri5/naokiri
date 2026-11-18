@@ -100,7 +100,7 @@ test('status ribbon goes STALE (never green) when the server stops answering, th
 
 for (const r of ROUTES) {
   test(`renders ${r}`, async () => {
-    await page.goto(r); await expect(page.locator('h1')).toBeVisible(); await page.waitForTimeout(400);
+    await page.goto(r); await expect(page.locator('h1')).toBeVisible(); await page.waitForLoadState('networkidle'); // every API call answered
     await expect(page.locator('[role=alert]')).toHaveCount(0); // no API error lines
   });
 }

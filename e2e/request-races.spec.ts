@@ -79,6 +79,7 @@ test('history requests stay idle until filters change or a relevant stream event
   await page.goto('/history');
   await expect(page.getByRole('heading', { name: 'Trading History', exact: true })).toBeVisible();
   await expect.poll(() => urls.length).toBe(1);
+  // Negative check: a fixed observation window is required to prove NO further request (state-based waits cannot).
   await page.waitForTimeout(1000);
   expect(urls).toHaveLength(1);
   await page.getByRole('combobox', { name: 'Period', exact: true }).selectOption('7');
@@ -88,6 +89,6 @@ test('history requests stay idle until filters change or a relevant stream event
   await page.evaluate(() => (window as unknown as { fixtureStream: { emit(topic: string): void } }).fixtureStream.emit('order'));
   await expect.poll(() => urls.length).toBe(3);
   expect(urls[2]).toBe(filteredUrl);
-  await page.waitForTimeout(100);
+  await page.waitForTimeout(100); // negative check: no duplicate refetch after the event
   expect(urls).toHaveLength(3);
 });

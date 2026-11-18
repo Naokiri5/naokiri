@@ -37,8 +37,9 @@ test('a malformed /api/shell response never blanks the app (CodeRabbit PR #9)', 
   await page.route('**/api/stream', (r) => r.abort());
   await page.route('**/api/auth/state', (r) => r.fulfill({ json: { setup: true, authenticated: true } }));
   await page.route('**/api/shell', (r) => r.fulfill({ json: {} })); // HTTP 200 without control/dataHealth
+  const shell = page.waitForResponse('**/api/shell');
   await page.goto('/');
-  await page.waitForTimeout(1000); // let the shell response render
+  await shell; await page.waitForLoadState('networkidle'); // the shell response arrived and was rendered
   await expect(page.getByRole('group', { name: 'Autopilot status' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible(); // the whole shell is still mounted
   await expect(page.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=engine]')).not.toHaveAttribute('data-tone', 'ok');
