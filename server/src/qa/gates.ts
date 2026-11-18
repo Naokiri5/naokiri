@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { join, posix } from 'node:path';
 import { config, REPO_ROOT } from '../config.js';
 import { all, get } from '../db/db.js';
@@ -118,10 +119,31 @@ export function evaluateTestEvidence(report: unknown, refs: readonly TestRef[]):
  * record failures outside assertions (e.g. an unhandled rejection), so a report is accepted only when the run that
  * produced it exited 0 and the recorded sha256 matches the report text on disk. Returns a reason, or null when valid.
  */
-export function runOutcomeProblem(outcome: unknown, reportText: string): string | null {
+/** Test evidence older than this never certifies (blueprint Q-01: no stale evidence). */
+export const QA_EVIDENCE_MAX_AGE_MS = 7 * 86_400_000;
+/** Commit of the code that is running: MIA_BUILD_SHA if the deployment stamps it, else `git rev-parse HEAD`; null if unknown. */
+let commitCache: string | null | undefined;
+export function currentBuildCommit(): string | null {
+  if (commitCache !== undefined) return commitCache;
+  const env = process.env.MIA_BUILD_SHA?.trim();
+  if (env) return (commitCache = /^[0-9a-f]{40}$/.test(env) ? env : null);
+  try { commitCache = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null; }
+  catch { commitCache = null; }
+  return commitCache;
+}
+export function runOutcomeProblem(outcome: unknown, reportText: string, ctx: { currentCommit?: string | null; nowTs?: number } = {}): string | null {
   if (!isRecord(outcome)) return 'run outcome missing or unreadable (data/qa/test-run.json); run `npm run qa -w server`';
   if (outcome.exitCode !== 0) return `QA run did not succeed (exit code ${String(outcome.exitCode)}${outcome.signal ? `, signal ${String(outcome.signal)}` : ''})`;
   if (typeof outcome.reportSha256 !== 'string' || outcome.reportSha256 !== createHash('sha256').update(reportText).digest('hex')) return 'run outcome does not belong to this report (sha256 mismatch)';
+  // Bound to the exact code that is running, from a clean tree, and recent (blueprint Q-01).
+  const current = ctx.currentCommit === undefined ? currentBuildCommit() : ctx.currentCommit;
+  if (typeof outcome.commit !== 'string' || !/^[0-9a-f]{40}$/.test(outcome.commit)) return 'run outcome has no commit SHA; re-run `npm run qa -w server` from a git checkout';
+  if (!current) return 'running build commit is unknown (set MIA_BUILD_SHA); evidence cannot be bound to this build';
+  if (outcome.commit !== current) return `evidence is from commit ${outcome.commit.slice(0, 12)}, but the running build is ${current.slice(0, 12)}`;
+  if (outcome.dirty !== false) return 'QA run had uncommitted changes; evidence must come from a clean checkout';
+  const finished = Number(outcome.finishedAt); const now = ctx.nowTs ?? Date.now();
+  if (!Number.isFinite(finished) || finished > now + 60_000) return 'run outcome has an invalid finish time';
+  if (now - finished > QA_EVIDENCE_MAX_AGE_MS) return `evidence is stale (${Math.floor((now - finished) / 86_400_000)} days old; limit ${QA_EVIDENCE_MAX_AGE_MS / 86_400_000})`;
   return null;
 }
 

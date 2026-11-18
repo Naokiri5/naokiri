@@ -27,7 +27,11 @@ const r = spawnSync(process.execPath, [vitest, 'run', '--reporter=default', '--r
   cwd: serverDir, stdio: 'inherit', env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' ') },
 });
 const exitCode = r.status ?? 1;
+const git = (...a) => { const g = spawnSync('git', a, { cwd: serverDir, encoding: 'utf8' }); return g.status === 0 ? g.stdout.trim() : null; };
 const outcome = { exitCode, signal: r.signal ?? null, startedAt, finishedAt: Date.now(),
-  reportSha256: existsSync(reportPath) ? createHash('sha256').update(readFileSync(reportPath)).digest('hex') : null };
+  reportSha256: existsSync(reportPath) ? createHash('sha256').update(readFileSync(reportPath)).digest('hex') : null,
+  // Evidence is bound to the exact commit and a clean tree (blueprint Q-01); gates reject any other build.
+  commit: git('rev-parse', 'HEAD'), dirty: (() => { const st = git('status', '--porcelain'); return st === null ? null : st.length > 0; })(),
+  node: process.version, invocation: ['vitest', 'run', ...process.argv.slice(2)] };
 writeFileSync(`${outcomePath}.partial`, JSON.stringify(outcome, null, 2) + '\n'); renameSync(`${outcomePath}.partial`, outcomePath);
 process.exit(exitCode);
