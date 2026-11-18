@@ -249,7 +249,7 @@ test('market coverage uses the saved IANA timezone and shows unsupported venues'
   await page.goto('/discover');
   await page.getByRole('tab', { name: 'Market coverage' }).click();
   await expect(page.getByText(/Asia\/Manila/)).toBeVisible();
-  await expect(page.getByRole('row', { name: /U.S. equities/ })).toContainText('PENDING_CREDENTIALS');
+  await expect(page.getByRole('row', { name: /U.S. equities/ })).toContainText('PENDING CREDENTIALS');
   await expect(page.getByRole('row', { name: /Tokenized equities/ })).toContainText('Unavailable');
   await page.goto('/calendar');
   await expect(page.getByText('Asia/Manila', { exact: true })).toBeVisible();
