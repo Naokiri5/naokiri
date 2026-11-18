@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { Worker } from 'node:worker_threads';
 import { getDb } from '../db/db.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { verifyAuditChain } from '../core/audit.js';
@@ -126,6 +127,32 @@ export function verifyBackup(file: string, key: Buffer | null = backupKey()): Ve
     finally { snap?.close(); }
   } finally { rmSync(tmp, { force: true }); }
   return done();
+}
+
+/**
+ * verifyBackup in a worker thread, so a large restore check never blocks the engine's event loop (MA-14). Falls back
+ * to the in-thread check if the worker cannot start, so a backup is never left unverified. Times out after `timeoutMs`
+ * (reported as a failed check, never as a pass).
+ */
+export function verifyBackupInWorker(file: string, key: Buffer | null = backupKey(), timeoutMs = 10 * 60_000): Promise<VerifyResult> {
+  const isTs = import.meta.url.endsWith('.ts');
+  const entry = new URL(isTs ? './verify-worker.ts' : './verify-worker.js', import.meta.url);
+  // Inherit the parent's runtime flags, minus ones that only apply to how the parent was launched (--eval/--print/
+  // --input-type) and would make the worker fail to start.
+  const inherited = process.execArgv.filter((a) => !/^(--input-type|--eval|-e|--print|-p)(=|$)/.test(a));
+  const execArgv = isTs && !inherited.some((a) => a.includes('tsx')) ? [...inherited, '--import', 'tsx'] : inherited;
+  return new Promise((resolve) => {
+    let worker: Worker;
+    try { worker = new Worker(entry, { workerData: { file, keyHex: key ? key.toString('hex') : null }, execArgv }); }
+    catch { resolve(verifyBackup(file, key)); return; }
+    let settled = false;
+    const finish = (r: VerifyResult) => { if (settled) return; settled = true; clearTimeout(timer); void worker.terminate(); resolve(r); };
+    const failed = (detail: string): VerifyResult => ({ ok: false, file: basename(file), checks: [{ name: 'worker', ok: false, detail }] });
+    const timer = setTimeout(() => finish(failed(`restore check timed out after ${timeoutMs} ms`)), timeoutMs);
+    worker.once('message', (m: { ok: boolean; result?: VerifyResult; error?: string }) => finish(m.ok && m.result ? m.result : failed(m.error ?? 'worker failed')));
+    worker.once('error', (e: Error) => finish(failed(`restore check worker error: ${String(e?.message ?? e).slice(0, 200)}`)));
+    worker.once('exit', (code) => { if (!settled) finish(failed(`restore check worker exited (${code}) without a result`)); });
+  });
 }
 
 /** Scheduled run (engine leader only): back up when the newest backup is older than the interval, then prune. */

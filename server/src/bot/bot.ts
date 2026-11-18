@@ -16,7 +16,7 @@ import type { DecisionReport } from '../decision/engine.js';
 import { releaseLease, acquireOrRenewLease, withWriteFence } from '../ops/lease.js';
 import { checkScanStall } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
-import { maybeScheduledBackup, verifyBackup, backupDir } from '../ops/backup.js';
+import { maybeScheduledBackup, verifyBackupInWorker, backupDir } from '../ops/backup.js';
 import { join } from 'node:path';
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -129,16 +129,17 @@ async function backgroundPass() {
   try { await scanPrints(); botStatus.lastPrintsAt = Date.now(); } catch { /* tracked */ }
   if (Date.now() - botStatus.lastNewsAt > 5 * 60_000) { try { await refreshNews(); botStatus.lastNewsAt = Date.now(); } catch { /* tracked */ } }
   if (!stillLeader()) return; // backups and strategy suspension write: only the current leader, re-checked after the awaits
-  backupPass();
+  await backupPass();
+  if (!stillLeader()) return; // the restore check is awaited: re-check before strategy suspension writes
   try { const s = checkStrategyHealth(); if (s.length) notify('WARNING', 'Strategy auto-suspended', s.join(', '), 'strategy-health'); } catch { /* */ }
 }
 
 /** Scheduled backup + restore check (leader only, from the background lane). Failures alert at most hourly. */
 let lastBackupAlertAt = 0;
-function backupPass() {
+async function backupPass() {
   try {
     const m = maybeScheduledBackup(); if (!m) return;
-    const v = verifyBackup(join(backupDir(), m.file));
+    const v = await verifyBackupInWorker(join(backupDir(), m.file)); // off the event loop (MA-14)
     journal('SYSTEM', `Backup ${m.file} written (${m.encrypted ? 'encrypted' : 'not encrypted'}); restore check ${v.ok ? 'passed' : 'FAILED'}`);
     if (!v.ok) throw new Error(`restore check failed: ${v.checks.filter((c) => !c.ok).map((c) => c.name).join(', ')}`);
   } catch (e: any) {
