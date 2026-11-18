@@ -53,6 +53,17 @@ const problem = (e: unknown) => e instanceof z.ZodError
 function check(raw: unknown): { policy: RiskPolicy } | { invalid: string } {
   try { return { policy: validatePolicy(raw) }; } catch (e) { return { invalid: problem(e) }; }
 }
+function readStoredPolicy(raw: string): Pick<PolicyVersion, 'policy' | 'invalid'> {
+  let decoded: unknown;
+  try { decoded = P(raw); }
+  catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    return { policy: DEFAULT_POLICY, invalid: 'stored policy is not valid JSON' };
+  }
+  const result = check(decoded);
+  return 'policy' in result ? result : { policy: decoded as RiskPolicy, invalid: result.invalid };
+}
+
 /**
  * MIA-RISK-006: the stored policy is re-validated on every read. A row missing a field (written by an older schema) or
  * holding NaN-turned-null would make comparisons like `costR > pol.maxCostR` false, i.e. the check silently passes.
@@ -62,8 +73,7 @@ function check(raw: unknown): { policy: RiskPolicy } | { invalid: string } {
 export function currentPolicy(): PolicyVersion | null {
   const r = get<any>('SELECT * FROM risk_policy_versions ORDER BY version DESC LIMIT 1');
   if (!r) return null;
-  const c = check(P(r.policy));
-  return { version: r.version, policy: 'policy' in c ? c.policy : P(r.policy), created_at: r.created_at, accepted_by: r.accepted_by, ...('invalid' in c ? { invalid: c.invalid } : {}) };
+  return { version: r.version, created_at: r.created_at, accepted_by: r.accepted_by, ...readStoredPolicy(r.policy) };
 }
 /**
  * The policy used to MANAGE EXISTING positions (exit fees, stop-fill buffer, open-risk accounting). Always validated:
@@ -72,7 +82,8 @@ export function currentPolicy(): PolicyVersion | null {
  */
 export function exitPolicy(): RiskPolicy {
   for (const r of all<any>('SELECT policy FROM risk_policy_versions ORDER BY version DESC LIMIT 50')) {
-    const c = check(P(r.policy)); if ('policy' in c) return c.policy;
+    const policy = readStoredPolicy(r.policy);
+    if (!policy.invalid) return policy.policy;
   }
   return DEFAULT_POLICY;
 }
@@ -85,4 +96,4 @@ export function acceptPolicy(actor: string, input: unknown): PolicyVersion {
   audit(actor, 'risk.policy.accept', { version, policy, previous: cur?.version ?? null });
   return currentPolicy()!;
 }
-export const policyHistory = () => all<any>('SELECT version, created_at, accepted_by, policy FROM risk_policy_versions ORDER BY version DESC').map((r) => ({ ...r, policy: P(r.policy) }));
+export const policyHistory = () => all<any>('SELECT version, created_at, accepted_by, policy FROM risk_policy_versions ORDER BY version DESC').map((r) => ({ ...r, ...readStoredPolicy(r.policy) }));

@@ -96,6 +96,29 @@ describe('stream retry, lag and stall safety (MA-10, MA-18)', () => {
     expect(published.at(-1)!.lastUpdateId).toBe(14); // continuity kept across the lagging update
     h.stop();
   });
+  it('rejects malformed metadata and does not publish future or stale buffered events', async () => {
+    const published: StreamBook[] = [];
+    const invalid: string[] = [];
+    const t = 50_000;
+    let resolveSnapshot!: (value: ReturnType<typeof snap>) => void;
+    expect(parseDepthEvent({ ...upd(11, 12, t), E: [t] })).toBeNull();
+    expect(parseDepthEvent({ ...upd(11, 12, t), U: false })).toBeNull();
+    const h = startDepthStream(['BTCUSDT'], {
+      url: () => 'wss://test', snapshot: () => new Promise(resolve => { resolveSnapshot = resolve; }),
+      publish: (_symbol, book) => published.push(book), invalidate: symbol => invalid.push(symbol),
+      now: () => t, WebSocketImpl: FakeWS as any,
+    });
+    try {
+      await tick();
+      FakeWS.last!.send(upd(11, 12, t - 6_000));
+      resolveSnapshot(snap(10));
+      await tick();
+      expect(published).toHaveLength(0);
+      FakeWS.last!.send(upd(13, 14, t + 1));
+      expect(published).toHaveLength(0);
+      expect(invalid).toEqual(['BTCUSDT', 'BTCUSDT']);
+    } finally { h.stop(); }
+  });
   it('a gap and a disconnect invalidate the published book; a silent socket is closed', async () => {
     const invalid: string[] = []; let t = 70_000;
     const h = startDepthStream(['BTCUSDT'], { url: () => 'wss://t', snapshot: async () => snap(10), publish: () => {}, invalidate: (s) => invalid.push(s), now: () => t, WebSocketImpl: FakeWS as any });

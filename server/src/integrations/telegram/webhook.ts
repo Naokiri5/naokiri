@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
-import { all, get, run } from '../../db/db.js';
+import { all, get, run, tx } from '../../db/db.js';
 import { config } from '../../config.js';
 import { audit } from '../../core/audit.js';
 import { limiter, RateLimitError } from '../../core/ratelimit.js';
@@ -77,12 +77,12 @@ export async function drainOutbox(send: (chatId: number, text: string) => Promis
     try {
       await send(row.chat_id, row.text);
       run("UPDATE telegram_outbox SET status='PROVIDER_ACCEPTED', attempts=attempts+1, last_error=NULL, updated_at=? WHERE id=?", Date.now(), row.id);
-    } catch (e: any) {
+    } catch {
       const attempts = row.attempts + 1;
       const failed = attempts >= OUTBOX_MAX_ATTEMPTS;
       run("UPDATE telegram_outbox SET status=?, attempts=?, next_attempt_at=?, last_error=?, updated_at=? WHERE id=?",
         failed ? 'FAILED' : 'QUEUED', attempts, Date.now() + BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)],
-        String(e?.message ?? 'send failed').slice(0, 200), Date.now(), row.id);
+        'Telegram delivery failed', Date.now(), row.id);
     }
   }
   run('DELETE FROM telegram_update_dedupe WHERE received_at < ?', now - DEDUPE_RETENTION_MS);
@@ -122,23 +122,28 @@ export async function telegramRoutes(app: FastifyInstance) {
     if (!parsed.success) return reply.code(400).send({ error: 'invalid update' });
     const update = parsed.data;
     const m = update.message;
+    const sender = m?.from;
     // Edits, callbacks, channel posts and other update types are acknowledged but not processed in v1.
-    if (!m || !m.from || m.from.is_bot) return reply.send({ ok: true, ignored: true });
+    if (!m || !sender || sender.is_bot) return reply.send({ ok: true, ignored: true });
     if (m.chat.type !== 'private') return reply.send({ ok: true, ignored: true });
     if (Math.floor(Date.now() / 1000) - m.date > STALE_MESSAGE_S) return reply.send({ ok: true, ignored: true, reason: 'stale' });
 
-    // Exactly-once processing per update_id: a retried or replayed update is acknowledged without side effects.
-    const ins = run('INSERT OR IGNORE INTO telegram_update_dedupe(update_id, received_at) VALUES (?,?)', update.update_id, Date.now());
-    if (Number(ins.changes) === 0) return reply.send({ ok: true, duplicate: true });
-
-    if (typeof m.text !== 'string') return reply.send({ ok: true, ignored: true });
-    try { chatLimiter.take(String(m.chat.id), 'telegram commands'); }
-    catch { return reply.send({ ok: true, ignored: true, reason: 'rate limited' }); }
-
-    const text = handleCommand(m.text, { userId: m.from.id, chatId: m.chat.id, chatType: m.chat.type });
-    if (text) enqueueReply(m.chat.id, text);
-    kickOutbox();
-    return reply.send({ ok: true });
+    const result = tx(() => {
+      // A failed command or reply insert rolls back the deduplication marker so Telegram can retry it.
+      const ins = run('INSERT OR IGNORE INTO telegram_update_dedupe(update_id, received_at) VALUES (?,?)', update.update_id, Date.now());
+      if (Number(ins.changes) === 0) return { ok: true, duplicate: true };
+      if (typeof m.text !== 'string') return { ok: true, ignored: true };
+      try { chatLimiter.take(String(m.chat.id), 'telegram commands'); }
+      catch (error) {
+        if (!(error instanceof RateLimitError)) throw error;
+        return { ok: true, ignored: true, reason: 'rate limited' };
+      }
+      const text = handleCommand(m.text, { userId: sender.id, chatId: m.chat.id, chatType: m.chat.type });
+      if (text) enqueueReply(m.chat.id, text);
+      return { ok: true };
+    });
+    if (!result.duplicate && !result.ignored) kickOutbox();
+    return reply.send(result);
   });
 
   app.post('/api/integrations/telegram/link/start', async (req, reply) => {

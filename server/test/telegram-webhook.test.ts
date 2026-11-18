@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
-import { closeDb, openDb, all } from '../src/db/db.js';
+import { closeDb, openDb, all, run } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { createLinkCode, redeemLinkCode } from '../src/integrations/telegram/link.js';
 import { getControl } from '../src/core/mode.js';
@@ -74,6 +74,20 @@ describe('Telegram webhook (MIA-TG-01)', () => {
     expect(outbox().length).toBe(before);
   });
 
+  it('retries a command whose reply failed to persist, without committing partial command state', async () => {
+    const chat = chatSeq++;
+    const { code } = createLinkCode();
+    redeemLinkCode(code, OWNER_USER, chat);
+    const update = msg('/pause', OWNER_USER, chat);
+    run("CREATE TEMP TRIGGER fail_telegram_reply BEFORE INSERT ON telegram_outbox BEGIN SELECT RAISE(ABORT, 'fixture'); END");
+    expect((await hook(update)).statusCode).toBe(500);
+    expect(getControl().pausedNewOrders).toBe(false);
+    expect(all('SELECT update_id FROM telegram_update_dedupe')).toHaveLength(0);
+    run('DROP TRIGGER fail_telegram_reply');
+    expect((await hook(update)).json()).toEqual({ ok: true });
+    expect(getControl().pausedNewOrders).toBe(true);
+    expect(outbox()).toHaveLength(1);
+  });
   it('ignores group chats and stale messages', async () => {
     const chat = chatSeq++;
     const { code } = createLinkCode();
