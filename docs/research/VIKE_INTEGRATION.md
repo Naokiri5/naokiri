@@ -1,6 +1,8 @@
 # Vike Data research provider and Paper/Live contract
 
-Status: **implemented, offline-tested.** Live calls to data.vike.io have **not** been verified, because they need the owner's rotated API key (see "Turning it on").
+Status: **implemented and live-verified (2026-11-18).** All seven endpoints answered through MIA's adapter with a real key: search, token screener, wallets, Hyperliquid candles, Predict.fun, Polymarket markets and archive metadata. The archive response contained no URL. The Discover → Vike research tab shows live data. Offline tests use stubbed responses.
+
+Field names actually observed: the token screener returns a top-level array with `token_address, symbol, name, volume_usd, net_flow_usd, in_usd, out_usd, unique_holders, tx_count`. Search returns `{tokens, hl_markets, wallets, traders, vaults, builders, …}`. These fields are not guaranteed by the spec, so the UI reads them defensively.
 
 Skill: `.claude/skills/mia-vike-parity/SKILL.md`. Contract source: official OpenAPI 3.1 spec "vike.io Data API" 1.0.0 (`https://vike.io/data/openapi.json`, fetched 2026-11-18).
 

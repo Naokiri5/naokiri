@@ -19,15 +19,15 @@ function rowsOf(data: unknown): Record<string, unknown>[] {
 const pick = (r: Record<string, unknown>, keys: string[]) => { for (const k of keys) if (r[k] != null && typeof r[k] !== 'object') return r[k] as string | number; return undefined; };
 const num = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
 
-function ResearchTable({ rows }: { rows: Record<string, unknown>[] }) {
+function ResearchTable({ rows, chain }: { rows: Record<string, unknown>[]; chain?: string }) {
   if (!rows.length) return <Empty>No rows in this response.</Empty>;
-  return <div className="tablewrap"><table><thead><tr><th>Name</th><th>Chain</th><th className="num">Volume (USD)</th><th className="num">Net inflow</th><th className="num">Holders</th></tr></thead>
+  return <div className="tablewrap"><table><thead><tr><th>Name</th><th>Chain</th><th className="num">Volume (USD)</th><th className="num">Net flow (USD)</th><th className="num">Holders</th></tr></thead>
     <tbody>{rows.slice(0, 50).map((r, i) => {
-      const vol = num(pick(r, ['volume_usd', 'volume', 'volumeUsd'])); const inflow = num(pick(r, ['net_inflow_usd', 'net_inflow', 'netInflow']));
-      const holders = num(pick(r, ['holders', 'holder_count']));
+      const vol = num(pick(r, ['volume_usd', 'volume', 'volumeUsd'])); const inflow = num(pick(r, ['net_flow_usd', 'net_inflow_usd', 'net_flow', 'net_inflow']));
+      const holders = num(pick(r, ['unique_holders', 'holders', 'holder_count']));
       return <tr key={String(pick(r, ['address', 'id', 'token_address']) ?? i)}>
         <td><b>{String(pick(r, ['symbol', 'name', 'title', 'question', 'address']) ?? '—')}</b> <span className="faint">{String(pick(r, ['name', 'type']) ?? '')}</span></td>
-        <td>{String(pick(r, ['chain', 'network']) ?? '—')}</td>
+        <td>{String(pick(r, ['chain', 'network']) ?? chain ?? '—')}</td>
         <td className="num">{vol == null ? '—' : fmt.big(vol)}</td><td className="num">{inflow == null ? '—' : fmt.big(inflow)}</td><td className="num">{holders == null ? '—' : fmt.num(holders, 0)}</td></tr>;
     })}</tbody></table></div>;
 }
@@ -49,7 +49,7 @@ export function VikeResearchPanel() {
     {status.data && !configured && <Card title="Vike research" right={<Badge v="PENDING_CREDENTIALS" />}><Empty>Not configured. The owner sets <code>MIA_VIKE_API_KEY</code> in the <b>server</b> environment (never in the browser or git) and restarts MIA. Until then no Vike data is shown.</Empty></Card>}
     {configured && <>
       <Card flush title="On-chain token screener (24h)" right={<><Freshness at={screener.data?.fetchedAt} /><select value={chain} onChange={(e) => setChain(e.target.value as typeof CHAINS[number])} aria-label="Chain">{CHAINS.map((c) => <option key={c} value={c}>{c}</option>)}</select></>}>
-        <ErrorLine e={screener.error} />{screener.data ? <ResearchTable rows={rowsOf(screener.data.data)} /> : <Empty>Loading…</Empty>}
+        <ErrorLine e={screener.error} />{screener.data ? <ResearchTable rows={rowsOf(screener.data.data)} chain={chain} /> : <Empty>Loading…</Empty>}
       </Card>
       <Card title="Search tokens, wallets and markets" right={found && <Freshness at={found.at} />}>
         <form onSubmit={(e) => { e.preventDefault(); if (q.trim()) void search(); }} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
