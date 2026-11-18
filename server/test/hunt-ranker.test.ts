@@ -40,6 +40,12 @@ describe('TITAN HUNTER read-only fast screening', () => {
     expect(r.results).toEqual(screenCachedTokens([latest], NOW).results);
   });
 
+  it('breaks equal-timestamp ties consistently across input order', () => {
+    const a = observation('dex:solana:tie', { volume24hUsd: 1_000_000 });
+    const b = observation(a.id, { volume24hUsd: 100_000, liquidityUsd: null });
+    expect(screenCachedTokens([a, b], NOW)).toEqual(screenCachedTokens([b, a], NOW));
+  });
+
   it('flags missing liquidity and incomplete contract verification', () => {
     const r = screenCachedTokens([observation('x', { liquidityUsd: null })], NOW);
     expect(r.results[0].warnings).toContain('POOL_LIQUIDITY_UNVERIFIED');

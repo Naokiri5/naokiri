@@ -55,6 +55,12 @@ const safe = (x: number | null | undefined) =>
 const logRatio = (x: number, scale: number) =>
   clamp(Math.log1p(Math.max(0, x)) / Math.log1p(scale));
 
+/** Stable tie-break for conflicting observations carrying the same two timestamps. */
+function observationKey(o: HuntObservation) {
+  return JSON.stringify([o.venue, o.symbol, o.source, o.priceUsd, o.volume24hUsd, safe(o.volume1hUsd),
+    safe(o.liquidityUsd), safe(o.change24hPct), safe(o.change1hPct), safe(o.trades1h)]);
+}
+
 /**
  * O(n log n) ranking; milliseconds budget is for cached computations only.
  * Network ingestion, security, historical analysis, QCI and execution are excluded.
@@ -88,8 +94,8 @@ export function screenCachedTokens(
     const previous = unique.get(o.id);
     if (previous) {
       duplicates++;
-      if (previous.providerAt > o.providerAt
-          || (previous.providerAt === o.providerAt && previous.receivedAt >= o.receivedAt)) continue;
+      const newer = o.providerAt - previous.providerAt || o.receivedAt - previous.receivedAt;
+      if (newer < 0 || (newer === 0 && observationKey(o) >= observationKey(previous))) continue;
     }
     unique.set(o.id, o);
   }
