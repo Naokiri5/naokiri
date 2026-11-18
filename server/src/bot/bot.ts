@@ -12,7 +12,7 @@ import { journal } from '../journal/journal.js';
 import { bus } from '../core/bus.js';
 import { config } from '../config.js';
 import type { DecisionReport } from '../decision/engine.js';
-import { tryAcquireLease, releaseLease } from '../ops/lease.js';
+import { releaseLease, acquireOrRenewLease, withWriteFence } from '../ops/lease.js';
 import { checkScanStall } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
 import { maybeScheduledBackup, verifyBackup, backupDir } from '../ops/backup.js';
@@ -33,13 +33,17 @@ export const ENGINE_LEASE = 'engine';
 /** Lease lifetime: three ticker intervals (minimum 45 s), so one slow tick never hands the engine to another copy. */
 export const engineLeaseTtlMs = () => (config.offline && config.engineLeaseTtlMs) || Math.max(45_000, config.tickerIntervalMs * 3);
 /** Acquire or renew the engine lease before any lane runs; a lane that does not hold it does nothing (fail closed). */
+const fenced = <T>(fn: () => T): T => withWriteFence(ENGINE_LEASE, botStatus.instanceId, fn);
 function holdEngine(): boolean {
   if (takeoverRefused) return false; // integrity checks failed: no lease until the owner restarts the engine
-  let ok = false;
-  try { ok = tryAcquireLease(ENGINE_LEASE, botStatus.instanceId, engineLeaseTtlMs()); } catch (e: any) { botStatus.lastError = `lease: ${e.message}`; }
+  let ok = false; let acquired = false;
+  try { const r = acquireOrRenewLease(ENGINE_LEASE, botStatus.instanceId, engineLeaseTtlMs()); ok = r !== 'HELD_ELSEWHERE'; acquired = r === 'ACQUIRED'; }
+  catch (e: any) { botStatus.lastError = `lease: ${e.message}`; }
   // MIA-BOT-001: nothing in here may throw out of a lane (an unhandled rejection from a setInterval lane ends the
   // process). A failing integrity check counts as "not leader" (fail closed); a failing journal/notify is recorded only.
-  try { if (ok && botStatus.running && botStatus.role !== 'LEADER' && !takeoverAllowed()) return false; }
+  // Takeover checks run after EVERY acquisition, decided from the persisted lease (CodeRabbit PR #12) — not from the
+  // cached role, which is stale when this process paused as LEADER and later re-acquired an expired lease.
+  try { if (ok && botStatus.running && (acquired || botStatus.role !== 'LEADER') && !takeoverAllowed()) return false; }
   catch (e: any) { botStatus.lastError = `takeover check: ${e.message}`; return false; }
   const role = ok ? 'LEADER' : 'STANDBY';
   if (botStatus.running && role !== botStatus.role) {
@@ -79,8 +83,9 @@ function onDecision(r: DecisionReport) {
   if (!stillLeader()) return;
   botStatus.decisionsTotal++;
   const ctl = getControl();
-  if (r.decision === 'PAPER_TRADE' && ctl.mode === 'PAPER') { const res = submitEntry(r, 'bot'); if (res.ok) botStatus.entriesToday++; }
-  else if (r.decision === 'APPROVED_FOR_USER_CONFIRMATION' && ctl.mode !== 'OBSERVE') queueForApproval(r);
+  // Bot writes are fenced: the lease is re-checked inside each write transaction (CodeRabbit PR #12).
+  if (r.decision === 'PAPER_TRADE' && ctl.mode === 'PAPER') { const res = fenced(() => submitEntry(r, 'bot')); if (res.ok) botStatus.entriesToday++; }
+  else if (r.decision === 'APPROVED_FOR_USER_CONFIRMATION' && ctl.mode !== 'OBSERVE') fenced(() => queueForApproval(r));
 }
 
 async function hotLane() {
@@ -95,9 +100,9 @@ async function hotLane() {
     try { await refreshBooks(openPositions().map((p) => p.instrument)); } catch (e: any) { botStatus.lastError = `books: ${e.message}`; }
     // The awaits above can outlast the lease: re-check synchronously before writing; a copy that lost it skips to STANDBY.
     if (!stillLeader()) return;
-    try { monitorPositions(); botStatus.lastMonitorAt = Date.now(); botStatus.monitorFailing = false; }
+    try { fenced(() => monitorPositions()); botStatus.lastMonitorAt = Date.now(); botStatus.monitorFailing = false; }
     catch (e: any) { botStatus.lastError = `monitor: ${e.message}`; botStatus.monitorFailing = true; }
-    try { expireApprovals(); } catch (e: any) { botStatus.lastError = `approvals: ${e.message}`; }
+    try { fenced(() => expireApprovals()); } catch (e: any) { botStatus.lastError = `approvals: ${e.message}`; }
     try { checkScanStall(botStatus); } catch (e: any) { botStatus.lastError = `watchdog: ${e.message}`; }
   } catch (e: any) { botStatus.lastError = `hot lane: ${e.message}`; }
   finally { ticking = false; }

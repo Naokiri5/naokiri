@@ -14,6 +14,7 @@ import { stepExit, newExitState, type ExitState } from '../lab/exits.js';
 import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
+import { assertWriteFence, LeaseLostError } from '../ops/lease.js';
 import { crashpoint } from './crashpoint.js';
 
 /**
@@ -133,6 +134,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   let orderId: string;
   crashpoint('entry.preTx');
   try { orderId = tx(() => {
+    assertWriteFence();
     const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id });
     run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, Date.now(), oid);
     crashpoint('entry.order');
@@ -171,8 +173,12 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
 /** APPROVAL mode: queue a pending order for the owner. */
 export function queueForApproval(report: DecisionReport) {
   const coid = `entry-${report.candidateId}`;
-  if (get('SELECT 1 FROM orders WHERE client_order_id=?', coid)) return null;
-  const id = insertOrder({ clientOrderId: coid, instrument: report.instrumentId, side: 'BUY', type: 'MARKET', qty: report.positionSize?.qty ?? 0, stop: report.stopLoss, status: 'PENDING_APPROVAL', purpose: 'ENTRY', decisionId: report.id });
+  const id = tx(() => {
+    assertWriteFence();
+    if (get('SELECT 1 FROM orders WHERE client_order_id=?', coid)) return null;
+    return insertOrder({ clientOrderId: coid, instrument: report.instrumentId, side: 'BUY', type: 'MARKET', qty: report.positionSize?.qty ?? 0, stop: report.stopLoss, status: 'PENDING_APPROVAL', purpose: 'ENTRY', decisionId: report.id });
+  });
+  if (!id) return null;
   notify('WARNING', `Approval requested: ${report.asset}`, `${report.strategy.id} · score ${report.opportunity.score} · expires ${report.consensus.expiresAt}`, 'oms');
   bus.publish('order', { orderId: id, status: 'PENDING_APPROVAL' });
   return id;
@@ -189,7 +195,7 @@ export function decideApproval(orderId: string, approve: boolean) {
 export function expireApprovals() {
   for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.status='PENDING_APPROVAL'")) {
     const r = P<DecisionReport>(o.report);
-    if (Date.parse(r.consensus.expiresAt) <= Date.now()) run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed', updated_at=? WHERE id=?", Date.now(), o.id);
+    if (Date.parse(r.consensus.expiresAt) <= Date.now()) tx(() => { assertWriteFence(); run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), o.id); });
   }
 }
 
@@ -225,6 +231,7 @@ export function monitorPositions(nowTs = Date.now()) {
       }
       crashpoint('monitor.preTx');
       tx(() => {
+        assertWriteFence(); // lease checked atomically with the monitor's writes (no-op outside a bot lane)
         // Compare-and-set against the snapshot the exits were computed from, so a concurrent monitor or manual close cannot
         // make this pass sell the same target twice or act on a position that is no longer open.
         // mfe/mae are part of the guard (CodeRabbit PR #16): they can change and return while qty/stop/targets match, and a
@@ -256,6 +263,7 @@ export function monitorPositions(nowTs = Date.now()) {
       else flagUnprotected(p, 'order book missing, stale or too thin to execute the stop');
     } catch (e: any) {
       if (e instanceof StaleSnapshot) continue;
+      if (e instanceof LeaseLostError) throw e; // not a protection problem: this instance is no longer the engine
       flagUnprotected(p, e instanceof ExitUnavailable ? 'no fresh executable price for exit' : `exit failed: ${String(e?.message ?? e).slice(0, 160)}`);
     }
   }

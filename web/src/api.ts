@@ -36,21 +36,35 @@ export function useApi<T = any>(path: string | null, opts: { topics?: string[]; 
   const [data, setData] = useState<T | null>(null); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(false);
   /** Monotonic (performance.now()) time the newest successful request was SENT; conservative for freshness checks. */
   const [requestedAt, setRequestedAt] = useState<number | null>(null);
-  const timer = useRef<number | null>(null); const seq = useRef(0);
+  const timer = useRef<number | null>(null); const seq = useRef(0); const inFlight = useRef(false); const again = useRef(false);
+  /** Forced load: supersedes anything in flight (used on mount, path change and reload() after a mutation, so a response
+   *  requested before the mutation is never shown). The sequence guard drops superseded responses. */
   const load = useCallback(async () => {
     if (!path) return; setLoading(true);
-    const n = ++seq.current; const sent = performance.now();
+    const n = ++seq.current; const sent = performance.now(); inFlight.current = true;
     try { const d = await api<T>(path); if (n !== seq.current) return; setData(d); setError(null); setRequestedAt(sent); }
     catch (e: any) { if (n === seq.current) setError(e.message); }
-    finally { if (n === seq.current) setLoading(false); }
+    finally {
+      if (n === seq.current) {
+        setLoading(false); inFlight.current = false;
+        if (again.current) { again.current = false; void load(); } // a refresh was requested while this one ran
+      }
+    }
   }, [path]);
-  // MIA-WEB-013: a new path starts empty. Keeping the previous path's data meant /terminal/FOOUSDT kept showing BTC's
-  // chart and order book (and its "Run analysis" button) when the new request failed.
-  useEffect(() => { setData(null); setError(null); setRequestedAt(null); }, [path]);
-  useEffect(() => { load(); if (!opts.every) return; const t = window.setInterval(load, opts.every); return () => clearInterval(t); }, [load, opts.every]);
+  /** Scheduled refresh (interval tick, stream topic): never supersedes a request in flight — it queues one follow-up
+   *  instead. Before, a slow endpoint whose latency exceeded the trigger gap had every response dropped (CodeRabbit PR #9). */
+  const schedule = useCallback(() => { if (inFlight.current) { again.current = true; return; } void load(); }, [load]);
+  // MIA-WEB-013: a new path starts empty. Pending work for the old path is cancelled: its debounced refresh is cleared
+  // and its in-flight response is invalidated, so it can never replace the new path's data (CodeRabbit PR #15).
+  useEffect(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    seq.current++; inFlight.current = false; again.current = false;
+    setData(null); setError(null); setRequestedAt(null);
+  }, [path]);
+  useEffect(() => { load(); if (!opts.every) return; const t = window.setInterval(schedule, opts.every); return () => clearInterval(t); }, [load, schedule, opts.every]);
   // MIA-WEB-002: a debounced stream refresh must not fire after the component is gone.
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  useStream((t) => { if (opts.topics?.includes(t)) { if (timer.current) clearTimeout(timer.current); timer.current = window.setTimeout(load, 600); } });
+  useStream((t) => { if (opts.topics?.includes(t)) { if (timer.current) clearTimeout(timer.current); timer.current = window.setTimeout(schedule, 600); } });
   return { data, error, loading, requestedAt, reload: load, setData };
 }
 

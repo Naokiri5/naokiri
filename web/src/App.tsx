@@ -69,8 +69,8 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     <main>
       <StaleBanner shell={shell} />
       {signOutErr && <div className="banner stale" role="alert">Sign-out failed ({signOutErr}). You are still signed in on the server — try again before leaving this device.</div>}
-      {s?.control.emergency && <div className="banner stale">⛔ EMERGENCY STOP active — new orders blocked. Existing positions are still monitored. Resolve in the Risk Center.</div>}
-      {s && s.dataHealth.stale && <div className="banner stale">⚠ Market data is stale or disconnected (last update {fmt.ago(s.dataHealth.tickersAt)}). New entries are blocked by the data-quality gate.</div>}
+      {s?.control?.emergency === true && <div className="banner stale">⛔ EMERGENCY STOP active — new orders blocked. Existing positions are still monitored. Resolve in the Risk Center.</div>}
+      {s?.dataHealth?.stale === true && <div className="banner stale">⚠ Market data is stale or disconnected (last update {fmt.ago(s.dataHealth?.tickersAt)}). New entries are blocked by the data-quality gate.</div>}
       {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}
       {s && !s.policyAccepted && loc.pathname !== '/risk' && <div className="banner info">Risk policy not yet accepted — paper execution stays disabled until you review it in the <a href="/risk" onClick={(e) => { e.preventDefault(); nav('/risk'); }}>Risk Center</a>.</div>}
       <ErrorLine e={shell.error} />

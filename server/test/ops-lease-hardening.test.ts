@@ -65,15 +65,19 @@ describe('engine lease hardening (additive to holdEngine)', () => {
   it('lastMonitorAt advances only after an error-free monitor pass; readiness fails while the monitor errors or is stale', async () => {
     (config as any).offline = false;
     const monitor = (e: typeof botStatus) => readiness(e).checks.find((c) => c.name === 'monitor');
+    // Controlled clock instead of a real wait (CodeRabbit PR #12): lastMonitorAt and readiness both read Date.now().
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(1_800_000_000_000);
+    try {
     await _test.hotLane();
     const ok = botStatus.lastMonitorAt; expect(ok).toBeGreaterThan(0); expect(monitor(botStatus)!.status).toBe('pass');
     vi.mocked(oms.monitorPositions).mockImplementationOnce(() => { throw new Error('boom'); });
-    await new Promise((r) => setTimeout(r, 5)); await _test.hotLane();
+    vi.setSystemTime(Date.now() + 5); await _test.hotLane();
     expect(botStatus.lastMonitorAt).toBe(ok); expect(botStatus.monitorFailing).toBe(true);
     expect(monitor(botStatus)).toMatchObject({ status: 'fail', detail: 'last position-monitor pass failed' });
     expect(readiness(botStatus).ready).toBe(false);
-    await _test.hotLane();
+    vi.setSystemTime(Date.now() + 5); await _test.hotLane();
     expect(botStatus.lastMonitorAt).toBeGreaterThan(ok); expect(botStatus.monitorFailing).toBe(false); expect(monitor(botStatus)!.status).toBe('pass');
+    } finally { vi.useRealTimers(); }
   });
 
   it('takeover runs the integrity checks; a failure releases the lease, stops the engine and records why', () => {

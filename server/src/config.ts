@@ -62,7 +62,8 @@ export const config = {
   scanIntervalMs: intEnv('MIA_SCAN_INTERVAL_MS', 60_000, 10_000, 3_600_000),
   tickerIntervalMs: intEnv('MIA_TICKER_INTERVAL_MS', 15_000, 5_000, 600_000),
   /** Engine lease TTL override for offline tests only (0 = default: three ticker intervals, min 45 s); ignored when online. */
-  engineLeaseTtlMs: intEnv('MIA_ENGINE_LEASE_TTL_MS', 0, 1_000, 3_600_000),
+  // 0 = use the default (3 ticker intervals, ≥ 45 s). An explicit '0' is accepted; nonzero values must be ≥ 1 s (CodeRabbit PR #12).
+  engineLeaseTtlMs: env.MIA_ENGINE_LEASE_TTL_MS?.trim() === '0' ? 0 : intEnv('MIA_ENGINE_LEASE_TTL_MS', 0, 1_000, 3_600_000),
   anthropicApiKey: env.ANTHROPIC_API_KEY ?? '',
   joeModel: env.MIA_JOE_MODEL ?? 'claude-opus-5-5',
   telegramBotToken: env.TELEGRAM_BOT_TOKEN ?? '',

@@ -1,5 +1,5 @@
 import { seedInstrument, seedBacktestFixture } from './helpers.js';
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { all, closeDb, openDb } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -40,18 +40,6 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     const live = await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'BOUNDED_LIVE', password: 'correct horse battery' } });
     expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/BOUNDED_LIVE blocked/);
     expect((await app.inject({ url: '/api/qa', headers: { cookie } })).json().liveAllowed).toBe(false);
-  });
-  it('shell carries what the status ribbon needs: server clock, live lock, policy limits, engine cadence', async () => {
-    const before = Date.now();
-    const s = (await app.inject({ url: '/api/shell', headers: { cookie } })).json();
-    expect(s.serverTime).toBeGreaterThanOrEqual(before);
-    expect(s.liveAllowed).toBe(false); expect(s.gates).toMatch(/live execution LOCKED/);
-    const { dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses } = DEFAULT_POLICY;
-    expect(s.riskLimits).toEqual({ dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses });
-    expect(s.account).toMatchObject({ weeklyPnlPct: 0, consecutiveLosses: 0, marksMissing: 0 });
-    expect(s.scanIntervalMs).toBeGreaterThan(0); expect(s.tickerIntervalMs).toBeGreaterThan(0);
-    expect(s.offline).toBe(true); expect(s.bot.running).toBe(false);
-    expect(s.dataHealth.stale).toBe(true); expect(s.dataHealth.tickersAt).toBe(0);
   });
   it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {
     const password = 'correct horse battery'; const id = STRATEGIES[0].id; const worker = WORKERS[0].id;
@@ -227,5 +215,28 @@ describe('HTTP hardening (auth gate, validation, error classes, step-up limits)'
     const r = await app.inject({ url: '/api/shell', headers: { cookie } });
     expect(r.headers['cache-control']).toBe('no-store');
     expect(String(r.headers['content-security-policy'])).toContain("frame-ancestors 'none'");
+  });
+});
+
+describe('shell status payload (independent setup)', () => {
+  let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
+  beforeAll(async () => {
+    closeDb(); openDb(':memory:'); failureGate.reset(); app = await buildApp();
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'correct horse battery' } });
+    cookie = String(r.headers['set-cookie']).split(';')[0];
+    expect((await app.inject({ method: 'POST', url: '/api/risk/policy', headers: { cookie, 'x-mia-csrf': '1' }, payload: { policy: DEFAULT_POLICY, password: 'correct horse battery' } })).statusCode).toBe(200);
+  });
+  afterAll(async () => { await app.close(); });
+  it('shell carries what the status ribbon needs: server clock, live lock, policy limits, engine cadence', async () => {
+    const before = Date.now();
+    const s = (await app.inject({ url: '/api/shell', headers: { cookie } })).json();
+    expect(s.serverTime).toBeGreaterThanOrEqual(before);
+    expect(s.liveAllowed).toBe(false); expect(s.gates).toMatch(/live execution LOCKED/);
+    const { dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses } = DEFAULT_POLICY;
+    expect(s.riskLimits).toEqual({ dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses });
+    expect(s.account).toMatchObject({ weeklyPnlPct: 0, consecutiveLosses: 0, marksMissing: 0 });
+    expect(s.scanIntervalMs).toBeGreaterThan(0); expect(s.tickerIntervalMs).toBeGreaterThan(0);
+    expect(s.offline).toBe(true); expect(s.bot.running).toBe(false);
+    expect(s.dataHealth.stale).toBe(true); expect(s.dataHealth.tickersAt).toBe(0);
   });
 });
