@@ -31,6 +31,25 @@ describe('HTTP API (auth, permissions, release gate)', () => {
   it('rejects state changes without CSRF header', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/emergency/pause', headers: { cookie } })).statusCode).toBe(403);
   });
+  it('keeps coverage and paper stress authenticated and validates the named display timezone', async () => {
+    for (const url of ['/api/markets/coverage', '/api/risk/stress']) {
+      expect((await app.inject({ url })).statusCode).toBe(401);
+    }
+    const update = (payload: object) => app.inject({ method: 'POST', url: '/api/calendar/tz', headers: H(), payload });
+    expect((await update({ timeZone: 'Mars/Colony' })).statusCode).toBe(400);
+    expect((await update({ timeZone: 'Asia/Manila', offsetMin: 0 })).statusCode).toBe(400);
+    expect((await update({ timeZone: 'Asia/Manila' })).statusCode).toBe(200);
+    const coverage = (await app.inject({ url: '/api/markets/coverage', headers: H() })).json();
+    expect(coverage.displayClock.timeZone).toBe('Asia/Manila');
+    expect(coverage.markets).toEqual(expect.arrayContaining([
+      expect.objectContaining({ market: 'U.S. equities', sources: [expect.objectContaining({ status: 'PENDING_CREDENTIALS' })] }),
+      expect.objectContaining({ market: 'Tokenized equities', sources: [] }),
+    ]));
+    expect((await app.inject({ url: '/api/risk/stress', headers: H() })).json()).toMatchObject({
+      account: 'paper-bot', scenarios: expect.arrayContaining([expect.objectContaining({ id: 'FLASH_CRASH' })]),
+    });
+    expect((await update({ offsetMin: 0 })).statusCode).toBe(200);
+  });
   it('policy acceptance and mode changes require step-up; PAPER requires policy; BOUNDED_LIVE is locked', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER', password: 'correct horse battery' } })).json().error).toMatch(/risk policy/);
     expect((await app.inject({ method: 'POST', url: '/api/risk/policy', headers: H(), payload: { policy: DEFAULT_POLICY } })).statusCode).toBe(403);

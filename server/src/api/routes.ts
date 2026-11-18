@@ -24,6 +24,7 @@ import { latencyReport } from '../core/latency.js';
 import { getControl, updateControl, displayMode } from '../core/mode.js';
 import { acceptPolicy, currentPolicy, DEFAULT_POLICY, policyHistory } from '../risk/policy.js';
 import { accountState, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio/ledger.js';
+import { portfolioStress } from '../portfolio/stress.js';
 import { correlation } from '../portfolio/correlation.js';
 import { calendar, calendarTimeZone, reconcile, setCalendarTimeZone, tzOffsetMin } from '../portfolio/calendar.js';
 import * as oms from '../exec/oms.js';
@@ -222,6 +223,7 @@ export async function routes(app: FastifyInstance) {
   });
 
   // ── risk center ──
+  app.get('/api/risk/stress', async () => portfolioStress());
   app.get('/api/risk', async () => {
     const acct = accountState(); const pos = openPositions();
     const corr = pos.map((a) => pos.map((b) => correlation(a.instrument, b.instrument)));

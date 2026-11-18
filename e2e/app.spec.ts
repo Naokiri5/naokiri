@@ -222,6 +222,27 @@ test('DITAS execution quality tab lists actual paper orders only', async () => {
   await expect(page.getByText(/Actual paper OMS records only/)).toBeVisible();
 });
 
+test('market coverage uses the saved IANA timezone and shows unsupported venues', async () => {
+  await page.goto('/settings');
+  await page.getByRole('textbox', { name: 'IANA timezone' }).fill('Asia/Manila');
+  await page.getByRole('button', { name: 'Save timezone' }).click();
+  await expect(page.getByRole('textbox', { name: 'IANA timezone' })).toHaveValue('Asia/Manila');
+  await page.goto('/discover');
+  await page.getByRole('tab', { name: 'Market coverage' }).click();
+  await expect(page.getByText(/Asia\/Manila/)).toBeVisible();
+  await expect(page.getByRole('row', { name: /U.S. equities/ })).toContainText('PENDING_CREDENTIALS');
+  await expect(page.getByRole('row', { name: /Tokenized equities/ })).toContainText('Unavailable');
+  await page.goto('/calendar');
+  await expect(page.getByText('Asia/Manila', { exact: true })).toBeVisible();
+});
+
+test('risk center shows research-only paper scenarios', async () => {
+  await page.goto('/risk');
+  await expect(page.getByText('Paper portfolio stress', { exact: true })).toBeVisible();
+  await expect(page.getByRole('row', { name: /Flash crash/ })).toContainText('NO EXPOSURE');
+  await expect(page.getByRole('row', { name: /USDT cash depeg/ })).toContainText('MODELED');
+});
+
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });
 
 test('mobile layout has no horizontal overflow', async ({ browser }) => {

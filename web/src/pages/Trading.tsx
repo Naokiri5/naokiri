@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter } from '../ui';
 
+import { PaperStress } from './PaperStress';
+
 export const StepUp = ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
   <input type="password" placeholder="Owner passphrase (step-up)" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="current-password" aria-label="Owner passphrase for step-up authentication" />;
 
@@ -127,6 +129,7 @@ export function Risk() {
         <Card title="Policy history" flush><table><tbody>{(data?.history ?? []).map((h: any) => <tr key={h.version}><td>v{h.version}</td><td className="faint">{fmt.time(h.created_at)}</td><td>{h.accepted_by}</td><td className="hint">risk {h.policy.riskPerTradePct}% · day {h.policy.dailyLossPct}% · DD {h.policy.drawdownHaltPct}%</td></tr>)}</tbody></table>{!data?.history.length && <Empty>No versions yet.</Empty>}</Card>
       </div>
     </div>
+    <div style={{ marginTop: 14 }}><PaperStress /></div>
   </Page>;
 }
 
@@ -168,12 +171,14 @@ function DecisionsList() {
 }
 
 export function Calendar() {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); const { data, error } = useApi(`/api/calendar?month=${month}`, { topics: ['position'] });
+  const [selectedMonth, setMonth] = useState<string | null>(null);
+  const { data, error } = useApi(selectedMonth ? `/api/calendar?month=${selectedMonth}` : '/api/calendar', { topics: ['position'] });
+  const month = selectedMonth ?? data?.month ?? new Date().toISOString().slice(0, 7);
   const [day, setDay] = useState<any>(null);
   const [y, m] = month.split('-').map(Number); const first = new Date(Date.UTC(y, m - 1, 1)); const lead = (first.getUTCDay() + 6) % 7; const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const byDate = new Map((data?.days ?? []).map((d: any) => [d.date, d]));
   const shift = (k: number) => { const d = new Date(Date.UTC(y, m - 1 + k, 1)); setMonth(d.toISOString().slice(0, 7)); };
-  return <Page title="Profit Calendar" sub={data?.definition} right={<><button onClick={() => shift(-1)}>‹</button><b className="mono">{month}</b><button onClick={() => shift(1)}>›</button><span className="hint">UTC{data?.tzOffsetMin ? `${data.tzOffsetMin > 0 ? '+' : ''}${data.tzOffsetMin / 60}` : ''}</span></>}>
+  return <Page title="Profit Calendar" sub={data?.definition} right={<><button onClick={() => shift(-1)}>‹</button><b className="mono">{month}</b><button onClick={() => shift(1)}>›</button><span className="hint">{data?.timeZone ?? `UTC${data?.tzOffsetMin ? `${data.tzOffsetMin > 0 ? '+' : ''}${data.tzOffsetMin / 60}` : ''}`}</span></>}>
     <ErrorLine e={error} />
     {data && <div className="grid g4" style={{ marginBottom: 14 }}><Stat k="Net realized" v={fmt.usd(data.summary.net)} tone={data.summary.net < 0 ? 'down' : 'up'} /><Stat k="Fees" v={fmt.usd(data.summary.fees)} /><Stat k="Trades" v={data.summary.trades} s={`${data.summary.greenDays} green / ${data.summary.redDays} red days`} /><Stat k="Best / worst day" v={<span style={{ fontSize: 15 }}>{data.summary.bestDay ? fmt.usd(data.summary.bestDay.net) : '—'} / {data.summary.worstDay ? fmt.usd(data.summary.worstDay.net) : '—'}</span>} /></div>}
     <Card><div className="cal">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => <div key={d} className="hint" style={{ textAlign: 'center' }}>{d}</div>)}
