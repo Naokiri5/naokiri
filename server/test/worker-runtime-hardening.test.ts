@@ -20,12 +20,14 @@ describe('worker runtime and evidence hardening', () => {
     const r = await runOne(slow, buildContext(candidate(inst.id, last)));
     expect(r).toMatchObject({ failed: 'DEADLINE' }); // used to return the late result
   });
-  it('C-01: without an order book the mandatory spread/impact checks abstain, so consensus is NO_QUORUM', async () => {
+  it('C-01: an abstaining mandatory check (regime unknown) means NO_QUORUM, naming the check', async () => {
     const { inst, last } = seedInstrument('ADAUSDT', { seed: 5 });
-    market.deep.get(inst.id)!.book = null;
-    const rec = await runConsensus(buildContext(candidate(inst.id, last)));
-    expect(['NO_QUORUM', 'VETOED']).toContain(rec.state);
-    if (rec.state === 'NO_QUORUM') expect(rec.reason_codes.join()).toMatch(/mandatory check/);
+    const c = candidate(inst.id, last); c.regime = 'UNKNOWN';
+    const rec = await runConsensus(buildContext(c));
+    if (rec.state !== 'VETOED') { // a safety veto would take precedence; the seeded asset is verified, so expect NO_QUORUM
+      expect(rec.state).toBe('NO_QUORUM');
+      expect(rec.reason_codes.join()).toMatch(/mandatory check W-REG-\d+/);
+    } else throw new Error(`unexpected veto: ${rec.reason_codes.join('; ')}`);
   });
   it('C-06: a book that cannot absorb the intended size is adverse evidence with a veto, not "no data"', () => {
     const w = byName('Impact at intended size');

@@ -19,9 +19,11 @@ describe('integrity evidence', () => {
     expect(verifyMemory([ev], [], [], [])).toMatchObject({ ok: false });
     expect(verifyMemory([{ ...ev, snapshot_id: null, hash: hashEvent({ ...ev, snapshot_id: null }) }], [], [], []).ok).toBe(true);
   });
-  it('J-02: with no paper fills and no audit entries, G05/G06 are PENDING, not PASS', () => {
+  it('J-02: with no paper fills and no audit entries, G05/G06 are PENDING, not PASS', async () => {
     const g = Object.fromEntries(releaseGates().gates.map((x) => [x.id, x.status]));
     expect(g.G05).toBe('PENDING');
-    expect(['PENDING', 'PASS']).toContain(g.G06); // freshDb may already hold setup audit rows
+    const { get } = await import('../src/db/db.js');
+    const auditRows = get<{ n: number }>('SELECT COUNT(*) n FROM audit_log')!.n;
+    expect(g.G06).toBe(auditRows === 0 ? 'PENDING' : 'PASS');
   });
 });

@@ -61,9 +61,15 @@ describe('market data hardening (Squad B)', () => {
   });
 
   it('B-09: floorToStep never rounds a quantity up', () => {
-    expect(floorToStep(0.0029999999999, 0.001)).toBeLessThanOrEqual(0.0029999999999);
+    // Never more than float noise above the input (≤ 1e-6 of a lot): a real overshoot is stepped back down, while noise
+    // just below a lot multiple keeps the lot (R-04, independent review, refines B-09).
+    expect(floorToStep(0.0029999999999, 0.001)).toBeLessThanOrEqual(0.0029999999999 + 0.001 * 1e-6);
+    expect(floorToStep(0.0025, 0.001)).toBe(0.002);
     expect(floorToStep(0.003, 0.001)).toBe(0.003);
     expect(floorToStep(1.23456, 0.01)).toBe(1.23);
     expect(floorToStep(5, 0)).toBe(5);
+    // R-04: float noise just below a lot multiple must not lose a whole lot.
+    expect(floorToStep(1 - 0.9, 0.1)).toBe(0.1);
+    expect(floorToStep(0.7 * 0.1, 0.01)).toBe(0.07);
   });
 });

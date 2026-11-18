@@ -81,7 +81,14 @@ export function aggregate(packets: EvidencePacket[], applicableDomains: Set<stri
     const shadowVoting = own.filter((p) => p.stance !== 'ABSTAIN' && primary.get(p.dependency_group) !== dom);
     if (shadowVoting.length) {
       const shadow = shadowVoting.reduce((acc, p) => acc + (p.stance === 'SUPPORT' ? 1 : -1), 0) / shadowVoting.length;
-      if (shadow < 0) { wo += weight * -shadow; if (score == null) score = shadow; }
+      // R-02 (independent review): count this domain's adverse evidence ONCE (max of its own vote and its shadow readings)
+      // and keep the domain's support + opposition within its weight, so weighted opposition stays in [0, 1].
+      if (shadow < 0) {
+        const counted = score != null ? Math.max(0, -score) : 0;
+        const room = Math.max(0, 1 - Math.max(0, score ?? 0) - counted);
+        wo += weight * Math.min(room, Math.max(0, -shadow - counted));
+        if (score == null) score = shadow;
+      }
     }
     domains.push({ domain: dom, groups: gm.size, support: s, oppose: o, abstain: a, score, weight, required: REQUIRED_DOMAINS.includes(dom as any), sharedGroups, constantRule });
   }

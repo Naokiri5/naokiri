@@ -35,4 +35,8 @@ describe('reconcile integrity (E-01)', () => {
     expect(reconcile().ok).toBe(true);
     expect(get<{ n: number }>('SELECT COUNT(*) n FROM ledger_entries')!.n).toBeGreaterThan(3);
   });
+  it('R-01: deleting an open entry\'s postings is not reconciled', () => {
+    run("DELETE FROM ledger_entries WHERE kind IN ('BUY','FEE')");
+    const r = reconcile(); expect(r.ok).toBe(false); expect(r.unpostedOrders).toBe(1);
+  });
 });

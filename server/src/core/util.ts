@@ -9,7 +9,7 @@ export const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.ma
 export function floorToStep(q: number, step: number) {
   if (!(step > 0)) return q;
   let r = Number((Math.floor(q / step + 1e-9) * step).toFixed(12));
-  if (r > q) r = Number((r - step).toFixed(12));
+  if (r - q > step * 1e-6) r = Number((r - step).toFixed(12)); // R-04: only a real overshoot, not float noise below a lot
   return Math.max(0, r);
 }
 /** True when an ISO timestamp is at or before `nowTs`, OR missing/unparseable (fail closed: J-04, 100-agent audit). */

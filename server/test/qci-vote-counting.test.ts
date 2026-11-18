@@ -82,6 +82,17 @@ describe('100-agent audit, Squad D findings', () => {
     expect(a.weightedOpposition).toBeGreaterThan(0);   // was 0: four adverse liquidity readings vanished
     expect(by.liquidity.score).toBe(-1);                 // shown as liquidity's (adverse) reading
     expect(a.groups).toBe(1);                            // still one vote for the group
+    // R-02: opposition is bounded and the same adverse group is not double counted beyond each domain's weight.
+    const both = aggregate([
+      pkt({ evidence_domain: 'flow', dependency_group: 'book', stance: 'OPPOSE' }),
+      pkt({ evidence_domain: 'liquidity', dependency_group: 'book', stance: 'OPPOSE' }),
+      ...['trend', 'momentum', 'volatility', 'structure', 'regime', 'news', 'risk', 'execution'].flatMap((d) => [
+        pkt({ evidence_domain: d, dependency_group: `own.${d}`, stance: 'OPPOSE' }),
+        pkt({ evidence_domain: d, dependency_group: 'book', stance: 'OPPOSE' }),
+      ]),
+    ], all);
+    expect(both.weightedOpposition).toBeLessThanOrEqual(1);
+    expect(both.weightedOpposition + both.weightedSupport).toBeLessThanOrEqual(1 + 1e-12);
     // Supportive readings in a credited-elsewhere group are NOT double counted.
     const b = aggregate([
       pkt({ evidence_domain: 'flow', dependency_group: 'book', stance: 'SUPPORT' }),
