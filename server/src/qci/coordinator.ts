@@ -113,6 +113,9 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
   const abstaining = packets.length - responding;
   const vetoes = packets.filter((p) => p.veto).map((p) => ({ worker_id: p.worker_id, reasons: p.reason_codes }));
   const missingRequired = agg.domains.filter((d) => d.required && (d.support + d.oppose) === 0).map((d) => d.domain);
+  // C-01 (100-agent audit): `mandatory` workers (spread, impact, cost, safety, data quality, regime fit) must each give a
+  // non-abstaining answer; an abstaining, failed or quarantined mandatory check means no quorum.
+  const missingMandatory = WORKERS.filter((w) => w.mandatory && applicable.has(w.domain) && !packets.some((p) => p.worker_id === w.id && p.stance !== 'ABSTAIN')).map((w) => `${w.id} ${w.name}`);
   const missing = [...missingRequired.map((d) => `required domain without evidence: ${d}`), ...agg.domains.filter((d) => !d.required && d.score == null).map((d) => `no evidence: ${d.domain}`)];
   const reasons: string[] = [];
   let state: ConsensusState;
@@ -124,8 +127,9 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     state = 'VETOED';
     vetoes.forEach((v) => reasons.push(`VETO ${v.worker_id}: ${v.reasons.join('; ')}`));
     criticalChallenges.forEach((c) => reasons.push(`CRITICAL ${c.reviewer}: ${c.findings.join('; ')}`));
-  } else if (respRatio < QCI_POLICY.minResponseRatio || missingRequired.length) {
+  } else if (respRatio < QCI_POLICY.minResponseRatio || missingRequired.length || missingMandatory.length) {
     state = 'NO_QUORUM';
+    missingMandatory.forEach((w) => reasons.push(`mandatory check ${w} gave no answer`));
     if (respRatio < QCI_POLICY.minResponseRatio) reasons.push(`data-driven response ratio ${(respRatio * 100).toFixed(0)}% < ${QCI_POLICY.minResponseRatio * 100}%`);
     missingRequired.forEach((d) => reasons.push(`required domain ${d} has no non-abstaining evidence`));
   } else if (agg.weightedSupport >= QCI_POLICY.supportThreshold && agg.weightedOpposition <= QCI_POLICY.maxOpposition) {
