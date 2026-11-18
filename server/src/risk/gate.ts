@@ -49,7 +49,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const incident = openIncidentFor(p.instrumentId);
   if (incident) deny.push(`PROTECTION_INCIDENT_OPEN:${incident.id}`);
   if (!pol.approvedMarkets.includes(inst.market as any)) deny.push(`MARKET_NOT_APPROVED:${inst.market}`);
-  const safety = assessCexAsset(p.instrumentId); ev.safety = safety.status;
+  const safety = assessCexAsset(p.instrumentId, nowTs); ev.safety = safety.status;
   if (!safety.eligibleForAutomation) deny.push(`ASSET_INELIGIBLE:${safety.status}`);
   const q = assessQuality(p.instrumentId, '1h', nowTs); ev.dataQuality = q.status;
   if (q.status === 'FAIL') deny.push(`DATA_QUALITY_FAIL:${q.issues.join('|')}`);

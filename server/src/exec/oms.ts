@@ -25,6 +25,13 @@ export const VENUE = 'binance-paper';
 const feeRate = () => exitPolicy().feeRate;
 
 export class OmsError extends Error {}
+/**
+ * Run journal/autopsy/bus callbacks AFTER a commit. Each is isolated: the fills are already committed, so a failing
+ * notification must never be reported as a failed exit or surface as an error to the caller (MA-17).
+ */
+function runAfterCommit(after: Array<() => void>) {
+  for (const fn of after) { try { fn(); } catch (e: any) { console.error(`[oms] post-commit callback failed (state is committed): ${String(e?.message ?? e).slice(0, 200)}`); } }
+}
 
 function insertOrder(o: { clientOrderId: string; instrument: string; side: 'BUY' | 'SELL'; type: string; qty: number; limit?: number | null; stop?: number | null; status: string; purpose: string; positionId?: string | null; decisionId?: string | null; reject?: string | null; at?: number }) {
   const id = uid('ord'); const t = o.at ?? Date.now(); // `at`: same timestamp as the fill/ledger rows written with it
@@ -108,9 +115,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   const ctl = getControl();
   if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
   if (actor === 'bot' && ctl.mode !== 'PAPER') return { ok: false, reason: `mode ${ctl.mode} does not permit automatic paper entries` };
-  if (Date.parse(report.consensus.expiresAt) <= Date.now()) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data');
+  if (Date.parse(report.consensus.expiresAt) <= nowTs) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data');
   // Last-moment revalidation: fresh risk evaluation on current data
-  const fresh = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId });
+  const fresh = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId }, nowTs);
   const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');
   if (!allowed || !fresh.sizing) return reject(`LAST_MOMENT_RISK_${fresh.decision}: ${fresh.reasonCodes.join('; ')}`);
   const qty = fresh.sizing.qty;
@@ -137,18 +144,18 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   crashpoint('entry.preTx');
   try { orderId = tx(() => {
     assertWriteFence();
-    const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id });
-    run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, Date.now(), oid);
+    const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
+    run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);
     crashpoint('entry.order');
-    run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, fill.price, fee, 'TAKER', Date.now());
+    run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, fill.price, fee, 'TAKER', nowTs);
     crashpoint('entry.fill');
     run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,max_hold_ms,decision_id,planned_risk) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      posId, PAPER_ACCOUNT, s.instrumentId, s.market, 'LONG', strat, qty, fill.price, s.stopLoss, s.stopLoss, J({ qtyInit: qty, trailAfterR, targets: st.targets, lastPx: fill.price }), 'OPEN', Date.now(), -fee, fee, maxHoldMs, s.id, qty * (fill.price - s.stopLoss * (1 - pol.stopFillBufferPct / 100)) + fee);
+      posId, PAPER_ACCOUNT, s.instrumentId, s.market, 'LONG', strat, qty, fill.price, s.stopLoss, s.stopLoss, J({ qtyInit: qty, trailAfterR, targets: st.targets, lastPx: fill.price }), 'OPEN', nowTs, -fee, fee, maxHoldMs, s.id, qty * (fill.price - s.stopLoss * (1 - pol.stopFillBufferPct / 100)) + fee);
     crashpoint('entry.position');
     // Protective stop: paper venue has no exchange-native stop; OMS monitors it. Recorded explicitly.
-    insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: 'STOP_MARKET (OMS-monitored, paper)', qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId });
+    insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: 'STOP_MARKET (OMS-monitored, paper)', qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId, at: nowTs });
     crashpoint('entry.stop');
-    ledger(PAPER_ACCOUNT, 'BUY', -fill.price * qty, oid, `${s.asset} entry`); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee');
+    ledger(PAPER_ACCOUNT, 'BUY', -fill.price * qty, oid, `${s.asset} entry`, nowTs); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee', nowTs);
     crashpoint('entry.precommit');
     return oid;
   }); } catch (e: any) {
@@ -257,7 +264,7 @@ export function monitorPositions(nowTs = Date.now()) {
         crashpoint('monitor.precommit');
       });
       crashpoint('monitor.committed');
-      after.forEach((fn) => fn());
+      runAfterCommit(after);
       // Recovery needs more than a fresh ticker: a fresh book must be able to absorb what is still open.
       const left = get<{ qty: number; status: string }>('SELECT qty, status FROM positions WHERE id=?', p.id);
       const book = market.deep.get(p.instrument)?.book ?? null;
@@ -325,7 +332,7 @@ export function executeExit(positionId: string, qty: number, reason: string, fr 
   crashpoint('exit.preTx');
   const r = tx(() => { const e = applyExit(positionId, qty, reason, fr, nowTs, after); crashpoint('exit.precommit'); return e; });
   crashpoint('exit.committed');
-  if (r) after.forEach((fn) => fn());
+  if (r) runAfterCommit(after);
   else { const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId); if (p?.status === 'OPEN') flagUnprotected(p, 'no fresh executable price for exit'); }
   return r;
 }
@@ -357,11 +364,11 @@ export function cancelPendingEntries(actor: string) {
   audit(actor, 'orders.cancelPendingEntries', { count: Number(r.changes) }); journal('INTERVENTION', `${r.changes} pending entries cancelled by ${actor}`);
   return { state: 'CONFIRMED', cancelled: Number(r.changes) };
 }
-export function protectPositions(log = false) {
+export function protectPositions(log = false, nowTs = Date.now()) {
   const res = openPositions().map((p) => {
     const stop = get<any>("SELECT * FROM orders WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", p.id);
     const px = market.price(p.instrument);
-    const now = Date.now(); const book = market.deep.get(p.instrument)?.book ?? null;
+    const now = nowTs; const book = market.deep.get(p.instrument)?.book ?? null;
     const stopOk = !!stop && Math.abs(stop.qty - p.qty) < 1e-9 && stop.stop_price === p.stop_price;
     const priceOk = !!px && quoteAgeOk(px.ts, now);
     // Same executability rule as applyExit: a stop is only "protected" if a fresh book can absorb the full exit.
