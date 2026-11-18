@@ -58,3 +58,23 @@ describe('post-commit callbacks are isolated (MA-17)', () => {
     } finally { bus.off('position', boom); }
   });
 });
+
+describe('duplicate instrument position under a concurrent writer (MA-20)', () => {
+  it('a position opened between the risk check and the entry transaction blocks the second entry', async () => {
+    const { setCrashHook } = await import('../src/exec/crashpoint.js');
+    const { run } = await import('../src/db/db.js');
+    freshDb(); market.reset(); const { inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    // Simulate another writer committing a position on the same instrument right after this entry passed the gate.
+    setCrashHook((p) => {
+      if (p !== 'entry.preTx') return;
+      setCrashHook(null);
+      run("INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,max_hold_ms,decision_id,planned_risk) VALUES ('pos_other',?,?,'crypto','LONG','trend_pullback',0.1,?,?,?,'{}','OPEN',?,0,0,0,NULL,1)", PAPER_ACCOUNT, id, last, last * 0.97, last * 0.97, Date.now());
+    });
+    try {
+      const r = submitEntry(report(id, last, Date.now() + 60_000), 'bot');
+      expect(r.ok).toBe(false); expect(r.reason).toMatch(/DUPLICATE_INSTRUMENT_POSITION/);
+      expect(openPositions().filter((p) => p.instrument === id)).toHaveLength(1);
+    } finally { setCrashHook(null); }
+  });
+});
