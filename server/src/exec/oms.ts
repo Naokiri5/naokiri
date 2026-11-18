@@ -11,6 +11,7 @@ import { bus } from '../core/bus.js';
 import { audit } from '../core/audit.js';
 import { getControl, updateControl } from '../core/mode.js';
 import { stepExit, newExitState, type ExitState } from '../lab/exits.js';
+import { STRATEGIES } from '../lab/strategies.js';
 import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
@@ -102,6 +103,8 @@ function simulateExitFill(instrumentId: string, qty: number, bufferPct: number, 
 export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowTs = Date.now()): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
   const t0 = performance.now();
   const s = report;
+  if (actor !== 'bot' && actor !== 'owner') return { ok: false, reason: 'ENTRY_ACTOR_UNSUPPORTED' };
+  if (!Number.isFinite(Date.parse(s.consensus?.expiresAt))) return { ok: false, reason: 'CONSENSUS_EXPIRY_INVALID' };
   const coid = `entry-${report.candidateId}`;
   const existing = get<any>('SELECT * FROM orders WHERE client_order_id=?', coid);
   if (existing && (existing.account !== PAPER_ACCOUNT || existing.venue !== VENUE)) {
@@ -112,11 +115,19 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
        existing.instrument !== s.instrumentId || existing.decision_id !== s.id)) {
     return { ok: false, reason: 'PENDING_APPROVAL_MISMATCH' };
   }
+  if (actor === 'owner' && (!existing || s.decision !== 'APPROVED_FOR_USER_CONFIRMATION')) {
+    return { ok: false, reason: 'PENDING_APPROVAL_REQUIRED' };
+  }
   if (existing && existing.status !== 'PENDING_APPROVAL') return { ok: false, reason: `DUPLICATE: order ${existing.id} already ${existing.status}` };
   const ctl = getControl();
   if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
   if (actor === 'bot' && ctl.mode !== 'PAPER') return { ok: false, reason: `mode ${ctl.mode} does not permit automatic paper entries` };
   if (Date.parse(report.consensus.expiresAt) <= Date.now()) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data');
+  const runtimeStrategy = STRATEGIES.find(strategy => strategy.id === s.strategy.id);
+  const enrollment = get<{ version: string }>('SELECT version FROM strategies WHERE id=?', s.strategy.id);
+  if (!runtimeStrategy || enrollment?.version !== s.strategy.version || runtimeStrategy.version !== s.strategy.version) {
+    return reject('STRATEGY_VERSION_MISMATCH: re-evaluate against the enrolled strategy');
+  }
   // Last-moment revalidation: fresh risk evaluation on current data
   const fresh = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId });
   const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');
@@ -193,7 +204,11 @@ export function decideApproval(orderId: string, approve: boolean) {
   if (!approve) { run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=?", Date.now(), orderId); journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId); return { ok: true }; }
   const rep = get<any>('SELECT report FROM decisions WHERE id=?', o.decision_id);
   if (!rep) throw new OmsError('decision record missing');
-  return submitEntry(P(rep.report), 'owner');
+  const decision = P<DecisionReport>(rep.report);
+  if (decision?.id !== o.decision_id || decision.instrumentId !== o.instrument || `entry-${decision.candidateId}` !== o.client_order_id) {
+    throw new OmsError('pending order does not match its decision');
+  }
+  return submitEntry(decision, 'owner');
 }
 export function expireApprovals() {
   for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.account=? AND o.venue=? AND o.purpose='ENTRY' AND o.status='PENDING_APPROVAL'", PAPER_ACCOUNT, VENUE)) {

@@ -52,6 +52,17 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     updateControl('owner', { mode: 'APPROVAL' });
     expect(submitEntry(report(id, last), 'bot').ok).toBe(false);
   });
+  it('withholds entry without the matching approval, a valid expiry and an enrolled strategy version', () => {
+    const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    expect(submitEntry(rep, 'owner')).toMatchObject({ ok: false, reason: 'PENDING_APPROVAL_REQUIRED' });
+    const invalid = report(id, last);
+    invalid.consensus.expiresAt = 'invalid';
+    expect(submitEntry(invalid, 'bot')).toMatchObject({ ok: false, reason: 'CONSENSUS_EXPIRY_INVALID' });
+    expect(submitEntry(report(id, last, { strategy: { id: 'trend_pullback', version: '0.0.1' } }), 'bot').reason)
+      .toMatch(/STRATEGY_VERSION_MISMATCH/);
+    expect(openPositions()).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
+  });
   it('approval workflow: queued → owner approves → filled', () => {
     updateControl('owner', { mode: 'APPROVAL' });
     const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
