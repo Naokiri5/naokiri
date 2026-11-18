@@ -9,6 +9,8 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | [`operations/SETUP_GUIDE_BEGINNER.md`](operations/SETUP_GUIDE_BEGINNER.md) | set up MIA step by step |
 | [`operations/TAILSCALE_FUNNEL.md`](operations/TAILSCALE_FUNNEL.md) | give MIA a free HTTPS address (e.g. for your phone or Privy) with Tailscale Funnel |
 | [`operations/PRIVY_SIGN_IN.md`](operations/PRIVY_SIGN_IN.md) | turn on Privy sign-in for the owner (wallet actions stay locked) |
+| [`research/INTEGRATIONS_OVERVIEW.md`](research/INTEGRATIONS_OVERVIEW.md) | see every integration (Privy, CCXT, Vike, DefiLlama, Aave, NautilusTrader, Freqtrade), its status, settings, owner actions and what stays locked |
+| [`research/PYTHON_RESEARCH_LABS.md`](research/PYTHON_RESEARCH_LABS.md) | set up the isolated NautilusTrader and Freqtrade research labs (dry-run/simulated only) |
 | [`research/DEFI_RESEARCH.md`](research/DEFI_RESEARCH.md) | read DefiLlama yields/TVL and Aave V3 flash-loan facts (read-only, never executable) |
 | [`research/CCXT_RESEARCH.md`](research/CCXT_RESEARCH.md) | use CCXT for read-only exchange research (keyless, GET-only, optional sandbox) |
 | [`research/VIKE_INTEGRATION.md`](research/VIKE_INTEGRATION.md) | turn on Vike on-chain research (research only) and see how Live stays locked |
