@@ -46,8 +46,14 @@ describe('streaming books wired into the market fabric', () => {
 
     // Same symbol set: the existing connection is kept, not restarted.
     expect(syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot })).toBe(h);
-    // A fresh stream book means REST does not overwrite it (offline=false but REST would fail anyway: book unchanged).
-    await refreshBooks([inst.id]);
+    // A fresh stream book means REST is not even asked: stub fetch so no outbound request can happen, and assert none did.
+    const realFetch = globalThis.fetch; let restCalls = 0;
+    globalThis.fetch = (async () => { restCalls++; throw new Error('network disabled in test'); }) as typeof fetch;
+    try {
+      expect(streamFresh(inst.id)).toBe(true);
+      await refreshBooks([inst.id]);
+    } finally { globalThis.fetch = realFetch; }
+    expect(restCalls).toBe(0);
     expect(market.deep.get(inst.id)!.book!.lastUpdateId).toBe(52);
 
     stopDepthStreams();

@@ -22,16 +22,23 @@ const reportPath = join(qaDir, 'test-results.json'); const outcomePath = join(qa
 rmSync(outcomePath, { force: true }); rmSync(reportPath, { force: true });
 
 const vitest = join(dirname(createRequire(join(serverDir, 'package.json')).resolve('vitest/package.json')), 'vitest.mjs'); // bin is not an exported subpath
+const git = (...a) => { const g = spawnSync('git', a, { cwd: serverDir, encoding: 'utf8' }); return g.status === 0 ? g.stdout.trim() : null; };
+/** Source identity: commit + exact working-tree state. Recorded BEFORE and AFTER the run (CodeRabbit PR #18): a tree
+ *  that was modified while tests ran and restored before they finished must not be recorded as a clean run. */
+const identity = () => ({ head: git('rev-parse', 'HEAD'), status: git('status', '--porcelain') });
+const before = identity();
 const startedAt = Date.now();
 const r = spawnSync(process.execPath, [vitest, 'run', '--reporter=default', '--reporter=json', `--outputFile.json=${reportPath}`, ...process.argv.slice(2)], {
   cwd: serverDir, stdio: 'inherit', env: { ...process.env, NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' ') },
 });
 const exitCode = r.status ?? 1;
-const git = (...a) => { const g = spawnSync('git', a, { cwd: serverDir, encoding: 'utf8' }); return g.status === 0 ? g.stdout.trim() : null; };
+const after = identity();
 const outcome = { exitCode, signal: r.signal ?? null, startedAt, finishedAt: Date.now(),
   reportSha256: existsSync(reportPath) ? createHash('sha256').update(readFileSync(reportPath)).digest('hex') : null,
   // Evidence is bound to the exact commit and a clean tree (blueprint Q-01); gates reject any other build.
-  commit: git('rev-parse', 'HEAD'), dirty: (() => { const st = git('status', '--porcelain'); return st === null ? null : st.length > 0; })(),
+  // dirty = unknown (null) without git; otherwise true unless the tree was clean AND identical before and after the run.
+  commit: before.head === after.head ? after.head : null,
+  dirty: before.status === null || after.status === null ? null : before.status.length > 0 || after.status.length > 0 || before.status !== after.status || before.head !== after.head,
   node: process.version, invocation: ['vitest', 'run', ...process.argv.slice(2)] };
 writeFileSync(`${outcomePath}.partial`, JSON.stringify(outcome, null, 2) + '\n'); renameSync(`${outcomePath}.partial`, outcomePath);
 process.exit(exitCode);

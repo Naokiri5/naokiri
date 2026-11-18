@@ -14,8 +14,9 @@ import { run, get, J } from '../src/db/db.js';
  * MA-01 / MA-02 / MA-16 (master audit 2026-11-18): an invalid STORED risk policy must deny new entries but must never
  * block, or silently corrupt, the exit of an existing paper position.
  */
+let seq = 0;
 const report = (id: string, last: number): any => {
-  const cid = `cand_${Math.random().toString(36).slice(2)}`;
+  const cid = `cand_${++seq}`; // deterministic ids (CodeRabbit PR #18); expiry below is relative to the same clock submitEntry uses
   return { id: `dec_${cid}`, candidateId: cid, traceId: 'tr', asset: id.split(':')[2], instrumentId: id, market: 'crypto', venue: 'binance', strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',
     entryRef: last, stopLoss: last * 0.97, takeProfit: [{ price: last * 1.045, fraction: 0.5, r: 1.5 }, { price: last * 1.09, fraction: 0.5, r: 3 }],
     consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 0.7, opposition: 0.1, expiresAt: new Date(Date.now() + 60_000).toISOString() },

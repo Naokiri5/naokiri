@@ -33,8 +33,8 @@ describe.skipIf(!canSpawn)('write fence across two real processes (blueprint L-0
     const a = proc('stale-writer-process.ts', dir); kids.push(a.child);
     expect(await until(() => a.lines.some((l) => l.ready), 20_000)).toBe(true);
     expect(a.lines[0].leader).toBe(true);
-    // Positive control: while A still holds a live lease, its fenced write commits.
-    a.child.stdin!.write('write\n');
+    // Positive control: while A holds a live lease (renewed right before the write), its fenced write commits.
+    a.child.stdin!.write('renew-write\n');
     expect(await until(() => a.lines.some((l) => 'wrote' in l), 10_000)).toBe(true);
     expect(a.lines.find((l) => 'wrote' in l).wrote).toBe(true);
     // A stops renewing (paused). B starts the normal engine loop and takes over once A's lease expires.

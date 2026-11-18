@@ -93,7 +93,7 @@ Four read-only reviews ran in parallel: security, trading/OMS risk, QCI with a d
 - O-01: the monitor compare-and-set includes mfe and mae, with `changes()===1`.
 - No double T1 or stop exit is possible: a deterministic exit id with a unique `client_order_id` inside an IMMEDIATE transaction (`crash.oms.test.ts`).
 - No fills from a ticker fallback (`oms.ts:295`).
-- Stale, future-dated or non-finite books and marks fail closed. NaN sizing is denied. A zero stop distance is rejected.
+- Books and marks whose **timestamp** is stale, future-dated or non-finite fail closed. NaN sizing is denied. A zero stop distance is rejected. Note: a stream book carries the local receive time, so a delayed provider event could look fresh. This was closed separately by MA-18, which does not publish events more than 5 s behind the provider clock.
 - SEC-13: a setup code is required for remote clients that carry headers; MA-04 remains open.
 - `trustProxy` is off. Sessions use random tokens stored as hashes with server-side expiry. Cookies are HttpOnly and SameSite=Strict, and CSRF needs a custom header.
 - CI uses `permissions: contents: read`, `npm ci` and no `pull_request_target`.

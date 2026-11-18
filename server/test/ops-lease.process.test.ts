@@ -37,11 +37,12 @@ describe.skipIf(!canSpawn)('engine lease across two real processes', () => {
     expect(await until(() => b.s.lines.length > 0, 15_000)).toBe(true); // B is up and made its first attempt
     for (let i = 0; i < 40; i++) { await sleep(50); expect([a, b].filter((p) => p.leader()).length).toBe(1); }
     expect(b.leader()).toBe(false); expect(b.s.lines.at(-1)!.role).toBe('STANDBY');
-    a.child.kill('SIGKILL');
-    // Anchor the takeover to A's persisted lease expiry, not to wall-clock sampling (CodeRabbit PR #12). B cannot take a
-    // live lease, so right after the kill the row is still A's.
+    // Anchor the takeover to A's persisted lease, not to wall-clock sampling (CodeRabbit PR #12). Read it BEFORE the kill
+    // (CodeRabbit PR #18): if the test paused past the TTL after the kill, B could already hold the row. A may renew once
+    // more before dying; that only moves the real expiry later, so the ordering assertion below stays valid.
     const leaseRow = () => { const d = new DatabaseSync(join(dir, 'mia.db'), { readOnly: true }); try { return d.prepare("SELECT holder, acquired_at, expires_at FROM runtime_leases WHERE name='engine'").get() as { holder: string; acquired_at: number; expires_at: number }; } finally { d.close(); } };
     const aLease = leaseRow();
+    a.child.kill('SIGKILL');
     expect(await until(b.leader, 6_000)).toBe(true); // polling deadline is only a failure bound
     const bLease = leaseRow();
     expect(bLease.holder).not.toBe(aLease.holder);

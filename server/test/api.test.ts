@@ -1,5 +1,5 @@
 import { seedInstrument, seedBacktestFixture } from './helpers.js';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll , vi } from 'vitest';
 import { all, closeDb, openDb } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -231,9 +231,10 @@ describe('shell status payload (independent setup)', () => {
   });
   afterAll(async () => { await app.close(); });
   it('shell carries what the status ribbon needs: server clock, live lock, policy limits, engine cadence', async () => {
-    const before = Date.now();
-    const s = (await app.inject({ url: '/api/shell', headers: { cookie } })).json();
-    expect(s.serverTime).toBeGreaterThanOrEqual(before);
+    // Fixed clock (CodeRabbit PR #18): a wall clock moving backwards between readings must not fail a valid response.
+    const fixed = Date.now() + 1_000; const clock = vi.spyOn(Date, 'now').mockReturnValue(fixed);
+    let s: any; try { s = (await app.inject({ url: '/api/shell', headers: { cookie } })).json(); } finally { clock.mockRestore(); }
+    expect(s.serverTime).toBe(fixed);
     expect(s.liveAllowed).toBe(false); expect(s.gates).toMatch(/live execution LOCKED/);
     const { dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses } = DEFAULT_POLICY;
     expect(s.riskLimits).toEqual({ dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses });

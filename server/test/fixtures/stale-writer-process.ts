@@ -15,7 +15,11 @@ botStatus.running = true;
 const leader = _test.holdEngine();
 process.stdout.write(JSON.stringify({ id: botStatus.instanceId, ready: true, leader }) + '\n');
 createInterface({ input: process.stdin }).on('line', (l) => {
-  if (l.trim() !== 'write') return;
+  const cmd = l.trim();
+  if (cmd !== 'write' && cmd !== 'renew-write') return;
+  // Positive control only (CodeRabbit PR #18): renew the lease immediately before the write, so a slow parent cannot let
+  // the 1.5 s lease lapse before the control runs. The stale write ('write') never renews.
+  if (cmd === 'renew-write' && !_test.holdEngine()) { process.stdout.write(JSON.stringify({ wrote: false, error: 'RenewFailed' }) + '\n'); return; }
   try {
     withWriteFence(ENGINE_LEASE, botStatus.instanceId, () => tx(() => {
       assertWriteFence();

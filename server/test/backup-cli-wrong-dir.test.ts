@@ -14,8 +14,9 @@ describe('backup CLI refuses a data directory without a database (MA-09)', () =>
   it('`backup create` exits non-zero and creates no database or backup', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mia-nodb-'));
     try {
-      const tsx = resolve(__dirname, '..', '..', 'node_modules', '.bin', 'tsx');
-      const r = spawnSync(tsx, ['src/ops/backup-cli.ts', 'create'], { cwd: resolve(__dirname, '..'), encoding: 'utf8', env: { ...process.env, MIA_DATA_DIR: dir, MIA_BACKUP_KEY: '' }, timeout: 60_000 });
+      // Node itself with the tsx loader (CodeRabbit PR #18): node_modules/.bin/tsx is a shell script that spawnSync cannot
+      // run on native Windows.
+      const r = spawnSync(process.execPath, ['--import', 'tsx', 'src/ops/backup-cli.ts', 'create'], { cwd: resolve(__dirname, '..'), encoding: 'utf8', env: { ...process.env, MIA_DATA_DIR: dir, MIA_BACKUP_KEY: '' }, timeout: 60_000 });
       expect(r.status).toBe(1);
       expect(r.stderr).toMatch(/no MIA database/);
       expect(existsSync(join(dir, 'mia.db'))).toBe(false);

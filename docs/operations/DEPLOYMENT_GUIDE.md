@@ -46,7 +46,7 @@ Running the server unattended enables nothing live. It keeps scanning the market
   - Failures raise a WARNING at most hourly.
 - **Manual (safe while running):** `npm run backup -- create`, `npm run backup -- list`, `npm run backup -- verify <file>`.
   - On a systemd install, run it **as the service user with the service's settings**, or it reads a different (or no) database:
-    `sudo -u mia sh -c 'set -a; . /etc/mia/mia.env; MIA_DATA_DIR=/var/lib/mia npm run backup -- create'` from `/opt/mia`.
+    `sudo -u mia sh -c 'set -a; [ -f /etc/mia/mia.env ] && . /etc/mia/mia.env; MIA_DATA_DIR=/var/lib/mia npm run backup -- create'` from `/opt/mia`. The environment file is optional, as it is for the service.
   - `create` prints the database it is backing up, refuses when no database exists there, and warns when `MIA_BACKUP_KEY` is missing (the backup would be plaintext).
 - **Encryption:** set `MIA_BACKUP_KEY` to 32 random bytes, e.g. `openssl rand -hex 32`, in the environment or `/etc/mia/mia.env`.
   - Never pass it on a command line, and never commit it.
