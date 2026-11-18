@@ -77,6 +77,13 @@ stranger who finds the URL first cannot. Setup in a browser on the same machine 
 | `✖ Dependencies are not installed` | skipped `npm install` | run `npm install` in the repository root |
 | Market data never loads behind a corporate proxy | proxy env | set `HTTPS_PROXY`; the launcher enables `NODE_USE_ENV_PROXY` for Node's fetch |
 
+### Enable Google owner sign-in
+
+1. Create a Google OAuth web application. Register your MIA HTTPS URL ending in `/api/auth/google/callback` as an authorized redirect URI.
+2. Set `MIA_GOOGLE_CLIENT_ID`, `MIA_GOOGLE_CLIENT_SECRET`, and `MIA_GOOGLE_REDIRECT_URI` server-side. Set `MIA_SECURE_COOKIE=1` and serve MIA over HTTPS. Configure any reverse proxy to omit OAuth callback query strings from access logs.
+3. Sign in with the existing owner passphrase and open **Settings → Google sign-in**. Confirm the passphrase, choose **Link Google**, and select your account at Google.
+4. Use **Continue with Google** on subsequent visits. **Unlink Google** requires the passphrase and revokes other sessions. Keep the owner passphrase for recovery and action confirmations.
+
 ### Connect a private Telegram chat
 
 1. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` in the server environment. Use a randomly generated URL-safe webhook secret.

@@ -45,3 +45,18 @@ test('a malformed /api/shell response never blanks the app (CodeRabbit PR #9)', 
   await expect(page.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=engine]')).not.toHaveAttribute('data-tone', 'ok');
   expect(errors.filter((e) => /Cannot read properties of undefined/.test(e))).toEqual([]);
 });
+
+test('linked Google sign-in offers the provider and the owner passphrase fallback', async ({ page }) => {
+  await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
+  await page.route('**/api/auth/state', route => route.fulfill({ json: { setup: true, authenticated: false, googleSignIn: true } }));
+  await page.route('**/api/auth/google/start', route => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().headers()['x-mia-csrf']).toBe('1');
+    return route.fulfill({ json: { url: 'https://accounts.google.com/o/oauth2/v2/auth' } });
+  });
+  await page.route('https://accounts.google.com/**', route => route.fulfill({ body: 'Google authorization fixture' }));
+  await page.goto('/');
+  await expect(page.getByLabel('Passphrase')).toBeVisible();
+  await page.getByRole('button', { name: 'Continue with Google' }).click();
+  await expect(page).toHaveURL('https://accounts.google.com/o/oauth2/v2/auth');
+});
