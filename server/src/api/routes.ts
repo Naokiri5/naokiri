@@ -1,3 +1,4 @@
+import { filingRoutes } from '../fundamentals/routes.js';
 import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -114,6 +115,7 @@ export async function routes(app: FastifyInstance) {
 
   await ditasRoutes(app);
   await knowledgeRoutes(app);
+  await filingRoutes(app);
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
   app.post('/api/risk/incidents/:id/ack', async (req) => {

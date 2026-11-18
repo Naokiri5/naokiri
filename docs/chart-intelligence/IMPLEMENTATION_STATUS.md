@@ -6,7 +6,7 @@ This is the first reviewed increment of the owner's phased specification, not de
 |---|---|---|
 | 0 audit | COMPLETE for this increment | Re-audit changed baseline before extending |
 | 1 charts | PARTIAL, implemented subset | Includes confirmed-pivot continuation and change of character, immediate breakout retests, and anchored VWAP. Zones, channels, named patterns, Fibonacci/pivots and volatility fixtures remain. |
-| 2 indicators | PARTIAL existing | Correct per-indicator warm-up; independently verify formulas; add missing WMA, Keltner, Ichimoku, SAR, volume profile; retain one feature engine |
+| 2 indicators | PARTIAL existing | Closed-candle WMA, HMA, Keltner, Ichimoku, SAR and OHLC volatility with numerical fixtures. Volume profile requires trade-level history. |
 | 3 multi-timeframe | PARTIAL | Binance spot agreement across the 15m, 1h and 4h caches. Additional provider intervals require separate ingestion and validation. |
 | 4 flow/liquidity | PARTIAL | Historical observed book/trade feed + provenance; separate inference from observation |
 | 5 fundamentals | PARTIAL/BLOCKED | Licensed asset-specific point-in-time feeds, schema, freshness tests |
