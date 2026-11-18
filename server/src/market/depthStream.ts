@@ -97,9 +97,22 @@ export class BookSync {
     if (b.some((x) => !x) || a.some((x) => !x)) return false;
     for (const [p, q] of b as [number, number][]) q === 0 ? this.bids.delete(p) : this.bids.set(p, q);
     for (const [p, q] of a as [number, number][]) q === 0 ? this.asks.delete(p) : this.asks.set(p, q);
+    this.trim();
     this.lastUpdateId = ev.u; this.first = false;
     return true;
   }
+  /**
+   * Bound the local book (MA-19, measured: 0.22 ms per event at 2k levels/side, >1 core at 5k for 2,000 events/s). Levels far
+   * from the top are incomplete anyway (the snapshot has only `depth` levels); dropping them can only make the book look
+   * THINNER, which fails closed in walkBook — never a fill that would not exist. Amortized: trims only past 4× depth.
+   */
+  private trim() {
+    const keep = this.depth * 2;
+    if (this.bids.size > this.depth * 4) this.bids = new Map([...this.bids].sort((x, y) => y[0] - x[0]).slice(0, keep));
+    if (this.asks.size > this.depth * 4) this.asks = new Map([...this.asks].sort((x, y) => x[0] - y[0]).slice(0, keep));
+  }
+  /** Test/diagnostic: number of locally held levels per side. */
+  levels() { return { bids: this.bids.size, asks: this.asks.size }; }
   private gap(): 'SNAPSHOT_NEEDED' {
     this.state = 'BUFFERING'; this.buffer = []; this.bids.clear(); this.asks.clear(); this.resyncs++;
     return 'SNAPSHOT_NEEDED';

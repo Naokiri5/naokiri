@@ -107,3 +107,16 @@ describe('stream retry, lag and stall safety (MA-10, MA-18)', () => {
     h.stop();
   });
 });
+
+describe('local book stays bounded (MA-19)', () => {
+  it('levels far from the top are trimmed; the published top of book is unchanged', () => {
+    const s = new BookSync('BTCUSDT', 100); s.onSnapshot(snap(1));
+    let u = 1;
+    for (let i = 0; i < 5_000; i++) { s.onEvent(ev(u + 1, u + 1, [[String(99 - i * 0.001), '1']], [[String(102 + i * 0.001), '1']])); u++; }
+    const lv = s.levels();
+    expect(lv.bids).toBeLessThanOrEqual(400); expect(lv.asks).toBeLessThanOrEqual(400); // was 5,002 per side
+    const b = s.book(1)!;
+    expect(b.bids[0]).toEqual([100, 1]); expect(b.asks[0]).toEqual([101, 1]); // best levels kept
+    expect(b.bids).toHaveLength(100);
+  });
+});
