@@ -37,8 +37,8 @@ const parseLevel = (l: unknown): [number, number] | null => {
 export function parseDepthEvent(raw: unknown): DepthEvent | null {
   const r = raw as any;
   if (!r || r.e !== 'depthUpdate' || typeof r.s !== 'string') return null;
-  const U = Number(r.U), u = Number(r.u), E = Number(r.E);
-  if (![U, u, E].every(Number.isSafeInteger) || U > u || !Array.isArray(r.b) || !Array.isArray(r.a)) return null;
+  const U = num(r.U), u = num(r.u), E = num(r.E);
+  if (![U, u, E].every(Number.isSafeInteger) || U <= 0 || E <= 0 || U > u || !Array.isArray(r.b) || !Array.isArray(r.a)) return null;
   return { E, s: r.s, U, u, b: r.b, a: r.a };
 }
 
@@ -46,6 +46,7 @@ export function parseDepthEvent(raw: unknown): DepthEvent | null {
 export class BookSync {
   state: SyncState = 'BUFFERING';
   lastUpdateId = 0;
+  lastAppliedEventAt: number | null = null;
   resyncs = 0;
   private buffer: DepthEvent[] = [];
   /** True until the first event after a snapshot: that one only has to OVERLAP the snapshot (U <= L+1 <= u). */
@@ -104,7 +105,7 @@ export class BookSync {
   }
   private load(s: Snapshot) {
     this.bids = new Map(s.bids.filter(([p, q]) => p > 0 && q > 0)); this.asks = new Map(s.asks.filter(([p, q]) => p > 0 && q > 0));
-    this.lastUpdateId = s.lastUpdateId; this.first = true;
+    this.lastUpdateId = s.lastUpdateId; this.lastAppliedEventAt = null; this.first = true;
   }
   private apply(ev: DepthEvent): boolean {
     const b = ev.b.map(parseLevel), a = ev.a.map(parseLevel);
@@ -112,7 +113,7 @@ export class BookSync {
     for (const [p, q] of b as [number, number][]) q === 0 ? this.bids.delete(p) : this.bids.set(p, q);
     for (const [p, q] of a as [number, number][]) q === 0 ? this.asks.delete(p) : this.asks.set(p, q);
     this.trim();
-    this.lastUpdateId = ev.u; this.first = false;
+    this.lastUpdateId = ev.u; this.lastAppliedEventAt = ev.E; this.first = false;
     return true;
   }
   /**
@@ -177,12 +178,25 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
         const snap = await deps.snapshot(sym);
         if (stopped || gen !== generation) return; // stale completion: discard
         const r = syncs.get(sym)!.onSnapshot(snap);
-        if (r === 'SYNCED') { failures.delete(sym); nextSnapshotAt.delete(sym); const b = syncs.get(sym)!.book(now()); if (b) deps.publish(sym, b); return; }
+        if (r === 'SYNCED') {
+          failures.delete(sym);
+          nextSnapshotAt.delete(sym);
+          const sync = syncs.get(sym)!;
+          const at = now();
+          const eventAt = sync.lastAppliedEventAt;
+          if (eventAt !== null && (eventAt > at || at - eventAt > MAX_EVENT_LAG_MS)) {
+            invalidate(sym);
+            return;
+          }
+          const book = sync.book(at);
+          if (book) deps.publish(sym, book);
+          return;
+        }
         if (r === 'WAITING') return; // a gap was found while replaying; the next event triggers a new snapshot
       }
       backoff(sym); // still too old after 3 tries
     } catch { if (!stopped && gen === generation) backoff(sym); /* snapshot failed: REST polling remains the fallback; retry after the backoff */ }
-    finally { inFlight.delete(sym); }
+    finally { if (gen === generation) inFlight.delete(sym); }
   };
   const connect = () => {
     if (stopped || !WS) return;
@@ -195,12 +209,16 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
       let msg: any; try { msg = JSON.parse(String(m.data)); } catch { return; }
       const ev = parseDepthEvent(msg?.data ?? msg); if (!ev) return;
       attempt = 0; // reconnect backoff resets only after a VALID event, not on open (a server that accepts then closes must not cause a storm)
-      const lag = Math.max(0, received - ev.E);
-      record('stream.binance.eventLagMs', lag); // provider event time → local receipt
       const sync = syncs.get(ev.s); if (!sync) return;
+      const lag = received - ev.E;
+      if (lag < 0) { invalidate(ev.s); return; }
+      record('stream.binance.eventLagMs', lag); // provider event time → local receipt
       const r = sync.onEvent(ev);
       if (r === 'SNAPSHOT_NEEDED') { status.resyncs++; invalidate(ev.s); void snapshot(ev.s); }
-      else if (r === 'APPLIED') { if (lag <= MAX_EVENT_LAG_MS) { const b = sync.book(received); if (b) deps.publish(ev.s, b); } }
+      else if (r === 'APPLIED') {
+        if (lag > MAX_EVENT_LAG_MS) invalidate(ev.s);
+        else { const b = sync.book(received); if (b) deps.publish(ev.s, b); }
+      }
       else if (r === 'BUFFERED' && sync.state === 'BUFFERING') void snapshot(ev.s);
     };
     sock.onclose = () => {
