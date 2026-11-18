@@ -45,14 +45,14 @@ smoke_one() {
     freqtrade)
       echo "==> freqtrade: strategy check + dry-run backtest on synthetic candles (no keys)"
       local extra; extra="$(proxy_config)"
-      local cfg=(-c user_data/config.json); [[ -n "$extra" ]] && cfg+=(-c "$extra")
+      local cfg=(-c user_data/config.json); if [[ -n "$extra" ]]; then cfg+=(-c "$extra"); fi
       (cd "$dir" && .venv/bin/freqtrade create-userdir --userdir user_data >/dev/null \
         && rm -f user_data/strategies/sample_strategy.py \
         && .venv/bin/freqtrade list-strategies --userdir user_data "${cfg[@]}" \
         && .venv/bin/python make_synthetic_data.py \
         && .venv/bin/freqtrade backtesting --userdir user_data "${cfg[@]}" --strategy MiaResearchEmaCross \
              --timerange 20260105-20260430 --cache none --export none)
-      [[ -n "$extra" ]] && rm -f "$extra" ;;
+      if [[ -n "$extra" ]]; then rm -f "$extra"; fi ;;  # an `a && b` here would make the function fail when there is no proxy
   esac
 }
 
