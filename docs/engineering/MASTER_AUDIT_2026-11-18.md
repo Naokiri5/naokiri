@@ -149,8 +149,8 @@ The owner said "Continue". Items that only tighten safety were repaired. Items t
 | MA-04 | **OPEN, owner decision** | — | Always requiring the setup code would change the owner's first-run flow and 15 test setups. |
 | MA-06 | **BLOCKED (upstream)** | — | picomatch has no patched release. No override and no exception were applied. |
 | MA-13 | **OPEN, owner decision** | — | DITAS retention. |
-| MA-14 | **OPEN** | — | Verifying a full backup on the event loop has not been measured on a large database. |
-| MA-20 | **OPEN (theoretical)** | — | The duplicate-instrument re-check inside the transaction is not added. It is safe within one process. |
+| MA-14 | **OPEN, measured** | — | Benchmark: verifyBackup of a database with 100,000 audit rows took 747 ms in one synchronous call that blocks the event loop; createBackup took 141 ms. DITAS rows add to this, so a month of decision history could stall the engine for tens of seconds during the daily backup. Planned fix: run the verification in a worker thread (it reads only the backup file), or verify from a stored checkpoint. |
+| MA-20 | **VERIFIED** | `322a5c9`, follow-up commit | The entry transaction re-checks, under the write lock, first for a duplicate order on the same decision and then for an open position on the instrument. Test: a simulated concurrent writer, injected through the crash hook, cannot create a second open position (fails on the old code). The two-process crash suite passes. Note: `322a5c9` was committed while one crash test failed, because the commit was not gated on the test exit code; it was corrected in the next commit before any push. |
 
 **Final local verification at `185b9ed`:**
 
@@ -164,3 +164,6 @@ The owner said "Continue". Items that only tighten safety were repaired. Items t
 | secret scan | ✓ (315 files) |
 | `npm audit --omit=dev` | 0 |
 | `npm audit --audit-level=high` | 6 high (MA-06) |
+
+### CI follow-up
+The first CI run with independent jobs exposed a test that depended on the environment. `api.test.ts` expected 404 for an over-long id, but the CI server job does not build the web app, so Fastify answers 414 (`FST_ERR_MAX_PARAM_LENGTH`). This was reproduced locally by hiding `web/dist`. Both answers reject the request without a database error, and the test now accepts exactly these two (`5a0eedf`). The audit job is still red, which is expected (MA-06).
