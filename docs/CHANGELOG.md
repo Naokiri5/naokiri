@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased: CCXT exchange research (2026-11-18)
+- **New:** read-only exchange research through CCXT (Binance, Coinbase Exchange, Kraken, OKX, Bybit): markets, ticker, order book and candles, labelled research only.
+- **Safety:** CCXT runs without keys and through MIA's own GET-only transport, so it cannot place orders or move funds. It uses MIA's rate limits and health tracking. `MIA_CCXT_SANDBOX=1` switches to official test URLs.
+- **Docs:** `docs/research/CCXT_RESEARCH.md`.
+
 ## Unreleased: Privy optional embedded wallets (2026-11-18)
 - **Optional:** with `MIA_PRIVY_EMBEDDED_WALLETS=1`, the owner can create a Privy-secured wallet from Security Center. MIA only shows its address.
 - **Still locked:** signing, sending, delegated signing, funding and key export. A new CI test fails if MIA's Privy code uses any of those Privy APIs.
