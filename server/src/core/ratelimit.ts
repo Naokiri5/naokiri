@@ -33,12 +33,17 @@ const clients = new Map<string, { n: number; until: number }>();
 let globalFails: number[] = [];
 
 export const failureGate = {
-  /** Throws 429 while this client, or the whole server, is locked out. */
-  check(client: string, nowTs = Date.now()) {
+  /**
+   * Throws 429 while this client, or the whole server, is locked out. `global: false` skips only the server-wide
+   * budget (SEC-14): used for risk-REDUCING step-up actions and for a direct local (loopback, unproxied) request, so
+   * strangers' failed guesses can never stop the owner from closing positions or signing in at the machine itself.
+   * The per-client exponential lockout always applies, and every failure still counts toward the global budget.
+   */
+  check(client: string, nowTs = Date.now(), opts: { global?: boolean } = {}) {
     const c = clients.get(client);
     if (c && c.until > nowTs) throw new RateLimitError('too many failed passphrase attempts; wait a minute', Math.ceil((c.until - nowTs) / 1000));
     globalFails = globalFails.filter((t) => nowTs - t < GLOBAL_WINDOW_MS);
-    if (globalFails.length >= GLOBAL) throw new RateLimitError('too many failed passphrase attempts on this server; wait 15 minutes', Math.ceil((globalFails[0] + GLOBAL_WINDOW_MS - nowTs) / 1000));
+    if (opts.global !== false && globalFails.length >= GLOBAL) throw new RateLimitError('too many failed passphrase attempts on this server; wait 15 minutes', Math.ceil((globalFails[0] + GLOBAL_WINDOW_MS - nowTs) / 1000));
   },
   fail(client: string, nowTs = Date.now()) {
     globalFails.push(nowTs);

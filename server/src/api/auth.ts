@@ -54,15 +54,15 @@ export function checkPassword(pass: string) {
  * The ONE place a passphrase is verified for login, step-up and passphrase change, so every path shares the
  * per-client and global brute-force limits (previously only login was limited and step-up could be guessed freely).
  */
-export function verifyPassphrase(pass: unknown, client: string, purpose: string) {
-  failureGate.check(client);
+export function verifyPassphrase(pass: unknown, client: string, purpose: string, opts: { exemptFromGlobalLockout?: boolean } = {}) {
+  failureGate.check(client, Date.now(), { global: !opts.exemptFromGlobalLockout });
   if (typeof pass === 'string' && checkPassword(pass)) { failureGate.ok(client); return; }
   failureGate.fail(client);
   audit('anonymous', purpose === 'login' ? 'auth.login.failed' : 'auth.stepup.failed', { ip: client, purpose });
   throw new AuthError(purpose === 'login' ? 'invalid passphrase' : 'step-up authentication failed: passphrase required for this action', purpose === 'login' ? 401 : 403);
 }
-export function login(pass: string, ip: string) {
-  verifyPassphrase(pass, ip, 'login');
+export function login(pass: string, ip: string, opts: { directLocal?: boolean } = {}) {
+  verifyPassphrase(pass, ip, 'login', { exemptFromGlobalLockout: opts.directLocal });
   run('DELETE FROM sessions WHERE expires_at <= ?', Date.now()); // expired sessions are otherwise kept forever
   const token = randomBytes(32).toString('hex');
   run('INSERT INTO sessions(token_hash, created_at, expires_at) VALUES (?,?,?)', sha256(token), Date.now(), Date.now() + SESSION_MS);

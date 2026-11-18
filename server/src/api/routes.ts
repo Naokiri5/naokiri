@@ -57,7 +57,10 @@ const COOKIE = 'mia_session';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 const bad = (reply: FastifyReply, code: number, msg: string) => reply.code(code).send({ error: msg });
 /** Step-up shares the login brute-force limits (per client + global), so it can no longer be guessed freely. */
-const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, req.ip, 'step-up');
+const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, req.ip, 'step-up', { exemptFromGlobalLockout: isDirectLocal(req) });
+/** Step-up for actions that only REDUCE risk or exposure (close all, revoke other sessions): never blocked by the
+ *  server-wide failure budget that unauthenticated strangers can exhaust (SEC-14). Per-client limits still apply. */
+const stepUpRiskReducing = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, req.ip, 'step-up', { exemptFromGlobalLockout: true });
 const PW = z.string().min(1).max(1024);
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
@@ -138,7 +141,7 @@ export async function routes(app: FastifyInstance) {
     }
     auth.setupOwner(password); auth.clearSetupCode(); return issue(reply, auth.login(password, req.ip));
   });
-  app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip)); });
+  app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
   app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; ${cookieFlags}; Max-Age=0`); return { ok: true }; });
   app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, req.ip); return { ok: true }; });
@@ -269,7 +272,7 @@ export async function routes(app: FastifyInstance) {
     if (a === 'cancel-pending') return oms.cancelPendingEntries('owner');
     if (a === 'protect') return oms.protectPositions(true);
     if (a === 'stop') return oms.emergencyStop('owner');
-    if (a === 'close-all') { stepUp(req, b); return oms.closeAllPositions('owner', b.confirm ?? ''); }
+    if (a === 'close-all') { stepUpRiskReducing(req, b); return oms.closeAllPositions('owner', b.confirm ?? ''); }
     throw httpError(404, 'unknown emergency action');
   });
 
@@ -334,7 +337,7 @@ export async function routes(app: FastifyInstance) {
   // ── Phase 1 workspaces ──
   app.get('/api/qhef', async () => qhefReport());
   app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
-  app.post('/api/security/sessions/revoke-others', async (req) => { stepUp(req, req.body); return revokeOtherSessions(tokenOf(req)); });
+  app.post('/api/security/sessions/revoke-others', async (req) => { stepUpRiskReducing(req, req.body); return revokeOtherSessions(tokenOf(req)); });
   app.get('/api/discover', async (req) => discover(z.object({ minVolume: z.coerce.number().min(0).default(1e6) }).parse(req.query ?? {}).minVolume));
   const histFilter = (q: any): HistoryFilter => z.object({ from: z.coerce.number().int().positive().optional(), to: z.coerce.number().int().positive().optional(),
     instrument: z.string().max(20).regex(/^[A-Za-z0-9]*$/).optional(), status: z.enum(['NEW', 'FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED', 'ACTIVE', 'PENDING_APPROVAL']).optional(),
