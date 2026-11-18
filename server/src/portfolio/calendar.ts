@@ -26,12 +26,27 @@ export function calendar(month: string /* YYYY-MM */, account = PAPER_ACCOUNT) {
   };
 }
 
-/** Independent reconciliation: positions' realized PnL vs ledger cash flows for the same orders. */
+/**
+ * Independent reconciliation (used by the integrity check, release gate G05 and the portfolio badge):
+ *  1. closed positions' realized PnL equals the ledger flows of their orders;
+ *  2. every BUY/SELL/FEE posting references a FILLED order (no orphan cash);
+ *  3. the trade postings equal the cash implied by the fills themselves (price × qty ∓ fee).
+ * Checks 2 and 3 were added after the 100-agent audit (E-01): an orphan or edited cash row used to reconcile as OK.
+ */
 export function reconcile(account = PAPER_ACCOUNT) {
   const closed = get<{ s: number; n: number }>("SELECT COALESCE(SUM(realized_pnl),0) s, COUNT(*) n FROM positions WHERE account=? AND status='CLOSED'", account)!;
   const flows = get<{ s: number }>(`SELECT COALESCE(SUM(l.amount),0) s FROM ledger_entries l JOIN orders o ON o.id=l.ref JOIN positions p ON p.id=o.position_id
     WHERE l.account=? AND p.status='CLOSED' AND l.kind IN ('BUY','SELL','FEE')`, account)!;
   const diff = Math.abs(closed.s - flows.s);
   const cash = get<{ s: number }>('SELECT COALESCE(SUM(amount),0) s FROM ledger_entries WHERE account=?', account)!.s;
-  return { ok: diff < 1e-6, positionsRealized: closed.s, ledgerFlows: flows.s, difference: diff, closedPositions: closed.n, cash, detail: `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (Δ ${diff.toExponential(2)})` };
+  const orphans = get<{ n: number }>(`SELECT COUNT(*) n FROM ledger_entries WHERE account=? AND kind IN ('BUY','SELL','FEE')
+    AND (ref IS NULL OR ref NOT IN (SELECT id FROM orders WHERE status='FILLED'))`, account)!.n;
+  const posted = get<{ s: number }>("SELECT COALESCE(SUM(amount),0) s FROM ledger_entries WHERE account=? AND kind IN ('BUY','SELL','FEE')", account)!.s;
+  const implied = get<{ s: number }>(`SELECT COALESCE(SUM(CASE o.side WHEN 'BUY' THEN -f.price*f.qty ELSE f.price*f.qty END - f.fee),0) s
+    FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.status='FILLED' AND o.id IN (SELECT ref FROM ledger_entries WHERE account=? AND ref IS NOT NULL)`, account)!.s;
+  const cashDiff = Math.abs(posted - implied);
+  const ok = diff < 1e-6 && orphans === 0 && cashDiff < 1e-6;
+  const detail = `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (Δ ${diff.toExponential(2)}); `
+    + `trade cash vs fills Δ ${cashDiff.toExponential(2)}; ${orphans} orphan posting(s)`;
+  return { ok, positionsRealized: closed.s, ledgerFlows: flows.s, difference: diff, closedPositions: closed.n, cash, orphanPostings: orphans, cashVsFillsDifference: cashDiff, detail };
 }
