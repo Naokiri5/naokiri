@@ -17,6 +17,8 @@ Running the server unattended enables nothing live. It keeps scanning the market
   - A clean exit (code 0) ends supervision.
   - Tuning variables: `MIA_SUPERVISE_MAX_CRASHES`, `MIA_SUPERVISE_WINDOW_MS`, `MIA_SUPERVISE_STABLE_MS`.
 - **systemd:** `deploy/mia.service` runs the supervisor.
+  - Create the service user once: `sudo useradd --system --home-dir /var/lib/mia --shell /usr/sbin/nologin mia`.
+  - `StateDirectory=mia` makes systemd create `/var/lib/mia` (owner `mia`, mode 0700) before each start. An existing directory and database are kept.
   - Its restart limits sit above the supervisor's own crash-loop cap.
   - It uses `KillMode=mixed`, so only the supervisor receives SIGTERM and forwards it once. A second signal would skip the drain.
   - Put optional secrets in `/etc/mia/mia.env` (mode 0600).
