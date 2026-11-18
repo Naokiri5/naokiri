@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased: DeFi research — DefiLlama yields and Aave V3 flash loans (2026-11-18)
+- **New:** read-only DefiLlama yield pools and protocol TVL. Risky yields are flagged: outlier APY, reward-dependent, impermanent loss, low TVL.
+- **New:** Aave V3 flash-loan research: on-chain flash-loan fee, enabled/paused/frozen status and available liquidity, plus a hypothetical cost calculator.
+- **Safety:** MIA cannot take a flash loan. Only read-only node calls are allowed, contract addresses come from the official registry, and failed reads are shown as missing, never as zero.
+- **Docs:** `docs/research/DEFI_RESEARCH.md`.
+
 ## Unreleased: CCXT exchange research (2026-11-18)
 - **New:** read-only exchange research through CCXT (Binance, Coinbase Exchange, Kraken, OKX, Bybit): markets, ticker, order book and candles, labelled research only.
 - **Safety:** CCXT runs without keys and through MIA's own GET-only transport, so it cannot place orders or move funds. It uses MIA's rate limits and health tracking. `MIA_CCXT_SANDBOX=1` switches to official test URLs.

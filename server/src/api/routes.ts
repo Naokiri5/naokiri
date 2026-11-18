@@ -3,6 +3,7 @@ import { knowledgeRoutes } from '../knowledge/routes.js';
 import { VikeNotConfiguredError } from '../providers/vike.js';
 import * as privy from '../security/privy.js';
 import { ccxtRoutes } from '../research/ccxtRoutes.js';
+import { defiRoutes } from '../research/defiRoutes.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -127,6 +128,7 @@ export async function routes(app: FastifyInstance) {
   await knowledgeRoutes(app);
   await vikeRoutes(app); // read-only Vike research (owner session required by the gate below)
   await ccxtRoutes(app); // read-only CCXT exchange research (GET-only transport, keyless)
+  await defiRoutes(app); // read-only DefiLlama yields/TVL and Aave V3 flash-loan research (no transactions)
   /** Paper/Live environments for the shared UI layout. Read-only; Live is reported as LOCKED, never as available. */
   app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
   // ── protection incidents (persistent; owner acknowledgement) ──
