@@ -143,3 +143,19 @@ Measured: start-up 0.8–1.6 s; SIGTERM to exit 13–29 ms; leader/standby corre
 
 ## Non-defects that were checked
 Every intended 401 (unauthenticated), 403 (no CSRF header or step-up), 413 (body limit) and 429 (rate limit) seen in fuzzing was correct behaviour, not a defect.
+
+## R: independent principal review of the repairs (assignment 100)
+**Verdict:** conditional GO for controlled paper testing.
+
+| ID | Sev | Evidence | Where | Error | Status |
+|---|---|---|---|---|---|
+| R-01 | S2 | REPRODUCED | `portfolio/calendar.ts` reconcile | The cash check skipped filled orders whose postings were deleted entirely. | FIXED `fea0fe9` |
+| R-02 | S3 | REPRODUCED | `qci/coordinator.ts` (D-01 fix) | Shadow opposition double-counted; weighted opposition reached 1.83. | FIXED `fea0fe9` (bounded to [0, 1]) |
+| R-03 | S3 | REPRODUCED | `test/worker-runtime-hardening.test.ts` | The C-01 test never reached the mandatory branch. | FIXED `fea0fe9` |
+| R-04 | S3 | REPRODUCED | `core/util.ts floorToStep` | The B-09 fix dropped a lot on float noise. | FIXED `fea0fe9` |
+| R-05 | S3 | CODE-CONFIRMED | `market/fabric.ts setBook` | A quiet but live book with an unchanged id ages out, so exits are blocked (fails closed). | OPEN (track "confirmed unchanged" from a synced stream) |
+| R-06 | S4 | CODE-CONFIRMED | `providers/http.ts` | A Retry-After block is not shown in provider health. | OPEN |
+| R-07 | S4 | CODE-CONFIRMED | `qci/coordinator.ts` | Mandatory checks are scoped by domain; a quarantined mandatory worker means NO_QUORUM until released (fails closed). | OPEN |
+| R-08 | S4 | CODE-CONFIRMED | tests | Weak G06 and opposition-bound assertions. | FIXED `fea0fe9` |
+| R-09 | S4 | CODE-CONFIRMED | `ops/backup.ts` | Short window before the chmod to 0600. | OPEN |
+| R-10 | S4 | CODE-CONFIRMED | `market/fabric.ts` | The skew constant duplicates `QUALITY_LIMITS.clockSkewMs`; dropped tickers are not counted. | OPEN |

@@ -29,8 +29,9 @@ Each fix's regression test was run against the old code and failed there, except
 | `9d95001` | C-03/J-01, C-01, C-04, C-06, C-07 | VERIFIED (C-01 test is a guard) |
 | `3fa973a` | J-04, G-01, A-01, A-02, H-04, H-08 | VERIFIED |
 | `9151e70` | G-02 (twin runs), G-03 (missing snapshot), J-02 | VERIFIED |
+| `fea0fe9` | R-01, R-02, R-03, R-04, R-08 (from the independent review) | VERIFIED; final verification ran at this commit (see `MIA_FINAL_ENGINEERING_ASSESSMENT.md`) |
 
-The independent review (assignment 100) of all repair commits is recorded in `MIA_100_AGENT_REPORT.md`.
+The independent review (assignment 100) found R-01…R-10. R-01–R-04 and R-08 are fixed; R-05, R-06, R-07, R-09 and R-10 are open (fail-closed or informational).
 
 ### Next work, in priority order
 1. **C-02 / J-05 (S2/S3):** consensus weighting by input source, and one costR. Needs a trading-risk review because it changes consensus outcomes.
