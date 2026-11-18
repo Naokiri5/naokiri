@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
 
 export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
-export async function api<T = any>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
-  const res = await fetch(path, { method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'), headers: { 'content-type': 'application/json', 'x-mia-csrf': '1' }, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined, credentials: 'same-origin' });
+export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
+  const res = await fetch(path, { method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'), headers: { 'content-type': 'application/json', 'x-mia-csrf': '1' }, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined, credentials: 'same-origin', signal: opts.signal });
   const data = await res.json().catch(() => ({}));
+  // An obsolete request must not invalidate a newer authenticated resource.
+  if (opts.signal?.aborted) throw new DOMException('Request aborted', 'AbortError');
   if (res.status === 401) window.dispatchEvent(new Event('mia:unauthorized'));
   if (!res.ok) throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
   return data as T;
@@ -31,41 +33,65 @@ export function connectStream() {
 export function disconnectStream() { es?.close(); es = null; streamState.connected = false; }
 export function useStream(fn: Handler) { const ref = useRef(fn); ref.current = fn; useEffect(() => { const h: Handler = (t, p) => ref.current(t, p); handlers.add(h); return () => { handlers.delete(h); }; }, []); }
 
-/** Fetch + auto-refresh on listed stream topics (debounced) and optional interval. */
+/** Fetch + auto-refresh. Data belongs to a resource path; only the newest request may publish it. */
 export function useApi<T = any>(path: string | null, opts: { topics?: string[]; every?: number } = {}) {
-  const [data, setData] = useState<T | null>(null); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(false);
-  /** Monotonic (performance.now()) time the newest successful request was SENT; conservative for freshness checks. */
-  const [requestedAt, setRequestedAt] = useState<number | null>(null);
-  const timer = useRef<number | null>(null); const seq = useRef(0); const inFlight = useRef(false); const again = useRef(false);
-  /** Forced load: supersedes anything in flight (used on mount, path change and reload() after a mutation, so a response
-   *  requested before the mutation is never shown). The sequence guard drops superseded responses. */
+  const [state, setState] = useState<{ path: string | null; data: T | null; error: string | null; loading: boolean; requestedAt: number | null; updatedAt: number | null }>({ path, data: null, error: null, loading: false, requestedAt: null, updatedAt: null });
+  const currentPath = useRef(path); currentPath.current = path;
+  const mounted = useRef(false); const requestId = useRef(0);
+  const controller = useRef<AbortController | null>(null);
+  const timer = useRef<number | null>(null);
+  const inFlight = useRef(false); const again = useRef(false);
+  /** Forced load: supersedes (aborts) anything in flight. Used on mount, path change and reload() after a mutation, so a
+   *  response requested before the mutation is never shown. */
   const load = useCallback(async () => {
-    if (!path) return; setLoading(true);
-    const n = ++seq.current; const sent = performance.now(); inFlight.current = true;
-    try { const d = await api<T>(path); if (n !== seq.current) return; setData(d); setError(null); setRequestedAt(sent); }
-    catch (e: any) { if (n === seq.current) setError(e.message); }
-    finally {
-      if (n === seq.current) {
-        setLoading(false); inFlight.current = false;
-        if (again.current) { again.current = false; void load(); } // a refresh was requested while this one ran
+    if (path === null || !mounted.current || currentPath.current !== path) return;
+    const id = ++requestId.current; const sent = performance.now(); inFlight.current = true;
+    controller.current?.abort();
+    const request = new AbortController(); controller.current = request;
+    const ownsRequest = () => mounted.current && currentPath.current === path && requestId.current === id && !request.signal.aborted;
+    setState(previous => previous.path === path ? { ...previous, loading: true } : { path, data: null, error: null, loading: true, requestedAt: null, updatedAt: null });
+    try {
+      const data = await api<T>(path, { signal: request.signal });
+      if (ownsRequest()) setState({ path, data, error: null, loading: false, requestedAt: sent, updatedAt: Date.now() });
+    } catch (error) {
+      if (ownsRequest()) setState(previous => ({ ...previous, error: error instanceof Error ? error.message : 'Request failed', loading: false }));
+    } finally {
+      if (requestId.current === id) {
+        inFlight.current = false;
+        if (again.current && mounted.current && currentPath.current === path) { again.current = false; void load(); } // queued refresh
       }
     }
   }, [path]);
-  /** Scheduled refresh (interval tick, stream topic): never supersedes a request in flight — it queues one follow-up
-   *  instead. Before, a slow endpoint whose latency exceeded the trigger gap had every response dropped (CodeRabbit PR #9). */
+  /** Scheduled refresh (interval tick, stream topic): never supersedes a request in flight, it queues one follow-up.
+   *  Aborting on every tick meant a slow endpoint (latency above the trigger gap) never delivered (CodeRabbit PR #9). */
   const schedule = useCallback(() => { if (inFlight.current) { again.current = true; return; } void load(); }, [load]);
-  // MIA-WEB-013: a new path starts empty. Pending work for the old path is cancelled: its debounced refresh is cleared
-  // and its in-flight response is invalidated, so it can never replace the new path's data (CodeRabbit PR #15).
   useEffect(() => {
-    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
-    seq.current++; inFlight.current = false; again.current = false;
-    setData(null); setError(null); setRequestedAt(null);
+    mounted.current = true;
+    if (path === null) setState({ path: null, data: null, error: null, loading: false, requestedAt: null, updatedAt: null });
+    else void load();
+    const interval = opts.every ? window.setInterval(schedule, opts.every) : null;
+    return () => {
+      mounted.current = false; requestId.current++; controller.current?.abort(); inFlight.current = false; again.current = false;
+      if (interval !== null) window.clearInterval(interval);
+      if (timer.current !== null) { window.clearTimeout(timer.current); timer.current = null; }
+    };
+  }, [load, schedule, opts.every]);
+  useStream(topic => {
+    if (opts.topics?.includes(topic)) {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => { timer.current = null; schedule(); }, 600);
+    }
+  });
+  const setData = useCallback((action: SetStateAction<T | null>) => {
+    if (!mounted.current || currentPath.current !== path) return;
+    setState(previous => {
+      const current = previous.path === path ? previous : { path, data: null, error: null, loading: false, requestedAt: null, updatedAt: null };
+      return { ...current, data: typeof action === 'function' ? (action as (previous: T | null) => T | null)(current.data) : action };
+    });
   }, [path]);
-  useEffect(() => { load(); if (!opts.every) return; const t = window.setInterval(schedule, opts.every); return () => clearInterval(t); }, [load, schedule, opts.every]);
-  // MIA-WEB-002: a debounced stream refresh must not fire after the component is gone.
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  useStream((t) => { if (opts.topics?.includes(t)) { if (timer.current) clearTimeout(timer.current); timer.current = window.setTimeout(schedule, 600); } });
-  return { data, error, loading, requestedAt, reload: load, setData };
+  // Guard during render too: path changes must never label an old resource before effect cleanup runs.
+  const visible = state.path === path && path !== null ? state : { data: null, error: null, loading: false, requestedAt: null, updatedAt: null };
+  return { data: visible.data, error: visible.error, loading: visible.loading, requestedAt: visible.requestedAt, updatedAt: visible.updatedAt, reload: load, setData };
 }
 
 export const fmt = {

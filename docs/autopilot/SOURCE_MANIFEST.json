@@ -1,0 +1,14 @@
+[
+  {
+    "path": "sources/MIA_Autopilot_100_Detailed_Functions_Code_Blueprint.md",
+    "bytes": 112308,
+    "sha256": "a890462a665687b6f237b046cdb93edb994bbcb3da6e6c15fb803fcf8080185b",
+    "matches_original_upload": true
+  },
+  {
+    "path": "sources/MIA_Autopilot_Engineering_Master_Prompt.txt",
+    "bytes": 15752,
+    "sha256": "02f8fe6d77309458e7a08252fd4e5f2ae3f95d62a610318d552c632b7974b8a4",
+    "matches_original_upload": true
+  }
+]

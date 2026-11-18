@@ -1,3 +1,4 @@
+import { usePresentation } from '../presentation';
 import { Link } from 'react-router-dom';
 import { fmt, useApi } from '../api';
 import { Badge, Card, Chg, Empty, ErrorLine, Page, Stat, Freshness, Meter } from '../ui';
@@ -16,6 +17,7 @@ const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit
 
 export function Overview() {
   const { data, error, loading, reload } = useApi('/api/overview', { topics: ['scan', 'decision', 'order', 'position', 'notification', 'risk', 'mode'], every: 30_000 });
+  const { mode } = usePresentation();
   const a = data?.account; const b = data?.breadth; const r = data?.risk; const p = data?.pipeline; const perf = data?.performance;
   const funded = !!a?.deposits;
   return <Page title="Overview" sub="Paper account, market intelligence, risk state and live activity — all from MIA's authoritative backend state."
@@ -25,6 +27,20 @@ export function Overview() {
     {r?.incidents.open > 0 && <div className="alertbar bad" role="status">{r.incidents.open} position(s) cannot currently be protected (no fresh executable order book). They stay open — no synthetic fill. <Link to="/risk">Review →</Link></div>}
     {!data && !error && <Empty>Loading dashboard…</Empty>}
 
+    <Card title="Paper cockpit" className="compact-overview">
+      <div className="row between"><strong>{r?.mode ?? 'UNKNOWN'}</strong><Badge v="PAPER ACCOUNT — SIMULATED" tone="b-warn" /></div>
+      <div className="grid g3" style={{ marginTop: 12 }}>
+        <Stat k="Paper equity" v={fmt.usd(a?.equity)} s="Not withdrawable real funds" />
+        <Stat k="Daily paper P&L" v={fmt.pct(a?.dailyPnlPct)} tone={pnlTone(a?.dailyPnlPct)} />
+        <Stat k="Open positions" v={a?.openCount ?? '—'} s={a ? `Open risk ${fmt.num(a.openRiskPct, 2)}%` : 'UNKNOWN'} />
+      </div>
+      <p role="status">{!data ? 'Waiting for verified backend state.' : error ? 'LAST KNOWN — request failed; refresh before relying on these values.' : r?.emergency ? 'Emergency stop active. Review the Risk Center.' : r?.incidents.open ? 'An open position has a protection incident. Review it in the Risk Center.' : !r?.policy ? 'Waiting for your risk-policy review.' : r?.pausedNewOrders ? 'New entries are paused.' : !p?.scanner.lastScanAt || p.scanner.ageMs == null || p.scanner.ageMs > STALE_SCAN_MS ? 'Waiting for a current scanner heartbeat.' : 'Monitoring. A candidate still needs strategy validation, consensus, risk approval and an authorized paper mode.'}</p>
+      <p className="hint">Paper only: live execution, signing and withdrawals remain locked.</p>
+      <div className="row"><Link to="/risk">Review risk and safety →</Link><Link to="/bot">Paper bot state →</Link><Link to="/scanner">Why trades were selected or rejected →</Link></div>
+    </Card>
+    <CriticalAlerts items={data?.alerts} />
+    <details className="overview-details" key={mode} open={mode !== 'simple'}>
+      <summary>Account, market and analysis details</summary>
     <div className="sec-title">Paper account</div>
     <div className="grid g6">
       <Stat k="Equity" v={fmt.usd(a?.equity)} s={funded ? `deposits ${fmt.usd(a.deposits)}` : <Link to="/bot">not funded — Bot Account</Link>} />
@@ -60,12 +76,16 @@ export function Overview() {
         <RiskCard r={r} />
         <DataHealth p={p} />
         <Card title="Trader Joe daily briefing" right={<Link to="/joe">Ask Joe →</Link>}><pre style={{ fontFamily: 'var(--sans)', fontSize: 13, whiteSpace: 'pre-wrap', margin: 0 }}>{data?.briefing ?? '…'}</pre></Card>
-        <Card title="Critical alerts" right={<Link to="/notifications">All →</Link>} flush>
-          {(data?.alerts ?? []).map((n: any) => <div key={n.id} style={{ padding: '8px 14px', borderBottom: '1px solid var(--line)' }}><div className="row"><Badge v={n.severity} /><b style={{ fontSize: 13 }}>{n.title}</b></div><div className="hint">{n.body} · {fmt.ago(n.ts)}</div></div>)}
-          {data && !data.alerts?.length && <Empty>No alerts.</Empty>}
-        </Card>
+
       </div>
     </div>
+    </details>
+    {mode === 'engineer' && <Card title="Snapshot diagnostics"><div className="kv">
+      <span>Backend snapshot time</span><span>{fmt.time(data?.asOf)}</span>
+      <span>Scanner snapshot time</span><span>{fmt.time(p?.scanner.lastScanAt)}</span>
+      <span>Registered workers</span><span>{p?.workers.registered ?? 'UNKNOWN'}</span>
+      <span>Provider-blocked workers</span><span>{p?.workers.providerBlocked ?? 'UNKNOWN'}</span>
+    </div><p className="hint">Diagnostics describe current evidence; they do not certify uninterrupted hosting, data correctness, profitability or live readiness.</p></Card>}
   </Page>;
 }
 
@@ -111,5 +131,12 @@ function ActivityFeed({ items }: { items?: any[] }) {
       const body = <><div className="when">{clock(x.at)}</div><div className="what"><div className="row" style={{ gap: 6 }}><Badge v={x.kind} tone={KIND_BADGE[x.kind]} /><b className={TONE[x.tone]}>{x.title}</b>{x.count > 1 && <span className="hint" title={`first ${fmt.time(x.firstAt)}`}>×{x.count} since {clock(x.firstAt)}</span>}</div><div className="hint">{x.detail}</div></div></>;
       return <li key={`${x.kind}-${x.at}-${i}`}>{x.link ? <Link to={x.link} style={{ display: 'contents' }}>{body}</Link> : body}</li>;
     })}</ul> : <Empty>{items ? 'No activity yet. The scanner records decisions and rejections as it evaluates closed candles.' : 'Loading…'}</Empty>}
+  </Card>;
+}
+
+function CriticalAlerts({ items }: { items?: { id: string; severity: string; title: string; body: string; ts: number }[] }) {
+  return <Card title="Critical alerts" right={<Link to="/notifications">All →</Link>} flush>
+    {items?.map(n => <div key={n.id} role={n.severity === 'CRITICAL' ? 'alert' : undefined} style={{ padding: '8px 14px', borderBottom: '1px solid var(--line)' }}><div className="row"><Badge v={n.severity} /><b style={{ fontSize: 13 }}>{n.title}</b></div><div className="hint">{n.body} · {fmt.ago(n.ts)}</div></div>)}
+    {items ? !items.length && <Empty>No alerts in the current response.</Empty> : <Empty>Checking alerts…</Empty>}
   </Card>;
 }

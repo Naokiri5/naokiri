@@ -1,0 +1,101 @@
+ticket,title,baseline_status,baseline_commit,evidence_contract_document,delivery_note
+001,No single-glance autopilot status,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+002,Dense overview hides critical details,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+003,No floating PnL during other work,MISSING,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+004,Browser PiP cannot survive a closed tab,BLOCKED,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+005,Floating chart can overwhelm a small window,MISSING,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+006,A widget could show old numbers as current,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+007,Sensitive balances may appear during screen sharing,MISSING,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+008,Users can confuse simulation profits with cash,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+009,Moving between mini chart and full terminal is clumsy,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+010,Too many equal-looking alerts distract users,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+011,MIA currently depends on a local/cloud session,BLOCKED,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+012,Browser closure could be confused with bot shutdown,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+013,An unhandled crash may leave the bot offline,MISSING,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+014,Multiple replicas could submit duplicate jobs,MISSING,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+015,Restart could lose in-memory job progress,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+016,An interrupted request could be executed twice,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+017,Downtime may go unnoticed overnight,BLOCKED,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+018,SQLite backups are not automated,MISSING,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+019,A deployment can interrupt position monitoring,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+020,Fresh startup may appear ready before market feeds arrive,MISSING,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+021,Polling can miss rapid market changes,BLOCKED,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+022,Provider bursts may trigger throttling,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+023,Timestamp skew can invalidate trade decisions,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+024,Missing or out-of-order candles can distort indicators,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+025,Large market snapshots can stall Node's event loop,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+026,Redundant subscriptions waste bandwidth,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+027,Recomputing full histories wastes CPU,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+028,Rapid SSE events may trigger wasteful React rerenders,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+029,Speed claims lack consistent evidence,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+030,Failover can silently mix inconsistent prices,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+031,No-trade decisions are less visible than entries,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+032,Strategies may operate outside tested regimes,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+033,Conflicting worker signals may look like consensus,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+034,Confidence numbers lack outcome calibration,PARTIAL,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+035,Main branch lacks durable decision forensics,IN_PR_ONLY,b624b52,TICKETS_001_035.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+036,Hard to see whether waiting would improve a result,IN_PR_ONLY,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+037,Historical comparison can accidentally use future data,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+038,Worker contribution is not continuously proven,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+039,A promising signal might be uneconomic after costs,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+040,Unverified news can trigger hasty reactions,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+041,Order lifecycle may be hard to diagnose,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+042,Retrying timed-out submissions may duplicate orders,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+043,Concurrent opportunities could oversubscribe risk,MISSING,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+044,Partial fills can complicate balances,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+045,A position may lack demonstrable exit protection,IN_PR_ONLY,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+046,Stale books prevent trustworthy protective exits,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+047,Venue outage could be mistaken for harmless latency,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+048,Actual trade size can exceed visible order-book liquidity,IN_PR_ONLY,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+049,Changing fees distort strategy comparisons,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+050,Slippage estimates are not continuously audited,IN_PR_ONLY,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+051,No verified live funding connection on main,BLOCKED,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+052,Paper funding may be mistaken for real deposits,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+053,Pending transfers could be treated as settled,BLOCKED,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+054,Deposits may falsely boost performance charts,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+055,Execution keys could accidentally have transfer rights,BLOCKED,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+056,Withdrawal preview is not real settlement,BLOCKED,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+057,One-click withdrawal may invite account takeover,BLOCKED,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+058,Users may confuse gross balance with net proceeds,BLOCKED,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+059,Pending withdrawal could be misreported as complete,BLOCKED,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+060,Instant withdrawal cannot be guaranteed,BLOCKED,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+061,AI could accidentally gain a privileged execution pathway,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+062,Signer access might expand silently,BLOCKED,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+063,Incomplete token checks can create false safety,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+064,Overnight operation needs tighter exposure policies,MISSING,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+065,Runaway order creation could exhaust capital quickly,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+066,Correlated trades can multiply one underlying bet,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+067,Daily loss counters can reset incorrectly,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+068,Stale or manipulated data can reach decision layer,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+069,Credentials may be compromised without immediate warning,PARTIAL,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+070,An audit trail stored only locally may be alterable,MISSING,b624b52,TICKETS_036_070.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+071,UI tests may miss popup-specific failures,MISSING,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+072,Short tests do not prove unattended stability,BLOCKED,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+073,Unexpected termination may corrupt order workflow,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+074,Provider throttling may cause cascading failures,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+075,Clock glitches can distort expiry and risk windows,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+076,Ledger edge cases can escape example-based tests,MISSING,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+077,Parallel trade decisions can create races,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+078,Withdrawal UI is a high-impact attack surface,BLOCKED,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+079,Users may experience slowness despite good API timing,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+080,A green build may hide untested release gates,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+081,Trade decisions are scattered across screens,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+082,Headline PnL can hide actual costs,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+083,Fees and spread are not visible as a story,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+084,Simulated and real performance can be confused,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+085,Users cannot audit why a recommendation appeared,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+086,Rejected trades can seem like bugs,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+087,Strategies can look good due to tiny samples,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+088,Users cannot judge resilience to market shocks,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+089,Daily activity is difficult to understand,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+090,A live card may conceal its data origin,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+091,Initial setup requires expert knowledge,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+092,Connections require manual technical debugging,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+093,Different skill levels need different views,MISSING,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+094,International markets use inconsistent clocks,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+095,Trader Joe is primarily text-first,MISSING,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+096,Experimenting can contaminate the funded paper account,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+097,User data is hard to move between tools,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+098,System diagnostics are hidden from ordinary users,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+099,Monitoring from a phone remains limited,MISSING,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
+100,No single proof that autopilot is ready unattended,PARTIAL,b624b52,TICKETS_071_100.md,Frozen pre-implementation status; see implementation report for tested selected milestone
