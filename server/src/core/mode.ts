@@ -23,7 +23,7 @@ export function updateControl(actor: string, patch: Partial<ControlState>, gateC
   // Non-owner actors (Trader Joe, automated supervisors) may only REDUCE risk.
   if (actor !== 'owner') {
     if (patch.pausedNewOrders === false || patch.emergency === false) throw new Error(`${actor} may not resume trading; owner action required`);
-    if (patch.disabledStrategies && patch.disabledStrategies.length < cur.disabledStrategies.length) throw new Error(`${actor} may not re-enable strategies`);
+    if (patch.disabledStrategies && cur.disabledStrategies.some((id) => !patch.disabledStrategies!.includes(id))) throw new Error(`${actor} may not re-enable strategies`);
   }
   const next = { ...cur, ...patch, updatedAt: Date.now() };
   setSetting('control', next);

@@ -216,7 +216,10 @@ export async function routes(app: FastifyInstance) {
       note: 'Workers are deterministic, versioned evaluators running in a bounded pool — not LLM agents. Confidence is NOT_CALIBRATED until walk-forward calibration is performed.' };
   });
   app.get('/api/consensus/:id', async (req, reply) => { const r = get<any>('SELECT record FROM consensus_records WHERE id=?', idOf(req)); return r ? P(r.record) : bad(reply, 404, 'not found'); });
-  app.post('/api/workers/:id/release', async (req) => { const id = idOf(req); releaseQuarantine(id); audit('owner', 'worker.release', { id }); return { ok: true }; });
+  app.post('/api/workers/:id/release', async (req) => {
+    const id = idOf(req); const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
+    stepUp(req, b); releaseQuarantine('owner', id); audit('owner', 'worker.release', { id }); return { ok: true };
+  });
 
   // ── risk center ──
   app.get('/api/risk', async () => {
@@ -275,7 +278,13 @@ export async function routes(app: FastifyInstance) {
   // ── strategy lab ──
   app.get('/api/lab', async () => ({ strategies: lab.listStrategies(), backtests: lab.listBacktests(30), universe: lab._universeSymbols() }));
   app.post('/api/lab/backtest', async (req) => { const b = z.object({ strategyId: z.string().max(60), symbol: z.string().min(1).max(20).regex(/^[A-Za-z0-9]+$/), bars: z.number().int().min(500).max(8000).optional() }).parse(req.body); limit(req, 'backtest', 'backtests'); return lab.runBacktest('owner', b.strategyId, b.symbol.toUpperCase(), b.bars); });
-  app.post('/api/lab/strategy/:id/status', async (req) => { const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional() }).parse(req.body); lab.setStrategyStatus('owner', (req.params as any).id, b.status, b.note); return { ok: true }; });
+  app.post('/api/lab/strategy/:id/status', async (req) => {
+    const id = idOf(req);
+    const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional(), password: PW.optional() }).strict().parse(req.body);
+    const current = get<{ status: lab.StrategyStatus }>('SELECT status FROM strategies WHERE id=?', id);
+    if (b.status === 'LIVE_CANDIDATE' || (b.status === 'PAPER' && (current?.status !== 'PAPER' || getSetting<string[]>('suspendedStrategies', []).includes(id)))) stepUp(req, b);
+    lab.setStrategyStatus('owner', id, b.status, b.note); return { ok: true };
+  });
 
   // ── news / whales ──
   app.get('/api/news', async () => ({ items: recentNews(300), asOf: getSetting('newsAt', null), license: 'Google News RSS — personal, non-commercial use only.' }));

@@ -1,9 +1,8 @@
 import { all, get } from '../db/db.js';
 import { market } from '../market/store.js';
-import { totalDeposits, PAPER_ACCOUNT } from '../portfolio/ledger.js';
+import { accountState, PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import { getControl } from '../core/mode.js';
 import { currentPolicy } from '../risk/policy.js';
-import { listIncidents } from '../exec/incidents.js';
 import type { DecisionReport, DecisionState } from './engine.js';
 
 /**
@@ -73,7 +72,7 @@ export function reasonsFromReport(r: StoredReport): Reason[] {
 
 interface DecisionRow { id: string; instrument: string; strategy: string; decision: string; score: number | null; created_at: number }
 function parseReport(id: string): StoredReport | null {
-  try { const v = JSON.parse(get<{ report: string }>('SELECT report FROM decisions WHERE id=?', id)?.report ?? ''); return v && typeof v === 'object' ? v : null; } catch { return null; }
+  try { const v = JSON.parse(get<{ report: string }>('SELECT report FROM decisions WHERE id=?', id)?.report ?? ''); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
 }
 function reasonsOf(report: StoredReport | null): Reason[] {
   return report ? reasonsFromReport(report) : [{ group: 'data', code: 'REPORT_UNREADABLE', text: 'the stored decision report could not be read' }];
@@ -92,19 +91,20 @@ function projectRow(d: DecisionRow, history: NoTradeHistory[], nowTs: number): N
 }
 
 /**
- * Known global blockers from existing state (control, policy, incidents, ledger deposits, market store). Absence is not
- * clearance. The ledger's accountState() is deliberately not used: it persists day/week/high-water marks, and this view
- * must never write.
+ * Known blockers from existing control, policy, incidents, equity and market data. Read-only equity does not persist account marks.
  */
 export function globalBlockers(nowTs = Date.now()): GlobalBlocker[] {
   const ctl = getControl(); const out: GlobalBlocker[] = [];
-  const r = { rawMode: ctl.mode, emergency: ctl.emergency, pausedNewOrders: ctl.pausedNewOrders, policy: currentPolicy(), openIncidents: listIncidents().filter((i) => i.status === 'OPEN').length };
+  const r = { rawMode: ctl.mode, emergency: ctl.emergency, pausedNewOrders: ctl.pausedNewOrders, policy: currentPolicy(), openIncidents: get<{ count: number }>("SELECT COUNT(*) AS count FROM protection_incidents WHERE status='OPEN'")!.count };
   if (r.rawMode === 'OBSERVE') out.push({ code: 'MODE_OBSERVE', group: 'mode', text: 'Execution mode is OBSERVE (read-only): decisions are monitored, never executed.', href: '/bot' });
   if (r.emergency) out.push({ code: 'EMERGENCY', group: 'mode', text: 'Emergency stop is active: no new orders.', href: '/risk' });
   if (r.pausedNewOrders) out.push({ code: 'PAUSED', group: 'mode', text: 'New orders are paused.', href: '/risk' });
   if (!r.policy) out.push({ code: 'NO_POLICY', group: 'mode', text: 'No risk policy accepted: paper execution stays disabled.', href: '/risk' });
   if (r.openIncidents > 0) out.push({ code: 'PROTECTION_INCIDENT_OPEN', group: 'safety', text: r.openIncidents + ' open protection incident(s): new entries on those instruments are blocked.', href: '/risk' });
-  if (!(totalDeposits(PAPER_ACCOUNT) > 0)) out.push({ code: 'UNFUNDED', group: 'risk', text: 'Net paper deposits are zero: the risk gate denies every entry (NO_EQUITY).', href: '/bot' });
+  const account = accountState(PAPER_ACCOUNT, nowTs, { persistMarks: false });
+  if (!account.marksMissing.length && Number.isFinite(account.equity) && account.equity <= 0) {
+    out.push({ code: 'UNFUNDED', group: 'risk', text: 'Paper equity is zero or negative. The risk gate denies new entries (NO_EQUITY).', href: '/bot' });
+  }
   const t = market.tickersFetchedAt;
   // Same 60 s threshold as the shell's data-health indicator (/api/shell).
   if (!t || t > nowTs || nowTs - t > 60_000) out.push({ code: 'STALE_DATA', group: 'data', text: t ? 'Market tickers are stale or future-dated (last batch ' + new Date(t).toISOString() + ').' : 'No market ticker batch received (offline or still loading).', href: '/connections' });

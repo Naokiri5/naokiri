@@ -44,7 +44,16 @@ export function useApi<T = any>(path: string | null, opts: { topics?: string[]; 
     catch (e: any) { if (n === seq.current) setError(e.message); }
     finally { if (n === seq.current) setLoading(false); }
   }, [path]);
-  useEffect(() => { load(); if (!opts.every) return; const t = window.setInterval(load, opts.every); return () => clearInterval(t); }, [load, opts.every]);
+  useEffect(() => {
+    load();
+    const interval = opts.every ? window.setInterval(load, opts.every) : undefined;
+    return () => {
+      if (interval !== undefined) clearInterval(interval);
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null;
+      seq.current++;
+    };
+  }, [load, opts.every]);
   useStream((t) => { if (opts.topics?.includes(t)) { if (timer.current) clearTimeout(timer.current); timer.current = window.setTimeout(load, 600); } });
   return { data, error, loading, requestedAt, reload: load, setData };
 }

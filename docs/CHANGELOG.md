@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased: engine lease hardening (builds on the Phase 1 engine lease in bot/bot.ts and ops/)
+- The lanes re-check the lease synchronously with the existing holdEngine() right before writing after awaited network
+  calls: the position monitor and approval expiry in the ticker lane, OMS writes from onDecision in the scan lane, and
+  backups plus strategy suspension in the background lane. A copy that lost the lease writes none of these and drops to
+  STANDBY. Not covered: the decision record and its DITAS event that decide() writes before onDecision; a demoted copy
+  can still record one evaluation per candidate, and the new leader then skips that candle (fail closed, no trade).
+- A refused takeover stays refused until the engine is restarted: the process cannot re-acquire the lease.
+- Every takeover (STOPPED or STANDBY to LEADER) first runs integrity checks on the live database (ops/integrity.ts:
+  quick_check, schema version, audit chain, decision-memory chain, ledger reconcile, protective stops on open positions),
+  built from the existing verifiers. On failure the lease is released, the engine stops, and the reason goes to
+  lastError, the journal and a CRITICAL notification. Nothing is repaired.
+- New botStatus.lastMonitorAt and monitorFailing fields. /api/ready gets a leader-only monitor check that fails while
+  the latest monitor pass errored or no pass completed within three ticker intervals. Standby and offline behave as before.
+  The status ribbon judges the monitor by the same fields (MONITOR FAILING / MONITOR STALLED).
+- MIA_ENGINE_LEASE_TTL_MS shortens the lease for offline tests only (ignored when online). A new two-process test SIGKILLs the leader and checks that
+  the standby takes over only after the TTL, with no overlapping writes.
+
 ## Unreleased: Compact cockpit PR A (six-destination navigation)
 - Navigation is regrouped into Home · Markets · Autopilot · Portfolio · AI Intelligence · Settings & Security, plus
   Trader Joe. It adds a one-level submenu, a collapsible rail, sibling-page tabs and a mobile bottom bar with More.

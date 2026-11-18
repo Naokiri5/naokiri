@@ -28,12 +28,13 @@ Phase 0 audit · 2026-11-16 · commit `ce655bd`
 | Seed phrases / private keys | Never requested or stored; no signer exists. |
 | Owner authentication | scrypt hash, timing-safe compare, `HttpOnly; SameSite=Strict` session cookie (`Secure` with `MIA_SECURE_COOKIE=1`), 12 h expiry, expired sessions purged at login, shared login/step-up lockout. Live event streams close when their session ends. |
 | CSRF | State-changing requests require the `x-mia-csrf` header. |
-| Step-up authentication | Required for risk-policy changes, mode changes, clearing emergency, resuming after a pause, re-enabling a strategy, close-all, address verification, withdrawal preview and lifting the withdrawal freeze. |
+| Step-up authentication | Required for risk-policy changes, mode changes, clearing emergency, resuming new orders (including redundant resume requests), re-enabling a disabled strategy, promotion into PAPER or a LIVE_CANDIDATE attempt, quarantine release, close-all, address verification, withdrawal preview and lifting the withdrawal freeze. LIVE_CANDIDATE remains blocked even with the correct passphrase. Suspension, demotion and pausing require only the owner session. |
 | AI and worker boundaries | Workers return signed, schema-validated evidence only. Trader Joe's tool set contains no order, limit, mode, funding or withdrawal tool (enforced by a test). |
 | Independent risk engine | Deterministic; any exception or missing input returns DENY. Covered by tests. |
 | Live trading | No live venue adapter or signer exists; `BOUNDED_LIVE` is refused by the release gates (tested). |
 | Withdrawals | Stop at a validated preview marked `BLOCKED_BY_RELEASE_GATE`. Emergency freeze exists. |
 | Audit log | Append-only and hash-chained; integrity is verified on the Release Gates page. |
+| Test-derived release gates | `server/src/qa/gates.ts` names exact source files and Vitest fullNames. Missing sources, missing/non-passed assertions, malformed reports or any failed test/suite keep the gate PENDING. Record evidence with `npm run qa -w server`; offline live-provider checks remain skipped/PENDING. G01 cannot certify browser workflows, G03 has untested on-chain/health coverage, and G04 cannot certify LLM factuality, so those gates remain PENDING. Report freshness and source-revision attestation are not implemented. |
 | Untrusted content | News, token metadata and market data are treated as data; Trader Joe's system prompt says so and his tools cannot act on it. |
 
 ## Rules that stay in force for every phase
