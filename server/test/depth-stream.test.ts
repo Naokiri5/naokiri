@@ -120,3 +120,26 @@ describe('local book stays bounded (MA-19)', () => {
     expect(b.bids).toHaveLength(100);
   });
 });
+
+describe('CodeRabbit PR #18 stream findings (SAFE-03)', () => {
+  it('a null or empty quantity is malformed (resync), never a level deletion', () => {
+    for (const bad of [null, '', ' ']) {
+      const s = new BookSync('BTCUSDT'); s.onSnapshot(snap(10));
+      expect(s.onEvent(ev(11, 11, [['100', bad as any]]))).toBe('SNAPSHOT_NEEDED');
+      expect(s.book(1)).toBeNull();
+    }
+  });
+  it('an update that crosses the book or empties a side forces a resync', () => {
+    const s = new BookSync('BTCUSDT'); s.onSnapshot(snap(10));
+    expect(s.onEvent(ev(11, 11, [['105', '1']]))).toBe('SNAPSHOT_NEEDED'); // bid 105 above ask 101
+    const e = new BookSync('BTCUSDT'); e.onSnapshot(snap(10));
+    expect(e.onEvent(ev(11, 11, [], [['101', '0'], ['102', '0']]))).toBe('SNAPSHOT_NEEDED'); // all asks removed
+  });
+  it('a snapshot that completes after stop() is discarded', async () => {
+    let resolve!: (v: any) => void; const published: StreamBook[] = [];
+    const h = startDepthStream(['BTCUSDT'], { url: () => 'wss://t', snapshot: () => new Promise((r) => { resolve = r; }), publish: (_s, b) => published.push(b), WebSocketImpl: FakeWS as any });
+    await tick(); h.stop();
+    resolve(snap(10)); await tick(); await tick();
+    expect(published).toHaveLength(0);
+  });
+});

@@ -72,4 +72,13 @@ describe('streaming books wired into the market fabric', () => {
     FakeWS.last!.send({ e: 'depthUpdate', E: Date.now(), s: 'STRM4USDT', U: 60, u: 61, b: [], a: [] }); // gap: 51..59 missing
     expect(streamFresh(inst.id)).toBe(false);
   });
+  it('a stream book that setBook rejects (older id) does not mark the symbol fresh (SAFE-03)', async () => {
+    const { inst, last } = seedInstrument('STRM5USDT');
+    market.deep.get(inst.id)!.book = { bids: [[last * 0.99, 1]], asks: [[last * 1.01, 1]], ts: Date.now(), lastUpdateId: 1_000 };
+    Object.assign(config, { streaming: true, offline: false });
+    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({ lastUpdateId: 10, bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]] }) });
+    await tick(); await tick();
+    expect(market.deep.get(inst.id)!.book!.lastUpdateId).toBe(1_000);
+    expect(streamFresh(inst.id)).toBe(false); // REST keeps refreshing this symbol
+  });
 });

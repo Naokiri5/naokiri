@@ -16,11 +16,12 @@ import type { Book } from '../providers/binance.js';
 import { startDepthStream, binanceStreamUrl, type StreamBook, type StreamDeps } from './depthStream.js';
 
 /** Install a book snapshot unless it is older than the one already held (concurrent refreshes can land out of order). */
-function setBook(id: string, b: Book) {
-  const d = market.deep.get(id); if (!d) return;
+/** Install a book unless it is older than the held one. Returns whether it was installed. */
+function setBook(id: string, b: Book): boolean {
+  const d = market.deep.get(id); if (!d) return false;
   const cur = d.book;
-  if (cur && ((b.lastUpdateId != null && cur.lastUpdateId != null && b.lastUpdateId < cur.lastUpdateId) || b.ts < cur.ts)) return;
-  d.book = b;
+  if (cur && ((b.lastUpdateId != null && cur.lastUpdateId != null && b.lastUpdateId < cur.lastUpdateId) || b.ts < cur.ts)) return false;
+  d.book = b; return true;
 }
 
 /** Part 29 L0 + Part 33.6 tiered scanning. Polling is the documented fallback (no WS hosts allow-listed). */
@@ -206,7 +207,8 @@ export function syncDepthStreams(ids: string[], seams: Partial<Pick<StreamDeps, 
     }),
     publish: (sym, b: StreamBook) => {
       const id = `crypto:binance:${sym}`; const inst = market.instruments.get(id); if (!inst) return;
-      market.deepState(inst); setBook(id, { bids: b.bids, asks: b.asks, ts: b.ts, lastUpdateId: b.lastUpdateId }); streamBookAt.set(id, b.ts);
+      market.deepState(inst); // Fresh only if the book was actually installed: a rejected (older) stream book must not stop REST (CodeRabbit PR #18).
+      if (setBook(id, { bids: b.bids, asks: b.asks, ts: b.ts, lastUpdateId: b.lastUpdateId })) streamBookAt.set(id, b.ts);
     },
     // Gap or disconnect: the published book stays valid only as of its timestamp and ages out under the normal execution
     // limits; REST stops skipping this symbol immediately (MA-18).

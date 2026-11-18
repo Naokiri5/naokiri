@@ -26,9 +26,12 @@ export const SNAPSHOT_BACKOFF_MIN_MS = 1_000, SNAPSHOT_BACKOFF_MAX_MS = 60_000, 
 export const MAX_EVENT_LAG_MS = 5_000;
 /** No message for this long on an open socket = half-open connection: close it and reconnect (MA-18). */
 export const STALL_MS = 15_000;
+/** Only a non-empty numeric string or a number is a value: Number(null) and Number('') are 0, which would turn a
+ *  malformed quantity into a level DELETION (CodeRabbit PR #18). */
+const num = (v: unknown) => (typeof v === 'string' && v.trim() !== '') || typeof v === 'number' ? Number(v) : NaN;
 const parseLevel = (l: unknown): [number, number] | null => {
   if (!Array.isArray(l) || l.length < 2) return null;
-  const p = Number(l[0]), q = Number(l[1]);
+  const p = num(l[0]), q = num(l[1]);
   return Number.isFinite(p) && p > 0 && Number.isFinite(q) && q >= 0 ? [p, q] : null;
 };
 export function parseDepthEvent(raw: unknown): DepthEvent | null {
@@ -60,7 +63,9 @@ export class BookSync {
     }
     if (ev.u <= this.lastUpdateId) return 'IGNORED'; // duplicate / already applied
     if (!this.continues(ev)) return this.gap();
-    return this.apply(ev) ? 'APPLIED' : this.gap();
+    // A book that becomes crossed or loses a whole side is not a valid book: resynchronize instead of sitting in
+    // SYNCED while never publishing (CodeRabbit PR #18).
+    return this.apply(ev) && this.sane() ? 'APPLIED' : this.gap();
   }
   /** Feed the REST snapshot while buffering. Returns false when the snapshot is too old for the buffered events. */
   onSnapshot(s: Snapshot): 'SYNCED' | 'SNAPSHOT_TOO_OLD' | 'WAITING' {
@@ -76,6 +81,7 @@ export class BookSync {
       if (ev.u <= this.lastUpdateId) continue;
       if (!this.continues(ev) || !this.apply(ev)) { this.gap(); return 'WAITING'; }
     }
+    if (!this.sane()) { this.gap(); return 'WAITING'; }
     return 'SYNCED';
   }
   book(ts: number): StreamBook | null {
@@ -84,6 +90,14 @@ export class BookSync {
     const asks = [...this.asks].sort((x, y) => x[0] - y[0]).slice(0, this.depth);
     if (!bids.length || !asks.length || bids[0][0] >= asks[0][0]) return null; // empty or crossed: never publish
     return { bids, asks, ts, lastUpdateId: this.lastUpdateId };
+  }
+  /** Both sides present and best bid < best ask. */
+  private sane() {
+    if (!this.bids.size || !this.asks.size) return false;
+    let bb = -Infinity, ba = Infinity;
+    for (const p of this.bids.keys()) if (p > bb) bb = p;
+    for (const p of this.asks.keys()) if (p < ba) ba = p;
+    return bb < ba;
   }
   private continues(ev: DepthEvent) {
     return this.first ? ev.U <= this.lastUpdateId + 1 && ev.u >= this.lastUpdateId + 1 : ev.U === this.lastUpdateId + 1;
@@ -144,6 +158,9 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
   const syncs = new Map(symbols.map((s) => [s, new BookSync(s)]));
   const status: StreamStatus = { connected: false, symbols, lastMessageAt: 0, reconnects: 0, resyncs: 0, synced: 0 };
   let ws: WebSocket | null = null; let stopped = false; let attempt = 0; let timer: ReturnType<typeof setTimeout> | null = null;
+  /** Connection generation: a snapshot that completes after stop() or after a reconnect belongs to an old connection and
+   *  must not touch the current book (CodeRabbit PR #18). */
+  let generation = 0;
   const inFlight = new Set<string>();
   const failures = new Map<string, number>(); const nextSnapshotAt = new Map<string, number>();
   const invalidate = (sym: string) => { try { deps.invalidate?.(sym); } catch { /* the REST fallback still ages the book out */ } };
@@ -154,19 +171,22 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
 
   const snapshot = async (sym: string) => {
     if (inFlight.has(sym) || stopped || inFlight.size >= MAX_CONCURRENT_SNAPSHOTS || now() < (nextSnapshotAt.get(sym) ?? 0)) return;
-    inFlight.add(sym);
+    inFlight.add(sym); const gen = generation;
     try {
       for (let tries = 0; tries < 3 && !stopped; tries++) {
-        const r = syncs.get(sym)!.onSnapshot(await deps.snapshot(sym));
+        const snap = await deps.snapshot(sym);
+        if (stopped || gen !== generation) return; // stale completion: discard
+        const r = syncs.get(sym)!.onSnapshot(snap);
         if (r === 'SYNCED') { failures.delete(sym); nextSnapshotAt.delete(sym); const b = syncs.get(sym)!.book(now()); if (b) deps.publish(sym, b); return; }
         if (r === 'WAITING') return; // a gap was found while replaying; the next event triggers a new snapshot
       }
       backoff(sym); // still too old after 3 tries
-    } catch { backoff(sym); /* snapshot failed: REST polling remains the fallback; retry after the backoff */ }
+    } catch { if (!stopped && gen === generation) backoff(sym); /* snapshot failed: REST polling remains the fallback; retry after the backoff */ }
     finally { inFlight.delete(sym); }
   };
   const connect = () => {
     if (stopped || !WS) return;
+    generation++; inFlight.clear();
     for (const s of syncs.values()) s.state = 'BUFFERING';
     const sock: WebSocket = new WS(deps.url(symbols)); ws = sock;
     sock.onopen = () => { status.connected = true; status.lastMessageAt = now(); for (const s of symbols) void snapshot(s); };
@@ -199,6 +219,6 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
     status: () => ({ ...status, synced: [...syncs.values()].filter((s) => s.state === 'SYNCED').length }),
     /** Test seam: run the stall check now. */
     checkStall: () => { if (status.connected && now() - status.lastMessageAt > STALL_MS) { try { ws?.close(); } catch { /* reconnect follows */ } } },
-    stop: () => { stopped = true; clearInterval(watchdog); if (timer) clearTimeout(timer); try { ws?.close(); } catch { /* already closed */ } },
+    stop: () => { stopped = true; generation++; clearInterval(watchdog); if (timer) clearTimeout(timer); try { ws?.close(); } catch { /* already closed */ } },
   };
 }
