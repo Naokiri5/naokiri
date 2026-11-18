@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { freshDb } from './helpers.js';
 import { audit } from '../src/core/audit.js';
@@ -136,6 +137,21 @@ describe('database backups', () => {
     expect(backupVerificationStatus(now).check.status).toBe('FAIL');
   });
 
+  it('returns successful verification even when retention cannot remove an old backup', () => {
+    vi.stubEnv('MIA_BACKUP_DIR', dir);
+    vi.stubEnv('MIA_BACKUP_KEEP', '1');
+    const now = Date.now();
+    const old = createBackup({ dir, key: null, nowTs: now - 3 * 86400_000 });
+    // A directory in place of the old snapshot makes the non-recursive retention deletion fail.
+    const oldPath = join(dir, old.file);
+    rmSync(oldPath);
+    mkdirSync(oldPath);
+    const result = maybeScheduledBackup(now)!;
+    expect(result.verification.ok).toBe(true);
+    expect(result.retentionWarning).toMatch(/could not be pruned/);
+    expect(backupVerificationStatus(now).lastVerify).toMatchObject({ file: result.file, ok: true });
+  });
+
   it('persists a passing scheduled verification and skips runs that are not due', () => {
     vi.stubEnv('MIA_BACKUP_DIR', dir); const now = Date.now();
     const m = maybeScheduledBackup(now)!; expect(m.verification.ok).toBe(true);
@@ -184,7 +200,7 @@ describe('database backups', () => {
 
   it('persists CLI verify results in the existing settings table, including failed checks', () => {
     const m = createBackup({ dir, key: null }); const file = join(dir, m.file); const dataDir = join(dir, 'cli-data');
-    const cli = () => spawnSync(process.execPath, ['--import', 'tsx', 'src/ops/backup-cli.ts', 'verify', file], { cwd: process.cwd(), env: { ...process.env, MIA_OFFLINE: '1', MIA_DATA_DIR: dataDir, MIA_BACKUP_DIR: dir }, encoding: 'utf8' });
+    const cli = () => spawnSync(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../src/ops/backup-cli.ts', import.meta.url)), 'verify', file], { cwd: process.cwd(), env: { ...process.env, MIA_OFFLINE: '1', MIA_DATA_DIR: dataDir, MIA_BACKUP_DIR: dir }, encoding: 'utf8' });
     expect(cli().status).toBe(0);
     let db = new DatabaseSync(join(dataDir, 'mia.db'), { readOnly: true });
     try { expect(JSON.parse(String(db.prepare("SELECT value FROM settings WHERE key='backup.lastVerify'").get()!.value))).toMatchObject({ ok: true, file: m.file }); } finally { db.close(); }
