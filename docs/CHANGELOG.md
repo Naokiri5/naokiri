@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased: Master repair audit (2026-11-18)
+- **A broken saved risk setting can no longer stop a stop-loss.** Exits use the last valid fee rate, and new entries stay blocked until the owner fixes the setting. The release gate shows a broken setting as FAIL.
+- **Worker votes:** a required area (for example liquidity) now needs its own evidence. A worker from another area can no longer count for it.
+- **Login:** behind a proxy, a stranger's wrong passwords can no longer block the owner's close-all.
+- **Backups:** a manual backup run in the wrong folder now fails instead of backing up an empty database.
+- **Server install:** the systemd unit creates its data folder, and its crash-loop limit now actually applies.
+- **Streaming (still off by default):** snapshot retries back off, lagging or broken books are not used, a silent connection reconnects, and the local book stays small (1.67 → 0.039 ms per update).
+- **CI:** the security audit runs as its own required job, so tests always run and report.
+- **Register:** `docs/engineering/MASTER_AUDIT_2026-11-18.md`.
+
 ## Unreleased: Architecture blueprint (2026-11-18)
 - **Streaming order books (milestone 3), off by default.** With `MIA_STREAMING=1`, open positions and the deep tier get Binance WebSocket books that are checked update by update. Any gap, bad data or crossed book throws the local book away and re-syncs. REST polling stays the fallback. Live latency has not been measured yet.
 - **QA evidence is tied to the exact build (Q-01).** The release gate accepts a test report only from the same commit, a clean tree and a run at most 7 days old.

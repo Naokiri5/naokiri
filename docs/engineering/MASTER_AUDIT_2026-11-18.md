@@ -122,3 +122,45 @@ Each item lands as its own commit with a regression test that fails on the old c
 3. MA-13: what may be stored slim or dropped?
 4. MA-03: accept a consensus-rule change that makes quorum stricter?
 5. Permission to push each batch to PR #18.
+
+## 6. Repair results (batches 1–4, same day)
+
+The owner said "Continue". Items that only tighten safety were repaired. Items that change the owner's own flow or data are left for owner decisions. Each fix has a regression test, and each test was run against the old code (stashed) to confirm it fails there unless noted.
+
+| ID | Final status | Commit | Evidence |
+|---|---|---|---|
+| MA-01 | **VERIFIED** | `f1ae3b0` | `policy-exit-safety.test.ts`: with a stored policy missing `feeRate`, a stopped-out position closes with a finite fee. Fails on the old code. |
+| MA-02 | **VERIFIED** | `f1ae3b0` | Same test file: null, negative and out-of-range fee rates book the last valid fee. Fails on the old code. |
+| MA-16 | **VERIFIED** | `f1ae3b0` | One `validatePolicy` for accepted and stored policies. G11 shows an invalid policy as FAIL. The PAPER mode switch refuses an invalid policy. |
+| MA-07 | **VERIFIED** | `ec06b49` | `auth-lockout.test.ts` "behind a proxy …": close-all and revoke-others work while the shared IP is locked. Fails on the old code. |
+| MA-09 | **VERIFIED** | `d567934` | `backup-cli-wrong-dir.test.ts` spawns the CLI against an empty directory: exit 1, no database, no backup. Fails on the old code. Guide updated. |
+| MA-05 | **FIXED, NOT YET VERIFIED in CI** | `5c1d68b` | `ci.yml` split into 6 independent jobs. The audit is unchanged and still required. Needs a completed GitHub run. |
+| MA-21 | **FIXED, NOT YET VERIFIED in CI** | `5c1d68b` | `claude.yml` requires OWNER, MEMBER or COLLABORATOR. Actions are still pinned by tag, not SHA (open, low). |
+| MA-03, MA-12 | **VERIFIED** | `f7abfb1` | QCI v3 (coordinator 1.2.0). `qci-vote-counting.test.ts`: 4 tests fail on the old code. `qci.test.ts`: with no book the result is NO_QUORUM or VETOED. **Consensus is stricter; trading-risk sign-off is still requested from the owner.** |
+| MA-11 | **VERIFIED** | `af6b0ed` | `oms-clock-callbacks.test.ts`: an entry at an injected stale time is denied, and rows carry the evaluation time. Fails on the old code. |
+| MA-17 | **VERIFIED** | `af6b0ed` | Same file: a throwing listener no longer creates a false "exit failed" incident. Fails on the old code. |
+| MA-10 | **VERIFIED (offline)** | `38971c2` | `depth-stream.test.ts`: 50 events lead to 1 snapshot call (was 50), then backoff of about 1 s and 2 s. Fails on the old code. Streaming is still off by default. |
+| MA-18 | **VERIFIED (offline)** | `38971c2` | A lagging book is not published. A gap or disconnect invalidates the book. A silent socket is closed. The fabric gap hands the symbol back to REST. Fails on the old code. |
+| MA-19 | **VERIFIED** | `185b9ed` | Benchmark after 20,000 level-adding updates: 1.67 ms per event becomes 0.039 ms, with about 200 levels per side. Covered by a test. |
+| MA-15, MA-24 | **VERIFIED** | `a86b1a7` | Migration v7 (indexes only). An upgrade test from v6 with data passes, and EXPLAIN QUERY PLAN uses each index. |
+| MA-08 | **FIXED, PARTLY VERIFIED** | `358c873` | `systemd-analyze verify` is clean. It also showed that `StartLimit*` was ignored in `[Service]`; this is fixed. A real `systemctl start` on a fresh host was not run. |
+| MA-22 | **VERIFIED (doc/config)** | `358c873` | `.env.example` no longer suggests a relative data directory. |
+| MA-23 | **VERIFIED** | `283d3fc` | Three sleeps were replaced with state-based waits. Four remain as commented windows that prove no extra request is made. e2e: 76 passed. |
+| MA-04 | **OPEN, owner decision** | — | Always requiring the setup code would change the owner's first-run flow and 15 test setups. |
+| MA-06 | **BLOCKED (upstream)** | — | picomatch has no patched release. No override and no exception were applied. |
+| MA-13 | **OPEN, owner decision** | — | DITAS retention. |
+| MA-14 | **OPEN** | — | Verifying a full backup on the event loop has not been measured on a large database. |
+| MA-20 | **OPEN (theoretical)** | — | The duplicate-instrument re-check inside the transaction is not added. It is safe within one process. |
+
+**Final local verification at `185b9ed`:**
+
+| Check | Result |
+|---|---|
+| typecheck | 0 errors |
+| build | ✓ |
+| server tests | 597 passed, 3 skipped (opt-in live-provider tests) |
+| web tests | 21 passed |
+| e2e | 76 passed |
+| secret scan | ✓ (315 files) |
+| `npm audit --omit=dev` | 0 |
+| `npm audit --audit-level=high` | 6 high (MA-06) |
