@@ -32,7 +32,7 @@ describe('Risk gate (Part 17)', () => {
   });
   it('denies proposals against another account even if it has cash', () => {
     acceptPolicy('owner', DEFAULT_POLICY);
-    updateControl('owner', { mode: 'PAPER' });
+    setSetting('control', { mode: 'PAPER' });
     ledger('other-account', 'DEPOSIT', 10_000);
     expect(evaluateRisk(prop(id, last, { account: 'other-account' }))).toMatchObject({
       decision: 'DENY', reasonCodes: ['ACCOUNT_UNSUPPORTED'], sizing: null,
