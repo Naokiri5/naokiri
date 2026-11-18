@@ -24,6 +24,17 @@ Priority key: **P0** must do (safety/correctness) · **P1** core spec gap · **P
 | M-4 | P2 | Liquidity heatmap from order-book snapshots | — |
 | M-5 | P2 | Tokenized-equity tagging for Binance listings | — |
 
+### MIA 4.2 research increment
+
+| Skill | Available in this increment | Outstanding inputs or behavior |
+|---|---|---|
+| 01–04 | Asset Discovery → Market coverage shows supported asset classes, provider health, IANA market clocks and UTC crypto research sessions. Settings saves the display zone and the profit calendar groups closes by local day. | Verified classification per instrument, licensed exchange calendars, auctions, early closes, maintenance and halt feeds |
+| 06 | Asset Discovery → SEC filings reads recent official filing metadata by CIK. Acceptance and financial reporting period are separate. | Requires a contact User-Agent and egress to data.sec.gov. Historical archives, filing contents and financial statement comparisons remain outside the current feed. |
+| 11 | The Market Terminal compares confirmed structure on the available 15m, 1h and 4h closed caches at one timestamp. | Provider ingestion and validation for 1m, 5m, 30m, 1d and 1w |
+| 12–14 | Structure breaks, changes of character, immediate breakout retests, and UTC or swing-anchored VWAP use the existing closed-candle report. | Additional pattern rules and verified earnings and event anchors |
+| 15 | The canonical feature engine supplies WMA, HMA, Keltner Channels, Ichimoku, Parabolic SAR and OHLC-based volatility estimates in the terminal. | Historical trades for volume profile |
+| 44 | The Risk Center models paper position and cash shocks from current marks and observable depth. It distinguishes partial or unavailable exposure. | Verified sector and token classification, and on-chain liquidity data for unsupported scenarios |
+
 ## Phase 3 — Worker network & QA roles
 | ID | Pri | Task |
 |---|---|---|

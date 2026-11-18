@@ -80,7 +80,7 @@ export function QA() {
 
 export function Settings() {
   const { data, error, reload } = useApi('/api/settings');
-  const [pw, setPw] = useState({ current: '', next: '' }); const [tz, setTz] = useState<number | null>(null); const [prefs, setPrefs] = useState<any>(null);
+  const [pw, setPw] = useState({ current: '', next: '' }); const [tz, setTz] = useState<string | null>(null); const [prefs, setPrefs] = useState<any>(null);
   const p = prefs ?? data?.notifyPrefs;
   return <Page title="Settings" sub="Security, notifications, display and assistant configuration. Risk limits live in the Risk Center; execution mode in Bot Account.">
     <ErrorLine e={error} />
@@ -93,7 +93,15 @@ export function Settings() {
         <label className="row">Quiet hours (UTC, critical always delivered) <input type="number" min={0} max={23} style={{ width: 60 }} value={p.quietHoursUtc?.[0] ?? ''} onChange={(e) => setPrefs({ ...p, quietHoursUtc: e.target.value === '' ? null : [Number(e.target.value), p.quietHoursUtc?.[1] ?? 7] })} />–<input type="number" min={0} max={23} style={{ width: 60 }} value={p.quietHoursUtc?.[1] ?? ''} onChange={(e) => setPrefs({ ...p, quietHoursUtc: [p.quietHoursUtc?.[0] ?? 22, Number(e.target.value)] })} /></label>
         <div className="row"><Action className="primary" label="Save" run={async () => { await api('/api/settings/notify', { body: p }); reload(); }} /><Action label="Send test notification" run={() => api('/api/notifications/test', { body: {} })} /></div>
         <div className="hint">Telegram: {data?.telegram.configured ? 'configured' : 'not configured (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID on the server)'}</div></>}</div></Card>
-      <Card title="Profit calendar timezone"><div className="row"><select value={tz ?? data?.calendarTzOffsetMin ?? 0} onChange={(e) => setTz(Number(e.target.value))} aria-label="Timezone offset">{Array.from({ length: 27 }, (_, i) => (i - 12) * 60).map((m) => <option key={m} value={m}>UTC{m >= 0 ? '+' : ''}{m / 60}</option>)}</select><Action label="Save" run={async () => { await api('/api/calendar/tz', { body: { offsetMin: tz ?? 0 } }); reload(); }} /></div><div className="hint">Defines the day boundary for daily PnL attribution.</div></Card>
+      <Card title="Display timezone">
+        <div className="row">
+          <input aria-label="IANA timezone" placeholder="Asia/Manila" value={tz ?? data?.calendarTimeZone ?? ''} onChange={e => setTz(e.target.value)} />
+          <Action label="Use device timezone" run={async () => setTz(Intl.DateTimeFormat().resolvedOptions().timeZone)} />
+          <Action label="Save timezone" disabled={!tz?.trim()} run={async () => { await api('/api/calendar/tz', { body: { timeZone: tz } }); setTz(null); reload(); }} />
+        </div>
+        <div className="hint">Used by market clocks and the profit calendar. Enter an IANA name such as America/New_York or UTC.</div>
+        {data && !data.calendarTimeZone && <div className="hint">Current profit calendar offset {data.calendarTzOffsetMin} minutes from UTC.</div>}
+      </Card>
       <Card title="Trader Joe"><div className="kv"><span>Mode</span><span>{data?.joe.llm ? `Claude API (${data.joe.model})` : 'Command mode — set ANTHROPIC_API_KEY on the server for conversational answers'}</span><span>Tools</span><span className="hint">{data?.joe.tools.join(', ')}</span><span>Authority</span><span className="hint">read, analyze, and risk-reducing pause only</span></div></Card>
     </div>
   </Page>;

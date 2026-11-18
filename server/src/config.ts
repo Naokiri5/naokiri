@@ -65,6 +65,7 @@ export const config = {
   engineLeaseTtlMs: intEnv('MIA_ENGINE_LEASE_TTL_MS', 0, 1_000, 3_600_000),
   anthropicApiKey: env.ANTHROPIC_API_KEY ?? '',
   joeModel: env.MIA_JOE_MODEL ?? 'claude-opus-5-5',
+  secUserAgent: env.MIA_SEC_USER_AGENT?.trim() ?? '',
   telegramBotToken: env.TELEGRAM_BOT_TOKEN ?? '',
   telegramChatId: env.TELEGRAM_CHAT_ID ?? '',
   /** Persistent secret used to authenticate worker evidence packets. Never logged. */

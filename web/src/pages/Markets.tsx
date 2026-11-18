@@ -5,6 +5,7 @@ import { hierarchy, pack } from 'd3-hierarchy';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Modal, Page, Tabs, useSort } from '../ui';
 import { DecisionView, IndicatorGrid } from './Intel';
+import { AdvancedIndicators } from './AdvancedIndicators';
 
 export function Terminal() {
   const { symbol = 'BTCUSDT' } = useParams(); const [iv, setIv] = useState<'15m' | '1h' | '4h'>('1h'); const nav = useNavigate();
@@ -41,11 +42,31 @@ export function Terminal() {
             <div className="row"><Badge v={data.chartIntelligence.status} /><Badge v={data.chartIntelligence.trend} /><Badge v="NO TRADE" /></div>
             <div className="hint">{data.chartIntelligence.note}</div>
             {data.chartIntelligence.issues.length > 0 && <div className="hint warn">{data.chartIntelligence.issues.join('; ')}</div>}
+            {data.timeframeAgreement && <div className="tablewrap">
+              <table>
+                <caption>Timeframe agreement · {data.timeframeAgreement.state.replaceAll('_', ' ')}</caption>
+                <thead><tr><th>Timeframe</th><th>Structure</th><th>Candle closed</th></tr></thead>
+                <tbody>{data.timeframeAgreement.readings.map((r: { timeframe: string; trend: string; status: string; closedAt: number | null; issues: string[] }) => (
+                  <tr key={r.timeframe}><td>{r.timeframe}</td>
+                    <td><Badge v={r.status === 'VALID' ? r.trend : r.status} />{r.issues.map(issue => <div className="hint" key={issue}>{issue}</div>)}</td>
+                    <td>{fmt.time(r.closedAt)}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>}
+            {!!data.chartIntelligence.anchoredVwap?.length && <div className="tablewrap">
+              <table><thead><tr><th>VWAP anchor</th><th>Anchor time (UTC)</th><th>Estimated VWAP</th><th>Close vs. VWAP</th></tr></thead>
+                <tbody>{data.chartIntelligence.anchoredVwap.map((v: { anchor: string; anchorAt: number; price: number | null; deviationPct: number | null }) => (
+                  <tr key={v.anchor}><td>{v.anchor.replaceAll('_', ' ')}</td><td>{new Date(v.anchorAt).toISOString()}</td>
+                    <td>{v.price === null ? 'Unavailable' : fmt.px(v.price)}</td><td>{v.deviationPct === null ? '—' : fmt.pct(v.deviationPct, 2)}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>}
             <div className="tablewrap"><table><thead><tr><th>Detection</th><th>Boundaries</th><th>Evidence</th><th>Invalidation</th></tr></thead><tbody>
               {data.chartIntelligence.detections.map((d: any) => <tr key={d.kind}><td>{d.kind}<div className="hint">{Math.round(d.confidence * 100)}% rule strength · {d.calibration}</div></td><td>{fmt.px(d.boundaries.low)}–{fmt.px(d.boundaries.high)}</td><td>{d.evidence.join('; ')}<div className="hint">{d.method}</div></td><td>{d.invalidation}<div className="hint">Expires {fmt.time(d.expiresAt)}</div></td></tr>)}
             </tbody></table></div>
           </div>}
         </Card>
+        <AdvancedIndicators snapshot={data?.featuresResearch} />
         <Card title="50 indicator specialists"><IndicatorGrid list={data?.indicators ?? []} /></Card>
       </div>
       <div className="col" style={{ gap: 14 }}>

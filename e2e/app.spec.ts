@@ -168,16 +168,38 @@ test('trading history CSV export downloads', async () => {
   expect(dl.suggestedFilename()).toBe('mia-orders-paper.csv');
 });
 
-test('terminal displays chart intelligence evidence and invalidation', async () => {
+test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', async () => {
   await page.route('**/api/instrument/CHARTFIXTURE?interval=1h', async route => route.fulfill({ json: {
     instrument: { base: 'CHARTFIXTURE', symbol: 'CHARTFIXTURE' }, cross: {}, candles: [], indicators: [],
-    chartIntelligence: { status: 'VALID', trend: 'UNKNOWN', note: 'Fixture evidence only; confidence is not calibrated.', issues: [], detections: [{ kind: 'BREAKOUT_UP', confidence: 0.6, calibration: 'NOT_CALIBRATED', boundaries: { low: 100, high: 105 }, evidence: ['close=105'], method: 'Prior 20-bar high', invalidation: 'Close back below 100', expiresAt: 3600000 }] }
+    featuresResearch: {
+      candleOpenAt: 39600000, wma20: 104, hma20: 106, keltner: null, parabolicSar: null,
+      ichimoku: { conversion9: 100, base26: 100, leadingA: 100, leadingB52: null, laggingClose: 105, displacementBars: 26 },
+      parkinson20: null, garmanKlass20: null,
+    },
+    timeframeAgreement: { state: 'CONFLICTING_SIGNALS', asOf: 43200000, readings: [
+      { timeframe: '15m', trend: 'BULLISH', status: 'VALID', closedAt: 43200000, issues: [] },
+      { timeframe: '1h', trend: 'UNKNOWN', status: 'UNAVAILABLE', closedAt: null, issues: ['No closed candles in the market cache'] },
+      { timeframe: '4h', trend: 'BEARISH', status: 'VALID', closedAt: 43200000, issues: [] },
+    ] },
+    chartIntelligence: { status: 'VALID', trend: 'UNKNOWN', note: 'Fixture evidence only; confidence is not calibrated.', issues: [],
+      anchoredVwap: [
+        { anchor: 'UTC_DAY', anchorAt: 0, price: 100, deviationPct: 5 },
+        { anchor: 'UTC_WEEK', anchorAt: -259200000, price: null, deviationPct: null },
+      ],
+      detections: [{ kind: 'BREAKOUT_UP', confidence: 0.6, calibration: 'NOT_CALIBRATED', boundaries: { low: 100, high: 105 }, evidence: ['close=105'], method: 'Prior 20-bar high', invalidation: 'Close back below 100', expiresAt: 3600000 }] }
   } }));
   await page.goto('/terminal/CHARTFIXTURE');
   await expect(page.getByText('Chart intelligence · closed candles')).toBeVisible();
+  const agreement = page.getByRole('table', { name: /Timeframe agreement · CONFLICTING SIGNALS/ });
+  await expect(agreement.getByRole('row', { name: /15m/ })).toContainText('BULLISH');
+  await expect(agreement.getByRole('row', { name: /1h/ })).toContainText('No closed candles in the market cache');
+  await expect(agreement.getByRole('row', { name: /4h/ })).toContainText('BEARISH');
   await expect(page.getByRole('cell', { name: /BREAKOUT_UP/ })).toBeVisible();
   await expect(page.getByText('Close back below 100')).toBeVisible();
+  await expect(page.getByRole('row', { name: /UTC DAY/ })).toContainText('+5.00%');
+  await expect(page.getByRole('row', { name: /UTC WEEK/ })).toContainText('Unavailable');
   await expect(page.getByText(/60% rule strength/)).toBeVisible();
+  await expect(page.getByRole('row', { name: /Hull moving average/ })).toContainText('106.0000');
   await page.unroute('**/api/instrument/CHARTFIXTURE?interval=1h');
 });
 
@@ -213,6 +235,51 @@ test('DITAS execution quality tab lists actual paper orders only', async () => {
   await page.getByRole('tab', { name: 'Execution quality' }).click();
   await expect(page.getByText('Paper execution quality')).toBeVisible();
   await expect(page.getByText(/Actual paper OMS records only/)).toBeVisible();
+});
+
+test('market coverage uses the saved IANA timezone and shows unsupported venues', async () => {
+  await page.goto('/settings');
+  await page.getByRole('textbox', { name: 'IANA timezone' }).fill('Asia/Manila');
+  const [response] = await Promise.all([
+    page.waitForResponse(r => r.url().endsWith('/api/calendar/tz') && r.request().method() === 'POST'),
+    page.getByRole('button', { name: 'Save timezone' }).click(),
+  ]);
+  expect(response.ok()).toBe(true);
+  await expect(page.getByRole('textbox', { name: 'IANA timezone' })).toHaveValue('Asia/Manila');
+  await page.goto('/discover');
+  await page.getByRole('tab', { name: 'Market coverage' }).click();
+  await expect(page.getByText(/Asia\/Manila/)).toBeVisible();
+  await expect(page.getByRole('row', { name: /U.S. equities/ })).toContainText('PENDING CREDENTIALS');
+  await expect(page.getByRole('row', { name: /Tokenized equities/ })).toContainText('Unavailable');
+  await page.goto('/calendar');
+  await expect(page.getByText('Asia/Manila', { exact: true })).toBeVisible();
+});
+
+test('SEC research keeps acceptance and report dates separate', async () => {
+  const sourceUrl = 'https://www.sec.gov/Archives/edgar/data/123456/000012345626000001/0000123456-26-000001-index.htm';
+  await page.route('**/api/research/filings/123456', route => route.fulfill({ json: {
+    cik: '0000123456', note: 'Fixture SEC filing metadata.',
+    filings: [{
+      accessionNumber: '0000123456-26-000001', form: '10-Q', filingDate: '2026-05-06',
+      reportDate: '2026-03-31', acceptedAt: '2026-05-06T20:00:00Z', items: [], sourceUrl,
+    }],
+  } }));
+  await page.goto('/discover');
+  await page.getByRole('tab', { name: 'SEC filings' }).click();
+  await page.getByRole('textbox', { name: 'Company CIK' }).fill('123456');
+  await page.getByRole('button', { name: 'Find filings' }).click();
+  await expect(page.getByRole('link', { name: '10-Q' })).toHaveAttribute('href', sourceUrl);
+  const filing = page.getByRole('row', { name: /10-Q/ });
+  await expect(filing).toContainText('2026-05-06T20:00:00Z');
+  await expect(filing).toContainText('2026-03-31');
+  await page.unroute('**/api/research/filings/123456');
+});
+
+test('risk center shows research-only paper scenarios', async () => {
+  await page.goto('/risk');
+  await expect(page.getByText('Paper portfolio stress', { exact: true })).toBeVisible();
+  await expect(page.getByRole('row', { name: /Flash crash/ })).toContainText('NO EXPOSURE');
+  await expect(page.getByRole('row', { name: /USDT cash depeg/ })).toContainText('MODELED');
 });
 
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });

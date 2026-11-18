@@ -7,7 +7,7 @@ export type ProviderStatus = 'LIVE' | 'DEGRADED' | 'DOWN' | 'PENDING_CREDENTIALS
 export interface ProviderInfo {
   id: string;
   name: string;
-  sourceClass: 'cex' | 'dex' | 'aggregator' | 'fx_reference' | 'news' | 'onchain' | 'social' | 'broker' | 'messaging';
+  sourceClass: 'cex' | 'dex' | 'aggregator' | 'fx_reference' | 'news' | 'onchain' | 'social' | 'broker' | 'messaging' | 'regulator';
   markets: string[];
   license: string;
   realtime: 'REALTIME' | 'NEAR_REALTIME' | 'DELAYED' | 'DAILY_REFERENCE';
@@ -53,7 +53,13 @@ export function setRateLimit(id: string, perMin: number) { buckets.set(id, new B
 export class ProviderError extends Error { constructor(public providerId: string, msg: string, public status?: number) { super(`${providerId}: ${msg}`); } }
 
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
-export async function fetchProvider(id: string, url: string, opts: { timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string> } = {}): Promise<any> {
+export async function fetchProvider<T = any>(id: string, url: string, opts: {
+  timeoutMs?: number;
+  as?: 'json' | 'text';
+  headers?: Record<string, string>;
+  redirect?: 'follow' | 'error';
+  decode?: (raw: unknown) => T;
+} = {}): Promise<T> {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
   if (config.offline) throw new ProviderError(id, 'offline mode');
@@ -62,13 +68,14 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
   try {
-    const res = await fetch(url, { signal: ctl.signal, redirect: 'follow', headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } });
+    const res = await fetch(url, { signal: ctl.signal, redirect: opts.redirect ?? 'follow', headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } });
     if (res.status === 404) { // resource-level miss (e.g. product not listed) — provider itself is reachable
       Object.assign(info, { lastOkAt: Date.now(), lastLatencyMs: Math.round(performance.now() - t0) });
       throw Object.assign(new ProviderError(id, 'HTTP 404 (resource not found)', 404), { resourceMiss: true });
     }
     if (!res.ok) throw new ProviderError(id, `HTTP ${res.status}`, res.status);
-    const body = opts.as === 'text' ? await res.text() : await res.json();
+    const raw: unknown = opts.as === 'text' ? await res.text() : await res.json();
+    const body = opts.decode ? opts.decode(raw) : raw as T;
     const ms = performance.now() - t0;
     record(`provider.${id}`, ms);
     const prev = info.status;
