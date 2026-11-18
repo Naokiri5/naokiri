@@ -22,7 +22,7 @@ import { run, J } from '../db/db.js';
  */
 export const QCI_POLICY = { supportThreshold: 0.5, maxOpposition: 0.25, minResponseRatio: 0.6, validityMs: 5 * 60_000 };
 export const DOMAIN_WEIGHTS: Record<string, number> = { trend: 0.16, momentum: 0.1, volatility: 0.08, flow: 0.1, liquidity: 0.12, structure: 0.1, regime: 0.1, news: 0.06, onchain: 0.04, risk: 0.08, execution: 0.06 };
-const COORDINATOR_VERSION = 'qci-coordinator@1.1.0';
+const COORDINATOR_VERSION = 'qci-coordinator@1.2.0';
 const CAPABILITY = new Map(WORKERS.map((w) => [w.id, w.capability]));
 /** Authenticated packets from an unknown worker id (test fixtures) are treated as data-driven. */
 const isEvidence = (p: EvidencePacket) => (CAPABILITY.get(p.worker_id) ?? 'DATA_DRIVEN') === 'DATA_DRIVEN';
@@ -39,15 +39,23 @@ export function validatePacket(raw: unknown, candidateId: string): EvidencePacke
   return p.data.packet;
 }
 
+/**
+ * R-12 v3 (MA-03/MA-12). Two separate questions:
+ *  - VOTE: each dependency group votes once. It is credited to the first domain (DOMAINS order) that has a non-abstaining
+ *    packet in it, and its score comes ONLY from that domain's packets — never an average across domains.
+ *  - COVERAGE: a domain's support/oppose/abstain are its OWN data-driven packets, wherever the group's vote went. A required
+ *    domain is covered only by its own non-abstaining evidence; another domain's worker can never satisfy it.
+ */
 export function aggregate(packets: EvidencePacket[], applicableDomains: Set<string>) {
   const evidence = packets.filter((p) => isEvidence(p) && applicableDomains.has(p.evidence_domain));
-  // One vote per dependency group across ALL domains, counted in its primary (first, in DOMAINS order) domain.
   const primary = new Map<string, string>();
-  for (const dom of DOMAINS) for (const p of evidence) if (p.evidence_domain === dom && !primary.has(p.dependency_group)) primary.set(p.dependency_group, dom);
-  const byDomain = new Map<string, Map<string, EvidencePacket[]>>();
+  for (const dom of DOMAINS) for (const p of evidence) if (p.evidence_domain === dom && p.stance !== 'ABSTAIN' && !primary.has(p.dependency_group)) primary.set(p.dependency_group, dom);
+  for (const dom of DOMAINS) for (const p of evidence) if (p.evidence_domain === dom && !primary.has(p.dependency_group)) primary.set(p.dependency_group, dom); // abstain-only groups
+  const votesByDomain = new Map<string, Map<string, EvidencePacket[]>>();
   for (const p of evidence) {
     const dom = primary.get(p.dependency_group)!;
-    const d = byDomain.get(dom) ?? new Map(); byDomain.set(dom, d);
+    if (p.evidence_domain !== dom) continue; // other domains' packets in this group: coverage only, no vote
+    const d = votesByDomain.get(dom) ?? new Map(); votesByDomain.set(dom, d);
     const g = d.get(p.dependency_group) ?? []; g.push(p); d.set(p.dependency_group, g);
   }
   let ws = 0, wo = 0, wTotal = 0; let groups = 0;
@@ -55,14 +63,15 @@ export function aggregate(packets: EvidencePacket[], applicableDomains: Set<stri
   for (const dom of DOMAINS) {
     if (!applicableDomains.has(dom)) continue;
     const weight = DOMAIN_WEIGHTS[dom]; wTotal += weight;
-    const gm: Map<string, EvidencePacket[]> = byDomain.get(dom) ?? new Map();
-    const sharedGroups = new Set(evidence.filter((p) => p.evidence_domain === dom && primary.get(p.dependency_group) !== dom).map((p) => p.dependency_group)).size;
+    const gm: Map<string, EvidencePacket[]> = votesByDomain.get(dom) ?? new Map();
+    const own = evidence.filter((p) => p.evidence_domain === dom);
+    const sharedGroups = new Set(own.filter((p) => primary.get(p.dependency_group) !== dom).map((p) => p.dependency_group)).size;
     const constantRule = packets.filter((p) => p.evidence_domain === dom && !isEvidence(p)).length;
-    let s = 0, o = 0, a = 0; const groupScores: number[] = [];
+    const s = own.filter((p) => p.stance === 'SUPPORT').length, o = own.filter((p) => p.stance === 'OPPOSE').length, a = own.filter((p) => p.stance === 'ABSTAIN').length;
+    const groupScores: number[] = [];
     for (const ps of gm.values()) {
       groups++;
       const voting = ps.filter((p) => p.stance !== 'ABSTAIN');
-      s += ps.filter((p) => p.stance === 'SUPPORT').length; o += ps.filter((p) => p.stance === 'OPPOSE').length; a += ps.filter((p) => p.stance === 'ABSTAIN').length;
       if (voting.length) groupScores.push(voting.reduce((acc, p) => acc + (p.stance === 'SUPPORT' ? 1 : -1), 0) / voting.length);
     }
     const score = groupScores.length ? groupScores.reduce((x, y) => x + y, 0) / groupScores.length : null;
@@ -123,7 +132,7 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
   const rec: ConsensusRecord = {
     schema_version: '1.0', consensus_id: uid('qci'), candidate_id: ctx.candidate.id, event_id: ctx.candidate.eventId, instrument_id: ctx.candidate.instrumentId,
     strategy_id: ctx.candidate.strategyId, state, reason_codes: reasons, created_at: iso(created), expires_at: iso(created + QCI_POLICY.validityMs), analysis_ms: Math.round(ms * 100) / 100,
-    method: { id: 'domain-capped-weighted-v2', support_threshold: QCI_POLICY.supportThreshold, max_opposition: QCI_POLICY.maxOpposition, min_response_ratio: QCI_POLICY.minResponseRatio, calibration: 'NOT_CALIBRATED' },
+    method: { id: 'domain-capped-weighted-v3', support_threshold: QCI_POLICY.supportThreshold, max_opposition: QCI_POLICY.maxOpposition, min_response_ratio: QCI_POLICY.minResponseRatio, calibration: 'NOT_CALIBRATED' },
     workers: { eligible, responding, abstaining, failed, quarantined, rejected_packets: rejected },
     domains: agg.domains, dependency_groups: agg.groups, weighted_support: round3(agg.weightedSupport), weighted_opposition: round3(agg.weightedOpposition),
     vetoes, challenge, missing_inputs: missing, coordinator_version: COORDINATOR_VERSION, trace_id: ctx.candidate.traceId,

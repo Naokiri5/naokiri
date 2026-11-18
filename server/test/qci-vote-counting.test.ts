@@ -15,12 +15,43 @@ describe('QCI vote counting (R-12)', () => {
     const shared = ['volatility', 'liquidity', 'structure', 'risk'].map((d) => pkt({ evidence_domain: d, dependency_group: 'ticker.24h' }));
     const a = aggregate(shared, all);
     const by = Object.fromEntries(a.domains.map((d) => [d.domain, d]));
-    expect(a.groups).toBe(1); // was 4 independent votes before
-    expect(by.volatility.score).toBe(1); expect(by.volatility.support).toBe(4);
-    for (const d of ['liquidity', 'structure', 'risk']) { expect(by[d].score).toBeNull(); expect(by[d].sharedGroups).toBe(1); expect(by[d].support).toBe(0); }
+    expect(a.groups).toBe(1); // was 4 independent votes before R-12
+    expect(by.volatility.score).toBe(1);
+    // v3 (MA-03): each domain's counts are its OWN packets (coverage); only the credited domain carries a score.
+    for (const d of ['volatility', 'liquidity', 'structure', 'risk']) expect(by[d].support).toBe(1);
+    for (const d of ['liquidity', 'structure', 'risk']) { expect(by[d].score).toBeNull(); expect(by[d].sharedGroups).toBe(1); }
     // Weighted support reflects one domain's weight, not four.
     const four = aggregate(['volatility', 'liquidity', 'structure', 'risk'].map((d) => pkt({ evidence_domain: d, dependency_group: `own.${d}` })), all);
     expect(a.weightedSupport).toBeLessThan(four.weightedSupport);
+  });
+  it('MA-03: another domain\'s worker can never cover a required domain', () => {
+    // Depth book unavailable: liquidity's own worker abstains; an execution worker in the shared `cross` group supports.
+    const a = aggregate([
+      pkt({ worker_id: 'W-LIQ-08', evidence_domain: 'liquidity', dependency_group: 'cross', stance: 'ABSTAIN' }),
+      pkt({ worker_id: 'W-EXE-07', evidence_domain: 'execution', dependency_group: 'cross', stance: 'SUPPORT' }),
+    ], all);
+    const by = Object.fromEntries(a.domains.map((d) => [d.domain, d]));
+    expect(by.liquidity.support + by.liquidity.oppose).toBe(0); // was 1: liquidity "covered" by execution's packet
+    expect(by.execution.support).toBe(1); expect(by.execution.score).toBe(1); // the vote goes to the domain that actually voted
+    expect(a.groups).toBe(1);
+  });
+  it('MA-12: a group is scored only from its credited domain — no cross-domain averaging', () => {
+    const a = aggregate([
+      pkt({ evidence_domain: 'flow', dependency_group: 'book', stance: 'SUPPORT' }),
+      pkt({ evidence_domain: 'liquidity', dependency_group: 'book', stance: 'OPPOSE' }),
+    ], all);
+    const by = Object.fromEntries(a.domains.map((d) => [d.domain, d]));
+    expect(by.flow.score).toBe(1);              // was 0: liquidity's OPPOSE was averaged into flow's vote
+    expect(by.liquidity.oppose).toBe(1);        // liquidity's adverse evidence still counts as its own coverage
+    expect(a.groups).toBe(1);
+  });
+  it('an abstain-only domain does not claim a group away from the domain that voted', () => {
+    const a = aggregate([
+      pkt({ evidence_domain: 'trend', dependency_group: 'macd.1h', stance: 'ABSTAIN' }),
+      pkt({ evidence_domain: 'momentum', dependency_group: 'macd.1h', stance: 'OPPOSE' }),
+    ], all);
+    const by = Object.fromEntries(a.domains.map((d) => [d.domain, d]));
+    expect(by.momentum.score).toBe(-1); expect(by.trend.score).toBeNull(); expect(by.trend.sharedGroups).toBe(1);
   });
   it('constant-rule workers never count as evidence or as required-domain coverage', () => {
     const a = aggregate([pkt({ worker_id: constantWorker.id, evidence_domain: 'execution', dependency_group: 'fee.tier' })], all);

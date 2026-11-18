@@ -60,6 +60,13 @@ describe('QCI (Part 29)', () => {
     expect(rep.decision).toBe('REJECTED');
     expect(rep.finalDecision).toBe('REJECT');
   });
+  it('no order book: consensus cannot reach a trade state on borrowed liquidity coverage (MA-03)', async () => {
+    const { inst, last } = seedInstrument('DOTUSDT', { seed: 6 });
+    market.deep.get(inst.id)!.book = null;
+    const c = candidate(inst.id, last); const rec = await runConsensus(buildContext(c));
+    expect(rec.method.id).toBe('domain-capped-weighted-v3');
+    expect(['NO_QUORUM', 'VETOED']).toContain(rec.state);
+  });
   it('stale data fails closed', async () => {
     const { inst, last } = seedInstrument('ADAUSDT', { seed: 4 });
     market.tickers.get(inst.id)!.receivedAt = Date.now() - 10 * 60_000;
