@@ -114,13 +114,20 @@ test('why MIA is not trading: grouped reasons, superseded history, unreadable re
   await expect(page.locator('details.nt-stale summary')).toContainText('1 stale decision(s)');
 });
 
-test('board evidence ages on the client and turns STALE at the 2h TTL between polls', async () => {
-  withDb((db) => seedDecision(db, 'AVAXUSDT', 'REJECTED', Date.now() - TTL + 6_000, { risk: { decision: 'DENY', reasonCodes: ['NO_ORDER_BOOK (cannot estimate slippage)'], policyVersion: 1, ts: 'x' } }));
-  await page.goto('/scanner'); await page.getByRole('tab', { name: 'Why not trading' }).click();
-  const avax = page.locator('.nt-current > .nt-card', { hasText: 'AVAXUSDT' });
-  await expect(avax).toContainText('RECENT');
-  await expect(page.locator('details.nt-stale summary')).toContainText('2 stale decision(s)', { timeout: 15_000 });
-  await expect(page.locator('.nt-current > .nt-card', { hasText: 'AVAXUSDT' })).toHaveCount(0);
+test('board evidence ages on the client and turns STALE at the 2h TTL between polls', async ({ browser }) => {
+  withDb((db) => seedDecision(db, 'AVAXUSDT', 'REJECTED', Date.now() - TTL + 15_000, { risk: { decision: 'DENY', reasonCodes: ['NO_ORDER_BOOK (cannot estimate slippage)'], policyVersion: 1, ts: 'x' } }));
+  const context = await browser.newContext({ storageState: await page.context().storageState() });
+  try {
+    const board = await context.newPage();
+    await board.clock.install();
+    await board.goto('/scanner');
+    await board.getByRole('tab', { name: 'Why not trading' }).click();
+    const avax = board.locator('.nt-current > .nt-card', { hasText: 'AVAXUSDT' });
+    await expect(avax).toContainText('RECENT');
+    await board.clock.fastForward('00:16');
+    await expect(board.locator('details.nt-stale summary')).toContainText('2 stale decision(s)');
+    await expect(avax).toHaveCount(0);
+  } finally { await context.close(); }
 });
 
 test('an empty board never invents a recommendation', async () => {
