@@ -122,6 +122,15 @@ const MIGRATIONS: string[] = [
   CREATE TRIGGER ditas_blobs_no_update BEFORE UPDATE ON ditas_blobs BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
   CREATE TRIGGER ditas_blobs_no_delete BEFORE DELETE ON ditas_blobs BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
   `,
+  // v7 — indexes for hot filters (master audit MA-15/MA-24). Additive only: no table, row or trigger changes.
+  //  - unread notification count on every /api/shell poll (was a full scan);
+  //  - failed-login count in the security center (audit_log is hash-chained and append-only, so it only grows);
+  //  - DITAS child-event lookups by parent.
+  `
+  CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read) WHERE read = 0;
+  CREATE INDEX IF NOT EXISTS idx_audit_action_ts ON audit_log(action, ts);
+  CREATE INDEX IF NOT EXISTS idx_ditas_events_parent ON ditas_events(parent_event_id);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
