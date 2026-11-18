@@ -208,6 +208,9 @@ export function syncDepthStreams(ids: string[], seams: Partial<Pick<StreamDeps, 
       const id = `crypto:binance:${sym}`; const inst = market.instruments.get(id); if (!inst) return;
       market.deepState(inst); setBook(id, { bids: b.bids, asks: b.asks, ts: b.ts, lastUpdateId: b.lastUpdateId }); streamBookAt.set(id, b.ts);
     },
+    // Gap or disconnect: the published book stays valid only as of its timestamp and ages out under the normal execution
+    // limits; REST stops skipping this symbol immediately (MA-18).
+    invalidate: (sym) => { streamBookAt.delete(`crypto:binance:${sym}`); },
   });
   return depthStream;
 }

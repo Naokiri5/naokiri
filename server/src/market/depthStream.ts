@@ -20,6 +20,12 @@ export interface StreamBook { bids: [number, number][]; asks: [number, number][]
 export type SyncState = 'BUFFERING' | 'SYNCED';
 
 const MAX_BUFFER = 2_000;
+/** Snapshot retry policy (MA-10): per-symbol exponential backoff with jitter, and a cap on concurrent snapshot requests. */
+export const SNAPSHOT_BACKOFF_MIN_MS = 1_000, SNAPSHOT_BACKOFF_MAX_MS = 60_000, MAX_CONCURRENT_SNAPSHOTS = 5;
+/** A book whose provider event is older than this when it arrives is not published (MA-18: lag is checked, not just recorded). */
+export const MAX_EVENT_LAG_MS = 5_000;
+/** No message for this long on an open socket = half-open connection: close it and reconnect (MA-18). */
+export const STALL_MS = 15_000;
 const parseLevel = (l: unknown): [number, number] | null => {
   if (!Array.isArray(l) || l.length < 2) return null;
   const p = Number(l[0]), q = Number(l[1]);
@@ -105,7 +111,11 @@ export interface StreamDeps {
   url: (symbols: string[]) => string;
   snapshot: (symbol: string) => Promise<Snapshot>;
   publish: (symbol: string, book: StreamBook) => void;
+  /** Called when a symbol's published book can no longer be extended (gap, disconnect): REST should take over now. */
+  invalidate?: (symbol: string) => void;
   now?: () => number;
+  /** Test seam: random in [0,1) for jitter. */
+  random?: () => number;
   WebSocketImpl?: typeof WebSocket;
 }
 export const binanceStreamUrl = (symbols: string[]) =>
@@ -117,49 +127,65 @@ export interface StreamStatus { connected: boolean; symbols: string[]; lastMessa
  * (re)connect starts every symbol from BUFFERING and a fresh snapshot, so no book survives a disconnect.
  */
 export function startDepthStream(symbols: string[], deps: StreamDeps) {
-  const now = deps.now ?? Date.now; const WS = deps.WebSocketImpl ?? (globalThis as any).WebSocket;
+  const now = deps.now ?? Date.now; const rand = deps.random ?? Math.random; const WS = deps.WebSocketImpl ?? (globalThis as any).WebSocket;
   const syncs = new Map(symbols.map((s) => [s, new BookSync(s)]));
   const status: StreamStatus = { connected: false, symbols, lastMessageAt: 0, reconnects: 0, resyncs: 0, synced: 0 };
   let ws: WebSocket | null = null; let stopped = false; let attempt = 0; let timer: ReturnType<typeof setTimeout> | null = null;
   const inFlight = new Set<string>();
+  const failures = new Map<string, number>(); const nextSnapshotAt = new Map<string, number>();
+  const invalidate = (sym: string) => { try { deps.invalidate?.(sym); } catch { /* the REST fallback still ages the book out */ } };
+  const backoff = (sym: string) => {
+    const n = (failures.get(sym) ?? 0) + 1; failures.set(sym, n);
+    nextSnapshotAt.set(sym, now() + Math.min(SNAPSHOT_BACKOFF_MAX_MS, SNAPSHOT_BACKOFF_MIN_MS * 2 ** (n - 1)) * (0.5 + rand() / 2));
+  };
 
   const snapshot = async (sym: string) => {
-    if (inFlight.has(sym) || stopped) return; inFlight.add(sym);
+    if (inFlight.has(sym) || stopped || inFlight.size >= MAX_CONCURRENT_SNAPSHOTS || now() < (nextSnapshotAt.get(sym) ?? 0)) return;
+    inFlight.add(sym);
     try {
       for (let tries = 0; tries < 3 && !stopped; tries++) {
         const r = syncs.get(sym)!.onSnapshot(await deps.snapshot(sym));
-        if (r === 'SYNCED') { const b = syncs.get(sym)!.book(now()); if (b) deps.publish(sym, b); return; }
+        if (r === 'SYNCED') { failures.delete(sym); nextSnapshotAt.delete(sym); const b = syncs.get(sym)!.book(now()); if (b) deps.publish(sym, b); return; }
         if (r === 'WAITING') return; // a gap was found while replaying; the next event triggers a new snapshot
       }
-    } catch { /* snapshot failed: REST polling remains the fallback; the next gap or reconnect retries */ }
+      backoff(sym); // still too old after 3 tries
+    } catch { backoff(sym); /* snapshot failed: REST polling remains the fallback; retry after the backoff */ }
     finally { inFlight.delete(sym); }
   };
   const connect = () => {
     if (stopped || !WS) return;
     for (const s of syncs.values()) s.state = 'BUFFERING';
     const sock: WebSocket = new WS(deps.url(symbols)); ws = sock;
-    sock.onopen = () => { status.connected = true; attempt = 0; for (const s of symbols) void snapshot(s); };
+    sock.onopen = () => { status.connected = true; status.lastMessageAt = now(); for (const s of symbols) void snapshot(s); };
     sock.onmessage = (m: MessageEvent) => {
       const received = now(); status.lastMessageAt = received;
       let msg: any; try { msg = JSON.parse(String(m.data)); } catch { return; }
       const ev = parseDepthEvent(msg?.data ?? msg); if (!ev) return;
-      record('stream.binance.eventLagMs', Math.max(0, received - ev.E)); // provider event time → local receipt
+      attempt = 0; // reconnect backoff resets only after a VALID event, not on open (a server that accepts then closes must not cause a storm)
+      const lag = Math.max(0, received - ev.E);
+      record('stream.binance.eventLagMs', lag); // provider event time → local receipt
       const sync = syncs.get(ev.s); if (!sync) return;
       const r = sync.onEvent(ev);
-      if (r === 'SNAPSHOT_NEEDED') { status.resyncs++; void snapshot(ev.s); }
-      else if (r === 'APPLIED') { const b = sync.book(received); if (b) deps.publish(ev.s, b); }
-      else if (r === 'BUFFERED' && !inFlight.has(ev.s) && sync.state === 'BUFFERING') void snapshot(ev.s);
+      if (r === 'SNAPSHOT_NEEDED') { status.resyncs++; invalidate(ev.s); void snapshot(ev.s); }
+      else if (r === 'APPLIED') { if (lag <= MAX_EVENT_LAG_MS) { const b = sync.book(received); if (b) deps.publish(ev.s, b); } }
+      else if (r === 'BUFFERED' && sync.state === 'BUFFERING') void snapshot(ev.s);
     };
     sock.onclose = () => {
-      status.connected = false; ws = null; if (stopped) return;
-      status.reconnects++; const delay = Math.min(60_000, 1_000 * 2 ** attempt++) * (0.5 + Math.random() / 2);
+      status.connected = false; ws = null; for (const s of symbols) invalidate(s);
+      if (stopped) return;
+      status.reconnects++; const delay = Math.min(60_000, 1_000 * 2 ** attempt++) * (0.5 + rand() / 2);
       timer = setTimeout(connect, delay);
     };
     sock.onerror = () => { try { sock.close(); } catch { /* close triggers reconnect */ } };
   };
+  // Half-open socket watchdog: no message for STALL_MS on a connected socket → close (onclose reconnects with backoff).
+  const watchdog = setInterval(() => { if (status.connected && now() - status.lastMessageAt > STALL_MS) { try { ws?.close(); } catch { /* reconnect follows */ } } }, Math.min(STALL_MS, 5_000));
+  (watchdog as any).unref?.();
   connect();
   return {
     status: () => ({ ...status, synced: [...syncs.values()].filter((s) => s.state === 'SYNCED').length }),
-    stop: () => { stopped = true; if (timer) clearTimeout(timer); try { ws?.close(); } catch { /* already closed */ } },
+    /** Test seam: run the stall check now. */
+    checkStall: () => { if (status.connected && now() - status.lastMessageAt > STALL_MS) { try { ws?.close(); } catch { /* reconnect follows */ } } },
+    stop: () => { stopped = true; clearInterval(watchdog); if (timer) clearTimeout(timer); try { ws?.close(); } catch { /* already closed */ } },
   };
 }

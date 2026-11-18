@@ -69,3 +69,41 @@ describe('depth stream transport (fake socket)', () => {
     h.stop(); expect(FakeWS.last!.closed).toBe(true); expect(h.status().connected).toBe(false);
   });
 });
+
+describe('stream retry, lag and stall safety (MA-10, MA-18)', () => {
+  const upd = (U: number, u: number, E: number) => ({ e: 'depthUpdate', E, s: 'BTCUSDT', U, u, b: [['100', '1']], a: [] });
+  it('a failing snapshot is retried with backoff, not on every event', async () => {
+    let calls = 0; let t = 10_000;
+    const h = startDepthStream(['BTCUSDT'], { url: () => 'wss://t', snapshot: async () => { calls++; throw new Error('HTTP 429'); }, publish: () => {}, now: () => t, random: () => 0.999, WebSocketImpl: FakeWS as any });
+    await tick(); await tick();
+    expect(calls).toBe(1);
+    for (let i = 0; i < 50; i++) FakeWS.last!.send(upd(i * 2 + 1, i * 2 + 2, t)); // 50 events ~ 5 s of a busy stream
+    await tick(); await tick();
+    expect(calls).toBe(1); // was 50: a new snapshot per buffered event
+    t += 1_100; FakeWS.last!.send(upd(201, 202, t)); await tick(); await tick();
+    expect(calls).toBe(2); // after the first backoff (~1 s)
+    t += 1_100; FakeWS.last!.send(upd(203, 204, t)); await tick(); await tick();
+    expect(calls).toBe(2); // second backoff is ~2 s
+    h.stop();
+  });
+  it('a lagging event is applied (sync kept) but its book is not published', async () => {
+    const published: StreamBook[] = []; const t = 50_000;
+    const h = startDepthStream(['BTCUSDT'], { url: () => 'wss://t', snapshot: async () => snap(10), publish: (_s, b) => published.push(b), now: () => t, WebSocketImpl: FakeWS as any });
+    await tick(); await tick(); const n = published.length;
+    FakeWS.last!.send(upd(11, 12, t - 6_000)); // 6 s behind the provider clock
+    expect(published.length).toBe(n);
+    FakeWS.last!.send(upd(13, 14, t - 100));
+    expect(published.at(-1)!.lastUpdateId).toBe(14); // continuity kept across the lagging update
+    h.stop();
+  });
+  it('a gap and a disconnect invalidate the published book; a silent socket is closed', async () => {
+    const invalid: string[] = []; let t = 70_000;
+    const h = startDepthStream(['BTCUSDT'], { url: () => 'wss://t', snapshot: async () => snap(10), publish: () => {}, invalidate: (s) => invalid.push(s), now: () => t, WebSocketImpl: FakeWS as any });
+    await tick(); await tick();
+    FakeWS.last!.send(upd(30, 31, t)); // gap
+    expect(invalid).toEqual(['BTCUSDT']);
+    const sock = FakeWS.last!; t += 16_000; h.checkStall();
+    expect(sock.closed).toBe(true); expect(invalid.length).toBe(2); expect(h.status().reconnects).toBe(1);
+    h.stop();
+  });
+});
