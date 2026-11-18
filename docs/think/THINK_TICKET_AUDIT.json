@@ -1,0 +1,1330 @@
+{
+ "auditedRef": "54c1d2e4d2942c65e55176300713b00b64425493",
+ "auditedAt": "2026-11-18",
+ "note": "Audited committed HEAD only; uncommitted WIP present in tree (decision/certificate.ts, decision/profitLab.ts, test/think-certificate.test.ts, web ThinkCertificate.tsx) was excluded. Statuses reflect the code BEFORE THINK slice 1; thinkSlice1 lists what this PR adds (status should be re-audited after merge).",
+ "tickets": [
+  {
+   "id": "MIA-THINK-001",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/market/quality.ts:assessQuality 'quote instrument mismatch'",
+    "server/test/quality.test.ts: 'rejects a mismatched instrument or source identity'",
+    "server/src/providers/dexscreener.ts: chainId+pairAddress"
+   ],
+   "gap": "No canonical asset-ID type or symbol-collision test; market.bySymbol resolves ticker text (Joe/analyze only); DEX ids not chain+contract+pool keyed.",
+   "owner": "server/src/market/store.ts",
+   "weakness": "Ambiguous tickers",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-002",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/market/quality.ts:assessQuality stale quote/providerTs => FAIL",
+    "server/test/quality.test.ts: 'stale quote fails closed' / 'rejects delayed source events even when just received'",
+    "server/test/qci.test.ts: 'stale data fails closed' (INSUFFICIENT_DATA)"
+   ],
+   "gap": "",
+   "owner": "server/src/market/quality.ts",
+   "weakness": "Stale quotes disguised as current",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-003",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/ditas/memory.ts:capture frozen pre-QCI snapshot",
+    "server/test/ditas-memory.test.ts: 'uses frozen pre-QCI evidence for the final decision'",
+    "server/test/chart.test.ts: 'does not inspect or expose hidden future OHLCV'",
+    "server/test/lab.test.ts: 'no look-ahead'"
+   ],
+   "gap": "",
+   "owner": "server/src/ditas/memory.ts",
+   "weakness": "Look-ahead leakage",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-004",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/market/quality.ts:assessQuality per-venue cross quotes, maxDeviationPct warn/fail",
+    "server/test/quality.test.ts: 'cross-venue deviation fails'",
+    "server/test/hardening.test.ts: 'a NaN quote is flagged and a real 5% deviation...'"
+   ],
+   "gap": "",
+   "owner": "server/src/market/quality.ts",
+   "weakness": "Different venue prices silently averaged",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-005",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/news/news.ts: id=sha256(guid|link) dedupe",
+    "server/src/market/depthStream.ts BookSync dup ids",
+    "server/test/depth-stream.test.ts: 'duplicates are ignored'"
+   ],
+   "gap": "No news-dedupe test; social post-ID and chain tx+logIndex dedupe and reorg rewind absent (providers pending).",
+   "owner": "server/src/news/news.ts",
+   "weakness": "Duplicate social/on-chain events",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-006",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/qci/coordinator.ts:aggregate one vote per dependency_group",
+    "server/src/market/quality.ts independentSources dedupe",
+    "server/test/quality.test.ts: 'excludes stale cross quotes and deduplicates source identities'"
+   ],
+   "gap": "No source-lineage graph: resellers of one exchange's data would still count as independent venues.",
+   "owner": "server/src/market/quality.ts",
+   "weakness": "Correlated vendors masquerade as independent",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-007",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/safety/safety.ts:assessDexPair 'volume/liquidity (wash proxy)'"
+   ],
+   "gap": "No CEX wash-volume detection (trade flow vs price response); no test; no trust-threshold failure on synthetic wash.",
+   "owner": "server/src/safety/safety.ts",
+   "weakness": "Manipulated exchange volume",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-008",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/joe/joe.ts tool set (no mode/order tools)",
+    "server/test/api.test.ts: 'Trader Joe has no order/limit/mode/withdraw tools'",
+    "server/test/joe-gate.test.ts: 'runs pause_new_orders only when the owner asked'",
+    "server/test/knowledge.test.ts: 'document text cannot break out of the LLM passage fence'"
+   ],
+   "gap": "",
+   "owner": "server/src/joe/joe.ts",
+   "weakness": "Untrusted social text as commands",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-009",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/test/quality.test.ts: 'does not invent a primary source when data is absent'",
+    "server/test/incidents.test.ts: 'provider outage: keeps the position open...'",
+    "server/test/oms.test.ts: 'never prices a stop-out from a stale book or a ticker fallback'"
+   ],
+   "gap": "",
+   "owner": "server/src/market/quality.ts",
+   "weakness": "Failed APIs replaced with estimated data",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-010",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/ditas/memory.ts:hashEvent/verifyMemory, lineage.strategyVersions",
+    "server/test/ditas-memory.test.ts: 'detects snapshot content tampering...'",
+    "server/src/qci/coordinator.ts stores packets+coordinator_version"
+   ],
+   "gap": "No explicit decision hash/model version and no re-run of decide() from a stored snapshot proving reconstruction.",
+   "owner": "server/src/ditas/memory.ts",
+   "weakness": "No immutable research audit",
+   "priority": "P0",
+   "thinkSlice1": "certificate commits to sha256 of stored report + consensus"
+  },
+  {
+   "id": "MIA-THINK-011",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/runtime.ts:isApplicable (onchain only for crypto-dex)"
+   ],
+   "gap": "All ~94 non-onchain workers run for every candidate; no candidate-specific task graph or invocation profiling.",
+   "owner": "server/src/workers/runtime.ts",
+   "weakness": "All 100 workers run on every asset",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-012",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/market/scanner.ts:scanOnce uses cached market",
+    "server/test/ditas-memory.test.ts: 'records manual no-signal analysis from the seeded closed cache without network calls'"
+   ],
+   "gap": "analyzeInstrument may refreshDeep on hot path; no zero-network warmed-cache benchmark test for the full decision path.",
+   "owner": "server/src/market/scanner.ts",
+   "weakness": "Network calls inside hot decision path",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-013",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/bot/bot.ts: hotLane separate from scanLane; no LLM in decide()/runConsensus",
+    "server/src/ditas/memory.ts lineage 'No LLM ... used by deterministic decision path'"
+   ],
+   "gap": "No slow-lane abstraction with deadlines/staleness and no test proving an LLM stall cannot block hotLane.",
+   "owner": "server/src/bot/bot.ts",
+   "weakness": "Slow large models block decisions",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-014",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/bot/bot.ts:hotLane refreshBooks(openPositions) + monitorPositions on own interval"
+   ],
+   "gap": "No reserved provider quota/queue priority for held positions; no 10k-candidate starvation test.",
+   "owner": "server/src/bot/bot.ts",
+   "weakness": "No priority for held positions",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-015",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/runtime.ts:runOne failure=>failed, quarantine after 5",
+    "server/test/worker-runtime-hardening.test.ts: 'C-03/J-01 ... DEADLINE failure'",
+    "server/test/worker-runtime-hardening.test.ts: 'C-01: an abstaining mandatory check ... NO_QUORUM'"
+   ],
+   "gap": "No test injecting a throwing worker into runConsensus, nor of quarantine after repeated faults.",
+   "owner": "server/src/workers/runtime.ts",
+   "weakness": "Single worker exception crashes ensemble",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-016",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/qci/coordinator.ts: responseRatio + missingRequired => NO_QUORUM",
+    "server/test/qci-vote-counting.test.ts: 'MA-03: another domain's worker can never cover a required domain'",
+    "server/test/qci-vote-counting.test.ts: 'response ratio counts only data-driven workers'"
+   ],
+   "gap": "",
+   "owner": "server/src/qci/coordinator.ts",
+   "weakness": "Timeouts are treated as agreement",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-017",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/qci/coordinator.ts SEEN_MAX; scanner rejections/lastDecisions caps; core/latency.ts ring buffers",
+    "server/test/depth-stream.test.ts: 'levels far from the top are trimmed'"
+   ],
+   "gap": "No configured RAM ceiling/memory budget, TTL caches or 24h soak test.",
+   "owner": "server/src/core/latency.ts",
+   "weakness": "Unlimited cache growth",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-018",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/features/indicators.ts incremental FeatureEngine shared by workers",
+    "server/test/ditas-store-once.test.ts: 'strategies evaluated on the same market state share one stored copy'",
+    "server/test/qci-vote-counting.test.ts: 'D-03: duplicate packets...'"
+   ],
+   "gap": "No feature fingerprint cache: each candidate re-runs every worker on identical snapshots.",
+   "owner": "server/src/workers/runtime.ts",
+   "weakness": "Repeated identical calculations",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-019",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/runtime.ts POOL.concurrency=16",
+    "server/src/bot/bot.ts lane overlap guards (ticking/scanning)"
+   ],
+   "gap": "No backpressure, priority queue or low-tier shedding; no stress test of monitoring SLA.",
+   "owner": "server/src/bot/bot.ts",
+   "weakness": "CPU overload triggers latency spikes",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-020",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/core/latency.ts p50/p95/p99",
+    "server/src/qhef/qhef.ts budgets",
+    "server/test/phase1.test.ts: 'QHEF report evaluates budgets from real samples'"
+   ],
+   "gap": "No cache-hit-rate or ingestion-lag metrics and no recorded reproducible benchmark conditions.",
+   "owner": "server/src/qhef/qhef.ts",
+   "weakness": "Quantum speed claims cannot be measured",
+   "priority": "P0",
+   "thinkSlice1": "scripts/benchmark-think.mjs compute-only baseline"
+  },
+  {
+   "id": "MIA-THINK-021",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/registry.ts: id, domain, version, dependencyGroup, sourceIds, capability",
+    "server/test/workers-effectiveness.test.ts: 'classifies every worker'"
+   ],
+   "gap": "No owner/input-needs contract per worker and no test pinning the exact expected versioned registry.",
+   "owner": "server/src/workers/registry.ts",
+   "weakness": "Worker names are mistaken for separate intelligent agents",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-022",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/qci/schemas.ts zod EvidencePacket + HMAC",
+    "server/test/qci.test.ts: 'rejects forged, replayed, and out-of-scope packets'",
+    "server/test/qci.test.ts: 'every applicable worker returns a schema-valid, signed packet'"
+   ],
+   "gap": "",
+   "owner": "server/src/qci/schemas.ts",
+   "weakness": "Evaluator output schemas drift",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-023",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/registry.ts warm-up ABSTAIN, 'insufficient out-of-sample trades' (<20)",
+    "server/src/regime/regime.ts n<60 => UNKNOWN",
+    "server/test/features.test.ts: 'insufficient history is UNKNOWN'"
+   ],
+   "gap": "Packets carry no sample count, window or noise estimate; no generic insufficient-sample ABSTAIN rule.",
+   "owner": "server/src/qci/schemas.ts",
+   "weakness": "Workers cast votes without adequate samples",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-024",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/qci/coordinator.ts dependency groups + domain caps + veto",
+    "server/test/qci.test.ts: 'dependency groups are not independent votes'",
+    "server/test/worker-runtime-hardening.test.ts: 'C-06: ... veto'"
+   ],
+   "gap": "",
+   "owner": "server/src/qci/coordinator.ts",
+   "weakness": "Same indicator counted repeatedly",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-025",
+   "status": "MISSING",
+   "evidence": [
+    "server/src/qci/coordinator.ts QCI_POLICY calibration:'NOT_CALIBRATED'",
+    "server/src/workers/registry.ts hard-coded thresholds"
+   ],
+   "gap": "Thresholds uncalibrated, not regime-specific; no frozen threshold manifest or drift test (calibration data also needed).",
+   "owner": "server/src/workers/registry.ts",
+   "weakness": "Hard-coded static thresholds fit one regime",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-026",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/runtime.ts:isApplicable",
+    "server/src/qci/coordinator.ts applicable domains exclude onchain for CEX"
+   ],
+   "gap": "Behavior exists but no test asserting CEX candidates invoke zero onchain workers.",
+   "owner": "server/src/workers/runtime.ts",
+   "weakness": "On-chain worker fires on CEX-only instruments",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-027",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/effectiveness.ts vote/abstain/failed counts",
+    "server/test/workers-effectiveness.test.ts: 'productivity is measured from recorded evaluations'"
+   ],
+   "gap": "No per-worker predictive discrimination, calibration or latency by regime.",
+   "owner": "server/src/workers/effectiveness.ts",
+   "weakness": "Worker accuracy not measured",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-028",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/qci/coordinator.ts workers.failed/quarantined in record; missingMandatory => NO_QUORUM",
+    "web/src/pages/Intel.tsx shows responding/eligible"
+   ],
+   "gap": "Decision card lacks quarantine/failure counts per required domain; no test that a quarantined required worker forces abstention.",
+   "owner": "server/src/qci/coordinator.ts",
+   "weakness": "Worker failures hidden in aggregate score",
+   "priority": "P1",
+   "thinkSlice1": "certificate shows failed/quarantined workers and missing required domains"
+  },
+  {
+   "id": "MIA-THINK-029",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/test/vike.test.ts: 'research code imports no OMS, signing, wallet or transfer module'",
+    "workers/qci import no exec/wallet (manual grep)"
+   ],
+   "gap": "Import-boundary test covers Vike files only, not workers/, qci/, chart/, knowledge/.",
+   "owner": "server/test (import-graph test over server/src/workers)",
+   "weakness": "Workers acquire order authority",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-030",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/registry.ts single canonical registry",
+    "skill duplication-audit"
+   ],
+   "gap": "No automated dedupe check (same dependencyGroup+sourceIds+features) rejecting redundant workers.",
+   "owner": "server/src/workers/registry.ts",
+   "weakness": "Adding extra workers causes architectural duplication",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-031",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/qci/coordinator.ts domain-capped-weighted-v3 + challengePanel",
+    "server/test/qci-vote-counting.test.ts: 'a dependency group shared by several domains votes once'"
+   ],
+   "gap": "",
+   "owner": "server/src/qci/coordinator.ts",
+   "weakness": "Majority voting gives false certainty",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-032",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/qci/challenge.ts BEAR/CONTRARIAN/DATA_AUDITOR/EXECUTION",
+    "server/src/decision/engine.ts opposingEvidence"
+   ],
+   "gap": "No explicit reversal/spoofing/liquidity-loss/macro-shock scenarios and no test that the report lists them.",
+   "owner": "server/src/qci/challenge.ts",
+   "weakness": "No explicit bear-case reviewer",
+   "priority": "P0",
+   "thinkSlice1": "certificate bull/bear case incl. vetoes"
+  },
+  {
+   "id": "MIA-THINK-033",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/workers/registry.ts mandatory workers + REQUIRED_DOMAINS",
+    "server/test/worker-runtime-hardening.test.ts: 'C-01: an abstaining mandatory check ... NO_QUORUM'",
+    "server/test/provider-validation.test.ts: 'DEX safety: ...' (eligibleForAutomation false)"
+   ],
+   "gap": "",
+   "owner": "server/src/qci/coordinator.ts",
+   "weakness": "Missing evidence incorrectly means neutral",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-034",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/qci/schemas.ts confidence:'NOT_CALIBRATED'",
+    "server/src/decision/engine.ts disclaimer",
+    "server/test/qci.test.ts: '... calibration label'"
+   ],
+   "gap": "No UI test refusing to render QCI/opportunity score as a win %; no calibrated P(win) separate field in decision.",
+   "owner": "web/src/pages/Intel.tsx",
+   "weakness": "Confidence confused with win probability",
+   "priority": "P0",
+   "thinkSlice1": "score labelled HEURISTIC, win probability NO_VALID_FORECAST"
+  },
+  {
+   "id": "MIA-THINK-035",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/decision/engine.ts evaluateRisk authoritative",
+    "server/test/knowledge.test.ts: 'knowledge attaches references but the risk gate stays authoritative'",
+    "server/test/api.test.ts: 'Trader Joe has no order/limit/mode/withdraw tools'"
+   ],
+   "gap": "",
+   "owner": "server/src/risk/gate.ts",
+   "weakness": "No hard veto independence",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-036",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/decision/engine.ts uses no LLM output",
+    "server/test/knowledge.test.ts: 'answers extractively with sources'"
+   ],
+   "gap": "No import/contract test proving LLM text cannot enter decisions; no verifier for generated hypotheses.",
+   "owner": "server/src/decision/engine.ts",
+   "weakness": "LLM hallucinations pollute decision",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-037",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/registry.ts per-timeframe 15m/1h/4h workers"
+   ],
+   "gap": "No explicit multi-horizon conflict detection, penalty or veto.",
+   "owner": "server/src/qci/challenge.ts",
+   "weakness": "Conflict between timeframe signals ignored",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-038",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/decision/engine.ts WAIT/MONITOR/REJECT finalDecision",
+    "server/src/bot/bot.ts:onDecision acts only on PAPER_TRADE/APPROVED"
+   ],
+   "gap": "No first-class NO_TRADE outcome with reason codes and no test that WAIT/MONITOR cause zero order side effects.",
+   "owner": "server/src/decision/engine.ts",
+   "weakness": "Research engine overtrades in uncertain regimes",
+   "priority": "P0",
+   "thinkSlice1": "NO_TRADE reason codes on every certificate"
+  },
+  {
+   "id": "MIA-THINK-039",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/qci/challenge.ts single deterministic pass",
+    "server/src/workers/runtime.ts deadlineMs"
+   ],
+   "gap": "No challenge-stage deadline/cost budget or escalation-to-WAIT test.",
+   "owner": "server/src/qci/challenge.ts",
+   "weakness": "Agent debate runs forever",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-040",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/registry.ts evaluate snapshot only; strategyStats from backtest"
+   ],
+   "gap": "No blind-first evaluation contract or test that shuffled prior outcomes leave base evidence unchanged.",
+   "owner": "server/src/decision/scoring.ts",
+   "weakness": "Prior decisions bias the next evaluation",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-041",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/lab/backtest.ts:monteCarlo",
+    "server/test/lab.test.ts: 'Monte Carlo is deterministic per seed and bounded'"
+   ],
+   "gap": "Decision report has no bear/base/bull quantiles labeled estimated with timestamp.",
+   "owner": "server/src/decision/engine.ts",
+   "weakness": "Profit shown as certain",
+   "priority": "P1",
+   "thinkSlice1": "hypothetical scenario table, labelled"
+  },
+  {
+   "id": "MIA-THINK-042",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/risk/gate.ts costR (fees+spread+impact)",
+    "server/src/lab/backtest.ts BtCosts"
+   ],
+   "gap": "No net-expectancy-after-cost check per trade; funding/gas N/A (spot); no gross-positive/net-negative fixture test.",
+   "owner": "server/src/risk/gate.ts",
+   "weakness": "Expected return ignores transaction costs",
+   "priority": "P1",
+   "thinkSlice1": "two-sided fees + spread/slippage; gross-win-net-loss test"
+  },
+  {
+   "id": "MIA-THINK-043",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/lab/backtest.ts:stats expectancyR",
+    "server/test/knowledge.test.ts: 'metrics are computed from trades and flag small samples'"
+   ],
+   "gap": "No P(win)*avgWin-P(loss)*avgLoss-costs with uncertainty in decision; no loss-skewed 60%-win fixture.",
+   "owner": "server/src/lab/backtest.ts",
+   "weakness": "Hit rate mistaken for edge",
+   "priority": "P1",
+   "thinkSlice1": "expectancy with interval; 60%-win negative fixture"
+  },
+  {
+   "id": "MIA-THINK-044",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/lab/strategies.ts fixed R-multiple targets",
+    "server/test/exit-edge-cases.test.ts: 'E-03: invalid take-profit fractions...'"
+   ],
+   "gap": "Targets ignore liquidity/volatility; no fill probabilities.",
+   "owner": "server/src/lab/exits.ts",
+   "weakness": "One profit target fits all market states",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-045",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/risk/gate.ts stopFillBufferPct",
+    "server/test/ditas-twin.test.ts: 'fills stop gaps at the adverse opening'",
+    "server/test/lab.test.ts: 'gap fills at open'"
+   ],
+   "gap": "No stress-loss/unable-to-exit estimate in decision or notional cap from it.",
+   "owner": "server/src/risk/gate.ts",
+   "weakness": "Stop assumed guaranteed",
+   "priority": "P1",
+   "thinkSlice1": "2x gap and liquidity-pull stress scenarios"
+  },
+  {
+   "id": "MIA-THINK-046",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/knowledge/research.ts walk-forward purge/embargo",
+    "server/test/ditas-api.test.ts: 'requires explicit probability, fixed reference and future boundary'"
+   ],
+   "gap": "No calibrated walk-forward model feeding decisions; forecasts NOT_CALIBRATED.",
+   "owner": "server/src/ditas/calibration.ts",
+   "weakness": "Profit estimate based on future data",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-047",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/risk/gate.ts sizing (equity risk, stop, fees, minNotional, floorToStep)",
+    "server/test/risk.test.ts: 'allows a valid paper trade and sizes conservatively'",
+    "server/test/market-data-hardening.test.ts: 'B-09: floorToStep never rounds a quantity up'"
+   ],
+   "gap": "",
+   "owner": "server/src/risk/gate.ts",
+   "weakness": "Position sizing ignores venue filters",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-048",
+   "status": "NOT_APPLICABLE",
+   "evidence": [
+    "server/src/risk/policy.ts leverage: z.literal(1); approvedMarkets ['crypto'] spot"
+   ],
+   "gap": "Spot-only, leverage locked to 1; revisit if margin products are added.",
+   "owner": "server/src/risk/policy.ts",
+   "weakness": "Leverage hides liquidation risk",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-049",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/market/quality.ts:bookImpact/walkBook",
+    "server/test/quality.test.ts: 'walks levels and reports impact; partial depth => Infinity'",
+    "server/test/oms.test.ts: 'walkBook is exact by quantity'"
+   ],
+   "gap": "",
+   "owner": "server/src/market/quality.ts",
+   "weakness": "Market impact grows with position size",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-050",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/knowledge/research.ts bootstrap/metrics"
+   ],
+   "gap": "Decision does not use a lower-bound edge; near-zero expectancy does not force WAIT.",
+   "owner": "server/src/decision/engine.ts",
+   "weakness": "No uncertainty around estimated edge",
+   "priority": "P1",
+   "thinkSlice1": "UNCERTAIN_EDGE when lower bound <= 0"
+  },
+  {
+   "id": "MIA-THINK-051",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/regime/regime.ts TREND/RANGE/HIGH_VOL/COMPRESSION",
+    "server/src/lab/strategies.ts suitableRegimes",
+    "server/test/features.test.ts: 'regime: uptrend detected'"
+   ],
+   "gap": "No panic/illiquid/event regimes, no strategy passport gate, no panic replay test.",
+   "owner": "server/src/regime/regime.ts",
+   "weakness": "Bull-market strategy runs during crashes",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-052",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/risk/gate.ts size = riskBudget/perUnitLoss (wider stop => smaller qty)"
+   ],
+   "gap": "No explicit volatility/liquidity risk-budget scaling and no monotonicity test.",
+   "owner": "server/src/risk/gate.ts",
+   "weakness": "Volatility spike does not change sizing",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-053",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/risk/gate.ts CORRELATION_LIMIT (unknown corr counts as correlated)",
+    "server/src/portfolio/correlation.ts"
+   ],
+   "gap": "No test of correlation limit; no factor clustering or shared risk budget.",
+   "owner": "server/src/risk/gate.ts",
+   "weakness": "Positions share hidden factor exposure",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-054",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/bot/bot.ts:hotLane monitorPositions (no LLM)",
+    "server/test/oms.test.ts: 'enters with book-walk fill, attaches OMS-monitored stop, exits on stop'",
+    "server/test/ops-lease-hardening.test.ts: 'lastMonitorAt advances only after an error-free monitor pass'"
+   ],
+   "gap": "",
+   "owner": "server/src/exec/oms.ts",
+   "weakness": "Stop monitor depends on inference model uptime",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-055",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/exec/oms.ts:monitorPositions/closePosition/closeAllPositions (no QCI)",
+    "server/test/policy-exit-safety.test.ts: 'the stop still executes, with the last valid fee rate'",
+    "server/test/policy-exit-safety.test.ts: 'close-all keeps going after one position fails'"
+   ],
+   "gap": "",
+   "owner": "server/src/exec/oms.ts",
+   "weakness": "Exit reasoning waits for a new bullish vote",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-056",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/exec/oms.ts UNIQUE client_order_id",
+    "server/test/crash.oms.test.ts: 'two entries for one decision fill once'",
+    "server/test/crash.oms.test.ts: 'SIGKILL after COMMIT keeps the effect, and a retry is a no-op'"
+   ],
+   "gap": "No UNKNOWN order/position state model or timeout-after-ACK reconcile (paper venue only; live part blocked).",
+   "owner": "server/src/exec/environment.ts",
+   "weakness": "Venue outage is treated as flat position",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-057",
+   "status": "BLOCKED",
+   "evidence": [
+    "server/src/safety/safety.ts:assessDexPair 'sell simulation NOT_AVAILABLE' => UNVERIFIED"
+   ],
+   "gap": "Freeze/mint/blacklist/LP rechecks need an EVM/Solana RPC provider (pending credentials).",
+   "owner": "server/src/safety/safety.ts",
+   "weakness": "DEX token may become unsellable",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-058",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/workers/registry.ts 'Exit liquidity at 2x size','Impact at intended size' veto",
+    "server/src/risk/gate.ts SLIPPAGE deny if !filledFully",
+    "server/test/worker-runtime-hardening.test.ts: 'C-06: a book that cannot absorb the intended size...'"
+   ],
+   "gap": "",
+   "owner": "server/src/risk/gate.ts",
+   "weakness": "Liquidity illusion hides exit risk",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-059",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/workers/registry.ts 'Macro event risk' OPPOSE"
+   ],
+   "gap": "No portfolio-wide macro exposure limit or shared scenario shock.",
+   "owner": "server/src/risk/gate.ts",
+   "weakness": "News shocks hit multiple positions",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-060",
+   "status": "NOT_APPLICABLE",
+   "evidence": [
+    "server/src/decision/engine.ts funding: 'N/A (spot)'"
+   ],
+   "gap": "Spot-only build; funding applies only if perpetuals are added.",
+   "owner": "server/src/risk/policy.ts",
+   "weakness": "Futures funding bleeds returns",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-061",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/ditas/memory.ts kinds NO_SIGNAL/REJECTED/PROPOSAL/DECISION",
+    "server/test/ditas-memory.test.ts: 'records manual no-signal analysis from the seeded closed cache'",
+    "server/test/ditas-api.test.ts: 'rejects no-signal and failed-data events...'"
+   ],
+   "gap": "",
+   "owner": "server/src/ditas/memory.ts",
+   "weakness": "Memory stores only winning trades",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-062",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/ditas/memory.ts:correctEvent",
+    "server/test/ditas-memory.test.ts: 'allows traceable correction events without overwriting parent evidence'",
+    "server/test/ditas-memory.test.ts: 'enforces update/delete immutability'"
+   ],
+   "gap": "",
+   "owner": "server/src/ditas/memory.ts",
+   "weakness": "Incorrect outcomes get overwritten",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-063",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/knowledge/store.ts doc hash/source",
+    "server/test/knowledge.test.ts: 'owner claims must quote the passage verbatim'"
+   ],
+   "gap": "No author/confidence provenance or trust gate preventing unverified items becoming training labels.",
+   "owner": "server/src/knowledge/store.ts",
+   "weakness": "Memory facts lack source provenance",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-064",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/lab/lab.ts:setStrategyStatus MIN_PROMOTION_OOS_TRADES=30, owner-only",
+    "server/test/promotion-gate.test.ts: 'one out-of-sample trade is not enough'"
+   ],
+   "gap": "",
+   "owner": "server/src/lab/lab.ts",
+   "weakness": "Recent profitable trades cause overconfidence",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-065",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/lab/lab.ts:checkStrategyHealth auto-suspend",
+    "server/test/ditas-market.test.ts: 'requires sufficient outcomes before a degraded review and never promotes'"
+   ],
+   "gap": "No covariate-drift or calibration-degradation detection by regime.",
+   "owner": "server/src/ditas/passports.ts",
+   "weakness": "Model performance deteriorates silently",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-066",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/lab/lab.ts owner-only promotion",
+    "server/test/ditas-market.test.ts: 'excludes legacy and mismatched paper versions'"
+   ],
+   "gap": "No strategy code hash bound to a position and asserted immutable through its lifecycle.",
+   "owner": "server/src/exec/oms.ts",
+   "weakness": "Strategy updates occur during live orders",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-067",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/ditas/twin.ts HYPOTHETICAL",
+    "server/test/ditas-api.test.ts: 'cannot write actual execution ledgers'",
+    "server/test/ditas-execution.test.ts: 'uses fills rather than cached order averages'",
+    "e2e/ditas.spec.ts: 'DITAS separates hypothetical results'"
+   ],
+   "gap": "",
+   "owner": "server/src/ditas/service.ts",
+   "weakness": "Counterfactual trades treated as real",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-068",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/knowledge/research.ts stored immutable experiments (all trials kept)"
+   ],
+   "gap": "No multiple-testing correction (deflated Sharpe/FDR) over sweeps.",
+   "owner": "server/src/knowledge/research.ts",
+   "weakness": "Repeated optimization mines noise",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-069",
+   "status": "MISSING",
+   "evidence": [],
+   "gap": "No regime-aware windows or versioned decay policy with OOS evidence.",
+   "owner": "server/src/lab/backtest.ts",
+   "weakness": "Older data dominates changed market conditions",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-070",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/risk/gate.ts STRATEGY_NOT_PROMOTED",
+    "server/test/risk.test.ts: 'denies strategies not promoted to PAPER'"
+   ],
+   "gap": "No shadow challenger run vs incumbent with OOS comparison report.",
+   "owner": "server/src/ditas/passports.ts",
+   "weakness": "No champion-challenger framework",
+   "priority": "P1",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-071",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/bot/bot.ts:startBot returns when config.offline",
+    "web/src/status.ts OFFLINE",
+    "web/src/status.test.ts: 'offline server: data OFFLINE and engine OFF'",
+    "e2e/app.spec.ts: 'status ribbon tells the truth about an offline server'"
+   ],
+   "gap": "",
+   "owner": "web/src/status.ts",
+   "weakness": "Offline claimed to mean live market access",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-072",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/ops/backup.ts AES-256-GCM backups",
+    "server/test/ditas-memory.test.ts: 'persists immutable evidence across a real SQLite close and reopen'"
+   ],
+   "gap": "No replay of the last durable checkpoint into engine state on cold restart.",
+   "owner": "server/src/ditas/memory.ts",
+   "weakness": "No local data for disconnected research",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-073",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/market/quality.ts stale => FAIL",
+    "server/test/ops-readiness.test.ts: 'fails closed on a stale scanner, a stale ticker...'",
+    "server/test/risk.test.ts: 'a frozen feed on an open position blocks new entries'"
+   ],
+   "gap": "",
+   "owner": "server/src/market/quality.ts",
+   "weakness": "Online feed loss silently freezes indicators",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-074",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "deterministic decision path (no LLM)",
+    "server/test/ditas-memory.test.ts: '... without network calls'",
+    "server/test/knowledge.test.ts: 'answers extractively with sources when no reasoning provider is configured'"
+   ],
+   "gap": "",
+   "owner": "server/src/decision/engine.ts",
+   "weakness": "Offline model requires cloud",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-075",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/ditas/memory.ts snapshot schemaVersion + strategyVersions",
+    "server/test/chart.test.ts: 'matches direct prefix analysis at each step'"
+   ],
+   "gap": "No feature-extractor version manifest and no offline replay test equal to recorded decision.",
+   "owner": "server/src/ditas/memory.ts",
+   "weakness": "Analysis cannot be reproduced without network",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-076",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/test/features.test.ts: 'ignores duplicates and out-of-order older candles'",
+    "server/test/quality.test.ts: 'allows repeated history across refreshes without duplicate indicator updates'",
+    "server/test/ditas-memory.test.ts: 'deduplicates retries'"
+   ],
+   "gap": "No durable consumer cursors/offsets and no restart duplicate-delivery test.",
+   "owner": "server/src/market/fabric.ts",
+   "weakness": "Disconnect causes duplicate event replay",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-077",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/test/quality.test.ts: 'does not advance indicators across a gap between otherwise valid batches'",
+    "server/test/depth-stream-fabric.test.ts: 'a sequence gap hands the symbol back to REST'",
+    "server/test/ops-lease-hardening.test.ts: 'takeover runs the integrity checks'"
+   ],
+   "gap": "",
+   "owner": "server/src/market/fabric.ts",
+   "weakness": "Reconnect blindly trusts latest state",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-078",
+   "status": "BLOCKED",
+   "evidence": [
+    "server/src/exec/oms.ts 'paper venue has no exchange-native stop; OMS monitors it'"
+   ],
+   "gap": "Requires a live venue adapter with native stop orders (locked).",
+   "owner": "server/src/exec/environment.ts",
+   "weakness": "Cloud scanner outage disables protective exchange orders",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-079",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/ditas/memory.ts store-once blobs",
+    "server/src/ops/backup.ts:pruneBackups",
+    "server/test/ops-backup.test.ts: 'keeps only the newest N backups'"
+   ],
+   "gap": "No compaction/retention of research events into signed checkpoints; no storage soak.",
+   "owner": "server/src/ditas/memory.ts",
+   "weakness": "Offline memory grows without limits",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-080",
+   "status": "PARTIAL",
+   "evidence": [
+    "web/src/status.ts LIVE/DEGRADED/OFFLINE/STALE",
+    "web/src/status.test.ts: 'degraded providers warn...'"
+   ],
+   "gap": "No OFFLINE_REPLAY or VENUE_UNKNOWN states.",
+   "owner": "web/src/status.ts",
+   "weakness": "Users cannot tell offline vs active",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-081",
+   "status": "BLOCKED",
+   "evidence": [
+    "server/src/workers/registry.ts onchain workers PROVIDER_BLOCKED (evm_rpc)"
+   ],
+   "gap": "Needs on-chain RPC/indexer provider.",
+   "owner": "server/src/whales/prints.ts",
+   "weakness": "Whale transfer mislabeled buy",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-082",
+   "status": "BLOCKED",
+   "evidence": [
+    "server/src/workers/registry.ts 'Social sentiment (X)' x_api pending"
+   ],
+   "gap": "X/Telegram ingestion not connected (credentials).",
+   "owner": "server/src/news/news.ts",
+   "weakness": "X/Telegram call treated as trusted trade signal",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-083",
+   "status": "BLOCKED",
+   "evidence": [],
+   "gap": "No social provider to version posts.",
+   "owner": "server/src/news/news.ts",
+   "weakness": "Edited/deleted calls erase losing evidence",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-084",
+   "status": "BLOCKED",
+   "evidence": [
+    "server/test/phase1.test.ts: 'Copy trading reports its real blocked state'",
+    "server/src/workers/registry.ts 'Entry still near signal' driftInR"
+   ],
+   "gap": "Copy-trade signal sources not connected.",
+   "owner": "server/src/workers/registry.ts",
+   "weakness": "Copy trades chase already-moved prices",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-085",
+   "status": "BLOCKED",
+   "evidence": [],
+   "gap": "Needs social provider for campaign clustering.",
+   "owner": "server/src/news/news.ts",
+   "weakness": "Multiple KOL calls are one coordinated pump",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-086",
+   "status": "BLOCKED",
+   "evidence": [
+    "server/src/workers/registry.ts 'Holder concentration','Token unlock schedule' blocked"
+   ],
+   "gap": "Needs on-chain RPC provider.",
+   "owner": "server/src/safety/safety.ts",
+   "weakness": "Deployer wallets dump tokens unnoticed",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-087",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/providers/dexscreener.ts SAFE_CHAIN/SAFE_ADDRESS, chainId+pairAddress",
+    "server/test/provider-validation.test.ts: 'DEX profile ids that would change the request path are refused'"
+   ],
+   "gap": "No test that same ticker on two contracts stays separate; no verified-token/router requirement.",
+   "owner": "server/src/providers/dexscreener.ts",
+   "weakness": "DEX contract spoofing",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-088",
+   "status": "NOT_APPLICABLE",
+   "evidence": [],
+   "gap": "No flash-loan/atomic-route capability in this build.",
+   "owner": "",
+   "weakness": "Flash-loan arbitrage margin ignores gas",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-089",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/market/scanner.ts candidates originate only from strategy.generate(price features)",
+    "server/test/untrusted-provider-text.test.ts"
+   ],
+   "gap": "No regression test that a viral headline without price confirmation produces no candidate/order.",
+   "owner": "server/src/market/scanner.ts",
+   "weakness": "News and filings are forwarded as order instructions",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-090",
+   "status": "NOT_APPLICABLE",
+   "evidence": [],
+   "gap": "No prediction-market data in this build.",
+   "owner": "",
+   "weakness": "Prediction market odds mixed with spot probability",
+   "priority": "P2",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-091",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/exec/environment.ts LockedLiveExecutionAdapter",
+    "server/src/core/mode.ts LIVE_EXECUTION_AVAILABLE=false",
+    "server/test/vike-routes.test.ts: 'the Live adapter refuses every command'"
+   ],
+   "gap": "No import-graph test that workers/qci/decision cannot reach wallet/signing/policy writes.",
+   "owner": "server/test (import boundary)",
+   "weakness": "User thinks THINK can authorize funds",
+   "priority": "P0",
+   "thinkSlice1": "certificate/profitLab import guard; canAuthorizeTrade:false"
+  },
+  {
+   "id": "MIA-THINK-092",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/joe/joe.ts tool allowlist",
+    "server/test/api.test.ts: 'Trader Joe has no order/limit/mode/withdraw tools and refuses such commands'",
+    "server/test/joe-gate.test.ts: 'runs pause_new_orders only when the owner asked'"
+   ],
+   "gap": "",
+   "owner": "server/src/joe/joe.ts",
+   "weakness": "Trader Joe can alter risk via a prompt",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-093",
+   "status": "PARTIAL",
+   "evidence": [
+    ".github/workflows/ci.yml npm audit + scripts/secret-scan.mjs"
+   ],
+   "gap": "No install-script/skill quarantine scan; malicious npm script fixture not flagged.",
+   "owner": "scripts/",
+   "weakness": "Untrusted code introduces wallet drainers",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-094",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/qhef/qhef.ts latency",
+    "server/src/ditas/passports.ts",
+    "server/src/ditas/calibration.ts"
+   ],
+   "gap": "No combined periodic quality report (net expectancy, drawdown, false positives, abstention + latency).",
+   "owner": "server/src/ditas/service.ts",
+   "weakness": "100-worker speed hides bad decisions",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-095",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    "server/src/core/mode.ts:updateControl",
+    "server/src/qa/gates.ts G07/G12 NOT_IMPLEMENTED",
+    "server/test/mode-authority.test.ts: 'BOUNDED_LIVE is refused in this build even when the gate callback says ok'"
+   ],
+   "gap": "",
+   "owner": "server/src/core/mode.ts",
+   "weakness": "No independent release gates",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-096",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/ops/backup.ts verifyBackup",
+    "server/test/ops-backup.test.ts",
+    "server/test/migration-guard.test.ts"
+   ],
+   "gap": "No feature flags, staged deploy or tested rollback-to-last-approved-version drill.",
+   "owner": "server/src/ops/backup.ts",
+   "weakness": "No disaster rollback",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-097",
+   "status": "PARTIAL",
+   "evidence": [
+    "account columns + PAPER_ACCOUNT",
+    "server/test/ditas-execution.test.ts: '... excludes other accounts'"
+   ],
+   "gap": "Single hard-coded account; no owner/environment scoping on decisions; no cross-account forged-candidate test.",
+   "owner": "server/src/portfolio/ledger.ts",
+   "weakness": "No account boundary tests",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-098",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/test/market-data-hardening.test.ts: 'B-03: 429 ...'",
+    "server/test/crash.oms.test.ts",
+    "server/test/oms.test.ts partial fills",
+    "server/test/joe-gate.test.ts"
+   ],
+   "gap": "No unified adversarial suite; flash-crash and chain-reorg drills absent.",
+   "owner": "server/test/",
+   "weakness": "No systematic adversarial testing",
+   "priority": "P0",
+   "thinkSlice1": ""
+  },
+  {
+   "id": "MIA-THINK-099",
+   "status": "PARTIAL",
+   "evidence": [
+    "server/src/decision/engine.ts disclaimer",
+    "server/src/joe/joe.ts 'Never promise profit'"
+   ],
+   "gap": "No test/lint forbidding 'guaranteed'/'100% accuracy' in UI copy.",
+   "owner": "web/src/",
+   "weakness": "Research metrics marketed as guaranteed profit",
+   "priority": "P0",
+   "thinkSlice1": "certificate language guard test"
+  },
+  {
+   "id": "MIA-THINK-100",
+   "status": "ALREADY_DONE",
+   "evidence": [
+    ".github/workflows/ci.yml typecheck/test/e2e/secret-scan/audit",
+    "server/src/qa/gates.ts G13/G14",
+    "server/test/gates.test.ts: 'evidence must come from the running commit, a clean tree and the last 7 days'"
+   ],
+   "gap": "",
+   "owner": ".github/workflows/ci.yml",
+   "weakness": "No safe path from proposal to deployment",
+   "priority": "P0",
+   "thinkSlice1": ""
+  }
+ ],
+ "counts": {
+  "ALREADY_DONE": 27,
+  "PARTIAL": 59,
+  "MISSING": 2,
+  "BLOCKED": 8,
+  "NOT_APPLICABLE": 4
+ }
+}

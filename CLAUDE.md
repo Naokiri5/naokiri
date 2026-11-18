@@ -113,3 +113,24 @@ For the newer Decision Intelligence, Trust & Adaptive Strategy System work, star
 ## Autopilot presentation and monitor
 
 See [the preserved Autopilot requirements and Claude handoff](docs/autopilot/README.md) before continuing the 100-function blueprint. The compact paper cockpit, presentation presets and read-only monitor reuse existing services. [Implementation and verification](docs/autopilot/IMPLEMENTATION_REPORT.md) distinguishes delivered behavior from remaining requirements.
+
+## MIA Ω THINK (Quantum Thinking Engine)
+
+THINK is the name for how the **existing** pipeline (100 deterministic workers → QCI → `decide` → risk gate → paper OMS) reasons and explains itself. Do not add new agents, scanners, risk engines or OMS. Start with:
+
+1. `docs/think/ADR-0001-THINK-CERTIFICATE.md`: decision, ownership map, rollback.
+2. `docs/think/THINK_TICKET_AUDIT.json` / `.csv`: the 100 MIA-THINK tickets audited against code (DONE / PARTIAL / MISSING / BLOCKED, with evidence).
+3. `docs/think/THINK_BASELINE_2026-11-18.md`: measured compute-only latency and its limits (`scripts/benchmark-think.mjs`).
+
+Delivered so far:
+
+- **Reason-to-Trade Certificate** (`server/src/decision/certificate.ts`): `GET /api/decisions/:id/certificate`, plus a Certificate tab on the Decision record page.
+- **Profit Laboratory** (`server/src/decision/profitLab.ts`).
+
+Rules for further THINK work:
+
+- **Certificates explain, they never authorize** (`canAuthorizeTrade: false`).
+- **No invented probabilities.** Win probability stays `NO_VALID_FORECAST` until a calibrated out-of-sample cohort (`ditas/calibration.ts`) exists. Opportunity score and QCI agreement are not probabilities.
+- **Scenario values are hypothetical.** Stops are triggers, not guaranteed fills.
+- **One canonical owner per change,** in small draft PRs, following the ticket audit's next slices: event provenance/as-known-at replay, bounded task graph + recorded-snapshot benchmark, calibrated forecast cohort, offline replay with honest LIVE/DEGRADED/OFFLINE_REPLAY state, account-scoped records.
+- **Never weaken** risk checks, release gates, signer isolation, account separation or approval requirements. No live orders, wallets or transfers.

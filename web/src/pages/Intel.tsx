@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Chg, Empty, ErrorLine, Page, Tabs, useSort, Action, Freshness, Modal } from '../ui';
 import { StepUp } from './Trading';
+import { ThinkCertificateView } from './ThinkCertificate';
 
 export function Scanner() {
   const { data, error } = useApi('/api/scanner', { topics: ['scan', 'decision'], every: 30_000 });
@@ -51,7 +52,7 @@ export function DecisionView({ report: r, consensus }: { report: any; consensus?
   return <div className="col" style={{ gap: 14 }}>
     <div className="row"><h2 style={{ fontSize: 18 }}>{r.asset}</h2><Badge v={r.decision} /><Badge v={r.direction} tone={r.direction === 'LONG' ? 'b-good' : 'b-neutral'} /><Badge v={r.consensus.state} /><span className="muted">{r.strategy.id} v{r.strategy.version} · {r.regime} · {fmt.time(r.createdAt)}</span></div>
     <div className="banner info" style={{ marginBottom: 0 }}>{r.disclaimer}</div>
-    <Tabs tabs={['Explanation', 'Pipeline steps', 'Score factors', 'QCI consensus', 'Indicators']} value={tab} onChange={setTab} />
+    <Tabs tabs={['Explanation', 'Certificate', 'Pipeline steps', 'Score factors', 'QCI consensus', 'Indicators']} value={tab} onChange={setTab} />
     {tab === 'Explanation' && <div className="grid g2">
       <Card title="Trade plan"><div className="kv">
         <span>Market</span><span>{r.market} · {r.venue}</span><span>Final decision</span><span><b>{r.finalDecision}</b></span><span>Reason</span><span>{r.reason}</span>
@@ -69,6 +70,7 @@ export function DecisionView({ report: r, consensus }: { report: any; consensus?
         <Card title="Risk assessment"><ul style={{ margin: 0, paddingLeft: 18 }}>{r.riskAssessment.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>{r.risk && <div className="row" style={{ marginTop: 8 }}>Risk gate: <Badge v={r.risk.decision} /> <span className="faint">policy v{r.risk.policyVersion} · trace {r.risk.traceId}</span></div>}</Card>
         <Card title="Missing information">{r.missingInformation.length ? <ul style={{ margin: 0, paddingLeft: 18 }}>{r.missingInformation.map((x: string, i: number) => <li key={i} className="muted">{x}</li>)}</ul> : <span className="muted">none</span>}</Card>
       </div></div>}
+    {tab === 'Certificate' && <ThinkCertificateView decisionId={r.id} />}
     {tab === 'Pipeline steps' && <Card flush><table><tbody>{r.steps.map((s: any) => <tr key={s.step}><td className="faint mono">{s.step}</td><td>{s.name}</td><td><Badge v={s.result} /></td><td className="muted">{s.detail}</td></tr>)}</tbody></table></Card>}
     {tab === 'Score factors' && <Card flush><table><thead><tr><th>Factor</th><th className="num">Weight</th><th className="num">Value</th><th>Basis</th></tr></thead><tbody>{r.opportunity.factors.map((f: any) => <tr key={f.factor}><td>{f.factor}{f.missing && <> <Badge v="MISSING" tone="b-warn" /></>}</td><td className="num">{(f.weight * 100).toFixed(0)}%</td><td className="num">{f.value}</td><td className="muted">{f.basis}</td></tr>)}</tbody></table></Card>}
     {tab === 'QCI consensus' && (consensus ? <ConsensusView c={consensus} /> : <Empty>Consensus record {r.consensus.id} — open from Decisions page for full detail.</Empty>)}
