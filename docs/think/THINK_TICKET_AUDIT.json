@@ -1,7 +1,7 @@
 {
  "auditedRef": "54c1d2e4d2942c65e55176300713b00b64425493",
  "auditedAt": "2026-11-18",
- "note": "Audited committed HEAD only; uncommitted WIP present in tree (decision/certificate.ts, decision/profitLab.ts, test/think-certificate.test.ts, web ThinkCertificate.tsx) was excluded. Statuses reflect the code BEFORE THINK slice 1; thinkSlice1 lists what this PR adds (status should be re-audited after merge). thinkSlice2 lists what THINK slice 2 adds. thinkSlice3 lists what THINK slice 3 adds.",
+ "note": "Audited committed HEAD only; uncommitted WIP present in tree (decision/certificate.ts, decision/profitLab.ts, test/think-certificate.test.ts, web ThinkCertificate.tsx) was excluded. Statuses reflect the code BEFORE THINK slice 1; thinkSlice1 lists what this PR adds (status should be re-audited after merge). thinkSlice2 lists what THINK slice 2 adds. thinkSlice3 lists what THINK slice 3 adds. thinkSlice4 lists what THINK slice 4 adds.",
  "tickets": [
   {
    "id": "MIA-THINK-001",
@@ -17,7 +17,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-002",
@@ -33,7 +34,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-003",
@@ -50,7 +52,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": "replay uses only the frozen snapshot + recorded clock; live market changes do not alter it (think-replay.test.ts)"
   },
   {
    "id": "MIA-THINK-004",
@@ -66,7 +69,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-005",
@@ -82,7 +86,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-006",
@@ -98,7 +103,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-007",
@@ -112,7 +118,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-008",
@@ -129,7 +136,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-009",
@@ -145,7 +153,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-010",
@@ -161,7 +170,8 @@
    "priority": "P0",
    "thinkSlice1": "certificate commits to sha256 of stored report + consensus",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": "evidence replay reconstructs consensus from the exact snapshot; hash verified; tamper refused"
   },
   {
    "id": "MIA-THINK-011",
@@ -175,7 +185,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-012",
@@ -190,7 +201,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-013",
@@ -205,7 +217,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-014",
@@ -219,7 +232,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-015",
@@ -235,7 +249,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "fault injection: crashing worker counted, coordinator survives; quarantine after 5 faults (worker-fault-injection.test.ts)",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-016",
@@ -251,7 +266,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "crashing/quarantined mandatory check => NO_QUORUM naming the check, never ENTER",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-017",
@@ -266,7 +282,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-018",
@@ -282,7 +299,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-019",
@@ -297,7 +315,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-020",
@@ -313,7 +332,8 @@
    "priority": "P0",
    "thinkSlice1": "scripts/benchmark-think.mjs compute-only baseline",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": "benchmark adds replay timing (p50 1.89 ms) and reproducibility counts"
   },
   {
    "id": "MIA-THINK-021",
@@ -328,7 +348,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-022",
@@ -344,7 +365,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "malformed worker result rejected before aggregation (rejected_packets)",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-023",
@@ -360,7 +382,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-024",
@@ -376,7 +399,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-025",
@@ -391,7 +415,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-026",
@@ -406,7 +431,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-027",
@@ -421,7 +447,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-028",
@@ -436,7 +463,8 @@
    "priority": "P1",
    "thinkSlice1": "certificate shows failed/quarantined workers and missing required domains",
    "thinkSlice2": "quarantined worker shown in certificate coverage + uncertainty; NO_QUORUM reason",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-029",
@@ -451,7 +479,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "repo-wide runtime import graph: evidence/research code cannot reach exec/, wallet/, portfolio/ (import-boundaries.test.ts)",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-030",
@@ -466,7 +495,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-031",
@@ -481,7 +511,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-032",
@@ -496,7 +527,8 @@
    "priority": "P0",
    "thinkSlice1": "certificate bull/bear case incl. vetoes",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-033",
@@ -512,7 +544,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-034",
@@ -528,7 +561,8 @@
    "priority": "P0",
    "thinkSlice1": "score labelled HEURISTIC, win probability NO_VALID_FORECAST",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-035",
@@ -544,7 +578,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-036",
@@ -559,7 +594,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-037",
@@ -573,7 +609,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-038",
@@ -588,7 +625,8 @@
    "priority": "P0",
    "thinkSlice1": "NO_TRADE reason codes on every certificate",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-039",
@@ -603,7 +641,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-040",
@@ -617,7 +656,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-041",
@@ -632,7 +672,8 @@
    "priority": "P1",
    "thinkSlice1": "hypothetical scenario table, labelled",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-042",
@@ -647,7 +688,8 @@
    "priority": "P1",
    "thinkSlice1": "two-sided fees + spread/slippage; gross-win-net-loss test",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-043",
@@ -662,7 +704,8 @@
    "priority": "P1",
    "thinkSlice1": "expectancy with interval; 60%-win negative fixture",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-044",
@@ -677,7 +720,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-045",
@@ -693,7 +737,8 @@
    "priority": "P1",
    "thinkSlice1": "2x gap and liquidity-pull stress scenarios",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-046",
@@ -708,7 +753,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-047",
@@ -724,7 +770,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": "step rounding only rounds down; planned loss <= budget; notional <= cap (tested across stop distances)"
+   "thinkSlice3": "step rounding only rounds down; planned loss <= budget; notional <= cap (tested across stop distances)",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-048",
@@ -738,7 +785,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-049",
@@ -754,7 +802,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-050",
@@ -768,7 +817,8 @@
    "priority": "P1",
    "thinkSlice1": "UNCERTAIN_EDGE when lower bound <= 0",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-051",
@@ -784,7 +834,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-052",
@@ -798,7 +849,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": "sizing monotonicity tested: wider stop never increases qty; fixed equity-share risk budget; volatility-scaled budget still missing (needs trading-risk review)"
+   "thinkSlice3": "sizing monotonicity tested: wider stop never increases qty; fixed equity-share risk budget; volatility-scaled budget still missing (needs trading-risk review)",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-053",
@@ -813,7 +865,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": "risk gate CORRELATION_LIMIT tested: correlated, uncorrelated, below-limit and UNKNOWN (fail-closed) cases (risk-correlation-sizing.test.ts); factor clustering still missing"
+   "thinkSlice3": "risk gate CORRELATION_LIMIT tested: correlated, uncorrelated, below-limit and UNKNOWN (fail-closed) cases (risk-correlation-sizing.test.ts); factor clustering still missing",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-054",
@@ -829,7 +882,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-055",
@@ -845,7 +899,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-056",
@@ -861,7 +916,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-057",
@@ -875,7 +931,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-058",
@@ -891,7 +948,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-059",
@@ -905,7 +963,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-060",
@@ -919,7 +978,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-061",
@@ -935,7 +995,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-062",
@@ -951,7 +1012,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-063",
@@ -966,7 +1028,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-064",
@@ -981,7 +1044,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-065",
@@ -996,7 +1060,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-066",
@@ -1011,7 +1076,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-067",
@@ -1028,7 +1094,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-068",
@@ -1042,7 +1109,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-069",
@@ -1054,7 +1122,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-070",
@@ -1069,7 +1138,8 @@
    "priority": "P1",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-071",
@@ -1086,7 +1156,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-072",
@@ -1101,7 +1172,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-073",
@@ -1117,7 +1189,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-074",
@@ -1133,7 +1206,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-075",
@@ -1148,7 +1222,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": "offline replay equals recorded consensus (200/200 in benchmark); breadth worker uses recorded evaluation clock"
   },
   {
    "id": "MIA-THINK-076",
@@ -1164,7 +1239,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-077",
@@ -1180,7 +1256,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-078",
@@ -1194,7 +1271,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-079",
@@ -1210,7 +1288,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-080",
@@ -1225,7 +1304,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": "Certificate tab shows replay status; OFFLINE_REPLAY/VENUE_UNKNOWN badges still missing"
   },
   {
    "id": "MIA-THINK-081",
@@ -1239,7 +1319,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-082",
@@ -1253,7 +1334,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-083",
@@ -1265,7 +1347,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-084",
@@ -1280,7 +1363,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-085",
@@ -1292,7 +1376,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-086",
@@ -1306,7 +1391,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-087",
@@ -1321,7 +1407,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-088",
@@ -1333,7 +1420,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-089",
@@ -1348,7 +1436,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-090",
@@ -1360,7 +1449,8 @@
    "priority": "P2",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-091",
@@ -1376,7 +1466,8 @@
    "priority": "P0",
    "thinkSlice1": "certificate/profitLab import guard; canAuthorizeTrade:false",
    "thinkSlice2": "mutating functions (orders, mode, policy, wallet) importable only by an explicit allow-list",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-092",
@@ -1392,7 +1483,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "Trader Joe may import only pauseNewOrders from OMS (locked by test)",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-093",
@@ -1406,7 +1498,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-094",
@@ -1422,7 +1515,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-095",
@@ -1438,7 +1532,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-096",
@@ -1454,7 +1549,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-097",
@@ -1469,7 +1565,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-098",
@@ -1486,7 +1583,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-099",
@@ -1501,7 +1599,8 @@
    "priority": "P0",
    "thinkSlice1": "certificate language guard test",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   },
   {
    "id": "MIA-THINK-100",
@@ -1517,7 +1616,8 @@
    "priority": "P0",
    "thinkSlice1": "",
    "thinkSlice2": "",
-   "thinkSlice3": ""
+   "thinkSlice3": "",
+   "thinkSlice4": ""
   }
  ],
  "counts": {

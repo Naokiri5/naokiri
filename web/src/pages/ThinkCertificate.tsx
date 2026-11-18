@@ -16,6 +16,20 @@ const REASON_TEXT: Record<string, string> = {
   NEGATIVE_OUT_OF_SAMPLE_EXPECTANCY: 'Strategy lost money out of sample', NO_POSITIVE_EDGE_LOWER_BOUND: 'No edge after uncertainty',
 };
 
+/** Evidence replay from the frozen DITAS snapshot (server: ditas/replay.ts). Read-only. */
+function ReplayCard({ decisionId }: { decisionId: string }) {
+  const { data: r, error } = useApi<any>(`/api/decisions/${decisionId}/replay`);
+  const tone = r?.status === 'REPRODUCED' ? 'b-good' : r?.status === 'DIVERGED' ? 'b-bad' : 'b-warn';
+  return <Card title="Evidence replay" right={r && <Badge v={r.status} tone={tone} />}>
+    {error ? <ErrorLine e={error} /> : !r ? <Empty>Replaying…</Empty> : <div className="col" style={{ gap: 6 }}>
+      <span className="muted">{r.status === 'REPRODUCED' ? `Re-running the ${r.compared.workersEvaluated} workers on the frozen snapshot gave the same evidence in all ${r.compared.domains} areas.` : r.status === 'DIVERGED' ? 'Re-running the workers on the frozen snapshot gave different evidence:' : 'This decision cannot be replayed:'}</span>
+      {r.differences.length > 0 && <ul style={{ margin: 0, paddingLeft: 18 }}>{r.differences.slice(0, 8).map((d: any, i: number) => <li key={i} className="mono">{d.domain}.{d.field}: recorded {String(d.recorded)} · replay {String(d.replayed)}</li>)}</ul>}
+      {r.reasons.length > 0 && <ul style={{ margin: 0, paddingLeft: 18 }}>{r.reasons.map((x: string, i: number) => <li key={i} className="muted">{x}</li>)}</ul>}
+      <span className="hint">Snapshot {r.snapshotVerified ? 'hash verified' : 'hash NOT verified'} · {r.scope}</span>
+    </div>}
+  </Card>;
+}
+
 export function ThinkCertificateView({ decisionId }: { decisionId: string }) {
   const { data: c, error } = useApi<any>(`/api/decisions/${decisionId}/certificate`);
   if (error) return <ErrorLine e={error} />;
@@ -55,6 +69,7 @@ export function ThinkCertificateView({ decisionId }: { decisionId: string }) {
           <span>Required areas missing</span><span>{c.coverage.requiredDomainsMissing.length ? c.coverage.requiredDomainsMissing.map((d: string) => <Badge key={d} v={d} tone="b-warn" />) : <span className="muted">none</span>}</span></div>
           : <span className="muted">Consensus record not found: coverage could not be verified.</span>}
       </Card>
+      <ReplayCard decisionId={decisionId} />
       <Card title="Uncertainty and provenance">
         <ul style={{ margin: 0, paddingLeft: 18 }}>{c.uncertainty.map((x: string, i: number) => <li key={i} className="muted">{x}</li>)}</ul>
         <div className="hint mono" style={{ marginTop: 8, wordBreak: 'break-all' }}>{c.version} · report sha256 {c.provenance.reportSha256.slice(0, 16)}… · consensus {c.provenance.consensusSha256 ? `${c.provenance.consensusSha256.slice(0, 16)}…` : 'missing'} · as of {fmt.time(c.asOf)}</div>

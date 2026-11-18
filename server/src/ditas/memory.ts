@@ -31,7 +31,7 @@ function capture(instrumentId: string, interval: Interval, asOf: number, ctx?: W
     book: d?.book ? { ts: d.book.ts, bids: d.book.bids.slice(0, 100), asks: d.book.asks.slice(0, 100) } : null,
     cross: Object.fromEntries(Object.entries(d?.cross ?? {}).map(([venue, q]) => [venue, pick(q, 'price bid ask ts venue')])), quality: ctx?.quality ?? assessQuality(instrumentId, interval, asOf),
     control: getControl(), fingerprint: ctx ? fingerprint(ctx, asOf) : null,
-    context: ctx ? { frameQuality: ctx.frameQuality ?? null, btc1h: feature(ctx.btc1h), btc4h: feature(ctx.btc4h), ticker: ctx.ticker ? pick(ctx.ticker, 'last changePct quoteVolume trades high low') : null, safety: ctx.safety, impact: ctx.impact, news: ctx.news, prints: ctx.prints, corrToBtc: ctx.corrToBtc, feeRate: ctx.feeRate, intendedNotional: ctx.intendedNotional, strategyStats: ctx.strategyStats } : null,
+    context: ctx ? { asOf: ctx.asOf ?? null, breadth: ctx.breadth ?? null, frameQuality: ctx.frameQuality ?? null, btc1h: feature(ctx.btc1h), btc4h: feature(ctx.btc4h), ticker: ctx.ticker ? pick(ctx.ticker, 'last changePct quoteVolume trades high low') : null, safety: ctx.safety, impact: ctx.impact, news: ctx.news, prints: ctx.prints, corrToBtc: ctx.corrToBtc, feeRate: ctx.feeRate, intendedNotional: ctx.intendedNotional, strategyStats: ctx.strategyStats } : null,
     lineage: { intelligence: 'deterministic-workers', modelVersion: null, promptVersion: null, calibrationId: null, strategyVersions: STRATEGIES.map(s => ({ id: s.id, version: s.version })), note: 'No LLM prediction probability used by deterministic decision path.' },
   };
 }
