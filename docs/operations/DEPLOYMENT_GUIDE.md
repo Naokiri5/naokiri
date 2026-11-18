@@ -43,6 +43,9 @@ Running the server unattended enables nothing live. It keeps scanning the market
   - Backups go to `MIA_BACKUP_DIR` (default `$MIA_DATA_DIR/backups`). The newest `MIA_BACKUP_KEEP` (default 14) are kept.
   - Failures raise a WARNING at most hourly.
 - **Manual (safe while running):** `npm run backup -- create`, `npm run backup -- list`, `npm run backup -- verify <file>`.
+  - On a systemd install, run it **as the service user with the service's settings**, or it reads a different (or no) database:
+    `sudo -u mia sh -c 'set -a; . /etc/mia/mia.env; MIA_DATA_DIR=/var/lib/mia npm run backup -- create'` from `/opt/mia`.
+  - `create` prints the database it is backing up, refuses when no database exists there, and warns when `MIA_BACKUP_KEY` is missing (the backup would be plaintext).
 - **Encryption:** set `MIA_BACKUP_KEY` to 32 random bytes, e.g. `openssl rand -hex 32`, in the environment or `/etc/mia/mia.env`.
   - Never pass it on a command line, and never commit it.
   - Backups are then AES-256-GCM (`.db.enc`).
@@ -59,7 +62,7 @@ Running the server unattended enables nothing live. It keeps scanning the market
   1. Stop the server.
   2. Run `verify` on the backup.
   3. Decrypt it if needed. `verify` proves the key works; decrypt with the same format in `server/src/ops/backup.ts`.
-  4. Replace `mia.db` and delete `mia.db-wal`/`mia.db-shm`.
+  4. Replace `$MIA_DATA_DIR/mia.db` (systemd: `/var/lib/mia/mia.db`, owned by `mia`, mode 0600) and delete `mia.db-wal`/`mia.db-shm` next to it.
   5. Start the server.
 - Migrations are append-only (`server/src/db/migrations.ts`). Roll back code by redeploying the previous commit together with a pre-upgrade backup.
 

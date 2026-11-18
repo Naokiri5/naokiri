@@ -28,6 +28,15 @@ export const backupKeep = () => { const n = Number(process.env.MIA_BACKUP_KEEP ?
 /** Hours between automatic backups by the engine leader; 0 disables. */
 export const backupIntervalMs = () => { const h = Number(process.env.MIA_BACKUP_INTERVAL_H ?? 24); return Number.isFinite(h) && h >= 0 && h <= 24 * 30 ? h * 3_600_000 : 24 * 3_600_000; };
 
+/**
+ * The live database a manual backup must read. Refuses (throws) when it does not exist: opening it would CREATE a new,
+ * empty database whose backup verifies fine — e.g. a shell without MIA_DATA_DIR=/var/lib/mia (MA-09).
+ */
+export function liveDatabasePath(dataDir = config.dataDir): string {
+  const file = join(dataDir, 'mia.db');
+  if (!existsSync(file)) throw new Error(`no MIA database at ${file}. Set MIA_DATA_DIR to the server's data directory (the systemd unit uses /var/lib/mia) and run as the service user`);
+  return file;
+}
 /** Parse MIA_BACKUP_KEY. Unset → null (plaintext backups). Set but not exactly 32 bytes → throw (fail closed). */
 export function backupKey(value = process.env.MIA_BACKUP_KEY): Buffer | null {
   if (value === undefined || value.trim() === '') return null;
