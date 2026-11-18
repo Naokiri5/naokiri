@@ -35,7 +35,14 @@ describe('Privy sign-in', () => {
 
   it('public config exposes only the app id and state; wallet actions are LOCKED', async () => {
     const r = (await app.inject({ url: '/api/auth/privy/config' })).json();
-    expect(r).toEqual({ enabled: true, appId: APP, linked: false, walletActions: 'LOCKED' });
+    expect(r).toEqual({ enabled: true, appId: APP, linked: false, embeddedWallets: false, walletActions: 'LOCKED' });
+  });
+  it('embedded wallets are opt-in and never unlock wallet actions', async () => {
+    process.env.MIA_PRIVY_EMBEDDED_WALLETS = '1';
+    expect((await app.inject({ url: '/api/auth/privy/config' })).json()).toMatchObject({ embeddedWallets: true, walletActions: 'LOCKED' });
+    process.env.MIA_PRIVY_EMBEDDED_WALLETS = 'true'; // only the exact value 1 enables it
+    expect((await app.inject({ url: '/api/auth/privy/config' })).json()).toMatchObject({ embeddedWallets: false });
+    delete process.env.MIA_PRIVY_EMBEDDED_WALLETS;
   });
   it('refuses Privy login before the owner links an identity', async () => {
     const r = await post('/api/auth/privy/login', { accessToken: await token() });
@@ -102,5 +109,17 @@ describe('Privy disabled', () => {
     expect((await app.inject({ url: '/api/auth/privy/config' })).json()).toMatchObject({ enabled: false, appId: null });
     expect((await app.inject({ method: 'POST', url: '/api/auth/privy/login', headers: json, payload: { accessToken: 'x'.repeat(40) } })).statusCode).toBe(404);
     await app.close();
+  });
+});
+
+describe('Privy client code cannot move funds (static guard, runs in CI)', () => {
+  it('the web Privy panels use no signing, sending, funding, export or delegation API', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const dir = new URL('../../web/src/privy/', import.meta.url);
+    const src = readdirSync(dir).filter((f) => /\.(t|j)sx?$/.test(f)).map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
+    expect(src.length).toBeGreaterThan(1000);
+    const forbidden = /\b(useSendTransaction|useSignTransaction|useSignMessage|useSignTypedData|useSign7702Authorization|useFundWallet|useExportWallet|useDelegatedActions|useHeadlessDelegatedActions|useSessionSigners|useSigners|sendTransaction|signTransaction|signMessage|signTypedData|exportWallet|fundWallet|delegateWallet|addSessionSigners)\b/;
+    expect(src.match(forbidden)?.[0] ?? null).toBeNull();
+    expect(src).toMatch(/createOnLogin: 'off'/);
   });
 });

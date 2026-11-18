@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased: Privy optional embedded wallets (2026-11-18)
+- **Optional:** with `MIA_PRIVY_EMBEDDED_WALLETS=1`, the owner can create a Privy-secured wallet from Security Center. MIA only shows its address.
+- **Still locked:** signing, sending, delegated signing, funding and key export. A new CI test fails if MIA's Privy code uses any of those Privy APIs.
+
 ## Unreleased: Tailscale Funnel guide (2026-11-18)
 - **New guide:** `docs/operations/TAILSCALE_FUNNEL.md` gives MIA a free HTTPS address with Tailscale Funnel (for your phone, or Privy's Allowed origins).
 - **Safety:** requests relayed by Tailscale Serve or Funnel are treated as remote even though they arrive from this computer, so the setup code and normal lockout still apply.

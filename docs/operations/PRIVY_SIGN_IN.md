@@ -10,8 +10,8 @@ Status: **implemented and offline-tested; not yet tried with a real Privy app.**
 | Add or link more sign-in methods to your Privy account | **Yes.** Security Center → Privy account. |
 | See the wallets linked to your Privy account | **Yes, view only.** |
 | Connect an external wallet (MetaMask, WalletConnect, …) | **Yes, identity only.** It proves you own the address; it never moves funds. |
-| Create an embedded (Privy-held) wallet | **LOCKED.** Turned off (`createOnLogin: 'off'`). |
-| Sign or send transactions, fund a wallet, export keys | **LOCKED.** MIA is paper trading only; Live stays locked. |
+| Create an embedded (Privy-held) wallet | **Optional, off by default.** With `MIA_PRIVY_EMBEDDED_WALLETS=1`, the owner can press **Create a Privy embedded wallet** in Security Center. Privy secures the key; MIA only shows the address. Nothing is ever created automatically (`createOnLogin: 'off'`). |
+| Sign or send transactions, delegated signing, fund a wallet, export keys | **LOCKED.** MIA is paper trading only; Live stays locked. A CI test fails if MIA's Privy code ever uses these Privy APIs. |
 
 ## How it stays safe
 

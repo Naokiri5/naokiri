@@ -4,16 +4,18 @@
  *
  * Safety model (see server/src/security/privy.ts):
  *  - Privy proves identity; the MIA server verifies the token and opens a session ONLY for the linked owner.
- *  - Embedded wallets are never created (`createOnLogin: 'off'`). Linked wallets are shown read-only. MIA never asks a
- *    wallet to sign or send a transaction, fund, or export keys: those actions are LOCKED (paper trading only).
+ *  - Embedded wallets are never created automatically (`createOnLogin: 'off'`). If the server allows it
+ *    (MIA_PRIVY_EMBEDDED_WALLETS=1), the owner can explicitly ask Privy to create one; Privy secures its key.
+ *    Wallets are shown read-only. MIA never asks a wallet to sign or send a transaction, fund, export keys or
+ *    delegate signing: those actions are LOCKED (paper trading only).
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { PrivyProvider, usePrivy } from '@privy-io/react-auth';
+import { PrivyProvider, useCreateWallet, usePrivy } from '@privy-io/react-auth';
 import { api } from '../api';
 import { Action, Badge, Card, Empty, ErrorLine, PageErrorBoundary } from '../ui';
 import { StepUp } from '../pages/Trading';
 
-export interface PrivyClientConfig { enabled: boolean; appId: string | null; linked: boolean; walletActions: 'LOCKED' }
+export interface PrivyClientConfig { enabled: boolean; appId: string | null; linked: boolean; embeddedWallets: boolean; walletActions: 'LOCKED' }
 
 function PrivyRoot({ appId, children }: { appId: string; children: ReactNode }) {
   return <PrivyProvider appId={appId} config={{
@@ -66,8 +68,10 @@ function describe(a: Account): { kind: string; detail: string; wallet: boolean }
 
 function AccountInner({ config, onChange }: { config: PrivyClientConfig; onChange: () => void }) {
   const p = usePrivy();
+  const { createWallet } = useCreateWallet();
   const [pw, setPw] = useState(''); const [err, setErr] = useState<string | null>(null);
   const accounts = ((p.user?.linkedAccounts ?? []) as unknown as Account[]);
+  const hasEmbedded = accounts.some((a) => a.type === 'wallet' && a.walletClientType === 'privy');
   const add = (label: string, fn: () => void) => <button type="button" className="sm" key={label} onClick={() => { setErr(null); try { fn(); } catch (e) { setErr(errText(e)); } }}>{label}</button>;
   return <div className="col" style={{ gap: 10 }}>
     <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
@@ -85,6 +89,10 @@ function AccountInner({ config, onChange }: { config: PrivyClientConfig; onChang
         <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}><span className="hint">Add a sign-in method:</span>
           {add('Email', p.linkEmail)}{add('Phone', p.linkPhone)}{add('Google', p.linkGoogle)}{add('Apple', p.linkApple)}{add('Passkey', p.linkPasskey)}{add('Wallet (identity only)', () => p.linkWallet())}
         </div>
+        {config.embeddedWallets && !hasEmbedded && <div className="row" style={{ gap: 8 }}>
+          <Action label="Create a Privy embedded wallet (Ethereum)" run={async () => { await createWallet(); }} />
+          <span className="hint">Optional. Privy secures the key; MIA only shows the address and can never sign, send or fund from it.</span>
+        </div>}
         <div className="row" style={{ gap: 8 }}>
           <StepUp value={pw} onChange={setPw} />
           <Action className="primary" label={config.linked ? 'Re-link this Privy account to MIA' : 'Use this Privy account to sign in to MIA'} run={async () => {
@@ -96,7 +104,7 @@ function AccountInner({ config, onChange }: { config: PrivyClientConfig; onChang
         </div>
       </>}
     <ErrorLine e={err} />
-    <div className="banner info">Not available in MIA (LOCKED): creating embedded wallets, signing or sending transactions, funding a wallet, exporting keys. MIA is paper trading only. Linking a wallet only proves you own the address; it never moves funds.</div>
+    <div className="banner info">Not available in MIA (LOCKED): signing or sending transactions, delegated signing, funding a wallet, exporting keys{config.embeddedWallets ? '' : ', creating embedded wallets (enable with MIA_PRIVY_EMBEDDED_WALLETS=1)'}. MIA is paper trading only. Linking a wallet only proves you own the address; it never moves funds.</div>
   </div>;
 }
 export function PrivyAccountCard({ config, onChange }: { config: PrivyClientConfig; onChange: () => void }) {

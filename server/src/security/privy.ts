@@ -7,8 +7,9 @@
  *  - A Privy access token (ES256 JWT) is verified on the server: signature, issuer `privy.io`, audience = this app id,
  *    expiry. The browser's word is never trusted. Failed attempts share the passphrase brute-force limiter.
  *  - Passphrase step-up stays required for every sensitive action; signing in with Privy does not bypass it.
- *  - Wallets: MIA only DISPLAYS wallets linked to the Privy account. It never creates embedded wallets, never asks a
- *    wallet to sign or send a transaction, never funds or exports a wallet. Live trading stays LOCKED.
+ *  - Wallets: MIA only DISPLAYS wallets linked to the Privy account. Embedded wallets are created only on the owner's
+ *    explicit request and only when MIA_PRIVY_EMBEDDED_WALLETS=1. MIA never asks a wallet to sign or send a
+ *    transaction, never funds, exports or delegates a wallet. Live trading stays LOCKED.
  *
  * Verification key: MIA_PRIVY_VERIFICATION_KEY (the PEM public key from the Privy dashboard) is preferred; otherwise
  * the app's public JWKS is fetched from auth.privy.io. Neither is a secret. No Privy app secret is needed or used.
@@ -54,8 +55,15 @@ export function contentSecurityPolicy(): string {
 /** Public config for the login screen. The app id and the linked state are not secrets. */
 export function privyPublicConfig() {
   const appId = privyAppId();
-  return { enabled: !!appId, appId, linked: !!getLink(), walletActions: 'LOCKED' as const };
+  return { enabled: !!appId, appId, linked: !!getLink(), embeddedWallets: embeddedWalletsAllowed(), walletActions: 'LOCKED' as const };
 }
+
+/**
+ * Optional Privy embedded wallets (MIA_PRIVY_EMBEDDED_WALLETS=1, default OFF). When on, the owner may ASK Privy to
+ * create a wallet that Privy secures; MIA never holds, sees or exports its key, never requests a signature, a
+ * transaction, funding or delegated signing. It only displays the address. Live trading and withdrawals stay locked.
+ */
+export const embeddedWalletsAllowed = () => privyEnabled() && process.env.MIA_PRIVY_EMBEDDED_WALLETS === '1';
 
 interface PrivyLink { userId: string; linkedAt: number }
 export const getLink = () => getSetting<PrivyLink | null>('privy_link', null);
