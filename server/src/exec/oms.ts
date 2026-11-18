@@ -149,8 +149,8 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     // MA-20: the gate's duplicate-instrument check ran before this transaction. Re-check inside it (BEGIN IMMEDIATE holds
     // the write lock), so a second writer that opened a position in between cannot produce two OPEN positions.
     // Same decision submitted twice: report it as the duplicate ORDER it is (checked first, under the same lock).
-    const sameOrder = get<{ id: string }>('SELECT id FROM orders WHERE client_order_id=?', coid);
-    if (sameOrder && sameOrder.id !== existing?.id) throw new DuplicateOrder();
+    const sameOrder = get<{ id: string; status: string }>('SELECT id,status FROM orders WHERE client_order_id=?', coid);
+    if (existing ? !sameOrder || sameOrder.id !== existing.id || sameOrder.status !== 'PENDING_APPROVAL' : !!sameOrder) throw new DuplicateOrder();
     if (get("SELECT 1 FROM positions WHERE account=? AND instrument=? AND status='OPEN' LIMIT 1", PAPER_ACCOUNT, s.instrumentId)) throw new DuplicatePosition();
     const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
     run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);
@@ -181,7 +181,10 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   return { ok: true, orderId, positionId: posId };
 
   function reject(reason: string) {
-    if (existing) run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=?", reason, Date.now(), existing.id);
+    if (existing) {
+      const changed = run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", reason, nowTs, existing.id);
+      if (Number(changed.changes) !== 1) return { ok: false, reason: 'APPROVAL_NO_LONGER_PENDING' };
+    }
     else insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
     journal('ORDER', `Entry rejected for ${s.asset}: ${reason}`, s.id);
     bus.publish('order', { status: 'REJECTED', reason });
@@ -206,7 +209,12 @@ export function decideApproval(orderId: string, approve: boolean) {
   const o = get<any>('SELECT * FROM orders WHERE id=?', orderId);
   if (!o || o.status !== 'PENDING_APPROVAL') throw new OmsError('order is not pending approval');
   audit('owner', approve ? 'order.approve' : 'order.reject', { orderId });
-  if (!approve) { run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=?", Date.now(), orderId); journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId); return { ok: true }; }
+  if (!approve) {
+    const changed = run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), orderId);
+    if (Number(changed.changes) !== 1) throw new OmsError('order is no longer pending approval');
+    journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId);
+    return { ok: true };
+  }
   const rep = get<any>('SELECT report FROM decisions WHERE id=?', o.decision_id);
   if (!rep) throw new OmsError('decision record missing');
   return submitEntry(P(rep.report), 'owner');
