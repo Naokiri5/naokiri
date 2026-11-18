@@ -72,7 +72,7 @@ test('DITAS evaluates only the selected exact forecast cohort', async ({ page })
       counts: { snapshots: 0, events: 0, twins: 0, forecasts: 100, outcomes: 100 },
       dataHealth: [], actual: { label: 'PAPER', orders: 0, fills: 0, closedPositions: 0, realizedPnl: 0, fees: 0 },
       controls: { mode: 'OBSERVE' }, events: [], fingerprints: [], twins: [], passports: [], coverage: [],
-      calibration: { status: selected ? 'EVALUATED' : 'UNCALIBRATED', sample: selected ? 100 : 0, brierScore: selected ? 0.25 : null, logLoss: selected ? 0.6931 : null, ece: selected ? 0 : null, bins: [], cohorts: [{ cohort, n: 100 }], uncertainty: [], note: 'Select an exact cohort. Evaluation does not prove a calibrated production model.' }
+      calibration: { cohort: selected, status: selected ? 'EVALUATED' : 'UNCALIBRATED', sample: selected ? 100 : 0, brierScore: selected ? 0.25 : null, logLoss: selected ? 0.6931 : null, ece: selected ? 0 : null, bins: [], cohorts: [{ cohort, n: 100 }], uncertainty: [], note: 'Select an exact cohort. Evaluation does not prove a calibrated production model.' }
     } });
   });
   await page.goto('/ditas');
