@@ -56,7 +56,7 @@ export async function dispatch(ctx: WorkerContext) {
   await Promise.all(Array.from({ length: Math.min(POOL.concurrency, active.length) }, async () => {
     while (i < active.length) { const w = active[i++]; results.push(await runOne(w, ctx)); }
   }));
-  return { eligible: eligible.length, quarantined: eligible.length - active.length, results };
+  return { eligible: eligible.length, quarantined: eligible.length - active.length, results, activeIds: active.map((w) => w.id) };
 }
 
 type Col = 'support' | 'oppose' | 'abstain' | 'failed';

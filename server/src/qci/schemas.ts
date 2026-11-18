@@ -44,9 +44,12 @@ export interface ConsensusRecord {
   schema_version: '1.0'; consensus_id: string; candidate_id: string; event_id: string; instrument_id: string; strategy_id: string;
   state: ConsensusState; reason_codes: string[];
   created_at: string; expires_at: string; analysis_ms: number;
-  method: { id: 'domain-capped-weighted-v1'; support_threshold: number; max_opposition: number; min_response_ratio: number; calibration: 'NOT_CALIBRATED' };
+  method: { id: 'domain-capped-weighted-v1' | 'domain-capped-weighted-v2'; support_threshold: number; max_opposition: number; min_response_ratio: number; calibration: 'NOT_CALIBRATED' };
   workers: { eligible: number; responding: number; abstaining: number; failed: number; quarantined: number; rejected_packets: number };
-  domains: { domain: string; groups: number; support: number; oppose: number; abstain: number; score: number | null; weight: number; required: boolean }[];
+  /** support/oppose/abstain count the data-driven packets of the dependency groups counted in this domain. sharedGroups: groups
+   *  with evidence here whose single vote is counted in an earlier domain; constantRule: packets from constant-rule workers
+   *  (shown for transparency, never counted as evidence). */
+  domains: { domain: string; groups: number; support: number; oppose: number; abstain: number; score: number | null; weight: number; required: boolean; sharedGroups?: number; constantRule?: number }[];
   dependency_groups: number;
   weighted_support: number; weighted_opposition: number;
   vetoes: { worker_id: string; reasons: string[] }[];
