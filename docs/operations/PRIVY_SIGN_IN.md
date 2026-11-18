@@ -36,7 +36,7 @@ Status: **implemented and offline-tested; not yet tried with a real Privy app.**
 
 1. Create an app at dashboard.privy.io. Copy the **App ID** (25 characters). It is public, not a secret.
 2. In the Privy dashboard, add your MIA address (e.g. `https://mia.example.com`, or `http://localhost:8787`) to **Allowed origins**.
-3. Privy requires **HTTPS**, except on `localhost`. A MIA reached over plain `http://` on a LAN or server needs TLS first; see `DEPLOYMENT_GUIDE.md`.
+3. Privy requires **HTTPS**, except on `localhost`. For a free HTTPS address, follow `TAILSCALE_FUNNEL.md`; for your own server see `DEPLOYMENT_GUIDE.md`.
 4. Set these in the **server** environment and restart MIA:
    - `MIA_PRIVY_APP_ID=<your app id>` (required).
    - Optional: `MIA_PRIVY_VERIFICATION_KEY` set to the PEM public key from the dashboard. Without it, MIA fetches Privy's public key set from `auth.privy.io`, so the server must be able to reach that host.

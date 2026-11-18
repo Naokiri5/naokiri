@@ -33,7 +33,7 @@ describe('first-owner setup (SEC-SETUP)', () => {
     expect(auth.isSetup()).toBe(false);
   });
   it('treats a loopback socket with proxy headers as remote (port forwarders, reverse proxies)', async () => {
-    for (const h of ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip']) {
+    for (const h of ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip', 'tailscale-funnel-request', 'tailscale-user-login']) {
       expect((await setup(app, '127.0.0.1', { password: 'attacker-owned-passphrase' }, { [h]: '203.0.113.9' })).statusCode).toBe(403);
     }
     expect(auth.isSetup()).toBe(false);

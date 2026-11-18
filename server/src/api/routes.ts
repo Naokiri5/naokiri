@@ -402,7 +402,9 @@ export async function routes(app: FastifyInstance) {
 const slim = (r: any) => ({ id: r.id, asset: r.asset, instrumentId: r.instrumentId, strategy: r.strategy, regime: r.regime, decision: r.decision, finalDecision: r.finalDecision, score: r.opportunity.score, consensus: r.consensus, createdAt: r.createdAt, entryCondition: r.entryCondition, invalidation: r.invalidation, stopLoss: r.stopLoss, takeProfit: r.takeProfit, risk: r.risk ? { decision: r.risk.decision, reasonCodes: r.risk.reasonCodes } : null, missing: r.missingInformation });
 const isLoopback = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 /** A loopback socket carrying proxy headers is a forwarded remote visitor (port forwarder, reverse proxy), not a local one. */
-const PROXY_HEADERS = ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip'];
+/** Any of these means the loopback socket belongs to a proxy relaying someone else (reverse proxy, port forwarder,
+ *  Tailscale Serve/Funnel), so the request is NOT the owner sitting at the machine. */
+const PROXY_HEADERS = ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip', 'tailscale-funnel-request', 'tailscale-user-login'];
 const isDirectLocal = (req: FastifyRequest) => isLoopback(req.ip) && !PROXY_HEADERS.some((h) => req.headers[h] !== undefined);
 function setupAccess(req: FastifyRequest): 'open' | 'code' {
   return isDirectLocal(req) || process.env.MIA_ALLOW_REMOTE_SETUP === '1' ? 'open' : 'code';

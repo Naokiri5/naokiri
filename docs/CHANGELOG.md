@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased: Tailscale Funnel guide (2026-11-18)
+- **New guide:** `docs/operations/TAILSCALE_FUNNEL.md` gives MIA a free HTTPS address with Tailscale Funnel (for your phone, or Privy's Allowed origins).
+- **Safety:** requests relayed by Tailscale Serve or Funnel are treated as remote even though they arrive from this computer, so the setup code and normal lockout still apply.
+
 ## Unreleased: Privy sign-in (2026-11-18)
 - **New: sign in with Privy** (email, phone, Google, Apple, passkey, wallet, as enabled in your Privy dashboard). Link your Privy account once in Security Center, with your passphrase; after that the login screen offers "Sign in with Privy".
 - **Safety:** the server checks every Privy token, and only your linked account can sign in. Your passphrase is still needed for sensitive actions. Wallets are view-only; creating embedded wallets and signing, sending, funding or exporting are LOCKED.
