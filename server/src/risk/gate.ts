@@ -12,12 +12,17 @@ import { openIncidentFor } from '../exec/incidents.js';
 
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
-export interface RiskProposal { instrumentId: string; strategyId: string; side: 'buy'; entryPrice: number; stopPrice: number; idempotencyKey: string; traceId: string; account?: string }
+export interface RiskProposal { instrumentId: string; strategyId: string; side: 'buy'; entryPrice: number; stopPrice: number; idempotencyKey: string; traceId: string; account?: typeof PAPER_ACCOUNT }
 export interface Sizing { qty: number; notional: number; riskBudget: number; plannedMaxLoss: number; perUnitLoss: number; conservativeStopFill: number; estEntry: number; estFees: number }
 export interface RiskDecision { decision: RiskDecisionKind; reasonCodes: string[]; evaluated: Record<string, number | string | boolean | null>; sizing: Sizing | null; policyVersion: number | null; ts: string; traceId: string }
 
 export function evaluateRisk(p: RiskProposal, nowTs = Date.now()): RiskDecision {
-  try { return evaluateInner(p, nowTs); }
+  try {
+    if (p.account !== undefined && p.account !== PAPER_ACCOUNT) {
+      return { decision: 'DENY', reasonCodes: ['ACCOUNT_UNSUPPORTED'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
+    }
+    return evaluateInner(p, nowTs);
+  }
   catch (e: any) { return { decision: 'DENY', reasonCodes: [`RISK_ENGINE_EXCEPTION: ${String(e?.message ?? e).slice(0, 200)}`], evaluated: {}, sizing: null, policyVersion: currentPolicySafe(), ts: iso(nowTs), traceId: p.traceId }; }
 }
 const currentPolicySafe = () => { try { return currentPolicy()?.version ?? null; } catch { return null; } };
@@ -28,12 +33,13 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const deny: string[] = []; const review: string[] = []; const ev: RiskDecision['evaluated'] = {};
   const pv = currentPolicy();
   if (!pv) return { decision: 'DENY', reasonCodes: ['POLICY_NOT_ACCEPTED: owner must review and accept a risk policy'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
-  const pol: RiskPolicy = pv.policy; const account = p.account ?? PAPER_ACCOUNT;
+  const pol: RiskPolicy = pv.policy; const account = PAPER_ACCOUNT;
   const ctl = getControl();
   ev.mode = ctl.mode;
   if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');
   if (ctl.pausedNewOrders) deny.push('NEW_ORDERS_PAUSED');
   if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
+  else if (ctl.mode !== 'PAPER' && ctl.mode !== 'APPROVAL') deny.push('MODE_NOT_PAPER');
   if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
   const suspended = getSetting<string[]>('suspendedStrategies', []);
   if (suspended.includes(p.strategyId)) deny.push(`STRATEGY_SUSPENDED:${p.strategyId}`);
@@ -75,7 +81,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const open = openPositions(account);
   if (open.length >= pol.maxConcurrentPositions) deny.push(`MAX_CONCURRENT_POSITIONS ${open.length}`);
   if (open.some((o) => o.instrument === p.instrumentId)) deny.push('DUPLICATE_INSTRUMENT_POSITION');
-  const pending = all("SELECT id FROM orders WHERE instrument=? AND status IN ('NEW','PENDING_APPROVAL','PARTIALLY_FILLED') AND purpose='ENTRY' AND client_order_id<>?", p.instrumentId, p.idempotencyKey);
+  const pending = all("SELECT id FROM orders WHERE account=? AND instrument=? AND status IN ('NEW','PENDING_APPROVAL','PARTIALLY_FILLED') AND purpose='ENTRY' AND client_order_id<>?", account, p.instrumentId, p.idempotencyKey);
   if (pending.length) deny.push('PENDING_ENTRY_ORDER_EXISTS');
   if (all("SELECT id FROM orders WHERE client_order_id=? AND status<>'PENDING_APPROVAL'", p.idempotencyKey).length) deny.push('DUPLICATE_REQUEST (idempotency key reused)');
   // correlation / concentration (conservative when unknown)

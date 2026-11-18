@@ -42,31 +42,48 @@ export function DecisionTable({ rows }: { rows: any[] }) {
     {!rows.length && <Empty>No candidates yet. Strategies fire only when their entry conditions are met on a closed 1h candle — most hours produce none, by design.</Empty>}</div></Card>;
 }
 
+interface PaperEntry {
+  orderId: string;
+  status: string;
+  filledQty: number;
+  averageFillPrice: number | null;
+  rejectReason: string | null;
+}
+
 export function DecisionPage() {
   const { id } = useParams(); const { data, error } = useApi(`/api/decisions/${id}`);
-  return <Page title="Decision record" sub="Part 8.3 trade explanation · Part 16.10 opportunity report · Part 29.6 consensus record"><ErrorLine e={error} />{data && <DecisionView report={data.report} consensus={data.consensus} />}</Page>;
+  return <Page title="Decision record" sub="Recorded market evidence, strategy decision, independent risk result and Paper OMS outcome"><ErrorLine e={error} />{data && <DecisionView report={data.report} consensus={data.consensus} paperEntry={data.paperEntry} />}</Page>;
 }
-export function DecisionView({ report: r, consensus }: { report: any; consensus?: any }) {
+export function DecisionView({ report: r, consensus, paperEntry }: { report: any; consensus?: any; paperEntry?: PaperEntry | null }) {
   const [tab, setTab] = useState('Explanation');
   return <div className="col" style={{ gap: 14 }}>
     <div className="row"><h2 style={{ fontSize: 18 }}>{r.asset}</h2><Badge v={r.decision} /><Badge v={r.direction} tone={r.direction === 'LONG' ? 'b-good' : 'b-neutral'} /><Badge v={r.consensus.state} /><span className="muted">{r.strategy.id} v{r.strategy.version} · {r.regime} · {fmt.time(r.createdAt)}</span></div>
     <div className="banner info" style={{ marginBottom: 0 }}>{r.disclaimer}</div>
     <Tabs tabs={['Explanation', 'Pipeline steps', 'Score factors', 'QCI consensus', 'Indicators']} value={tab} onChange={setTab} />
     {tab === 'Explanation' && <div className="grid g2">
-      <Card title="Trade plan"><div className="kv">
+      <Card title="Think · Trade plan"><div className="kv">
         <span>Market</span><span>{r.market} · {r.venue}</span><span>Final decision</span><span><b>{r.finalDecision}</b></span><span>Reason</span><span>{r.reason}</span>
         <span>Entry condition</span><span>{r.entryCondition}</span><span>Invalidation</span><span>{r.invalidation}</span>
         <span>Stop-loss</span><span className="mono">{fmt.px(r.stopLoss)}</span>
         <span>Take-profit</span><span className="mono">{r.takeProfit.map((t: any) => `${fmt.px(t.price)} (${t.r}R, ${t.fraction * 100}%)`).join(' · ')}</span>
         <span>Position size</span><span className="mono">{r.positionSize ? `${r.positionSize.qty} ≈ ${fmt.usd(r.positionSize.notional)} · max loss ${fmt.usd(r.positionSize.plannedMaxLoss)}` : 'not sized (not eligible for execution)'}</span>
         <span>Expected costs</span><span className="mono">fees {fmt.usd(r.expectedCosts.feesUsd)} · spread {fmt.num(r.expectedCosts.spreadBps, 1)}bps · slippage {fmt.num(r.expectedCosts.slippageBps, 1)}bps · {r.expectedCosts.costR ?? '—'}R · funding {r.expectedCosts.funding}</span>
-        <span>Data freshness</span><span><Badge v={r.dataFreshness.status} /> quote {fmt.num((r.dataFreshness.quoteAgeMs ?? 0) / 1000, 0)}s · book {fmt.num((r.dataFreshness.bookAgeMs ?? 0) / 1000, 0)}s</span>
+        <span>Sense · Data freshness</span><span><Badge v={r.dataFreshness.status} /> quote {r.dataFreshness.quoteAgeMs == null ? 'unavailable' : `${fmt.num(r.dataFreshness.quoteAgeMs / 1000, 0)}s`} · book {r.dataFreshness.bookAgeMs == null ? 'unavailable' : `${fmt.num(r.dataFreshness.bookAgeMs / 1000, 0)}s`}</span>
         <span>Opportunity score</span><span className="mono">{r.opportunity.score} <span className="faint">({r.opportunity.version})</span></span>
       </div></Card>
       <div className="col" style={{ gap: 14 }}>
         <Card title="Supporting evidence"><ul style={{ margin: 0, paddingLeft: 18 }}>{r.supportingEvidence.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul></Card>
         <Card title="Opposing evidence"><ul style={{ margin: 0, paddingLeft: 18 }}>{r.opposingEvidence.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul></Card>
-        <Card title="Risk assessment"><ul style={{ margin: 0, paddingLeft: 18 }}>{r.riskAssessment.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>{r.risk && <div className="row" style={{ marginTop: 8 }}>Risk gate: <Badge v={r.risk.decision} /> <span className="faint">policy v{r.risk.policyVersion} · trace {r.risk.traceId}</span></div>}</Card>
+        <Card title="Defend · Risk assessment"><ul style={{ margin: 0, paddingLeft: 18 }}>{r.riskAssessment.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>{r.risk && <div className="row" style={{ marginTop: 8 }}>Risk gate: <Badge v={r.risk.decision} /> <span className="faint">policy v{r.risk.policyVersion} · trace {r.risk.traceId}</span></div>}</Card>
+        {paperEntry !== undefined && <Card title="Execute · Paper OMS">
+          {paperEntry ? <div className="kv">
+            <span>Order status</span><Badge v={paperEntry.status} />
+            <span>Order ID</span><span className="mono">{paperEntry.orderId}</span>
+            <span>Filled quantity</span><span>{fmt.num(paperEntry.filledQty, 6)}</span>
+            <span>Average fill price</span><span>{fmt.px(paperEntry.averageFillPrice)}</span>
+            {paperEntry.rejectReason && <><span>Reason</span><span>{paperEntry.rejectReason}</span></>}
+          </div> : <Empty>No paper entry was recorded for this decision.</Empty>}
+        </Card>}
         <Card title="Missing information">{r.missingInformation.length ? <ul style={{ margin: 0, paddingLeft: 18 }}>{r.missingInformation.map((x: string, i: number) => <li key={i} className="muted">{x}</li>)}</ul> : <span className="muted">none</span>}</Card>
       </div></div>}
     {tab === 'Pipeline steps' && <Card flush><table><tbody>{r.steps.map((s: any) => <tr key={s.step}><td className="faint mono">{s.step}</td><td>{s.name}</td><td><Badge v={s.result} /></td><td className="muted">{s.detail}</td></tr>)}</tbody></table></Card>}

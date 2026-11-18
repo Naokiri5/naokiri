@@ -21,6 +21,7 @@ import { crashpoint } from './crashpoint.js';
  * (real spread + depth), with configured fees. Venue = 'binance-paper'. No live venue exists.
  */
 export const VENUE = 'binance-paper';
+const paperPosition = (id: string) => get<PositionRow>('SELECT * FROM positions WHERE id=? AND account=?', id, PAPER_ACCOUNT);
 const feeRate = () => (currentPolicy()?.policy ?? DEFAULT_POLICY).feeRate;
 
 export class OmsError extends Error {}
@@ -102,6 +103,14 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   const s = report;
   const coid = `entry-${report.candidateId}`;
   const existing = get<any>('SELECT * FROM orders WHERE client_order_id=?', coid);
+  if (existing && (existing.account !== PAPER_ACCOUNT || existing.venue !== VENUE)) {
+    return { ok: false, reason: 'ORDER_ACCOUNT_MISMATCH' };
+  }
+  if (existing && existing.status === 'PENDING_APPROVAL' &&
+      (actor !== 'owner' || existing.purpose !== 'ENTRY' || existing.side !== 'BUY' ||
+       existing.instrument !== s.instrumentId || existing.decision_id !== s.id)) {
+    return { ok: false, reason: 'PENDING_APPROVAL_MISMATCH' };
+  }
   if (existing && existing.status !== 'PENDING_APPROVAL') return { ok: false, reason: `DUPLICATE: order ${existing.id} already ${existing.status}` };
   const ctl = getControl();
   if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
@@ -177,7 +186,7 @@ export function queueForApproval(report: DecisionReport) {
   return id;
 }
 export function decideApproval(orderId: string, approve: boolean) {
-  const o = get<any>('SELECT * FROM orders WHERE id=?', orderId);
+  const o = get<any>("SELECT * FROM orders WHERE id=? AND account=? AND venue=? AND purpose='ENTRY' AND side='BUY'", orderId, PAPER_ACCOUNT, VENUE);
   if (!o || o.status !== 'PENDING_APPROVAL') throw new OmsError('order is not pending approval');
   audit('owner', approve ? 'order.approve' : 'order.reject', { orderId });
   if (!approve) { run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=?", Date.now(), orderId); journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId); return { ok: true }; }
@@ -186,7 +195,7 @@ export function decideApproval(orderId: string, approve: boolean) {
   return submitEntry(P(rep.report), 'owner');
 }
 export function expireApprovals() {
-  for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.status='PENDING_APPROVAL'")) {
+  for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.account=? AND o.venue=? AND o.purpose='ENTRY' AND o.status='PENDING_APPROVAL'", PAPER_ACCOUNT, VENUE)) {
     const r = P<DecisionReport>(o.report);
     if (Date.parse(r.consensus.expiresAt) <= Date.now()) run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed', updated_at=? WHERE id=?", Date.now(), o.id);
   }
@@ -229,7 +238,7 @@ export function monitorPositions(nowTs = Date.now()) {
         const cas = run("UPDATE positions SET stop_price=?, targets=?, mfe=?, mae=? WHERE id=? AND status='OPEN' AND qty=? AND stop_price=? AND targets=?", st.stop, J(meta), st.mfe, st.mae, p.id, p.qty, p.stop_price, p.targets);
         if (Number(cas.changes) !== 1) throw new StaleSnapshot();
         crashpoint('monitor.state');
-        if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id); crashpoint('monitor.stop'); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }
+        if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND account=? AND venue=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id, PAPER_ACCOUNT, VENUE); crashpoint('monitor.stop'); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }
         let consumed = 0; // depth already taken by earlier exits in this pass
         // stepExit (shared with the backtester) marks a target done before lot rounding; a target whose slice rounds to
         // zero sold nothing, so it is reopened here and stays eligible on later passes.
@@ -264,7 +273,7 @@ function flagUnprotected(p: PositionRow, why: string) { reportUnprotected(p, why
  * so nothing is announced for a transaction that rolls back.
  */
 function applyExit(positionId: string, wantQty: number, reason: string, fr: number, nowTs: number, after: Deferred, consumedQty = 0) {
-  const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId);
+  const p = paperPosition(positionId);
   if (!p || p.status !== 'OPEN' || !(p.qty > 0)) return null;
   const inst = market.instruments.get(p.instrument); const step = inst?.stepSize ?? 0;
   let qty = floorStep(Math.min(wantQty, p.qty), step);
@@ -291,8 +300,8 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   run('UPDATE positions SET qty=?, realized_pnl=realized_pnl+?, fees=fees+?, status=?, closed_at=?, exit_price=?, exit_reason=? WHERE id=?',
     remaining, pnl, fee, closed ? 'CLOSED' : 'OPEN', closed ? nowTs : null, closed ? px : null, closed ? reason : null, positionId);
   crashpoint('exit.position');
-  if (closed) run("UPDATE orders SET status='CANCELLED', updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", nowTs, positionId);
-  else run("UPDATE orders SET qty=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", remaining, nowTs, positionId);
+  if (closed) run("UPDATE orders SET status='CANCELLED', updated_at=? WHERE position_id=? AND account=? AND venue=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", nowTs, positionId, PAPER_ACCOUNT, VENUE);
+  else run("UPDATE orders SET qty=?, updated_at=? WHERE position_id=? AND account=? AND venue=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", remaining, nowTs, positionId, PAPER_ACCOUNT, VENUE);
   crashpoint('exit.stop');
   after.push(() => {
     journal('EXIT', `SELL ${qty} ${p.instrument.split(':')[2]} @ ${px.toPrecision(6)} — ${reason}, PnL ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}${fill.basis === 'BOOK' ? '' : ` [${fill.basis}]`}`, positionId, { fill, fee, reason });
@@ -308,13 +317,14 @@ export function executeExit(positionId: string, qty: number, reason: string, fr 
   const r = tx(() => { const e = applyExit(positionId, qty, reason, fr, nowTs, after); crashpoint('exit.precommit'); return e; });
   crashpoint('exit.committed');
   if (r) after.forEach((fn) => fn());
-  else { const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId); if (p?.status === 'OPEN') flagUnprotected(p, 'no fresh executable price for exit'); }
+  else { const p = paperPosition(positionId); if (p?.status === 'OPEN') flagUnprotected(p, 'no fresh executable price for exit'); }
   return r;
 }
 
 /** Part 20.4 deterministic trade autopsy. */
 export function autopsy(positionId: string) {
-  const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId)!;
+  const p = paperPosition(positionId);
+  if (!p) return;
   const dec = p.decision_id ? P<DecisionReport>(get<any>('SELECT report FROM decisions WHERE id=?', p.decision_id)?.report) : null;
   const r = p.planned_risk > 0 ? p.realized_pnl / p.planned_risk : 0;
   const findings = [
@@ -335,13 +345,13 @@ export function autopsy(positionId: string) {
 // ── Part 17.8 emergency semantics — distinct actions with distinct reported states ──
 export function pauseNewOrders(actor: string) { updateControl(actor, { pausedNewOrders: true }); journal('INTERVENTION', `New orders paused by ${actor}`); return { state: 'CONFIRMED' }; }
 export function cancelPendingEntries(actor: string) {
-  const r = run("UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=? WHERE purpose='ENTRY' AND status IN ('NEW','PENDING_APPROVAL')", `cancelled by ${actor}`, Date.now());
+  const r = run("UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=? WHERE account=? AND venue=? AND purpose='ENTRY' AND status IN ('NEW','PENDING_APPROVAL')", `cancelled by ${actor}`, Date.now(), PAPER_ACCOUNT, VENUE);
   audit(actor, 'orders.cancelPendingEntries', { count: Number(r.changes) }); journal('INTERVENTION', `${r.changes} pending entries cancelled by ${actor}`);
   return { state: 'CONFIRMED', cancelled: Number(r.changes) };
 }
 export function protectPositions(log = false) {
   const res = openPositions().map((p) => {
-    const stop = get<any>("SELECT * FROM orders WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", p.id);
+    const stop = get<any>("SELECT * FROM orders WHERE position_id=? AND account=? AND venue=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", p.id, PAPER_ACCOUNT, VENUE);
     const px = market.price(p.instrument);
     const now = Date.now(); const book = market.deep.get(p.instrument)?.book ?? null;
     const stopOk = !!stop && Math.abs(stop.qty - p.qty) < 1e-9 && stop.stop_price === p.stop_price;
@@ -376,6 +386,17 @@ export function emergencyStop(actor: string) {
   notify('CRITICAL', 'EMERGENCY STOP engaged', `new orders blocked, ${c.cancelled} pending entries cancelled, protection ${p.state}. Positions NOT auto-closed (policy).`, 'risk');
   return { pause: 'CONFIRMED', cancel: c, protect: p, close: 'NOT_REQUESTED' };
 }
-export const listOrders = (limit = 200) => all('SELECT * FROM orders ORDER BY created_at DESC LIMIT ?', limit);
-export const listPositions = (status?: string) => (status ? all<PositionRow>('SELECT * FROM positions WHERE status=? ORDER BY opened_at DESC', status) : all<PositionRow>('SELECT * FROM positions ORDER BY opened_at DESC LIMIT 500')).map((p) => ({ ...p, targets: P(p.targets), mark: market.price(p.instrument)?.price ?? null }));
+/** Recorded entry outcome for the original decision. Approval and decision do not imply a fill. */
+export function paperEntryForDecision(decisionId: string, instrumentId: string) {
+  const order = get<{ id: string; status: string; filled_qty: number; avg_price: number | null; reject_reason: string | null }>(
+    "SELECT id, status, filled_qty, avg_price, reject_reason FROM orders WHERE decision_id=? AND instrument=? AND account=? AND venue=? AND purpose='ENTRY' AND side='BUY' ORDER BY created_at DESC, id DESC LIMIT 1",
+    decisionId, instrumentId, PAPER_ACCOUNT, VENUE,
+  );
+  return order ? {
+    orderId: order.id, status: order.status, filledQty: order.filled_qty,
+    averageFillPrice: order.avg_price, rejectReason: order.reject_reason,
+  } : null;
+}
+export const listOrders = (limit = 200) => all('SELECT * FROM orders WHERE account=? AND venue=? ORDER BY created_at DESC LIMIT ?', PAPER_ACCOUNT, VENUE, limit);
+export const listPositions = (status?: string) => (status ? all<PositionRow>('SELECT * FROM positions WHERE account=? AND status=? ORDER BY opened_at DESC', PAPER_ACCOUNT, status) : all<PositionRow>('SELECT * FROM positions WHERE account=? ORDER BY opened_at DESC LIMIT 500', PAPER_ACCOUNT)).map((p) => ({ ...p, targets: P(p.targets), mark: market.price(p.instrument)?.price ?? null }));
 export { iso };
