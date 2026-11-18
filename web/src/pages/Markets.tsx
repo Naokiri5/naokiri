@@ -41,6 +41,17 @@ export function Terminal() {
             <div className="row"><Badge v={data.chartIntelligence.status} /><Badge v={data.chartIntelligence.trend} /><Badge v="NO TRADE" /></div>
             <div className="hint">{data.chartIntelligence.note}</div>
             {data.chartIntelligence.issues.length > 0 && <div className="hint warn">{data.chartIntelligence.issues.join('; ')}</div>}
+            {data.timeframeAgreement && <div className="tablewrap">
+              <table>
+                <caption>Timeframe agreement · {data.timeframeAgreement.state.replaceAll('_', ' ')}</caption>
+                <thead><tr><th>Timeframe</th><th>Structure</th><th>Candle closed</th></tr></thead>
+                <tbody>{data.timeframeAgreement.readings.map((r: { timeframe: string; trend: string; status: string; closedAt: number | null; issues: string[] }) => (
+                  <tr key={r.timeframe}><td>{r.timeframe}</td>
+                    <td><Badge v={r.status === 'VALID' ? r.trend : r.status} />{r.issues.map(issue => <div className="hint" key={issue}>{issue}</div>)}</td>
+                    <td>{fmt.time(r.closedAt)}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>}
             {!!data.chartIntelligence.anchoredVwap?.length && <div className="tablewrap">
               <table><thead><tr><th>VWAP anchor</th><th>Anchor time (UTC)</th><th>Estimated VWAP</th><th>Close vs. VWAP</th></tr></thead>
                 <tbody>{data.chartIntelligence.anchoredVwap.map((v: { anchor: string; anchorAt: number; price: number | null; deviationPct: number | null }) => (

@@ -159,7 +159,12 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     seedInstrument('CHARTUSDT');
     const r = await app.inject({ url: '/api/instrument/CHARTUSDT?interval=1h', headers: { cookie } });
     expect(r.statusCode).toBe(200);
-    expect(r.json().chartIntelligence).toMatchObject({ status: 'VALID', decision: 'NO TRADE', timeframe: '1h' });
+    const { chartIntelligence, timeframeAgreement } = r.json();
+    expect(chartIntelligence).toMatchObject({ status: 'VALID', decision: 'NO TRADE', timeframe: '1h' });
+    expect(timeframeAgreement).toMatchObject({
+      asOf: chartIntelligence.asOf,
+      readings: ['15m', '1h', '4h'].map(timeframe => ({ timeframe, closedAt: expect.any(Number) })),
+    });
     expect((await app.inject({ url: '/api/instrument/CHARTUSDT?interval=1m', headers: { cookie } })).statusCode).toBe(400);
   });
   it('protects replay, validates intervals, and returns only the visible prefix', async () => {

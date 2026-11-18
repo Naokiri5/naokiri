@@ -7,7 +7,7 @@ This is the first reviewed increment of the owner's phased specification, not de
 | 0 audit | COMPLETE for this increment | Re-audit changed baseline before extending |
 | 1 charts | PARTIAL, implemented subset | Includes confirmed-pivot continuation and change of character, immediate breakout retests, and anchored VWAP. Zones, channels, named patterns, Fibonacci/pivots and volatility fixtures remain. |
 | 2 indicators | PARTIAL existing | Correct per-indicator warm-up; independently verify formulas; add missing WMA, Keltner, Ichimoku, SAR, volume profile; retain one feature engine |
-| 3 multi-timeframe | PARTIAL existing | Closed-bar as-of alignment and conflicts; provider-supported intervals before expanding |
+| 3 multi-timeframe | PARTIAL | Binance spot agreement across the 15m, 1h and 4h caches. Additional provider intervals require separate ingestion and validation. |
 | 4 flow/liquidity | PARTIAL | Historical observed book/trade feed + provenance; separate inference from observation |
 | 5 fundamentals | PARTIAL/BLOCKED | Licensed asset-specific point-in-time feeds, schema, freshness tests |
 | 6 scanner | PARTIAL existing | Extend current capability registry/discovery; no duplicate scanner; outage/rate-limit tests |
@@ -36,6 +36,7 @@ Supported intervals remain 15m, 1h and 4h. Research replay does not infer market
 
 ## MIA 4.2 chart research
 
+- The timeframe agreement report compares confirmed swing trends from the latest completed 15m, 1h and 4h candles at one UTC timestamp. Opposed valid directions produce a conflict. Alignment requires all three valid readings in the same direction. Missing, stale or invalid data cannot vote.
 - A structure break requires the first close through a swing level that was confirmed before the signal candle. Two rising highs and lows define bullish structure. Two falling highs and lows define bearish structure. A break against that sequence is a change of character.
 - A breakout retest requires a close beyond a 20-bar range, then an immediate touch and close beyond the same boundary.
 - Anchored VWAP uses the same typical-price and base-volume formula as rolling VWAP. It supports Binance spot UTC day, Monday UTC week and UTC month boundaries, plus the most recent confirmed swing. An anchor is unavailable when the cache lacks its first candle or the observed volume is zero. Earnings and event anchors need a verified event source.

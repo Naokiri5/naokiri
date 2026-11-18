@@ -168,9 +168,14 @@ test('trading history CSV export downloads', async () => {
   expect(dl.suggestedFilename()).toBe('mia-orders-paper.csv');
 });
 
-test('terminal displays anchored VWAP, chart evidence and invalidation', async () => {
+test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', async () => {
   await page.route('**/api/instrument/CHARTFIXTURE?interval=1h', async route => route.fulfill({ json: {
     instrument: { base: 'CHARTFIXTURE', symbol: 'CHARTFIXTURE' }, cross: {}, candles: [], indicators: [],
+    timeframeAgreement: { state: 'CONFLICTING_SIGNALS', asOf: 43200000, readings: [
+      { timeframe: '15m', trend: 'BULLISH', status: 'VALID', closedAt: 43200000, issues: [] },
+      { timeframe: '1h', trend: 'UNKNOWN', status: 'UNAVAILABLE', closedAt: null, issues: ['No closed candles in the market cache'] },
+      { timeframe: '4h', trend: 'BEARISH', status: 'VALID', closedAt: 43200000, issues: [] },
+    ] },
     chartIntelligence: { status: 'VALID', trend: 'UNKNOWN', note: 'Fixture evidence only; confidence is not calibrated.', issues: [],
       anchoredVwap: [
         { anchor: 'UTC_DAY', anchorAt: 0, price: 100, deviationPct: 5 },
@@ -180,6 +185,10 @@ test('terminal displays anchored VWAP, chart evidence and invalidation', async (
   } }));
   await page.goto('/terminal/CHARTFIXTURE');
   await expect(page.getByText('Chart intelligence · closed candles')).toBeVisible();
+  const agreement = page.getByRole('table', { name: /Timeframe agreement · CONFLICTING SIGNALS/ });
+  await expect(agreement.getByRole('row', { name: /15m/ })).toContainText('BULLISH');
+  await expect(agreement.getByRole('row', { name: /1h/ })).toContainText('No closed candles in the market cache');
+  await expect(agreement.getByRole('row', { name: /4h/ })).toContainText('BEARISH');
   await expect(page.getByRole('cell', { name: /BREAKOUT_UP/ })).toBeVisible();
   await expect(page.getByText('Close back below 100')).toBeVisible();
   await expect(page.getByRole('row', { name: /UTC DAY/ })).toContainText('+5.00%');
