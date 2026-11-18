@@ -56,11 +56,17 @@ import { sha256 } from '../core/util.js';
 const COOKIE = 'mia_session';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 const bad = (reply: FastifyReply, code: number, msg: string) => reply.code(code).send({ error: msg });
-/** Step-up shares the login brute-force limits (per client + global), so it can no longer be guessed freely. */
-const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, req.ip, 'step-up', { exemptFromGlobalLockout: isDirectLocal(req) });
+/**
+ * Step-up runs on an AUTHENTICATED session, so its per-client budget is keyed by that session (hash of the token), not by
+ * IP. Behind a reverse proxy or container gateway every client shares one IP, and a stranger's failed logins used to lock
+ * the owner's step-up too (MA-07). A session's own failures still lock that session (5 misses → exponential backoff).
+ */
+const stepUpClient = (req: FastifyRequest) => `session:${sha256(tokenOf(req) ?? '')}`;
+/** Step-up shares the login brute-force limits (per session + global), so it can no longer be guessed freely. */
+const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, stepUpClient(req), 'step-up', { exemptFromGlobalLockout: isDirectLocal(req) });
 /** Step-up for actions that only REDUCE risk or exposure (close all, revoke other sessions): never blocked by the
- *  server-wide failure budget that unauthenticated strangers can exhaust (SEC-14). Per-client limits still apply. */
-const stepUpRiskReducing = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, req.ip, 'step-up', { exemptFromGlobalLockout: true });
+ *  server-wide failure budget that unauthenticated strangers can exhaust (SEC-14), nor by another client's failures. */
+const stepUpRiskReducing = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, stepUpClient(req), 'step-up', { exemptFromGlobalLockout: true });
 const PW = z.string().min(1).max(1024);
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */

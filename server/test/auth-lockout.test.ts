@@ -41,4 +41,13 @@ describe('global lockout cannot block the owner (SEC-14)', () => {
     for (let i = 0; i < 5; i++) await app.inject({ method: 'POST', url: '/api/emergency/close-all', remoteAddress: '10.0.0.9', headers: h, payload: { password: 'bad guess ' + i, confirm: 'CLOSE ALL' } });
     expect((await app.inject({ method: 'POST', url: '/api/emergency/close-all', remoteAddress: '10.0.0.9', headers: h, payload: { password: PW, confirm: 'CLOSE ALL' } })).statusCode).toBe(429);
   });
+  it('behind a proxy, a stranger locking the shared IP cannot block the owner\'s close-all (MA-07)', async () => {
+    failureGate.reset();
+    const proxied = { ...json, 'x-forwarded-for': '203.0.113.50' }; // every client arrives from the proxy's loopback address
+    for (let i = 0; i < 6; i++) await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '127.0.0.1', headers: proxied, payload: { password: 'stranger ' + i } });
+    expect((await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '127.0.0.1', headers: proxied, payload: { password: PW } })).statusCode).toBe(429); // the IP is locked
+    const h = { cookie, 'x-mia-csrf': '1', ...proxied };
+    expect((await app.inject({ method: 'POST', url: '/api/emergency/close-all', remoteAddress: '127.0.0.1', headers: h, payload: { password: PW, confirm: 'CLOSE ALL' } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/security/sessions/revoke-others', remoteAddress: '127.0.0.1', headers: h, payload: { password: PW } })).statusCode).toBe(200);
+  });
 });
