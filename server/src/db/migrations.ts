@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
 /** Ordered, append-only migrations. Never edit a shipped migration — add a new one. */
@@ -133,16 +134,48 @@ const MIGRATIONS: string[] = [
   `,
 ];
 
+const OBJECT_RE = /CREATE\s+(?:UNIQUE\s+)?(?:VIRTUAL\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;
+/** Names of the tables, indexes, triggers and views a migration creates (migrations never drop or rename). */
+export function migrationObjects(sql: string): string[] { return [...sql.matchAll(OBJECT_RE)].map((m) => m[1]); }
+export const migrationChecksum = (sql: string) => createHash('sha256').update(sql.replace(/\s+/g, ' ').trim()).digest('hex');
+export class MigrationMismatchError extends Error {}
+
+/**
+ * SAFE-02 (ticket #93): refuse to run on a database whose recorded schema version N was produced by DIFFERENT
+ * migration code — e.g. a branch that reused version 6 for other tables. Without this, migrate() would see "6
+ * applied", skip this build's v6 and run with tables missing. Checks, for every applied version:
+ *  - the recorded checksum (stored since SAFE-02) equals this build's migration text;
+ *  - every object this build's migration creates exists (also covers databases from before checksums existed).
+ * A database newer than this build (unknown versions) is refused too: running old code on it is unsafe.
+ */
+function verifyApplied(db: DatabaseSync, current: number) {
+  if (current > MIGRATIONS.length) throw new MigrationMismatchError(`database schema v${current} is newer than this build (v${MIGRATIONS.length}); refusing to start. Use the build that created it, or restore a matching backup.`);
+  const rows = db.prepare('SELECT version, checksum FROM schema_migrations ORDER BY version').all() as { version: number; checksum: string | null }[];
+  const existing = new Set((db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map((r) => r.name));
+  for (const r of rows) {
+    const sql = MIGRATIONS[r.version - 1];
+    if (r.checksum && r.checksum !== migrationChecksum(sql)) throw new MigrationMismatchError(`schema v${r.version} in this database was created by different migration code than this build's v${r.version}; refusing to start (no table was skipped or modified). Restore a backup made by this build, or reconcile the branches that both used v${r.version}.`);
+    const missing = migrationObjects(sql).filter((n) => !existing.has(n));
+    if (missing.length) throw new MigrationMismatchError(`schema v${r.version} is recorded as applied but its objects are missing (${missing.slice(0, 5).join(', ')}): this database was migrated by a different build that reused v${r.version}. Refusing to start; nothing was changed.`);
+  }
+  // Databases from before SAFE-02 passed the structural check above: record this build's checksums for the future.
+  const fill = db.prepare('UPDATE schema_migrations SET checksum=? WHERE version=? AND checksum IS NULL');
+  for (const r of rows) if (!r.checksum) fill.run(migrationChecksum(MIGRATIONS[r.version - 1]), r.version);
+}
+
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
 export function migrate(db: DatabaseSync, target = MIGRATIONS.length) {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
+  const cols = (db.prepare('PRAGMA table_info(schema_migrations)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes('checksum')) db.exec('ALTER TABLE schema_migrations ADD COLUMN checksum TEXT'); // migration-ledger metadata only
   const row = db.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number | null };
   const current = row?.v ?? 0;
+  verifyApplied(db, current);
   for (let i = current; i < Math.min(target, MIGRATIONS.length); i++) {
     db.exec('BEGIN');
     try {
       db.exec(MIGRATIONS[i]);
-      db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(i + 1, Date.now());
+      db.prepare('INSERT INTO schema_migrations(version, applied_at, checksum) VALUES (?, ?, ?)').run(i + 1, Date.now(), migrationChecksum(MIGRATIONS[i]));
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }

@@ -151,3 +151,37 @@ Not every one of the 100 tickets was verified line by line. The table states the
 **Not changed:**
 - Risk-reducing actions (pause, emergency, disabling strategies) need no gate.
 - Non-owners still cannot change mode.
+
+## 9. SAFE-02 result (migration reconciliation)
+
+**Done in PR #18:** `server/src/db/migrations.ts`, the migration identity guard (implemented, VERIFIED locally).
+
+**Behaviour:**
+- `schema_migrations` gains a `checksum` column. It is added in place and is migration-ledger metadata only.
+- Every applied version is checked before anything runs:
+  - the recorded checksum must equal this build's migration text;
+  - every table, index and trigger this build's migration creates must exist. This also covers databases created before checksums existed.
+- On any mismatch, or a database newer than this build, startup **refuses** with `MigrationMismatchError` and changes nothing. Previously `migrate()` would see "v6 applied", skip this build's v6, and run without `ditas_blobs`.
+- Older databases that pass the structural check get their checksums filled in.
+
+**Tests** (`migration-guard.test.ts`, 6 tests):
+- fresh database and idempotence;
+- an older database is upgraded and its checksums backfilled;
+- **the PR #20 v6 collision, simulated, is refused and the database is left untouched**;
+- a mismatched checksum is refused;
+- a newer database is refused.
+
+On the old code all 6 fail (partly because the new exports are missing; the old `migrate()` itself accepts the collision silently).
+
+| Check | Result |
+|---|---|
+| server tests | 610 passed, 3 skipped |
+| e2e | 76 passed |
+| typecheck and build | ✓ |
+
+**Still required on PR #20** (another branch; this session may push only to PR #18's branch, so it is **not changed here**):
+1. Rebase PR #20 onto `main` after PR #18 merges.
+2. Move its Telegram migration from v6 to the **next free version (v8)** by appending it after v7. Never edit v6 or v7.
+3. Add an upgrade test from v7 that keeps existing data.
+
+Any database created by the current PR #20 draft build will be refused by this guard. It must not be reused: start fresh, or restore a backup made by a PR #18 build.
