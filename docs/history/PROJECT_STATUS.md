@@ -21,21 +21,21 @@ that only you can provide.
 | Development branch | `claude/blissful-planck-lazglg` (restarted from `main` after the merge) |
 | Phase 0 changes | Documentation only; committed and pushed |
 | Phase 1 changes | Code + tests + CI; committed, pushed, and opened as a pull request for your review |
-| How to open the app | `npm install` then `npm start`, then http://localhost:8787/ (see `SETUP_GUIDE_BEGINNER.md`) |
+| How to open the app | `npm install` then `npm start`, then http://localhost:8787/ (see `docs/operations/SETUP_GUIDE_BEGINNER.md`) |
 
 ## Phase 0 deliverables
 | Deliverable | File |
 |---|---|
 | Architecture report + technology assessment | `ARCHITECTURE.md` |
-| Requirements traceability (Parts 1–33) + feature, missing and mocked inventories | `REQUIREMENTS_TRACEABILITY.md` |
+| Requirements traceability (Parts 1–33) + feature, missing and mocked inventories | `docs/planning/REQUIREMENTS_TRACEABILITY.md` |
 | Dependency inventory | `ARCHITECTURE.md` § Dependencies |
 | Security audit | `SECURITY.md` |
-| Roadmap + prioritized backlog | `IMPLEMENTATION_ROADMAP.md` |
-| Test evidence | `TEST_REPORT.md` |
+| Roadmap + prioritized backlog | `docs/planning/IMPLEMENTATION_ROADMAP.md` |
+| Test evidence | `docs/history/TEST_REPORT.md` |
 | Integrations & what needs credentials | `API_INTEGRATIONS.md` |
-| Limitations | `KNOWN_LIMITATIONS.md` |
-| Setup for beginners | `SETUP_GUIDE_BEGINNER.md` |
-| Deployment & operations | `DEPLOYMENT_GUIDE.md` |
+| Limitations | `docs/history/KNOWN_LIMITATIONS.md` |
+| Setup for beginners | `docs/operations/SETUP_GUIDE_BEGINNER.md` |
+| Deployment & operations | `docs/operations/DEPLOYMENT_GUIDE.md` |
 | History | `CHANGELOG.md` |
 
 ## Requirement status (74 rows)
@@ -69,4 +69,4 @@ that only you can provide.
 
 ## Tests at this point
 54 automated tests + 32 browser checks pass (browser suite run 3× in a row to rule out flakiness); live checks of the new pages
-against real market data passed with 0 browser errors. See `TEST_REPORT.md`.
+against real market data passed with 0 browser errors. See `docs/history/TEST_REPORT.md`.

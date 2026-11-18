@@ -1,12 +1,12 @@
 {
- "generatedFrom": "0018f2280ba1cf715224c4f033c7c4ad708248fc",
- "totalFiles": 277,
+ "generatedFrom": "fbeccfb21f0b2b2991856f3bd98f87a1788b52a5",
+ "totalFiles": 284,
  "counts": {
   "NOT_REVIEWED": 27,
-  "READ_FULL": 125,
+  "READ_FULL": 126,
   "PARTIAL": 8,
-  "DOC": 59,
-  "TEST_CODE": 57,
+  "DOC": 60,
+  "TEST_CODE": 62,
   "GENERATED": 1
  },
  "files": [
@@ -208,7 +208,7 @@
   },
   {
    "path": "README.md",
-   "bytes": 7937,
+   "bytes": 7528,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
@@ -229,91 +229,28 @@
   },
   {
    "path": "docs/ARCHITECTURE.md",
-   "bytes": 9129,
+   "bytes": 9145,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
   },
   {
    "path": "docs/CHANGELOG.md",
-   "bytes": 13168,
+   "bytes": 13989,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
   },
   {
-   "path": "docs/CLAUDE_CODE_WORKFLOW.md",
-   "bytes": 3881,
-   "language": "markdown",
-   "team": "A Repository & architecture",
-   "review": "DOC"
-  },
-  {
-   "path": "docs/DEPLOYMENT_GUIDE.md",
-   "bytes": 7375,
-   "language": "markdown",
-   "team": "A Repository & architecture",
-   "review": "DOC"
-  },
-  {
-   "path": "docs/IMPLEMENTATION_ROADMAP.md",
-   "bytes": 4831,
-   "language": "markdown",
-   "team": "A Repository & architecture",
-   "review": "DOC"
-  },
-  {
-   "path": "docs/KNOWN_LIMITATIONS.md",
-   "bytes": 2966,
-   "language": "markdown",
-   "team": "A Repository & architecture",
-   "review": "DOC"
-  },
-  {
-   "path": "docs/PROJECT_STATUS.md",
-   "bytes": 4559,
-   "language": "markdown",
-   "team": "A Repository & architecture",
-   "review": "DOC"
-  },
-  {
-   "path": "docs/QHEF_LATENCY_BASELINE.md",
-   "bytes": 1607,
-   "language": "markdown",
-   "team": "A Repository & architecture",
-   "review": "DOC"
-  },
-  {
-   "path": "docs/REFACTORING_BACKLOG.md",
-   "bytes": 6020,
-   "language": "markdown",
-   "team": "A Repository & architecture",
-   "review": "DOC"
-  },
-  {
-   "path": "docs/REQUIREMENTS_TRACEABILITY.md",
-   "bytes": 12765,
+   "path": "docs/README.md",
+   "bytes": 4343,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
   },
   {
    "path": "docs/SECURITY.md",
-   "bytes": 8335,
-   "language": "markdown",
-   "team": "A Repository & architecture",
-   "review": "DOC"
-  },
-  {
-   "path": "docs/SETUP_GUIDE_BEGINNER.md",
-   "bytes": 2455,
-   "language": "markdown",
-   "team": "A Repository & architecture",
-   "review": "DOC"
-  },
-  {
-   "path": "docs/TEST_REPORT.md",
-   "bytes": 6174,
+   "bytes": 8614,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
@@ -557,6 +494,13 @@
    "review": "DOC"
   },
   {
+   "path": "docs/engineering/CLAUDE_CODE_WORKFLOW.md",
+   "bytes": 3902,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
    "path": "docs/engineering/DASHBOARD_RUNTIME_VERIFICATION.md",
    "bytes": 6973,
    "language": "markdown",
@@ -565,7 +509,7 @@
   },
   {
    "path": "docs/engineering/DEBUG_AUDIT_2026-11-17.md",
-   "bytes": 22526,
+   "bytes": 28760,
    "language": "markdown",
    "team": "A Repository & architecture",
    "review": "DOC"
@@ -593,7 +537,7 @@
   },
   {
    "path": "docs/engineering/REQUIREMENTS_TRACEABILITY.csv",
-   "bytes": 12807,
+   "bytes": 12818,
    "language": "csv",
    "team": "A Repository & architecture",
    "review": "DOC"
@@ -620,6 +564,69 @@
    "review": "DOC"
   },
   {
+   "path": "docs/history/KNOWN_LIMITATIONS.md",
+   "bytes": 2966,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/history/PROJECT_STATUS.md",
+   "bytes": 4674,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/history/TEST_REPORT.md",
+   "bytes": 6174,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/operations/DEPLOYMENT_GUIDE.md",
+   "bytes": 7375,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/operations/QHEF_LATENCY_BASELINE.md",
+   "bytes": 1607,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/operations/SETUP_GUIDE_BEGINNER.md",
+   "bytes": 2455,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/planning/IMPLEMENTATION_ROADMAP.md",
+   "bytes": 4831,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/planning/REFACTORING_BACKLOG.md",
+   "bytes": 6020,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
+   "path": "docs/planning/REQUIREMENTS_TRACEABILITY.md",
+   "bytes": 12779,
+   "language": "markdown",
+   "team": "A Repository & architecture",
+   "review": "DOC"
+  },
+  {
    "path": "e2e/app.spec.ts",
    "bytes": 20791,
    "language": "typescript",
@@ -628,7 +635,7 @@
   },
   {
    "path": "e2e/auth.spec.ts",
-   "bytes": 2146,
+   "bytes": 3358,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -726,7 +733,7 @@
   },
   {
    "path": "server/package.json",
-   "bytes": 1183,
+   "bytes": 1049,
    "language": "json",
    "team": "A Repository & architecture",
    "review": "READ_FULL"
@@ -734,6 +741,13 @@
   {
    "path": "server/scripts/ensure-build.mjs",
    "bytes": 948,
+   "language": "javascript",
+   "team": "H Reliability",
+   "review": "READ_FULL"
+  },
+  {
+   "path": "server/scripts/qa.mjs",
+   "bytes": 2350,
    "language": "javascript",
    "team": "H Reliability",
    "review": "READ_FULL"
@@ -754,21 +768,21 @@
   },
   {
    "path": "server/src/api/auth.ts",
-   "bytes": 5153,
+   "bytes": 5343,
    "language": "typescript",
    "team": "D Backend API & security",
    "review": "READ_FULL"
   },
   {
    "path": "server/src/api/routes.ts",
-   "bytes": 36893,
+   "bytes": 37833,
    "language": "typescript",
    "team": "D Backend API & security",
    "review": "READ_FULL"
   },
   {
    "path": "server/src/bot/bot.ts",
-   "bytes": 11909,
+   "bytes": 12515,
    "language": "typescript",
    "team": "H Reliability",
    "review": "READ_FULL"
@@ -789,7 +803,7 @@
   },
   {
    "path": "server/src/config.ts",
-   "bytes": 4883,
+   "bytes": 5071,
    "language": "typescript",
    "team": "D Backend API & security",
    "review": "READ_FULL"
@@ -824,7 +838,7 @@
   },
   {
    "path": "server/src/core/ratelimit.ts",
-   "bytes": 2755,
+   "bytes": 3211,
    "language": "typescript",
    "team": "D Backend API & security",
    "review": "READ_FULL"
@@ -866,7 +880,7 @@
   },
   {
    "path": "server/src/db/migrations.ts",
-   "bytes": 12294,
+   "bytes": 13088,
    "language": "typescript",
    "team": "E Database & accounting",
    "review": "PARTIAL"
@@ -908,7 +922,7 @@
   },
   {
    "path": "server/src/ditas/memory.ts",
-   "bytes": 8725,
+   "bytes": 12335,
    "language": "typescript",
    "team": "F Markets & intelligence",
    "review": "READ_FULL"
@@ -957,7 +971,7 @@
   },
   {
    "path": "server/src/exec/oms.ts",
-   "bytes": 30618,
+   "bytes": 31368,
    "language": "typescript",
    "team": "G Order lifecycle & risk",
    "review": "READ_FULL"
@@ -1181,7 +1195,7 @@
   },
   {
    "path": "server/src/ops/backup.ts",
-   "bytes": 9099,
+   "bytes": 9253,
    "language": "typescript",
    "team": "H Reliability",
    "review": "READ_FULL"
@@ -1195,7 +1209,7 @@
   },
   {
    "path": "server/src/ops/lease.ts",
-   "bytes": 1814,
+   "bytes": 3562,
    "language": "typescript",
    "team": "H Reliability",
    "review": "READ_FULL"
@@ -1293,7 +1307,7 @@
   },
   {
    "path": "server/src/qa/gates.ts",
-   "bytes": 13107,
+   "bytes": 14422,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "READ_FULL"
@@ -1307,21 +1321,21 @@
   },
   {
    "path": "server/src/qci/coordinator.ts",
-   "bytes": 7825,
+   "bytes": 9988,
    "language": "typescript",
    "team": "F Markets & intelligence",
    "review": "READ_FULL"
   },
   {
    "path": "server/src/qci/schemas.ts",
-   "bytes": 3165,
+   "bytes": 3557,
    "language": "typescript",
    "team": "F Markets & intelligence",
    "review": "READ_FULL"
   },
   {
    "path": "server/src/qhef/qhef.ts",
-   "bytes": 4142,
+   "bytes": 4153,
    "language": "typescript",
    "team": "D Backend API & security",
    "review": "READ_FULL"
@@ -1384,7 +1398,7 @@
   },
   {
    "path": "server/src/workers/effectiveness.ts",
-   "bytes": 2126,
+   "bytes": 2243,
    "language": "typescript",
    "team": "F Markets & intelligence",
    "review": "READ_FULL"
@@ -1405,7 +1419,7 @@
   },
   {
    "path": "server/src/workers/runtime.ts",
-   "bytes": 4694,
+   "bytes": 4730,
    "language": "typescript",
    "team": "F Markets & intelligence",
    "review": "READ_FULL"
@@ -1419,7 +1433,14 @@
   },
   {
    "path": "server/test/api.test.ts",
-   "bytes": 18527,
+   "bytes": 20110,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/auth-lockout.test.ts",
+   "bytes": 3556,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1441,6 +1462,13 @@
   {
    "path": "server/test/chart.test.ts",
    "bytes": 3883,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/config-env.test.ts",
+   "bytes": 1078,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1530,6 +1558,13 @@
    "review": "TEST_CODE"
   },
   {
+   "path": "server/test/ditas-store-once.test.ts",
+   "bytes": 3191,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
    "path": "server/test/ditas-twin.test.ts",
    "bytes": 6899,
    "language": "typescript",
@@ -1552,7 +1587,7 @@
   },
   {
    "path": "server/test/gates.test.ts",
-   "bytes": 16358,
+   "bytes": 17479,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1607,6 +1642,13 @@
    "review": "TEST_CODE"
   },
   {
+   "path": "server/test/lease-fence.test.ts",
+   "bytes": 2342,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
    "path": "server/test/live.providers.test.ts",
    "bytes": 4199,
    "language": "typescript",
@@ -1615,7 +1657,7 @@
   },
   {
    "path": "server/test/oms.test.ts",
-   "bytes": 13568,
+   "bytes": 14343,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1629,14 +1671,14 @@
   },
   {
    "path": "server/test/ops-lease-hardening.test.ts",
-   "bytes": 9352,
+   "bytes": 9623,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
   },
   {
    "path": "server/test/ops-lease.process.test.ts",
-   "bytes": 3847,
+   "bytes": 4477,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1672,6 +1714,13 @@
   {
    "path": "server/test/provider-validation.test.ts",
    "bytes": 3703,
+   "language": "typescript",
+   "team": "J Independent QA & release",
+   "review": "TEST_CODE"
+  },
+  {
+   "path": "server/test/qci-vote-counting.test.ts",
+   "bytes": 3236,
    "language": "typescript",
    "team": "J Independent QA & release",
    "review": "TEST_CODE"
@@ -1790,7 +1839,7 @@
   },
   {
    "path": "web/src/App.tsx",
-   "bytes": 11768,
+   "bytes": 11785,
    "language": "tsx",
    "team": "C Frontend & accessibility",
    "review": "READ_FULL"
@@ -1811,7 +1860,7 @@
   },
   {
    "path": "web/src/api.ts",
-   "bytes": 5894,
+   "bytes": 6937,
    "language": "typescript",
    "team": "C Frontend & accessibility",
    "review": "READ_FULL"
@@ -1909,14 +1958,14 @@
   },
   {
    "path": "web/src/status.test.ts",
-   "bytes": 12362,
+   "bytes": 13503,
    "language": "typescript",
    "team": "C Frontend & accessibility",
    "review": "TEST_CODE"
   },
   {
    "path": "web/src/status.ts",
-   "bytes": 13059,
+   "bytes": 13621,
    "language": "typescript",
    "team": "C Frontend & accessibility",
    "review": "READ_FULL"

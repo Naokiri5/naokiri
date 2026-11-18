@@ -92,24 +92,18 @@ and pull request.
 
 ## Documentation
 
-Start with `docs/PROJECT_STATUS.md` (plain-language status) and `docs/SETUP_GUIDE_BEGINNER.md`. For AI-assisted development, read `docs/CLAUDE_CODE_WORKFLOW.md` and `docs/REFACTORING_BACKLOG.md`.
+**Start at [`docs/README.md`](docs/README.md)**: it maps every document by purpose (start here, run and operate, security, features, engineering, planning, history) and shows where each part of the code lives.
 
-| File | Contents |
+| Most-used documents | Contents |
 |---|---|
-| `docs/PROJECT_STATUS.md` | where the project stands, what needs you |
-| `docs/ARCHITECTURE.md` | design, trust boundaries, technology choices, dependencies |
-| `docs/REQUIREMENTS_TRACEABILITY.md` | every spec part (1–33) → code → status |
-| `docs/IMPLEMENTATION_ROADMAP.md` | phases and prioritized backlog |
-| `docs/SETUP_GUIDE_BEGINNER.md` | step-by-step install and first use |
-| `docs/API_INTEGRATIONS.md` | data providers, licences, credentials |
-| `docs/SECURITY.md` | security audit and controls |
-| `docs/TEST_REPORT.md` | test evidence |
-| `docs/DEPLOYMENT_GUIDE.md` | running, backups, incidents, rollback |
-| `docs/KNOWN_LIMITATIONS.md` | what does not work yet and why |
-| `docs/QHEF_LATENCY_BASELINE.md` | measured performance |
-| `docs/CHANGELOG.md` | history |
-| `docs/CLAUDE_CODE_WORKFLOW.md` | Claude Code setup, specialist agents, slash skills and optional GitHub @claude workflow |
-| `docs/REFACTORING_BACKLOG.md` | evidence-based code-organization and duplication-removal plan |
+| `docs/operations/SETUP_GUIDE_BEGINNER.md` | step-by-step install and first use |
+| `docs/operations/DEPLOYMENT_GUIDE.md` | always-on PAPER operation, readiness, backups, incidents |
+| `docs/engineering/DEBUG_AUDIT_2026-11-17.md` | current bug register, test results, performance baseline |
+| `docs/SECURITY.md` | security register and controls |
+| `docs/ARCHITECTURE.md` | design and trust boundaries |
+| `docs/CHANGELOG.md` | history, newest first |
+
+Dated reports from earlier phases (project status, known limitations, test report) are kept under `docs/history/`.
 
 ## Global Chart Intelligence
 

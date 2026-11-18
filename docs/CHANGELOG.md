@@ -144,7 +144,7 @@ PR #6 `feat/ditas-foundation`.
 - Fixes: Market Terminal no longer crashes before market data loads; event-loop delay reports true blocking time.
 
 ## Unreleased: Phase 0 audit (branch `claude/blissful-planck-lazglg`)
-- Full audit against spec Parts 1–33 (`REQUIREMENTS_TRACEABILITY.md`): 27 implemented, 34 partial, 4 missing, 9 blocked,
+- Full audit against spec Parts 1–33 (`docs/planning/REQUIREMENTS_TRACEABILITY.md`): 27 implemented, 34 partial, 4 missing, 9 blocked,
   0 mocked.
 - Security audit (`SECURITY.md`): 1 high-severity dependency advisory found (SEC-01), no committed secrets.
 - Documentation reorganised into the required `docs/` file set; the old numbered docs were renamed, not duplicated.
