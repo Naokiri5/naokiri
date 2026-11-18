@@ -22,7 +22,8 @@ const OMS_CALLERS = new Map<string, readonly string[] | '*'>([
 
 const READABLE_APIS = new Map<string, readonly string[]>([
   ['core/mode.ts', ['getControl', 'displayMode']],
-  ['risk/policy.ts', ['currentPolicy', 'DEFAULT_POLICY', 'policyHistory', 'RiskPolicy']],
+  // Claude's safety branch also reads the most recent valid policy for protective exits.
+  ['risk/policy.ts', ['currentPolicy', 'exitPolicy', 'DEFAULT_POLICY', 'policyHistory', 'RiskPolicy']],
   ['portfolio/ledger.ts', ['PAPER_ACCOUNT', 'accountState', 'cashBalance', 'totalDeposits', 'openPositions', 'markPrice']],
   ['lab/lab.ts', ['fetchHistory', 'listStrategies', 'listBacktests', 'strategyStats', 'paperStats', '_universeSymbols']],
   ['wallet/wallet.ts', ['NETWORKS', 'toChecksum', 'validateAddress', 'withdrawalFrozen']],
