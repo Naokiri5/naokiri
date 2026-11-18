@@ -70,3 +70,28 @@ describe('QCI vote counting (R-12)', () => {
     expect(a.domains[0].score).toBe(0); expect(a.groups).toBe(2);
   });
 });
+
+describe('100-agent audit, Squad D findings', () => {
+  it('D-01: adverse evidence from a domain whose group vote went elsewhere still counts as opposition', () => {
+    // Real registry shape: the `book` group is credited to flow (first in DOMAINS); liquidity's own readings oppose.
+    const a = aggregate([
+      pkt({ worker_id: 'W-FLW-10', evidence_domain: 'flow', dependency_group: 'book', stance: 'SUPPORT' }),
+      ...['W-LIQ-01', 'W-LIQ-02', 'W-LIQ-03', 'W-LIQ-07'].map((id) => pkt({ worker_id: id, evidence_domain: 'liquidity', dependency_group: 'book', stance: 'OPPOSE' })),
+    ], all);
+    const by = Object.fromEntries(a.domains.map((d) => [d.domain, d]));
+    expect(a.weightedOpposition).toBeGreaterThan(0);   // was 0: four adverse liquidity readings vanished
+    expect(by.liquidity.score).toBe(-1);                 // shown as liquidity's (adverse) reading
+    expect(a.groups).toBe(1);                            // still one vote for the group
+    // Supportive readings in a credited-elsewhere group are NOT double counted.
+    const b = aggregate([
+      pkt({ evidence_domain: 'flow', dependency_group: 'book', stance: 'SUPPORT' }),
+      pkt({ evidence_domain: 'liquidity', dependency_group: 'book', stance: 'SUPPORT' }),
+    ], all);
+    const one = aggregate([pkt({ evidence_domain: 'flow', dependency_group: 'book', stance: 'SUPPORT' })], all);
+    expect(b.weightedSupport).toBe(one.weightedSupport);
+  });
+  it('D-03: duplicate packets from one worker cannot inflate the response ratio', () => {
+    const many = Array.from({ length: 10 }, () => pkt({ worker_id: dataWorkers[0].id }));
+    expect(responseRatio([dataWorkers[0].id, dataWorkers[1].id], many)).toBe(0.5); // was 5
+  });
+});

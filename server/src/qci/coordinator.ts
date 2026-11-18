@@ -74,8 +74,15 @@ export function aggregate(packets: EvidencePacket[], applicableDomains: Set<stri
       const voting = ps.filter((p) => p.stance !== 'ABSTAIN');
       if (voting.length) groupScores.push(voting.reduce((acc, p) => acc + (p.stance === 'SUPPORT' ? 1 : -1), 0) / voting.length);
     }
-    const score = groupScores.length ? groupScores.reduce((x, y) => x + y, 0) / groupScores.length : null;
+    let score = groupScores.length ? groupScores.reduce((x, y) => x + y, 0) / groupScores.length : null;
     if (score != null) { ws += weight * Math.max(0, score); wo += weight * Math.max(0, -score); }
+    // D-01 (100-agent audit): this domain's own packets in groups whose single vote went to ANOTHER domain must not
+    // disappear. Their ADVERSE balance still counts as this domain's opposition (support is never double-counted).
+    const shadowVoting = own.filter((p) => p.stance !== 'ABSTAIN' && primary.get(p.dependency_group) !== dom);
+    if (shadowVoting.length) {
+      const shadow = shadowVoting.reduce((acc, p) => acc + (p.stance === 'SUPPORT' ? 1 : -1), 0) / shadowVoting.length;
+      if (shadow < 0) { wo += weight * -shadow; if (score == null) score = shadow; }
+    }
     domains.push({ domain: dom, groups: gm.size, support: s, oppose: o, abstain: a, score, weight, required: REQUIRED_DOMAINS.includes(dom as any), sharedGroups, constantRule });
   }
   return { domains, weightedSupport: wTotal ? ws / wTotal : 0, weightedOpposition: wTotal ? wo / wTotal : 0, groups };
@@ -84,7 +91,8 @@ export function aggregate(packets: EvidencePacket[], applicableDomains: Set<stri
 /** Share of active DATA-DRIVEN workers that returned a valid packet (ABSTAIN counts as an answer; failures do not). */
 export function responseRatio(activeIds: string[], packets: EvidencePacket[]) {
   const dataDrivenActive = activeIds.filter((id) => (CAPABILITY.get(id) ?? 'DATA_DRIVEN') === 'DATA_DRIVEN').length;
-  return dataDrivenActive ? packets.filter(isEvidence).length / dataDrivenActive : 0;
+  const answered = new Set(packets.filter(isEvidence).map((p) => p.worker_id)).size; // distinct workers (D-03)
+  return dataDrivenActive ? Math.min(1, answered / dataDrivenActive) : 0;
 }
 
 export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord> {
@@ -95,6 +103,7 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     if ('failed' in r) { failed++; continue; }
     const v = validatePacket(r, ctx.candidate.id);
     if (typeof v === 'string') { rejected++; continue; }
+    if (packets.some((p) => p.worker_id === v.worker_id)) { rejected++; continue; } // one packet per worker (D-03)
     packets.push(v);
   }
   const applicable = new Set(DOMAINS.filter((d) => d !== 'onchain' || ctx.candidate.market === 'crypto-dex'));
@@ -137,7 +146,13 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     domains: agg.domains, dependency_groups: agg.groups, weighted_support: round3(agg.weightedSupport), weighted_opposition: round3(agg.weightedOpposition),
     vetoes, challenge, missing_inputs: missing, coordinator_version: COORDINATOR_VERSION, trace_id: ctx.candidate.traceId,
   };
-  try { run('INSERT INTO consensus_records(id,candidate_id,instrument,state,created_at,expires_at,record) VALUES (?,?,?,?,?,?,?)', rec.consensus_id, rec.candidate_id, rec.instrument_id, rec.state, created, created + QCI_POLICY.validityMs, J({ ...rec, packets })); } catch { /* persistence failure doesn't create approval */ }
+  try { run('INSERT INTO consensus_records(id,candidate_id,instrument,state,created_at,expires_at,record) VALUES (?,?,?,?,?,?,?)', rec.consensus_id, rec.candidate_id, rec.instrument_id, rec.state, created, created + QCI_POLICY.validityMs, J({ ...rec, packets })); }
+  catch (e: any) {
+    // D-06: a decision must never reference a consensus record that was not stored (it could not be reproduced).
+    // Fail closed: the record no longer permits a trade.
+    rec.state = 'NO_QUORUM';
+    rec.reason_codes = [...rec.reason_codes, `CONSENSUS_NOT_PERSISTED: ${String(e?.message ?? e).slice(0, 120)}`];
+  }
   return rec;
 }
 export const isExpired = (r: ConsensusRecord, nowTs = Date.now()) => Date.parse(r.expires_at) <= nowTs;
