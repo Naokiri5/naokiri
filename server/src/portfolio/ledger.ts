@@ -3,7 +3,7 @@ import { uid } from '../core/util.js';
 import { market } from '../market/store.js';
 import { quoteAgeOk } from '../market/quality.js';
 import { getSetting, setSetting } from '../core/settings.js';
-import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
+import { exitPolicy } from '../risk/policy.js';
 
 export const PAPER_ACCOUNT = 'paper-bot';
 export type LedgerKind = 'DEPOSIT' | 'WITHDRAW' | 'BUY' | 'SELL' | 'FEE';
@@ -29,7 +29,7 @@ const weekKey = (t: number) => { const d = new Date(t); const day = (d.getUTCDay
 export function accountState(account = PAPER_ACCOUNT, nowTs = Date.now()): AccountState {
   const cash = cashBalance(account); const pos = openPositions(account);
   let value = 0, unreal = 0, openRisk = 0; const missing: string[] = [];
-  const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
+  const pol = exitPolicy(); // open-risk accounting of EXISTING positions: always a validated policy
   for (const p of pos) {
     // MIA-RISK-001: a mark must be fresh, not just present. A frozen feed (delisted/halted symbol) used to keep its last
     // price forever, so equity, loss breakers and open risk were computed from stale data and the gate failed open.

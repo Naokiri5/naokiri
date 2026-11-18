@@ -187,7 +187,8 @@ export function releaseGates(report?: unknown) {
   const first = get<{ t: number }>("SELECT MIN(opened_at) t FROM positions")?.t;
   const days = first ? (Date.now() - first) / 86400_000 : 0; const closed = get<{ n: number }>("SELECT COUNT(*) n FROM positions WHERE status='CLOSED'")!.n;
   g.push({ id: 'G10', name: '30-day paper-trading evaluation', status: days >= 30 && closed >= 50 ? 'PASS' : 'PENDING', evidence: `${days.toFixed(1)} days since first paper trade, ${closed} closed trades (needs ≥30 days, ≥50 trades)` });
-  g.push({ id: 'G11', name: 'Risk policy reviewed and accepted by owner', status: currentPolicy() ? 'PASS' : 'PENDING', evidence: currentPolicy() ? `policy v${currentPolicy()!.version}` : 'not accepted' });
+  const pv = currentPolicy(); // MA-16: an invalid stored policy is a FAIL, never a pass
+  g.push({ id: 'G11', name: 'Risk policy reviewed and accepted by owner', status: !pv ? 'PENDING' : pv.invalid ? 'FAIL' : 'PASS', evidence: !pv ? 'not accepted' : pv.invalid ? `policy v${pv.version} invalid: ${pv.invalid}` : `policy v${pv.version}` });
   g.push({ id: 'G12', name: 'Live venue adapter + transaction firewall implemented', status: 'NOT_IMPLEMENTED', evidence: 'Deliberately absent until gates G07–G10 pass.' });
   g.push({ id: 'G13', name: 'Independent Release Auditor go/no-go', status: 'NOT_CERTIFIED', evidence: 'Human sign-off required.' });
   g.push({ id: 'G14', name: 'Owner explicit authorization for live execution', status: 'PENDING', evidence: 'Can only be recorded after all other gates pass.' });

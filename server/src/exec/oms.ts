@@ -3,7 +3,7 @@ import { uid, iso } from '../core/util.js';
 import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
 import { evaluateRisk } from '../risk/gate.js';
-import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
+import { currentPolicy, exitPolicy } from '../risk/policy.js';
 import { ledger, cashBalance, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
 import { journal } from '../journal/journal.js';
 import { notify } from '../notify/notify.js';
@@ -22,7 +22,7 @@ import { crashpoint } from './crashpoint.js';
  * (real spread + depth), with configured fees. Venue = 'binance-paper'. No live venue exists.
  */
 export const VENUE = 'binance-paper';
-const feeRate = () => (currentPolicy()?.policy ?? DEFAULT_POLICY).feeRate;
+const feeRate = () => exitPolicy().feeRate;
 
 export class OmsError extends Error {}
 
@@ -117,7 +117,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   const sim = simulateEntryFill(s.instrumentId, qty, nowTs);
   if (!sim.fill) return reject(sim.reason!);
   const fill = sim.fill;
-  const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
+  const pv = currentPolicy();
+  if (!pv || pv.invalid) return reject('POLICY_INVALID: entries need a valid owner-accepted risk policy');
+  const pol = pv.policy;
   if (fill.impactBps > pol.maxSlippageBps) return reject(`SLIPPAGE ${fill.impactBps.toFixed(1)}bps at submission`);
   if (fill.price <= s.stopLoss) return reject('PRICE_THROUGH_STOP');
   if (s.takeProfit.some((t) => t.price <= fill.price)) return reject('PRICE_THROUGH_TARGET: fill would be at or above a take-profit level');
@@ -208,7 +210,7 @@ class StaleSnapshot extends Error {}
  * executed nothing is persisted, so a target is never marked done without its quantity being sold.
  */
 export function monitorPositions(nowTs = Date.now()) {
-  const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
+  const pol = exitPolicy();
   sweepClosedPositions(nowTs);
   for (const p of openPositions()) {
     const px = market.price(p.instrument);
@@ -286,7 +288,8 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   // A remainder smaller than one lot (or the venue minimum) could never be sold later: close it with this fill.
   if (remaining < Math.max(step, inst?.minQty ?? 0, 1e-12) - 1e-12) { qty = p.qty; remaining = 0; }
   if (!(qty > 0)) return { price: 0, pnl: 0, closed: false, qty: 0 }; // slice below one lot: nothing to sell yet
-  const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
+  if (!Number.isFinite(fr) || fr < 0) throw new OmsError(`invalid exit fee rate ${fr}`); // never book a NaN or credited fee
+  const pol = exitPolicy();
   const fill = simulateExitFill(p.instrument, qty, pol.stopFillBufferPct, nowTs, consumedQty);
   if (!fill) return null;
   // Project invariant (CLAUDE.md #4, PR #4): never invent a fill from a ticker fallback. Every exit — protective or
@@ -294,6 +297,7 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   // executeExit() raises the protection alert; the data-quality gate then blocks new entries until data recovers.
   if (fill.basis !== 'BOOK') return null;
   const px = fill.price; const fee = px * qty * fr; const pnl = (px - p.entry_price) * qty - fee; const closed = remaining === 0;
+  if (![px, fee, pnl].every(Number.isFinite)) throw new OmsError('non-finite exit accounting'); // rolls back the whole exit
   const seq = get<{ n: number }>("SELECT COUNT(*) n FROM orders WHERE position_id=? AND purpose LIKE 'EXIT_%'", positionId)!.n + 1;
   // Deterministic client id: a second writer trying to record the same exit hits UNIQUE(client_order_id) and rolls back.
   const oid = insertOrder({ clientOrderId: `exit-${positionId}-${seq}`, instrument: p.instrument, side: 'SELL', type: 'MARKET', qty, status: 'FILLED', purpose: `EXIT_${reason}`, positionId, at: nowTs });
@@ -373,7 +377,11 @@ export function closeAllPositions(actor: string, confirm: string) {
   if (actor !== 'owner') throw new OmsError('only the owner may close positions');
   if (confirm !== 'CLOSE ALL') throw new OmsError('confirmation phrase required: CLOSE ALL');
   audit(actor, 'positions.closeAll');
-  const results = openPositions().map((p) => ({ positionId: p.id, result: executeExit(p.id, p.qty, 'MANUAL_CLOSE') }));
+  // Each position on its own: one failing exit must not stop the others from being closed (MA-01).
+  const results = openPositions().map((p) => {
+    try { return { positionId: p.id, result: executeExit(p.id, p.qty, 'MANUAL_CLOSE') }; }
+    catch (e: any) { if (e instanceof LeaseLostError) throw e; flagUnprotected(p, `close failed: ${String(e?.message ?? e).slice(0, 160)}`); return { positionId: p.id, result: null, error: String(e?.message ?? e).slice(0, 200) }; }
+  });
   return { state: results.every((r) => r.result?.closed) ? 'CONFIRMED' : results.some((r) => r.result) ? 'PARTIALLY_COMPLETED' : results.length ? 'FAILED' : 'CONFIRMED', results };
 }
 export function closePosition(actor: string, positionId: string) {

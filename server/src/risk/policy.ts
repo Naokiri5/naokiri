@@ -39,25 +39,47 @@ export const DEFAULT_POLICY: RiskPolicy = {
 };
 
 export interface PolicyVersion { version: number; policy: RiskPolicy; created_at: number; accepted_by: string; /** set when the stored policy fails validation */ invalid?: string }
-/**
- * MIA-RISK-006: the stored policy is re-validated on every read. A row missing a field (written by an older schema) or
- * holding NaN-turned-null would make comparisons like `costR > pol.maxCostR` false, i.e. the check silently passes.
- * An invalid stored policy is reported as `invalid` and the gate denies (POLICY_INVALID) until the owner re-accepts.
- */
-export function currentPolicy(): PolicyVersion | null {
-  const r = get<any>('SELECT * FROM risk_policy_versions ORDER BY version DESC LIMIT 1');
-  if (!r) return null;
-  const parsed = RiskPolicy.safeParse(P(r.policy));
-  return { version: r.version, policy: parsed.success ? parsed.data : P(r.policy), created_at: r.created_at, accepted_by: r.accepted_by,
-    ...(parsed.success ? {} : { invalid: parsed.error.issues.slice(0, 3).map((i) => `${i.path.join('.') || 'policy'}: ${i.message}`).join('; ') }) };
-}
-/** Only the authenticated owner may accept/change limits (Part 17.1). Changes are versioned + audited. */
-export function acceptPolicy(actor: string, input: unknown): PolicyVersion {
-  if (actor !== 'owner') throw new Error('only the authenticated owner may change risk limits');
+/** Schema + relational rules. The ONE validator for accepted and stored policies (MA-16). Throws on the first problem. */
+export function validatePolicy(input: unknown): RiskPolicy {
   const policy = RiskPolicy.parse(input);
   if (policy.drawdownHaltPct < policy.drawdownWarnPct) throw new Error('drawdownHaltPct must be ≥ drawdownWarnPct');
   if (policy.weeklyLossPct < policy.dailyLossPct) throw new Error('weeklyLossPct must be ≥ dailyLossPct');
   if (policy.maxOpenRiskPct < policy.riskPerTradePct) throw new Error('maxOpenRiskPct must be ≥ riskPerTradePct');
+  return policy;
+}
+const problem = (e: unknown) => e instanceof z.ZodError
+  ? e.issues.slice(0, 3).map((i) => `${i.path.join('.') || 'policy'}: ${i.message}`).join('; ')
+  : String((e as Error)?.message ?? e);
+function check(raw: unknown): { policy: RiskPolicy } | { invalid: string } {
+  try { return { policy: validatePolicy(raw) }; } catch (e) { return { invalid: problem(e) }; }
+}
+/**
+ * MIA-RISK-006: the stored policy is re-validated on every read. A row missing a field (written by an older schema) or
+ * holding NaN-turned-null would make comparisons like `costR > pol.maxCostR` false, i.e. the check silently passes.
+ * An invalid stored policy is reported as `invalid` and the gate denies (POLICY_INVALID) until the owner re-accepts.
+ * `policy` is then the raw row for DISPLAY ONLY: execution code must use exitPolicy() (MA-01).
+ */
+export function currentPolicy(): PolicyVersion | null {
+  const r = get<any>('SELECT * FROM risk_policy_versions ORDER BY version DESC LIMIT 1');
+  if (!r) return null;
+  const c = check(P(r.policy));
+  return { version: r.version, policy: 'policy' in c ? c.policy : P(r.policy), created_at: r.created_at, accepted_by: r.accepted_by, ...('invalid' in c ? { invalid: c.invalid } : {}) };
+}
+/**
+ * The policy used to MANAGE EXISTING positions (exit fees, stop-fill buffer, open-risk accounting). Always validated:
+ * the current policy if valid, else the newest valid stored version, else DEFAULT_POLICY. An invalid stored policy must
+ * deny new entries (gate) but must never block or corrupt a risk-reducing exit (MA-01/MA-02).
+ */
+export function exitPolicy(): RiskPolicy {
+  for (const r of all<any>('SELECT policy FROM risk_policy_versions ORDER BY version DESC LIMIT 50')) {
+    const c = check(P(r.policy)); if ('policy' in c) return c.policy;
+  }
+  return DEFAULT_POLICY;
+}
+/** Only the authenticated owner may accept/change limits (Part 17.1). Changes are versioned + audited. */
+export function acceptPolicy(actor: string, input: unknown): PolicyVersion {
+  if (actor !== 'owner') throw new Error('only the authenticated owner may change risk limits');
+  const policy = validatePolicy(input);
   const cur = currentPolicy(); const version = (cur?.version ?? 0) + 1;
   run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (?,?,?,?)', version, J(policy), Date.now(), actor);
   audit(actor, 'risk.policy.accept', { version, policy, previous: cur?.version ?? null });
