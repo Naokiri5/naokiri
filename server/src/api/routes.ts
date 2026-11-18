@@ -25,7 +25,7 @@ import { getControl, updateControl, displayMode } from '../core/mode.js';
 import { acceptPolicy, currentPolicy, DEFAULT_POLICY, policyHistory } from '../risk/policy.js';
 import { accountState, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio/ledger.js';
 import { correlation } from '../portfolio/correlation.js';
-import { calendar, reconcile } from '../portfolio/calendar.js';
+import { calendar, calendarTimeZone, reconcile, setCalendarTimeZone, tzOffsetMin } from '../portfolio/calendar.js';
 import * as oms from '../exec/oms.js';
 import { listIncidents, acknowledgeIncident, IncidentError } from '../exec/incidents.js';
 import { listJournal } from '../journal/journal.js';
@@ -47,6 +47,8 @@ import { config, inContainer } from '../config.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { qhefReport } from '../qhef/qhef.js';
 import { securityOverview, revokeOtherSessions } from '../security/security.js';
+import { timeZoneName } from '../core/time.js';
+import { marketCoverage } from '../market/coverage.js';
 import { discover } from '../market/discover.js';
 import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js';
 import { provider, ProviderError } from '../providers/http.js';
@@ -270,8 +272,16 @@ export async function routes(app: FastifyInstance) {
 
   // ── journal / calendar ──
   app.get('/api/journal', async (req) => listJournal(400, z.object({ kind: TOKEN.optional() }).parse(req.query).kind));
-  app.get('/api/calendar', async (req) => calendar(z.object({ month: MONTH.default(new Date().toISOString().slice(0, 7)) }).parse(req.query ?? {}).month));
-  app.post('/api/calendar/tz', async (req) => { const { offsetMin } = z.object({ offsetMin: z.number().int().min(-720).max(840) }).parse(req.body); setSetting('calendarTzOffsetMin', offsetMin); return { ok: true }; });
+  app.get('/api/calendar', async (req) => calendar(z.object({ month: MONTH.optional() }).parse(req.query ?? {}).month));
+  app.post('/api/calendar/tz', async (req) => {
+    const timezone = z.string().trim().max(64).transform(timeZoneName).pipe(z.string({ error: 'expected an IANA timezone identifier' }));
+    const preference = z.union([
+      z.strictObject({ timeZone: timezone }),
+      z.strictObject({ offsetMin: z.number().int().min(-720).max(840) }),
+    ]).parse(req.body);
+    setCalendarTimeZone(preference);
+    return { ok: true };
+  });
 
   // ── strategy lab ──
   app.get('/api/lab', async () => ({ strategies: lab.listStrategies(), backtests: lab.listBacktests(30), universe: lab._universeSymbols() }));
@@ -308,6 +318,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/qhef', async () => qhefReport());
   app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
   app.post('/api/security/sessions/revoke-others', async (req) => { stepUp(req, req.body); return revokeOtherSessions(tokenOf(req)); });
+  app.get('/api/markets/coverage', async () => marketCoverage(Date.now(), calendarTimeZone() ?? 'UTC'));
   app.get('/api/discover', async (req) => discover(z.object({ minVolume: z.coerce.number().min(0).default(1e6) }).parse(req.query ?? {}).minVolume));
   const histFilter = (q: any): HistoryFilter => z.object({ from: z.coerce.number().int().positive().optional(), to: z.coerce.number().int().positive().optional(),
     instrument: z.string().max(20).regex(/^[A-Za-z0-9]*$/).optional(), status: z.enum(['NEW', 'FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED', 'ACTIVE', 'PENDING_APPROVAL']).optional(),
@@ -336,7 +347,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/notifications', async () => listNotifications(300));
   app.post('/api/notifications/read', async (req) => { const { id } = z.object({ id: z.string().min(1).max(64).optional() }).parse(req.body ?? {}); markRead(id); return { ok: true }; });
   app.post('/api/notifications/test', async () => ({ id: notify('INFO', 'Test notification', 'Delivery check from Settings', 'settings') }));
-  app.get('/api/settings', async () => ({ notifyPrefs: getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null }), calendarTzOffsetMin: getSetting('calendarTzOffsetMin', 0), joe: { model: config.joeModel, llm: !!config.anthropicApiKey, tools: JOE_TOOL_NAMES }, telegram: { configured: !!config.telegramBotToken } }));
+  app.get('/api/settings', async () => ({ notifyPrefs: getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null }), calendarTzOffsetMin: tzOffsetMin(), calendarTimeZone: calendarTimeZone(), joe: { model: config.joeModel, llm: !!config.anthropicApiKey, tools: JOE_TOOL_NAMES }, telegram: { configured: !!config.telegramBotToken } }));
   app.post('/api/settings/notify', async (req) => { const b = z.object({ telegramMinSeverity: z.enum(['INFO', 'WARNING', 'CRITICAL']), quietHoursUtc: z.tuple([z.number().int().min(0).max(23), z.number().int().min(0).max(23)]).nullable() }).parse(req.body); setSetting('notifyPrefs', b); return { ok: true }; });
   app.get('/api/qa', async () => ({ ...releaseGates(), audit: verifyAuditChain() }));
   app.get('/api/audit', async () => recentAudit(200));
