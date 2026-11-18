@@ -61,14 +61,14 @@ export function DecisionView({ report: r, consensus, paperEntry }: { report: any
     <div className="banner info" style={{ marginBottom: 0 }}>{r.disclaimer}</div>
     <Tabs tabs={['Explanation', 'Pipeline steps', 'Score factors', 'QCI consensus', 'Indicators']} value={tab} onChange={setTab} />
     {tab === 'Explanation' && <div className="grid g2">
-      <Card title="Think · Trade plan"><div className="kv">
+      <Card title="Sense and Think · Trade plan"><div className="kv">
         <span>Market</span><span>{r.market} · {r.venue}</span><span>Final decision</span><span><b>{r.finalDecision}</b></span><span>Reason</span><span>{r.reason}</span>
         <span>Entry condition</span><span>{r.entryCondition}</span><span>Invalidation</span><span>{r.invalidation}</span>
         <span>Stop-loss</span><span className="mono">{fmt.px(r.stopLoss)}</span>
         <span>Take-profit</span><span className="mono">{r.takeProfit.map((t: any) => `${fmt.px(t.price)} (${t.r}R, ${t.fraction * 100}%)`).join(' · ')}</span>
         <span>Position size</span><span className="mono">{r.positionSize ? `${r.positionSize.qty} ≈ ${fmt.usd(r.positionSize.notional)} · max loss ${fmt.usd(r.positionSize.plannedMaxLoss)}` : 'not sized (not eligible for execution)'}</span>
         <span>Expected costs</span><span className="mono">fees {fmt.usd(r.expectedCosts.feesUsd)} · spread {fmt.num(r.expectedCosts.spreadBps, 1)}bps · slippage {fmt.num(r.expectedCosts.slippageBps, 1)}bps · {r.expectedCosts.costR ?? '—'}R · funding {r.expectedCosts.funding}</span>
-        <span>Sense · Data freshness</span><span><Badge v={r.dataFreshness.status} /> quote {r.dataFreshness.quoteAgeMs == null ? 'unavailable' : `${fmt.num(r.dataFreshness.quoteAgeMs / 1000, 0)}s`} · book {r.dataFreshness.bookAgeMs == null ? 'unavailable' : `${fmt.num(r.dataFreshness.bookAgeMs / 1000, 0)}s`}</span>
+        <span>Data freshness</span><span><Badge v={r.dataFreshness.status} /> quote {fmt.num((r.dataFreshness.quoteAgeMs ?? 0) / 1000, 0)}s · book {fmt.num((r.dataFreshness.bookAgeMs ?? 0) / 1000, 0)}s</span>
         <span>Opportunity score</span><span className="mono">{r.opportunity.score} <span className="faint">({r.opportunity.version})</span></span>
       </div></Card>
       <div className="col" style={{ gap: 14 }}>

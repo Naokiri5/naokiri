@@ -33,7 +33,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const deny: string[] = []; const review: string[] = []; const ev: RiskDecision['evaluated'] = {};
   const pv = currentPolicy();
   if (!pv) return { decision: 'DENY', reasonCodes: ['POLICY_NOT_ACCEPTED: owner must review and accept a risk policy'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
-  const pol: RiskPolicy = pv.policy; const account = PAPER_ACCOUNT;
+  const pol: RiskPolicy = pv.policy; const account = p.account ?? PAPER_ACCOUNT;
   const ctl = getControl();
   ev.mode = ctl.mode;
   if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');

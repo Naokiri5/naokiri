@@ -16,12 +16,13 @@ import type { DecisionReport } from '../decision/engine.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { crashpoint } from './crashpoint.js';
 
+const paperPosition = (id: string) => get<PositionRow>('SELECT * FROM positions WHERE id=? AND account=?', id, PAPER_ACCOUNT);
+
 /**
  * Paper OMS (Part 26 / 32.6). Fills are simulated by walking the LIVE Binance order book
  * (real spread + depth), with configured fees. Venue = 'binance-paper'. No live venue exists.
  */
 export const VENUE = 'binance-paper';
-const paperPosition = (id: string) => get<PositionRow>('SELECT * FROM positions WHERE id=? AND account=?', id, PAPER_ACCOUNT);
 const feeRate = () => (currentPolicy()?.policy ?? DEFAULT_POLICY).feeRate;
 
 export class OmsError extends Error {}
@@ -264,7 +265,7 @@ export function monitorPositions(nowTs = Date.now()) {
   }
 }
 /** Persistent, de-duplicated protection incident (survives restarts; see exec/incidents.ts). */
-function flagUnprotected(p: PositionRow, why: string) { reportUnprotected(p, why); }
+function flagUnprotected(p: PositionRow, why: string) { if (p.account === PAPER_ACCOUNT) reportUnprotected(p, why); }
 
 /**
  * Apply one exit fill. MUST run inside tx(): it re-reads the position there, so the quantity it sells is the
@@ -317,7 +318,7 @@ export function executeExit(positionId: string, qty: number, reason: string, fr 
   const r = tx(() => { const e = applyExit(positionId, qty, reason, fr, nowTs, after); crashpoint('exit.precommit'); return e; });
   crashpoint('exit.committed');
   if (r) after.forEach((fn) => fn());
-  else { const p = paperPosition(positionId); if (p?.status === 'OPEN') flagUnprotected(p, 'no fresh executable price for exit'); }
+  else { const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId); if (p?.status === 'OPEN') flagUnprotected(p, 'no fresh executable price for exit'); }
   return r;
 }
 
