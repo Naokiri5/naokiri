@@ -158,7 +158,10 @@ describe('HTTP API (auth, permissions, release gate)', () => {
   it('repeated query keys and bad ids are rejected as validation errors, never leaked as database errors', async () => {
     for (const url of ['/api/decisions?decision=a&decision=b', '/api/journal?kind=a&kind=b', '/api/markets/search?q=a&q=b', `/api/decisions/${'x'.repeat(200)}`]) {
       const r = await app.inject({ url, headers: { cookie } });
-      expect([400, 404], url).toContain(r.statusCode); expect(r.body, url).not.toMatch(/named parameter|SQLITE|sqlite/i); // over-long path ids are 404 at the router
+      // Over-long path ids are rejected by the router: 404 when the web build's static catch-all route exists, 414
+      // (FST_ERR_MAX_PARAM_LENGTH) when it does not (CI server job). Either way: rejected, never a database error.
+      const allowed = url.startsWith('/api/decisions/x') ? [404, 414] : [400, 404];
+      expect(allowed, url).toContain(r.statusCode); expect(r.body, url).not.toMatch(/named parameter|SQLITE|sqlite/i);
     }
     const r = await app.inject({ method: 'POST', url: '/api/emergency/pause', headers: { cookie, 'x-mia-csrf': '1' }, payload: { unexpected: true } });
     expect(r.statusCode).toBe(400);
