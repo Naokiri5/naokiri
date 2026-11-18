@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
@@ -15,14 +15,22 @@ export function Ditas() {
   const [detail, setDetail] = useState<{ title: string; value: unknown } | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const inspection = useRef(0);
   const inspectEvent = async (id: string) => {
+    const request = ++inspection.current;
     setOpening(id); setDetailError(null);
-    try { setDetail({ title: 'Decision evidence and market snapshot', value: await api(`/api/ditas/events/${encodeURIComponent(id)}`) }); }
-    catch (e: any) { setDetailError(e.message); }
-    finally { setOpening(null); }
+    try {
+      const value = await api(`/api/ditas/events/${encodeURIComponent(id)}`);
+      if (request === inspection.current) setDetail({ title: 'Decision evidence and market snapshot', value });
+    } catch (error) {
+      if (request === inspection.current) setDetailError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (request === inspection.current) setOpening(null);
+    }
   };
   const counts = data?.counts;
-  const calibration = data?.calibration;
+  const lastCalibration = data?.calibration;
+  const calibration = (lastCalibration?.cohort ?? '') === cohort ? lastCalibration : undefined;
   return <Page title="DITAS · Decision intelligence" sub="Inspect the evidence behind decisions, strategy health and hypothetical alternatives. Every result is tied to stored records."
     right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={() => { reload(); setRefreshKey((k) => k + 1); }} disabled={loading}>Refresh</button></>}>
     <ErrorLine e={error} /><ErrorLine e={detailError} />
@@ -73,17 +81,17 @@ export function Ditas() {
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
             <option value="">Select a cohort to evaluate</option>
-            {(calibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{c.cohort} · {c.n} forecasts</option>)}
+            {(lastCalibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{c.cohort} · {c.n} forecasts</option>)}
           </select>
         </label>
         <div className="hint">Calibration evaluates stored probability forecasts against outcomes. It does not turn chart confidence, opportunity scores or votes into win probabilities.</div>
-        <div className="kv"><span>Matched outcomes</span><span>{calibration?.sample ?? calibration?.sampleSize ?? 0}</span><span>Brier score</span><span>{fmt.num(calibration?.brierScore, 4)}</span><span>Log loss</span><span>{fmt.num(calibration?.logLoss, 4)}</span><span>Expected calibration error</span><span>{fmt.num(calibration?.ece, 4)}</span></div>
+        <div className="kv"><span>Matched outcomes</span><span>{calibration?.sample ?? calibration?.sampleSize ?? '—'}</span><span>Brier score</span><span>{fmt.num(calibration?.brierScore, 4)}</span><span>Log loss</span><span>{fmt.num(calibration?.logLoss, 4)}</span><span>Expected calibration error</span><span>{fmt.num(calibration?.ece, 4)}</span></div>
         <div className="hint">{calibration?.note ?? 'An insufficient sample remains UNCALIBRATED. No production model is promoted automatically.'}</div>
         <div className="tablewrap"><table><thead><tr><th>Probability bin</th><th>Outcomes</th><th>Mean prediction</th><th>Observed frequency</th><th>95% Wilson interval</th><th>Evidence status</th></tr></thead><tbody>
           {(calibration?.bins ?? []).map((b: any) => <tr key={b.lower}><td>{fmt.num(b.lower, 1)}–{fmt.num(b.upper, 1)}</td><td>{b.count}</td><td>{fmt.num(b.prediction, 3)}</td><td>{fmt.num(b.observed, 3)}</td><td>{b.wilson95 ? `${fmt.num(b.wilson95[0], 3)}–${fmt.num(b.wilson95[1], 3)}` : '—'}</td><td><Badge v={b.status} /></td></tr>)}
         </tbody></table></div>
         {(calibration?.uncertainty ?? []).map((u: string) => <div className="hint warn" key={u}>{u}</div>)}
-        <button className="sm" onClick={() => setDetail({ title: 'Calibration metrics, reliability bins and uncertainty', value: calibration })}>Inspect calibration evidence</button>
+        <button className="sm" disabled={!calibration} onClick={() => setDetail({ title: 'Calibration metrics, reliability bins and uncertainty', value: calibration })}>Inspect calibration evidence</button>
       </div>
     </Card>}
     {data && tab === 'Foundation coverage' && <Card title="Implementation coverage" flush><div className="tablewrap"><table><thead><tr><th>Foundation</th><th>Status</th><th>Scope and limitations</th></tr></thead><tbody>
