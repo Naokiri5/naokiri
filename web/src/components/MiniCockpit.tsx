@@ -22,6 +22,9 @@ export function MiniCockpit({ snapshot, error, receivedAt }: Props) {
   const alerts = useApi<Notice[]>(visible ? '/api/notifications' : null, { topics: ['notification'], every: 30_000 });
   const state = monitorState(snapshot, now, receivedAt, error);
   useEffect(() => { if (!visible) return; setNow(Date.now()); const clock = window.setInterval(() => setNow(Date.now()), 5_000); return () => clearInterval(clock); }, [visible]);
+  // Advance the clock when a response arrives (CodeRabbit PR #18): otherwise a response newer than the last 5 s tick looks
+  // future-dated and the monitor shows UNKNOWN until the next tick.
+  useEffect(() => { if (visible) setNow(Date.now()); }, [visible, receivedAt, instrument.updatedAt]);
   useEffect(() => {
     alive.current = true;
     const close = () => { generation.current++; pipRef.current?.close(); pipRef.current = null; };

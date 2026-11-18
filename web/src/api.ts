@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type SetStateAction } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type SetStateAction } from 'react';
 
 export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
 export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
@@ -36,7 +36,11 @@ export function useStream(fn: Handler) { const ref = useRef(fn); ref.current = f
 /** Fetch + auto-refresh. Data belongs to a resource path; only the newest request may publish it. */
 export function useApi<T = any>(path: string | null, opts: { topics?: string[]; every?: number } = {}) {
   const [state, setState] = useState<{ path: string | null; data: T | null; error: string | null; loading: boolean; requestedAt: number | null; updatedAt: number | null }>({ path, data: null, error: null, loading: false, requestedAt: null, updatedAt: null });
-  const currentPath = useRef(path); currentPath.current = path;
+  // Updated after commit, not during render (CodeRabbit PR #18): React may discard an uncommitted render, which must not
+  // leave the ref pointing at a path the committed component never adopted. Layout effects run before the passive effect
+  // that loads, so a path change is visible to load() in the same commit.
+  const currentPath = useRef(path);
+  useLayoutEffect(() => { currentPath.current = path; }, [path]);
   const mounted = useRef(false); const requestId = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const timer = useRef<number | null>(null);

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { usePresentation } from '../presentation';
 import { Link } from 'react-router-dom';
 import { fmt, useApi } from '../api';
@@ -16,9 +17,14 @@ const pnlTone = (x: number | null | undefined) => (x == null || x === 0 ? undefi
 const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 export function Overview() {
-  const { data, error, loading, reload } = useApi('/api/overview', { topics: ['scan', 'decision', 'order', 'position', 'notification', 'risk', 'mode'], every: 30_000 });
+  const { data, error, loading, reload, updatedAt } = useApi('/api/overview', { topics: ['scan', 'decision', 'order', 'position', 'notification', 'risk', 'mode'], every: 30_000 });
   const { mode } = usePresentation();
   const a = data?.account; const b = data?.breadth; const r = data?.risk; const p = data?.pipeline; const perf = data?.performance;
+  // The server reports the scanner age at response time; keep ageing it while this snapshot is shown (CodeRabbit PR #18),
+  // so a retained response can never keep claiming a current heartbeat.
+  const [clock, setClock] = useState(Date.now());
+  useEffect(() => { const t = window.setInterval(() => setClock(Date.now()), 15_000); return () => clearInterval(t); }, []);
+  const scanAgeMs = p?.scanner?.ageMs == null || updatedAt == null ? null : p.scanner.ageMs + Math.max(0, clock - updatedAt);
   const funded = !!a?.deposits;
   return <Page title="Overview" sub="Paper account, market intelligence, risk state and live activity — all from MIA's authoritative backend state."
     right={<><Freshness at={data?.asOf} />{r && <Badge v={r.mode} tone={r.emergency ? 'b-bad' : r.pausedNewOrders ? 'b-warn' : 'b-violet'} />}<button className="sm" onClick={reload} disabled={loading}>Refresh</button></>}>
@@ -34,7 +40,7 @@ export function Overview() {
         <Stat k="Daily paper P&L" v={fmt.pct(a?.dailyPnlPct)} tone={pnlTone(a?.dailyPnlPct)} />
         <Stat k="Open positions" v={a?.openCount ?? '—'} s={a ? `Open risk ${fmt.num(a.openRiskPct, 2)}%` : 'UNKNOWN'} />
       </div>
-      <p role="status">{!data ? 'Waiting for verified backend state.' : error ? 'LAST KNOWN — request failed; refresh before relying on these values.' : r?.emergency ? 'Emergency stop active. Review the Risk Center.' : r?.incidents.open ? 'An open position has a protection incident. Review it in the Risk Center.' : !r?.policy ? 'Waiting for your risk-policy review.' : r?.pausedNewOrders ? 'New entries are paused.' : !p?.scanner.lastScanAt || p.scanner.ageMs == null || p.scanner.ageMs > STALE_SCAN_MS ? 'Waiting for a current scanner heartbeat.' : 'Monitoring. A candidate still needs strategy validation, consensus, risk approval and an authorized paper mode.'}</p>
+      <p role="status">{!data ? 'Waiting for verified backend state.' : error ? 'LAST KNOWN — request failed; refresh before relying on these values.' : r?.emergency ? 'Emergency stop active. Review the Risk Center.' : r?.incidents.open ? 'An open position has a protection incident. Review it in the Risk Center.' : !r?.policy ? 'Waiting for your risk-policy review.' : r?.pausedNewOrders ? 'New entries are paused.' : !p?.scanner.lastScanAt || scanAgeMs == null || scanAgeMs > STALE_SCAN_MS ? 'Waiting for a current scanner heartbeat.' : 'Monitoring. A candidate still needs strategy validation, consensus, risk approval and an authorized paper mode.'}</p>
       <p className="hint">Paper only: live execution, signing and withdrawals remain locked.</p>
       <div className="row"><Link to="/risk">Review risk and safety →</Link><Link to="/bot">Paper bot state →</Link><Link to="/scanner">Why trades were selected or rejected →</Link></div>
     </Card>
