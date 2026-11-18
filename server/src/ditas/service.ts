@@ -62,7 +62,7 @@ export function runDecisionTwin(eventId: string, candles: Candle[], assumptions:
 export function similarEnvironments(eventId: string) {
   const d = memoryDetail(eventId), f = d?.snapshot?.fingerprint;
   if (!f) throw new Error('event has no fingerprint');
-  return all<any>(`SELECT e.id,json_extract(s.payload,'$.fingerprint') fingerprint FROM ditas_events e JOIN ditas_snapshots s ON s.id=e.snapshot_id WHERE e.created_at<=? AND e.id<>? AND e.snapshot_id<>? AND json_extract(s.payload,'$.fingerprint') IS NOT NULL ORDER BY e.created_at DESC LIMIT 500`, d!.event.createdAt, eventId, d!.event.snapshotId).flatMap(r => {
+  return all<any>(`SELECT e.id,json_extract(s.payload,'$.fingerprint') fingerprint FROM ditas_events e JOIN ditas_snapshots s ON s.id=e.snapshot_id WHERE e.seq < (SELECT seq FROM ditas_events WHERE id=?) AND e.created_at<=? AND e.snapshot_id<>? AND json_extract(s.payload,'$.fingerprint') IS NOT NULL ORDER BY e.seq DESC LIMIT 500`, eventId, d!.event.createdAt, d!.event.snapshotId).flatMap(r => {
     const fp = P(r.fingerprint); const comparison = compareFingerprints(f, fp); return comparison.comparable ? [{ eventId: r.id, instrumentId: fp.instrumentId, asOf: fp.asOf, ...comparison }] : [];
   }).sort((a, b) => b.similarity! - a.similarity!).slice(0, 20);
 }
