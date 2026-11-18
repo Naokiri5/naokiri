@@ -1,5 +1,8 @@
 import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
+import { VikeNotConfiguredError } from '../providers/vike.js';
+import { vikeRoutes } from '../research/vikeRoutes.js';
+import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -95,6 +98,7 @@ export async function routes(app: FastifyInstance) {
       req.log.warn({ provider: err.providerId, status: err.status }, 'upstream provider failure');
       return reply.code(err.status === 404 ? 404 : err.status === 429 ? 503 : 502).send({ error: `upstream market-data provider unavailable (${err.providerId})` });
     }
+    if (err instanceof VikeNotConfiguredError) return reply.code(503).send({ error: `${err.message}. Research data is unavailable until the owner configures it.` });
     if (err instanceof oms.OmsError) return reply.code(409).send({ error: err.message });
     if (err instanceof IncidentError) return reply.code(err.statusCode).send({ error: err.message });
     if (Number.isInteger(err?.statusCode) && err.statusCode >= 400 && err.statusCode < 500) return reply.code(err.statusCode).send({ error: String(err.message ?? err) });
@@ -119,6 +123,9 @@ export async function routes(app: FastifyInstance) {
 
   await ditasRoutes(app);
   await knowledgeRoutes(app);
+  await vikeRoutes(app); // read-only Vike research (owner session required by the gate below)
+  /** Paper/Live environments for the shared UI layout. Read-only; Live is reported as LOCKED, never as available. */
+  app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
   app.post('/api/risk/incidents/:id/ack', async (req) => {

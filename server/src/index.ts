@@ -6,6 +6,7 @@ import { config } from './config.js';
 import { openDb } from './db/db.js';
 import './providers/binance.js'; import './providers/coinbase.js'; import './providers/kraken.js'; import './providers/coingecko.js';
 import './providers/dexscreener.js'; import './providers/frankfurter.js'; import './providers/googlenews.js'; import './providers/pending.js';
+import './providers/vike.js'; // one credentialed, read-only research provider; no trading authority
 import { routes } from './api/routes.js';
 import { seedStrategies } from './lab/lab.js';
 import { seedCatalog, resumeIngestion } from './knowledge/store.js';

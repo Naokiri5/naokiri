@@ -66,7 +66,11 @@ export function setRateLimit(id: string, perMin: number) { buckets.set(id, new B
 export class ProviderError extends Error { constructor(public providerId: string, msg: string, public status?: number) { super(`${providerId}: ${msg}`); } }
 
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
-export async function fetchProvider(id: string, url: string, opts: { timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string> } = {}): Promise<any> {
+/**
+ * `redirectMode: 'error'` is for credentialed providers: a redirect must never carry an API key to another host
+ * (fetch keeps custom headers across redirects). Default stays 'follow' for the public, keyless providers.
+ */
+export async function fetchProvider(id: string, url: string, opts: { timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string>; redirectMode?: 'error' | 'follow' } = {}): Promise<any> {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
   if (config.offline) throw new ProviderError(id, 'offline mode');
@@ -77,7 +81,7 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
   try {
-    const res = await fetch(url, { signal: ctl.signal, redirect: 'follow', headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } });
+    const res = await fetch(url, { signal: ctl.signal, redirect: opts.redirectMode ?? 'follow', headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } });
     if (res.status === 404) { // resource-level miss (e.g. product not listed) — provider itself is reachable
       Object.assign(info, { lastOkAt: Date.now(), lastLatencyMs: Math.round(performance.now() - t0) });
       throw Object.assign(new ProviderError(id, 'HTTP 404 (resource not found)', 404), { resourceMiss: true });

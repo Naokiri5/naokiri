@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased: Vike research provider and Paper/Live contract (2026-11-18)
+- **New: Vike on-chain research** (Discover → Vike research tab): token screener and search from data.vike.io, read-only. It is labelled research only and can never place, approve or size a trade.
+- **Key safety:** the key is read only from the server setting `MIA_VIKE_API_KEY`. Without it MIA shows PENDING_CREDENTIALS and sends nothing. Presigned archive links never leave the server.
+- **Paper/Live:** Live trading stays locked. Every Live command is refused (`LIVE_LOCKED`), and `/api/trading/environments` shows it truthfully.
+- **Docs:** `docs/research/VIKE_INTEGRATION.md`.
+
 ## Unreleased: Master repair audit (2026-11-18)
 - **A broken saved risk setting can no longer stop a stop-loss.** Exits use the last valid fee rate, and new entries stay blocked until the owner fixes the setting. The release gate shows a broken setting as FAIL.
 - **Worker votes:** a required area (for example liquidity) now needs its own evidence. A worker from another area can no longer count for it.
