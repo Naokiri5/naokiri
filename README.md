@@ -81,7 +81,7 @@ stranger who finds the URL first cannot. Setup in a browser on the same machine 
 
 1. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` in the server environment. Use a randomly generated URL-safe webhook secret.
 2. Use Telegram Bot API `setWebhook` with your HTTPS MIA URL ending in `/api/integrations/telegram/webhook` and set `secret_token` to the same webhook secret. Keep the bot token and webhook secret server-side.
-3. Open **Connections → Telegram**, enter your MIA owner passphrase, and generate a pairing code. Send the displayed `/link` command in your bot’s private chat before it expires.
+3. Open **Connections → Telegram**, enter your MIA owner passphrase, and generate a pairing code. Send the displayed `/link` command in your bot’s private chat before it expires. Use **Cancel pairing code** to invalidate a code you no longer need.
 4. After MIA shows **Linked**, send `/help` to see commands. Use **Unlink Telegram** in MIA to disconnect the chat.
 
 The linked chat can check paper account status and pause new paper entries. Configure outbound notifications separately with `TELEGRAM_CHAT_ID` if you use them.

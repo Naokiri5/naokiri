@@ -39,14 +39,22 @@ export function TelegramConnection() {
             setPairing(null);
             await reload();
           }} />
-        </div> : ready && <>
+        </div> : pending ? <>
           {showCode && <p role="status">Send <code>/link {pairing.code}</code> to your bot in a private chat by {fmt.time(pairing.expiresAt)}.</p>}
-          {pending && !showCode && <p className="muted">A pairing code is already active. Generate a new one if you no longer have it.</p>}
+          {pending && !showCode && <p className="muted">A pairing code is already active. Cancel it to generate a new one.</p>}
+          <div className="row">
+            <Action label="Cancel pairing code" disabled={!!error} run={async () => {
+              await api(`${endpoint}/link/cancel`, { body: {} });
+              setPairing(null);
+              await reload();
+            }} />
+          </div>
+        </> : ready && <>
           <label className="col">Owner passphrase
             <input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
           </label>
           <div className="row">
-            <Action className="primary" label={pending ? 'Generate new pairing code' : 'Generate pairing code'} disabled={!password || !!error} run={async () => {
+            <Action className="primary" label="Generate pairing code" disabled={!password || !!error} run={async () => {
               try {
                 setPairing(await api<PairingCode>(`${endpoint}/link/start`, { body: { password } }));
                 await reload();

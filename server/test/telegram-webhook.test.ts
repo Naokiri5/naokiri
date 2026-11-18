@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { closeDb, openDb, all } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
-import { createLinkCode, redeemLinkCode } from '../src/integrations/telegram/link.js';
+import { createLinkCode, isLinkedIdentity, linkStatus, redeemLinkCode } from '../src/integrations/telegram/link.js';
 import { getControl } from '../src/core/mode.js';
 import { parseCommand } from '../src/integrations/telegram/commands.js';
 
@@ -111,6 +111,32 @@ describe('Telegram webhook (MIA-TG-01)', () => {
   it('owner endpoints require a session (401 without cookie)', async () => {
     expect((await app.inject({ method: 'GET', url: '/api/integrations/telegram/status' })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url: '/api/integrations/telegram/link/start', headers: { 'x-mia-csrf': '1' }, payload: { password: 'x' } })).statusCode).toBe(401);
+  });
+
+  it('requires owner session and CSRF to cancel a pending code, and preserves an active link', async () => {
+    const password = 'telegram test passphrase';
+    const session = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password } });
+    expect(session.statusCode).toBe(200);
+    const cookie = session.cookies.find(({ name }) => name === 'mia_session');
+    expect(cookie).toBeDefined();
+    const headers = { cookie: `mia_session=${cookie!.value}` };
+    const cancel = (requestHeaders: Record<string, string>) => app.inject({
+      method: 'POST', url: '/api/integrations/telegram/link/cancel', headers: requestHeaders,
+    });
+    const ownerHeaders = { ...headers, 'x-mia-csrf': '1' };
+    const chat = chatSeq++;
+    const { code } = createLinkCode();
+
+    expect((await cancel({ 'x-mia-csrf': '1' })).statusCode).toBe(401);
+    expect((await cancel(headers)).statusCode).toBe(403);
+    expect(linkStatus().pendingCode).toBe(true);
+    expect((await cancel(ownerHeaders)).json()).toEqual({ ok: true, canceled: true });
+    expect(linkStatus().pendingCode).toBe(false);
+    expect(redeemLinkCode(code, OWNER_USER, chat).ok).toBe(false);
+
+    expect(redeemLinkCode(createLinkCode().code, OWNER_USER, chat).ok).toBe(true);
+    expect((await cancel(ownerHeaders)).json()).toEqual({ ok: true, canceled: false });
+    expect(isLinkedIdentity(OWNER_USER, chat)).toBe(true);
   });
 
   it('parses commands with an optional @bot suffix and rejects plain text', () => {

@@ -24,6 +24,11 @@ test('owner can pair and unlink Telegram from the Connections Hub', async ({ pag
     expiresAt = Date.now() + 600_000;
     return route.fulfill({ json: { code: 'E2ETEST1', expiresAt } });
   });
+  await page.route('**/api/integrations/telegram/link/cancel', route => {
+    expect(route.request().method()).toBe('POST');
+    expiresAt = null;
+    return route.fulfill({ json: { ok: true, canceled: true } });
+  });
   await page.route('**/api/integrations/telegram/unlink', route => {
     expect(route.request().method()).toBe('POST');
     linked = false;
@@ -39,7 +44,14 @@ test('owner can pair and unlink Telegram from the Connections Hub', async ({ pag
   await passphrase.fill(password, { timeout: 10_000 });
   await page.getByRole('button', { name: 'Generate pairing code' }).click();
   await expect(page.getByText('/link E2ETEST1', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Cancel pairing code' }).click();
+  await expect(page.getByText('UNLINKED', { exact: true })).toBeVisible();
+  await expect(page.getByText('/link E2ETEST1', { exact: true })).toHaveCount(0);
   await expect(passphrase).toHaveValue('');
+  await passphrase.fill(password);
+  await page.getByRole('button', { name: 'Generate pairing code' }).click();
+  await expect(page.getByText('/link E2ETEST1', { exact: true })).toBeVisible();
 
   linked = true;
   expiresAt = null;
