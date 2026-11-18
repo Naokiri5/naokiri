@@ -1,6 +1,41 @@
 import type { EvidencePacket, ChallengeFinding } from './schemas.js';
 import type { WorkerContext } from '../workers/types.js';
 
+export type HorizonTrend = 'UP' | 'DOWN' | 'FLAT' | 'UNKNOWN';
+/** Strategies that buy WITH the trend; buying against both higher horizons contradicts their own thesis. */
+const TREND_FOLLOWING = new Set(['trend_pullback', 'donchian_breakout']);
+const HORIZONS = ['15m', '1h', '4h'] as const;
+
+/**
+ * MIA-THINK-037: explicit 15m / 1h / 4h trend alignment. A horizon is UP when price and EMA20 are both above EMA50, DOWN
+ * when both are below, FLAT otherwise, UNKNOWN when its features are missing (never guessed). For a trend-following long,
+ * 1h AND 4h both DOWN is a critical contradiction (the challenge vetoes); any other disagreement is listed as opposing
+ * evidence without blocking. Range-reversion buys dips by design and is never vetoed by this check.
+ */
+export function horizonAlignment(ctx: WorkerContext): { trends: Record<(typeof HORIZONS)[number], HorizonTrend>; findings: string[]; critical: boolean } {
+  const trend = (iv: (typeof HORIZONS)[number]): HorizonTrend => {
+    const f = ctx.f[iv];
+    if (!f || ![f.close, f.ema20, f.ema50].every((x) => typeof x === 'number' && Number.isFinite(x))) return 'UNKNOWN';
+    if (f.close > f.ema50 && f.ema20 > f.ema50) return 'UP';
+    if (f.close < f.ema50 && f.ema20 < f.ema50) return 'DOWN';
+    return 'FLAT';
+  };
+  const trends = Object.fromEntries(HORIZONS.map((iv) => [iv, trend(iv)])) as Record<(typeof HORIZONS)[number], HorizonTrend>;
+  const findings: string[] = []; let critical = false;
+  if (ctx.candidate.signal.direction !== 'long') return { trends, findings, critical };
+  const down = HORIZONS.filter((iv) => trends[iv] === 'DOWN');
+  if (down.length) {
+    const trendFollowing = TREND_FOLLOWING.has(ctx.candidate.strategyId);
+    if (trendFollowing && trends['1h'] === 'DOWN' && trends['4h'] === 'DOWN') {
+      critical = true;
+      findings.push(`horizon conflict: long ${ctx.candidate.strategyId} against a 1h AND 4h downtrend (15m ${trends['15m']}, 1h DOWN, 4h DOWN)`);
+    } else {
+      findings.push(`horizon conflict: ${down.join(' and ')} trend DOWN against a long (15m ${trends['15m']}, 1h ${trends['1h']}, 4h ${trends['4h']})${trendFollowing ? '' : '; strategy is not trend-following, listed only'}`);
+    }
+  }
+  return { trends, findings, critical };
+}
+
 /** Part 29.3 L2 independent challenge panel. Reviewers may disagree or abstain; agreement is not rewarded. */
 export function challengePanel(ctx: WorkerContext, packets: EvidencePacket[]): ChallengeFinding[] {
   const sup = packets.filter((p) => p.stance === 'SUPPORT'); const opp = packets.filter((p) => p.stance === 'OPPOSE');
@@ -17,6 +52,8 @@ export function challengePanel(ctx: WorkerContext, packets: EvidencePacket[]): C
     if (ctx.candidate.strategyId === 'donchian_breakout' && f1.takerBuyRatio < 0.48) c.push('breakout without taker-buy dominance (false-breakout risk)');
     if (f1.zscore20 > 3) { c.push(`price ${f1.zscore20.toFixed(1)}σ above mean`); critical = true; }
   }
+  const h = horizonAlignment(ctx); // MIA-THINK-037: timeframe conflict is opposing evidence; critical for trend longs vs 1h+4h
+  c.push(...h.findings); if (h.critical) critical = true;
   out.push({ reviewer: 'CONTRARIAN', stance: c.length ? 'OPPOSE' : 'ABSTAIN', critical, findings: c.length ? c : ['no crowding, exhaustion, or trap pattern detected'] });
 
   // Data auditor

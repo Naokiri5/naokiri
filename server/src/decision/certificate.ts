@@ -23,7 +23,7 @@ export type NoTradeCode =
   | 'STALE_OR_MISSING_MARKET_DATA' | 'INSUFFICIENT_DATA' | 'ASSET_NOT_ELIGIBLE' | 'INSUFFICIENT_LIQUIDITY'
   | 'QCI_VETO' | 'QCI_NO_QUORUM' | 'QCI_MIXED_EVIDENCE' | 'CONSENSUS_EXPIRED' | 'REQUIRED_DOMAIN_MISSING'
   | 'BELOW_OPPORTUNITY_THRESHOLD' | 'OBSERVE_MODE' | 'RISK_DENIED' | 'NEEDS_OWNER_REVIEW' | 'COSTS_TOO_HIGH'
-  | 'NEGATIVE_OUT_OF_SAMPLE_EXPECTANCY' | 'NO_POSITIVE_EDGE_LOWER_BOUND';
+  | 'NEGATIVE_OUT_OF_SAMPLE_EXPECTANCY' | 'NO_POSITIVE_EDGE_LOWER_BOUND' | 'HORIZON_CONFLICT';
 
 export interface ThinkCertificate {
   version: typeof CERTIFICATE_VERSION; kind: 'EXPLANATION_ONLY';
@@ -65,7 +65,7 @@ function noTradeReasons(r: DecisionReport, c: ConsensusRecord | null, missingReq
   if (step('Expected fees')?.result === 'FAIL') out.add('COSTS_TOO_HIGH');
   if (step('Strategy performance')?.result === 'FAIL') out.add('NEGATIVE_OUT_OF_SAMPLE_EXPECTANCY');
   if (exp.verdict === 'NEGATIVE' || exp.verdict === 'UNCERTAIN_EDGE') out.add('NO_POSITIVE_EDGE_LOWER_BOUND');
-  void c;
+  if (c?.reason_codes.some((x) => x.startsWith('CRITICAL CONTRARIAN') && x.includes('horizon conflict'))) out.add('HORIZON_CONFLICT');
   return [...out];
 }
 

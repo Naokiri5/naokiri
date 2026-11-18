@@ -14,6 +14,7 @@ const REASON_TEXT: Record<string, string> = {
   BELOW_OPPORTUNITY_THRESHOLD: 'Opportunity score below the policy minimum', OBSERVE_MODE: 'MIA is in observe mode',
   RISK_DENIED: 'Independent risk gate denied it', NEEDS_OWNER_REVIEW: 'Risk gate asked for owner review', COSTS_TOO_HIGH: 'Fees and slippage too high for the risk',
   NEGATIVE_OUT_OF_SAMPLE_EXPECTANCY: 'Strategy lost money out of sample', NO_POSITIVE_EDGE_LOWER_BOUND: 'No edge after uncertainty',
+  HORIZON_CONFLICT: 'Buying against both the 1h and 4h downtrend',
 };
 
 /** Evidence replay from the frozen DITAS snapshot (server: ditas/replay.ts). Read-only. */
