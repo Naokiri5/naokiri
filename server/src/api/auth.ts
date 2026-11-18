@@ -62,7 +62,8 @@ export function verifyPassphrase(pass: unknown, client: string, purpose: string,
   throw new AuthError(purpose === 'login' ? 'invalid passphrase' : 'step-up authentication failed: passphrase required for this action', purpose === 'login' ? 401 : 403);
 }
 export function login(pass: string, ip: string, opts: { directLocal?: boolean } = {}) {
-  verifyPassphrase(pass, ip, 'login', { exemptFromGlobalLockout: opts.directLocal });
+  const client = opts.directLocal ? `direct-local:${ip}` : ip;
+  verifyPassphrase(pass, client, 'login', { exemptFromGlobalLockout: opts.directLocal });
   return issueSession(ip, 'passphrase');
 }
 export function issueSession(ip: string, method: 'passphrase' | 'google') {

@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync } from 'node:fs';
+import { chmodSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { config, ensureDataDir } from '../config.js';
 import { migrate } from './migrations.js';
@@ -11,9 +11,12 @@ export function openDb(file?: string) {
   let path = file;
   if (!path) { ensureDataDir(); path = join(config.dataDir, 'mia.db'); }
   db = new DatabaseSync(path);
-  // The database holds the owner's passphrase hash, session hashes and the paper ledger: owner-only (0600). SQLite gives
-  // the -wal/-shm files the same mode. Best effort: a file owned by another account (mounted volume) is left unchanged.
-  if (path !== ':memory:') { try { chmodSync(path, 0o600); } catch { /* not our file to change */ } }
+  // Restrict existing sidecars too. SQLite inherits the main file mode only when creating new sidecars.
+  if (path !== ':memory:') {
+    for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+      try { if (lstatSync(file).isFile()) chmodSync(file, 0o600); } catch { /* absent or owned by another account */ }
+    }
+  }
   db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
   migrate(db);
   return db;
