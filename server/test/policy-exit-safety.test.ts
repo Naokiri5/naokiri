@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
@@ -27,6 +27,10 @@ const lastExitFee = () => get<{ fees: number }>("SELECT fees FROM orders WHERE p
 
 describe('invalid stored risk policy vs. exits (MA-01/MA-02)', () => {
   let id = ''; let last = 0;
+  // Fixed clock (CodeRabbit PR #18): consensus expiry, quotes and the book are all stamped from this instant, so a slow
+  // machine can never turn an expected entry into a CONSENSUS_EXPIRED or stale-data rejection. Only Date is faked.
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-18T12:00:00Z')); seq = 0; });
+  afterEach(() => { vi.useRealTimers(); });
   beforeEach(() => {
     freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);

@@ -53,17 +53,23 @@ for (const staleStatus of [200, 401]) {
 
 test('a stream debounce is cancelled when its subscribing page unmounts', async ({ page }) => {
   await installFixtureStream(page);
-  let requests = 0;
-  await page.route('**/api/overview', route => { requests++; return route.fulfill({ json: { account: {}, alerts: [], opportunities: [], movers: [], activity: [] } }); });
+  let requests = 0; let afterUnmount = 0;
+  await page.route('**/api/overview', route => {
+    requests++;
+    // Only a fetch issued after the app left the overview is an orphan. One issued while the overview is still shown
+    // (a slow navigation) is legitimate, so the result no longer depends on navigation speed (CodeRabbit PR #18).
+    if (/\/risk$/.test(page.url())) afterUnmount++;
+    return route.fulfill({ json: { account: {}, alerts: [], opportunities: [], movers: [], activity: [] } });
+  });
   await page.goto('/');
   await expect(page.locator('.mode')).not.toHaveText('…');
   await expect.poll(() => requests).toBe(1);
   await page.evaluate(() => (window as unknown as { fixtureStream: { emit(topic: string): void } }).fixtureStream.emit('scan'));
   await page.locator('[data-seg="risk"]').click();
   await expect(page).toHaveURL(/\/risk$/);
-  // The stream debounce is 600 ms. Observe beyond that deadline to detect an orphaned fetch.
+  // The stream debounce is 600 ms. Observe beyond that deadline (negative check) to detect an orphaned fetch.
   await page.waitForTimeout(800);
-  expect(requests).toBe(1);
+  expect(afterUnmount).toBe(0);
 });
 
 
