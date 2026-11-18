@@ -5,6 +5,7 @@ import { hierarchy, pack } from 'd3-hierarchy';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Modal, Page, Tabs, useSort } from '../ui';
 import { DecisionView, IndicatorGrid } from './Intel';
+import { CexActivity } from './CexActivity';
 import { AdvancedIndicators } from './AdvancedIndicators';
 
 export function Terminal() {
@@ -66,6 +67,7 @@ export function Terminal() {
             </tbody></table></div>
           </div>}
         </Card>
+        <CexActivity report={data?.cexActivity} />
         <AdvancedIndicators snapshot={data?.featuresResearch} />
         <Card title="50 indicator specialists"><IndicatorGrid list={data?.indicators ?? []} /></Card>
       </div>

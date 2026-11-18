@@ -51,6 +51,7 @@ import { SCHEMA_VERSION } from '../db/migrations.js';
 import { qhefReport } from '../qhef/qhef.js';
 import { securityOverview, revokeOtherSessions } from '../security/security.js';
 import { timeZoneName } from '../core/time.js';
+import { readCexActivity } from '../market/cexActivity.js';
 import { marketCoverage } from '../market/coverage.js';
 import { discover } from '../market/discover.js';
 import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js';
@@ -194,7 +195,7 @@ export async function routes(app: FastifyInstance) {
     const timeframeAgreement = summarizeTimeframes(chartIntelligence, d);
     const selectedReading = timeframeAgreement.readings.find(reading => reading.timeframe === iv);
     const featuresResearch = selectedReading?.status === 'VALID' ? d?.engines[iv].research ?? null : null;
-    return { chartIntelligence, timeframeAgreement, featuresResearch,
+    return { chartIntelligence, timeframeAgreement, featuresResearch, cexActivity: readCexActivity(i.id, chartIntelligence.asOf),
       instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
       quality: assessQuality(i.id), safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };
