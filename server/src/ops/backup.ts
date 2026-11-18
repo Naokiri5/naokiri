@@ -110,7 +110,8 @@ export function verifyBackup(file: string, key: Buffer | null = backupKey()): Ve
       add('schema', v === m.schema && v <= SCHEMA_VERSION, `v${v} (manifest v${m.schema}, code v${SCHEMA_VERSION})`);
       const a = verifyAuditChain(snap.prepare('SELECT * FROM audit_log ORDER BY id').all());
       add('audit chain', a.ok, a.ok ? `${a.entries} entries` : `broken at entry ${a.brokenAt}`);
-      const d = verifyMemory(snap.prepare('SELECT * FROM ditas_events ORDER BY seq').all(), snap.prepare('SELECT * FROM ditas_snapshots').all());
+      const blobs = (() => { try { return snap.prepare('SELECT * FROM ditas_blobs').all(); } catch { return []; } })(); // absent before schema v6
+      const d = verifyMemory(snap.prepare('SELECT * FROM ditas_events ORDER BY seq').all(), snap.prepare('SELECT * FROM ditas_snapshots').all(), blobs);
       add('decision memory chain', d.ok, d.ok ? `${d.entries} events` : `broken at ${d.brokenAt}`);
     } catch (e: any) { add('open', false, `cannot read snapshot: ${String(e?.message ?? e).slice(0, 200)}`); }
     finally { snap?.close(); }

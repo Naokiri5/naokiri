@@ -113,6 +113,15 @@ const MIGRATIONS: string[] = [
   CREATE TABLE runtime_leases (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at INTEGER NOT NULL,
     renewed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   `,
+  // v6 — DITAS store-once market data (owner-approved 2026-11-18). Candle windows and order books are stored once,
+  // keyed by the sha256 of their canonical JSON, and snapshots reference them as {"$blob": hash}. Measured before:
+  // every event stored a full 223 KB snapshot (~394 MB/day). Blobs are immutable like every other DITAS table; older
+  // v1 snapshots are left exactly as written.
+  `
+  CREATE TABLE ditas_blobs (hash TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at INTEGER NOT NULL, payload TEXT NOT NULL);
+  CREATE TRIGGER ditas_blobs_no_update BEFORE UPDATE ON ditas_blobs BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  CREATE TRIGGER ditas_blobs_no_delete BEFORE DELETE ON ditas_blobs BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
