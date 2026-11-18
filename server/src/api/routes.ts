@@ -172,6 +172,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/overview', async () => overviewSnapshot());
 
   // ── markets ──
+  app.get('/api/markets/coverage', async () => marketCoverage(Date.now(), calendarTimeZone() ?? 'UTC'));
   app.get('/api/markets', async () => ({ tickers: [...market.tickers.values()].filter((t) => t.quoteVolume > 1e6 && isEligibleSpot(t.base, t.quote)).sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 300), universe: market.universe, asOf: market.tickersFetchedAt }));
   app.get('/api/markets/search', async (req) => { const q = z.object({ q: z.string().max(30).default('') }).parse(req.query).q.toUpperCase(); return [...market.instruments.values()].filter((i) => i.symbol.includes(q) || i.base.startsWith(q)).slice(0, 20).map((i) => ({ id: i.id, symbol: i.symbol, base: i.base })); });
   app.get('/api/instrument/:symbol', async (req, reply) => {
@@ -328,7 +329,6 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/qhef', async () => qhefReport());
   app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
   app.post('/api/security/sessions/revoke-others', async (req) => { stepUp(req, req.body); return revokeOtherSessions(tokenOf(req)); });
-  app.get('/api/markets/coverage', async () => marketCoverage(Date.now(), calendarTimeZone() ?? 'UTC'));
   app.get('/api/discover', async (req) => discover(z.object({ minVolume: z.coerce.number().min(0).default(1e6) }).parse(req.query ?? {}).minVolume));
   const histFilter = (q: any): HistoryFilter => z.object({ from: z.coerce.number().int().positive().optional(), to: z.coerce.number().int().positive().optional(),
     instrument: z.string().max(20).regex(/^[A-Za-z0-9]*$/).optional(), status: z.enum(['NEW', 'FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED', 'ACTIVE', 'PENDING_APPROVAL']).optional(),

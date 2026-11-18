@@ -4,8 +4,8 @@ import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChar
 import { hierarchy, pack } from 'd3-hierarchy';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Modal, Page, Tabs, useSort } from '../ui';
-import { AdvancedIndicators } from './AdvancedIndicators';
 import { DecisionView, IndicatorGrid } from './Intel';
+import { AdvancedIndicators } from './AdvancedIndicators';
 
 export function Terminal() {
   const { symbol = 'BTCUSDT' } = useParams(); const [iv, setIv] = useState<'15m' | '1h' | '4h'>('1h'); const nav = useNavigate();
