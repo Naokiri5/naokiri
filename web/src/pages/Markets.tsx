@@ -41,6 +41,14 @@ export function Terminal() {
             <div className="row"><Badge v={data.chartIntelligence.status} /><Badge v={data.chartIntelligence.trend} /><Badge v="NO TRADE" /></div>
             <div className="hint">{data.chartIntelligence.note}</div>
             {data.chartIntelligence.issues.length > 0 && <div className="hint warn">{data.chartIntelligence.issues.join('; ')}</div>}
+            {!!data.chartIntelligence.anchoredVwap?.length && <div className="tablewrap">
+              <table><thead><tr><th>VWAP anchor</th><th>Anchor time (UTC)</th><th>Estimated VWAP</th><th>Close vs. VWAP</th></tr></thead>
+                <tbody>{data.chartIntelligence.anchoredVwap.map((v: { anchor: string; anchorAt: number; price: number | null; deviationPct: number | null }) => (
+                  <tr key={v.anchor}><td>{v.anchor.replaceAll('_', ' ')}</td><td>{new Date(v.anchorAt).toISOString()}</td>
+                    <td>{v.price === null ? 'Unavailable' : fmt.px(v.price)}</td><td>{v.deviationPct === null ? '—' : fmt.pct(v.deviationPct, 2)}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>}
             <div className="tablewrap"><table><thead><tr><th>Detection</th><th>Boundaries</th><th>Evidence</th><th>Invalidation</th></tr></thead><tbody>
               {data.chartIntelligence.detections.map((d: any) => <tr key={d.kind}><td>{d.kind}<div className="hint">{Math.round(d.confidence * 100)}% rule strength · {d.calibration}</div></td><td>{fmt.px(d.boundaries.low)}–{fmt.px(d.boundaries.high)}</td><td>{d.evidence.join('; ')}<div className="hint">{d.method}</div></td><td>{d.invalidation}<div className="hint">Expires {fmt.time(d.expiresAt)}</div></td></tr>)}
             </tbody></table></div>

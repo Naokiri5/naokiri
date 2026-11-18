@@ -1,5 +1,15 @@
 import type { Candle } from '../market/types.js';
 
+/** OHLCV approximation using typical price weighted by base volume. */
+export function candleVwap(candles: readonly Candle[]): number {
+  let weighted = 0, volume = 0;
+  for (const candle of candles) {
+    weighted += ((candle.h + candle.l + candle.c) / 3) * candle.v;
+    volume += candle.v;
+  }
+  return volume > 0 ? weighted / volume : NaN;
+}
+
 /**
  * Incremental feature engine (Part 33.5). State is updated once per *closed* candle in O(window);
  * no full recomputation per tick. Every snapshot is deterministic for a given candle sequence.
@@ -92,7 +102,6 @@ export class FeatureEngine {
     // MFI 14
     let pos = 0, neg = 0; const w15 = win(15);
     for (let i = 1; i < w15.length; i++) { const a = (w15[i].h + w15[i].l + w15[i].c) / 3, b = (w15[i - 1].h + w15[i - 1].l + w15[i - 1].c) / 3; if (a > b) pos += a * w15[i].v; else if (a < b) neg += a * w15[i].v; }
-    const w20 = win(20); const pv = w20.reduce((s, x) => s + ((x.h + x.l + x.c) / 3) * x.v, 0); const vv = w20.reduce((s, x) => s + x.v, 0);
     const piv = win(11); const swingHigh = piv.length ? Math.max(...piv.slice(0, -1).map((x) => x.h)) : NaN; const swingLow = piv.length ? Math.min(...piv.slice(0, -1).map((x) => x.l)) : NaN;
     const w11 = win(11); const er = w11.length > 1 ? Math.abs(w11[w11.length - 1].c - w11[0].c) / w11.slice(1).reduce((s, x, i) => s + Math.abs(x.c - w11[i].c), 0) : NaN;
     const pdi = (100 * this.pdm.v) / this.atr.v, mdi = (100 * this.mdm.v) / this.atr.v;
@@ -112,7 +121,7 @@ export class FeatureEngine {
       ret1: back(1) ? c.c / back(1) - 1 : NaN, ret5: c.c / back(5) - 1, ret20: c.c / back(20) - 1, roc10: c.c / back(10) - 1,
       realizedVol20: sdev(logr), stochK14: h14 === l14 ? 50 : (100 * (c.c - l14)) / (h14 - l14), williamsR14: h14 === l14 ? -50 : (-100 * (h14 - c.c)) / (h14 - l14),
       cci20: md ? (tp[tp.length - 1] - tpm) / (0.015 * md) : NaN, mfi14: neg === 0 ? (pos ? 100 : 50) : 100 - 100 / (1 + pos / neg),
-      vwap20: vv ? pv / vv : NaN, zscore20: sd ? (c.c - mid) / sd : NaN, swingHigh, swingLow,
+      vwap20: candleVwap(win(20)), zscore20: sd ? (c.c - mid) / sd : NaN, swingHigh, swingLow,
       ema20Slope5: this.ema20Hist.length >= 6 ? this.ema20Hist[5] / this.ema20Hist[0] - 1 : NaN,
       ema50Slope10: this.ema50Hist.length >= 11 ? this.ema50Hist[10] / this.ema50Hist[0] - 1 : NaN,
       bbWidthPctile100: NaN, efficiencyRatio10: er,
