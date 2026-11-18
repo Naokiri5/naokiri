@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Page, Stat, Tabs } from '../ui';
+import { SecFilings } from './SecFilings';
 import { MarketCoverage } from './MarketCoverage';
 import { StepUp } from './Trading';
 
@@ -14,8 +15,8 @@ export function Discover() {
   return <Page title="Asset Discovery" sub={<>Find assets worth a closer look. Every list is computed from live exchange data. {data?.note}</>}
     right={<><Freshness at={data?.asOf} /><select value={minVol} onChange={(e) => setMinVol(Number(e.target.value))} aria-label="Minimum 24h volume"><option value={1e6}>≥ $1M vol</option><option value={1e7}>≥ $10M</option><option value={1e8}>≥ $100M</option></select></>}>
     <ErrorLine e={error} />
-    <Tabs tabs={[...Object.keys(lists), 'New DEX tokens', 'Market coverage']} value={tab} onChange={setTab} />
-    {tab === 'Market coverage' ? <MarketCoverage /> : tab !== 'New DEX tokens' ? <Card flush title={`${rows.length} of ${data?.universe ?? 0} liquid pairs`}><div className="tablewrap"><table><thead><tr><th>Asset</th><th className="num">Price</th><th className="num">24h</th><th className="num">Volume</th><th className="num">Mkt cap</th><th className="num">Rel. vol 1h</th><th>Regime</th><th>Safety</th><th /></tr></thead>
+    <Tabs tabs={[...Object.keys(lists), 'New DEX tokens', 'Market coverage', 'SEC filings']} value={tab} onChange={setTab} />
+    {tab === 'SEC filings' ? <SecFilings /> : tab === 'Market coverage' ? <MarketCoverage /> : tab !== 'New DEX tokens' ? <Card flush title={`${rows.length} of ${data?.universe ?? 0} liquid pairs`}><div className="tablewrap"><table><thead><tr><th>Asset</th><th className="num">Price</th><th className="num">24h</th><th className="num">Volume</th><th className="num">Mkt cap</th><th className="num">Rel. vol 1h</th><th>Regime</th><th>Safety</th><th /></tr></thead>
       <tbody>{rows.map((r) => <tr key={r.instrumentId} className="click" onClick={() => nav(`/terminal/${r.symbol}`)}><td><b>{r.base}</b> <span className="faint">{r.name ?? ''}</span>{r.rank && <span className="faint"> #{r.rank}</span>}</td><td className="num">{fmt.px(r.price)}</td><td className="num"><Chg v={r.changePct} /></td><td className="num">{fmt.big(r.quoteVolume)}</td><td className="num">{fmt.big(r.marketCap)}</td><td className="num">{r.relVol1h == null ? '—' : `${fmt.num(r.relVol1h, 2)}×`}</td><td>{r.regime ? <Badge v={r.regime} /> : <span className="faint">not deep-scanned</span>}</td><td>{r.safety ? <Badge v={r.safety} /> : ''}</td><td><Action className="sm" label="Analyze" run={async () => { nav(`/terminal/${r.symbol}`); }} /></td></tr>)}</tbody></table>
       {!rows.length && <Empty>{tab === 'Unusual volume' ? 'Relative volume is available for deep-tier instruments once their candles load.' : 'Waiting for market data…'}</Empty>}</div></Card>
       : <Card flush title="Newest DEX token profiles" right={<Freshness at={data?.dexAsOf} />}><div className="banner info" style={{ margin: 12 }}>DEX tokens are never eligible for automated trading: contract-level honeypot checks need an on-chain provider. Names are untrusted external content.</div>

@@ -34,7 +34,10 @@ export function marketCoverage(asOf: number, displayTimeZone: string) {
     utcAnalysisSession: UTC_SESSIONS.find(s => hour >= s.startHourUtc && hour < s.endHourUtc),
     markets: COVERAGE.map(({ market, coverage, schedule, sourceIds }) => ({
       market, coverage, schedule,
-      sources: sourceIds.map(id => ({ id, name: provider(id)?.name ?? id, status: provider(id)?.status ?? 'UNAVAILABLE' })),
+      sources: sourceIds.map(id => {
+        const source = provider(id);
+        return { id, name: source?.name ?? id, status: source?.status ?? 'UNAVAILABLE' };
+      }),
     })),
   };
 }

@@ -25,6 +25,6 @@ export function zonedClock(ts: number, timeZone: string) {
   const fields = Object.fromEntries(local.map(p => [p.type, p.value]));
   return {
     timeZone, local: `${fields.year}-${fields.month}-${fields.day} ${fields.hour}:${fields.minute}:${fields.second}`,
-    offset: fields.timeZoneName,
+    offset: fields.timeZoneName === 'GMT' ? 'GMT+00:00' : fields.timeZoneName,
   };
 }

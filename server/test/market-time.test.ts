@@ -14,7 +14,7 @@ describe('IANA market clocks', () => {
     expect(report.asOf).toBe(sample);
     expect(report.displayClock.local).toBe('2026-03-15 20:00:00');
     expect(report.clocks.find(clock => clock.location === 'New York')).toMatchObject({ local: '2026-03-15 08:00:00', offset: 'GMT-04:00' });
-    expect(report.clocks.find(clock => clock.location === 'London')).toMatchObject({ local: '2026-03-15 12:00:00', offset: 'GMT' });
+    expect(report.clocks.find(clock => clock.location === 'London')).toMatchObject({ local: '2026-03-15 12:00:00', offset: 'GMT+00:00' });
     expect(report.utcAnalysisSession?.label).toBe('Europe');
     expect(marketCoverage(at('2026-03-15T16:00:00Z'), 'UTC').utcAnalysisSession?.label).toBe('Americas');
   });

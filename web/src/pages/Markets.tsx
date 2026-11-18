@@ -4,6 +4,7 @@ import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChar
 import { hierarchy, pack } from 'd3-hierarchy';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Modal, Page, Tabs, useSort } from '../ui';
+import { AdvancedIndicators } from './AdvancedIndicators';
 import { DecisionView, IndicatorGrid } from './Intel';
 
 export function Terminal() {
@@ -65,6 +66,7 @@ export function Terminal() {
             </tbody></table></div>
           </div>}
         </Card>
+        <AdvancedIndicators snapshot={data?.featuresResearch} />
         <Card title="50 indicator specialists"><IndicatorGrid list={data?.indicators ?? []} /></Card>
       </div>
       <div className="col" style={{ gap: 14 }}>

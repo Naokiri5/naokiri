@@ -188,7 +188,10 @@ export async function routes(app: FastifyInstance) {
     const d = market.deep.get(i.id);
     const f = d ? { '15m': d.engines['15m'].last, '1h': d.engines['1h'].last, '4h': d.engines['4h'].last } : {};
     const chartIntelligence = analyzeChart(i.id, iv, d?.engines[iv].candles ?? [], Date.now());
-    return { chartIntelligence, timeframeAgreement: summarizeTimeframes(chartIntelligence, d),
+    const timeframeAgreement = summarizeTimeframes(chartIntelligence, d);
+    const selectedReading = timeframeAgreement.readings.find(reading => reading.timeframe === iv);
+    const featuresResearch = selectedReading?.status === 'VALID' ? d?.engines[iv].research ?? null : null;
+    return { chartIntelligence, timeframeAgreement, featuresResearch,
       instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
       quality: assessQuality(i.id), safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };

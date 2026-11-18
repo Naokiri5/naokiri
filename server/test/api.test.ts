@@ -159,8 +159,9 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     seedInstrument('CHARTUSDT');
     const r = await app.inject({ url: '/api/instrument/CHARTUSDT?interval=1h', headers: { cookie } });
     expect(r.statusCode).toBe(200);
-    const { chartIntelligence, timeframeAgreement } = r.json();
+    const { chartIntelligence, timeframeAgreement, featuresResearch } = r.json();
     expect(chartIntelligence).toMatchObject({ status: 'VALID', decision: 'NO TRADE', timeframe: '1h' });
+    expect(featuresResearch).toMatchObject({ wma20: expect.any(Number), hma20: expect.any(Number) });
     expect(timeframeAgreement).toMatchObject({
       asOf: chartIntelligence.asOf,
       readings: ['15m', '1h', '4h'].map(timeframe => ({ timeframe, closedAt: expect.any(Number) })),

@@ -171,6 +171,11 @@ test('trading history CSV export downloads', async () => {
 test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', async () => {
   await page.route('**/api/instrument/CHARTFIXTURE?interval=1h', async route => route.fulfill({ json: {
     instrument: { base: 'CHARTFIXTURE', symbol: 'CHARTFIXTURE' }, cross: {}, candles: [], indicators: [],
+    featuresResearch: {
+      candleOpenAt: 39600000, wma20: 104, hma20: 106, keltner: null, parabolicSar: null,
+      ichimoku: { conversion9: 100, base26: 100, leadingA: 100, leadingB52: null, laggingClose: 105, displacementBars: 26 },
+      parkinson20: null, garmanKlass20: null,
+    },
     timeframeAgreement: { state: 'CONFLICTING_SIGNALS', asOf: 43200000, readings: [
       { timeframe: '15m', trend: 'BULLISH', status: 'VALID', closedAt: 43200000, issues: [] },
       { timeframe: '1h', trend: 'UNKNOWN', status: 'UNAVAILABLE', closedAt: null, issues: ['No closed candles in the market cache'] },
@@ -194,6 +199,7 @@ test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', 
   await expect(page.getByRole('row', { name: /UTC DAY/ })).toContainText('+5.00%');
   await expect(page.getByRole('row', { name: /UTC WEEK/ })).toContainText('Unavailable');
   await expect(page.getByText(/60% rule strength/)).toBeVisible();
+  await expect(page.getByRole('row', { name: /Hull moving average/ })).toContainText('106.0000');
   await page.unroute('**/api/instrument/CHARTFIXTURE?interval=1h');
 });
 
@@ -234,7 +240,11 @@ test('DITAS execution quality tab lists actual paper orders only', async () => {
 test('market coverage uses the saved IANA timezone and shows unsupported venues', async () => {
   await page.goto('/settings');
   await page.getByRole('textbox', { name: 'IANA timezone' }).fill('Asia/Manila');
-  await page.getByRole('button', { name: 'Save timezone' }).click();
+  const [response] = await Promise.all([
+    page.waitForResponse(r => r.url().endsWith('/api/calendar/tz') && r.request().method() === 'POST'),
+    page.getByRole('button', { name: 'Save timezone' }).click(),
+  ]);
+  expect(response.ok()).toBe(true);
   await expect(page.getByRole('textbox', { name: 'IANA timezone' })).toHaveValue('Asia/Manila');
   await page.goto('/discover');
   await page.getByRole('tab', { name: 'Market coverage' }).click();
@@ -243,6 +253,26 @@ test('market coverage uses the saved IANA timezone and shows unsupported venues'
   await expect(page.getByRole('row', { name: /Tokenized equities/ })).toContainText('Unavailable');
   await page.goto('/calendar');
   await expect(page.getByText('Asia/Manila', { exact: true })).toBeVisible();
+});
+
+test('SEC research keeps acceptance and report dates separate', async () => {
+  const sourceUrl = 'https://www.sec.gov/Archives/edgar/data/123456/000012345626000001/0000123456-26-000001-index.htm';
+  await page.route('**/api/research/filings/123456', route => route.fulfill({ json: {
+    cik: '0000123456', note: 'Fixture SEC filing metadata.',
+    filings: [{
+      accessionNumber: '0000123456-26-000001', form: '10-Q', filingDate: '2026-05-06',
+      reportDate: '2026-03-31', acceptedAt: '2026-05-06T20:00:00Z', items: [], sourceUrl,
+    }],
+  } }));
+  await page.goto('/discover');
+  await page.getByRole('tab', { name: 'SEC filings' }).click();
+  await page.getByRole('textbox', { name: 'Company CIK' }).fill('123456');
+  await page.getByRole('button', { name: 'Find filings' }).click();
+  await expect(page.getByRole('link', { name: '10-Q' })).toHaveAttribute('href', sourceUrl);
+  const filing = page.getByRole('row', { name: /10-Q/ });
+  await expect(filing).toContainText('2026-05-06T20:00:00Z');
+  await expect(filing).toContainText('2026-03-31');
+  await page.unroute('**/api/research/filings/123456');
 });
 
 test('risk center shows research-only paper scenarios', async () => {
