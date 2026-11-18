@@ -38,7 +38,7 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER' } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER', password: 'correct horse battery' } })).json().mode).toBe('PAPER');
     const live = await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'BOUNDED_LIVE', password: 'correct horse battery' } });
-    expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/BOUNDED_LIVE blocked/);
+    expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/BOUNDED_LIVE is locked/); // SAFE-01: refused in core/mode.ts before any gate
     expect((await app.inject({ url: '/api/qa', headers: { cookie } })).json().liveAllowed).toBe(false);
   });
   it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {

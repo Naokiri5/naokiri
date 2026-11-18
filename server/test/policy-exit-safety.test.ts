@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, currentPolicy, exitPolicy, validatePolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -27,7 +28,7 @@ describe('invalid stored risk policy vs. exits (MA-01/MA-02)', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
     freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     expect(submitEntry(report(id, last), 'bot')).toMatchObject({ ok: true });
   });
 

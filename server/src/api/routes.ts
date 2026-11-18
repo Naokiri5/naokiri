@@ -35,7 +35,7 @@ import * as lab from '../lab/lab.js';
 import { STRATEGIES } from '../lab/strategies.js';
 import * as wallet from '../wallet/wallet.js';
 import { listNotifications, markRead, notify } from '../notify/notify.js';
-import { releaseGates } from '../qa/gates.js';
+import { releaseGates, modeGate } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
 import { botStatus, botStatusView } from '../bot/bot.js';
 import { readiness } from '../ops/readiness.js';
@@ -266,11 +266,7 @@ export async function routes(app: FastifyInstance) {
     const cur = getControl();
     const reEnables = !!patch.disabledStrategies && cur.disabledStrategies.some((s) => !patch.disabledStrategies!.includes(s));
     if (patch.mode || patch.emergency === false || patch.pausedNewOrders === false || reEnables) stepUp(req, b);
-    return updateControl('owner', patch, (m) => {
-      if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
-      if ((m === 'PAPER' || m === 'APPROVAL') && (!currentPolicy() || currentPolicy()!.invalid)) return { ok: false, reason: 'accept a valid risk policy before enabling paper execution' };
-      return { ok: true };
-    });
+    return updateControl('owner', patch, modeGate);
   });
   app.post('/api/emergency/:action', async (req) => {
     const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), password: PW.optional() }).strict().parse(req.body ?? {});

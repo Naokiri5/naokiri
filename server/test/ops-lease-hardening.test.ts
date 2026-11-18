@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -36,7 +37,7 @@ describe('engine lease hardening (additive to holdEngine)', () => {
   const wasOffline = config.offline;
   beforeEach(() => {
     freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     Object.assign(botStatus, { running: true, role: 'STOPPED', lastError: null, lastMonitorAt: 0, monitorFailing: false, startedAt: Date.now() });
     hooks.duringAwait = () => {}; vi.mocked(oms.monitorPositions).mockClear(); vi.mocked(oms.submitEntry).mockClear(); vi.mocked(lab.checkStrategyHealth).mockClear(); _resetWatchdog();
   });

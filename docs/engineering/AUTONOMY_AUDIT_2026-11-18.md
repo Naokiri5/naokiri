@@ -86,7 +86,7 @@ Not every one of the 100 tickets was verified line by line. The table states the
 5. Every paper fill needs a fresh, executable book; no ticker fallback (CLAUDE.md #4).
 6. Migrations are append-only, and versions are never reused across branches.
 
-## 6. Recommended first PR — SAFE-01 (awaiting owner approval; not implemented)
+## 6. First PR — SAFE-01 (owner-approved 2026-11-18; **implemented, VERIFIED locally**)
 
 **Goal:** privileged mode transitions fail closed, including internal callers (ticket #1).
 
@@ -124,3 +124,30 @@ Not every one of the 100 tickets was verified line by line. The table states the
 - MA-04 (setup code at the machine), MA-13 (decision-memory retention), and the trading-risk sign-off on QCI v3: owner decisions.
 - R-01, a 24 h or 7-day hosted paper soak: needs a host.
 - Live execution as a whole (signer, venue adapter, legal and licensing review): out of scope for this build.
+
+## 8. SAFE-01 result
+
+**Implemented after the owner approved it ("ADD THAT FEATURE TO MY GITHUB").**
+
+**Changes:**
+- `core/mode.ts`:
+  - A mode transition with no gate throws `mode change requires release-gate authorization`.
+  - `BOUNDED_LIVE` is refused in the core while `LIVE_EXECUTION_AVAILABLE = false`.
+- `qa/gates.ts` `modeGate()` is now the one gate. The route and every test use it, instead of a gate defined inline in the route.
+- Tests that switched into paper mode with no gate were the exact bypass, so they now pass `modeGate`. One risk test had entered PAPER **without any policy**; it now accepts a valid policy first.
+- The BOUNDED_LIVE refusal message in two route and e2e assertions is now the earlier core message. It is still HTTP 400 and still refused.
+
+**Evidence:**
+
+| Check | Result |
+|---|---|
+| `mode-authority.test.ts` | 2 of 6 fail on the old code; the other 4 confirm behaviour that must not change |
+| server tests | 604 passed, 3 skipped |
+| web tests | ✓ |
+| e2e | 76 passed |
+| typecheck and build | ✓ |
+| secret scan | ✓ |
+
+**Not changed:**
+- Risk-reducing actions (pause, emergency, disabling strategies) need no gate.
+- Non-owners still cannot change mode.

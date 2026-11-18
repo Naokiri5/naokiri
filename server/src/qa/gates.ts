@@ -5,6 +5,7 @@ import { join, posix } from 'node:path';
 import { config, REPO_ROOT } from '../config.js';
 import { all, get } from '../db/db.js';
 import { currentPolicy } from '../risk/policy.js';
+import type { Mode } from '../core/mode.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { WORKERS } from '../workers/registry.js';
 import { reconcile } from '../portfolio/calendar.js';
@@ -196,3 +197,14 @@ export function releaseGates(report?: unknown) {
   return { gates: g, liveAllowed, summary: `${g.filter((x) => x.status === 'PASS').length}/${g.length} gates passed — live execution ${liveAllowed ? 'ELIGIBLE' : 'LOCKED'}` };
 }
 export const openDefects = () => all('SELECT * FROM journal WHERE kind=? ORDER BY ts DESC LIMIT 50', 'RISK');
+
+/**
+ * The release-gate check for an execution-mode transition (SAFE-01). The ONE gate used by the HTTP route and every
+ * other caller of updateControl: BOUNDED_LIVE needs every live gate (and is locked in this build regardless, in
+ * core/mode.ts); PAPER/APPROVAL need a valid owner-accepted risk policy; OBSERVE (read-only) is always allowed.
+ */
+export function modeGate(m: Mode): { ok: boolean; reason?: string } {
+  if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
+  if ((m === 'PAPER' || m === 'APPROVAL') && (!currentPolicy() || currentPolicy()!.invalid)) return { ok: false, reason: 'accept a valid risk policy before enabling paper execution' };
+  return { ok: true };
+}

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { evaluateRisk } from '../src/risk/gate.js';
@@ -20,7 +21,7 @@ describe('Risk gate (Part 17)', () => {
     expect(r.reasonCodes.join()).toMatch(/NO_EQUITY/);
   });
   it('allows a valid paper trade and sizes conservatively', () => {
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     const r = evaluateRisk(prop(id, last));
     expect(r.decision).toBe('ALLOW');
     const s = r.sizing!;
@@ -31,7 +32,7 @@ describe('Risk gate (Part 17)', () => {
     expect(r.policyVersion).toBe(1); expect(r.traceId).toBe('t');
   });
   it('enforces daily loss breaker, stop direction, duplicates, pause and emergency', () => {
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     evaluateRisk(prop(id, last)); // establishes start-of-day mark
     const day = new Date().toISOString().slice(0, 10);
     const week = (() => { const d = new Date(); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); })();
@@ -44,7 +45,7 @@ describe('Risk gate (Part 17)', () => {
     updateControl('owner', { pausedNewOrders: false, emergency: true }); expect(evaluateRisk(prop(id, last)).reasonCodes).toContain('EMERGENCY_STOP_ACTIVE');
   });
   it('deposits never register as PnL and never disarm breakers', () => {
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' });
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate);
     accountState(); // day mark taken while unfunded
     ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     const a = accountState(); expect(a.startOfDayEquity).toBe(10_000); expect(a.dailyPnlPct).toBe(0); expect(a.drawdownPct).toBe(0);
@@ -56,7 +57,7 @@ describe('Risk gate (Part 17)', () => {
   });
   it('denies strategies not promoted to PAPER', () => {
     freshDb(false); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     expect(evaluateRisk(prop(id, last)).reasonCodes.join()).toMatch(/STRATEGY_NOT_PROMOTED/);
   });
   it('fails closed on internal errors and unknown instruments', () => {
@@ -84,7 +85,7 @@ describe('stale position marks fail closed (MIA-RISK-001)', () => {
     const { run } = await import('../src/db/db.js');
     const { inst: x, last: lx } = seedInstrument('XRPUSDT', { seed: 4 }) as any;
     const { inst: y, last: ly } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     run(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,planned_risk)
       VALUES ('pos_x',?,?,'crypto','long','trend_pullback',10,?,?,?,'[]','OPEN',?,0,0,10)`, PAPER_ACCOUNT, x.id, lx, lx * 0.97, lx * 0.97, Date.now());
     expect(evaluateRisk(prop(y.id, ly)).reasonCodes.join()).not.toMatch(/POSITION_MARKS_MISSING/); // fresh: fine
@@ -112,11 +113,12 @@ describe('stored risk policy is re-validated (MIA-RISK-006)', () => {
   it('denies with POLICY_INVALID when the stored policy lacks a field, instead of passing the missing check', async () => {
     const { run } = await import('../src/db/db.js');
     const { inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
-    updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    // SAFE-01: PAPER can only be entered with a valid policy, so accept one first; the corrupt row arrives later.
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     const { maxCostR: _drop, ...partial } = DEFAULT_POLICY;
-    run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (1, ?, ?, ?)', JSON.stringify(partial), Date.now(), 'owner');
+    run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (2, ?, ?, ?)', JSON.stringify(partial), Date.now(), 'owner');
     const r = evaluateRisk(prop(id, last));
-    expect(r.decision).toBe('DENY'); expect(r.reasonCodes[0]).toMatch(/^POLICY_INVALID: stored policy v1 .*maxCostR/);
+    expect(r.decision).toBe('DENY'); expect(r.reasonCodes[0]).toMatch(/^POLICY_INVALID: stored policy v2 .*maxCostR/);
     acceptPolicy('owner', DEFAULT_POLICY); // the owner re-accepts a valid policy
     expect(evaluateRisk(prop(id, last)).reasonCodes.join()).not.toMatch(/POLICY_INVALID/);
   });

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { closeDb, openDb, get, all, run, tx, inTransaction } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
@@ -23,7 +24,7 @@ describe('R-OMS: order-book freshness', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
     freshDb(); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
   it('R-OMS-1 refuses an entry when the order book is stale even if the ticker is fresh', () => {
     market.deep.get(id)!.book!.ts = Date.now() - 10 * 60_000; // 10-minute-old book, ticker still fresh
@@ -56,7 +57,7 @@ describe('R-PR7: CodeRabbit-verified fail-closed fixes', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
     freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
   it('nested tx joins the outer transaction and an inner failure rolls back everything (no isTransaction dependency)', () => {
     expect(() => tx(() => { run("INSERT INTO journal(id,ts,kind,summary) VALUES ('a',1,'X','outer')"); tx(() => { expect(inTransaction()).toBe(true); run("INSERT INTO journal(id,ts,kind,summary) VALUES ('b',1,'X','inner')"); throw new Error('boom'); }); })).toThrow('boom');

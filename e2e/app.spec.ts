@@ -72,7 +72,7 @@ test('BOUNDED LIVE cannot be enabled', async () => {
   await expect(live.getByText('LOCKED', { exact: true })).toBeVisible();
   // The server still refuses it directly, even with the correct passphrase (the authoritative check).
   const r = await page.evaluate(async (pw) => { const res = await fetch('/api/control', { method: 'POST', headers: { 'content-type': 'application/json', 'x-mia-csrf': '1' }, body: JSON.stringify({ mode: 'BOUNDED_LIVE', password: pw }) }); return { status: res.status, body: await res.json() }; }, PW);
-  expect(r.status).toBe(400); expect(r.body.error).toMatch(/BOUNDED_LIVE blocked/);
+  expect(r.status).toBe(400); expect(r.body.error).toMatch(/BOUNDED_LIVE is locked/); // SAFE-01: refused in the core
   await page.reload(); await expect(page.locator('.mode')).toHaveText('PAPER');
   // the server's refusal (HTTP 400) is the expected outcome; the browser logs it as a failed resource
   const extra = errors.splice(before); expect(extra.every((e) => /status of 400/.test(e)), extra.join('\n')).toBe(true);

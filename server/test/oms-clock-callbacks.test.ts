@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -21,7 +22,7 @@ describe('OMS uses one clock (MA-11)', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
     freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
   it('an entry evaluated at an injected time where the data is stale is denied, even if it is fresh by the wall clock', () => {
     const later = Date.now() + 30 * 60_000; // 30 min ahead: every quote is stale relative to this evaluation time
@@ -47,7 +48,7 @@ describe('OMS uses one clock (MA-11)', () => {
 describe('post-commit callbacks are isolated (MA-17)', () => {
   it('a throwing position listener does not turn a committed stop exit into "exit failed"', () => {
     freshDb(); market.reset(); const { inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     expect(submitEntry(report(id, last, Date.now() + 60_000), 'bot').ok).toBe(true);
     const boom = () => { throw new Error('listener exploded'); };
     bus.on('position', boom);
@@ -64,7 +65,7 @@ describe('duplicate instrument position under a concurrent writer (MA-20)', () =
     const { setCrashHook } = await import('../src/exec/crashpoint.js');
     const { run } = await import('../src/db/db.js');
     freshDb(); market.reset(); const { inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     // Simulate another writer committing a position on the same instrument right after this entry passed the gate.
     setCrashHook((p) => {
       if (p !== 'entry.preTx') return;
