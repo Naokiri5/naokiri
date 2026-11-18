@@ -1,5 +1,5 @@
 import { all, get, run, tx, J, P } from '../db/db.js';
-import { uid, iso } from '../core/util.js';
+import { uid, iso, floorToStep } from '../core/util.js';
 import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
 import { evaluateRisk } from '../risk/gate.js';
@@ -44,7 +44,7 @@ function insertOrder(o: { clientOrderId: string; instrument: string; side: 'BUY'
 
 export interface SimFill { price: number; impactBps: number; spreadBps: number | null; bookAgeMs: number | null; quoteAgeMs: number; basis: 'BOOK' | 'BOOK_PARTIAL' | 'QUOTE_BUFFERED' }
 type Deferred = (() => void)[];
-const floorStep = (q: number, step: number) => (step > 0 ? Number((Math.floor(q / step + 1e-9) * step).toFixed(12)) : q);
+const floorStep = floorToStep; // canonical helper (core/util.ts)
 
 /** A quote is usable only when its age is finite, non-negative (not future-dated) and within the execution limit. */
 export { quoteAgeOk } from '../market/quality.js'; // moved so the ledger can share it without an import cycle
