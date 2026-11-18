@@ -2,6 +2,7 @@ import { validateCandles } from '../chart/analysis.js';
 import { bookAge, bookImpact, QUALITY_LIMITS, walkBook } from './quality.js';
 import { market, type DeepState } from './store.js';
 import { INTERVAL_MS, type Candle } from './types.js';
+import type { AggressiveFlow, BookActivity, CexActivityReport, DepthProbe, VolumeWindow } from './cexActivityTypes.js';
 
 const BASELINE_WINDOWS = 10;
 const MIN_BASELINE_WINDOWS = 4;
@@ -10,59 +11,6 @@ const WINDOWS = [
   { window: '1h', interval: '15m', candles: 4 },
   { window: '24h', interval: '1h', candles: 24 },
 ] as const;
-
-interface AggressiveFlow {
-  buyBase: number;
-  sellBase: number;
-  deltaBase: number;
-  imbalance: number | null;
-  tradeCount: number | null;
-}
-
-interface VolumeWindow {
-  window: '5m' | '1h' | '24h';
-  status: 'AVAILABLE' | 'UNAVAILABLE';
-  reason: 'NO_CANDLE_FEED' | 'CANDLES_MISSING' | 'CANDLE_BATCH_REJECTED' | 'CANDLES_INVALID' | 'CANDLES_STALE' | 'BASELINE_UNAVAILABLE' | null;
-  closedAt: number | null;
-  receivedAt: number | null;
-  baseVolume: number | null;
-  baselineWindows: number;
-  medianBaseVolume: number | null;
-  relativeToMedian: number | null;
-  changeVsPreviousPct: number | null;
-  aggressiveFlow: AggressiveFlow | null;
-  candles: number;
-}
-
-interface DepthProbe {
-  side: 'buy' | 'sell';
-  requestedQuote: number;
-  filledFully: boolean;
-  impactBps: number | null;
-  avgPrice: number | null;
-}
-
-interface BookActivity {
-  status: 'AVAILABLE' | 'UNAVAILABLE';
-  reason: 'BOOK_MISSING' | 'BOOK_INVALID' | 'BOOK_STALE' | null;
-  quoteAgeMs: number | null;
-  capturedAt: number | null;
-  bidLevelCount: number | null;
-  askLevelCount: number | null;
-  spreadBps: number | null;
-  bidDepth1pctQuote: number | null;
-  askDepth1pctQuote: number | null;
-  bidShare1pct: number | null;
-  impactCurve: DepthProbe[];
-  exit: {
-    bandBps: 100;
-    conservativeBaseCapacity: number | null;
-    requestedBaseQty: number | null;
-    fitsVisibleCapacity: boolean | null;
-    avgPrice: number | null;
-    impactBps: number | null;
-  };
-}
 
 const finite = (value: number) => Number.isFinite(value) ? value : null;
 
@@ -176,7 +124,7 @@ function readBook(deep: DeepState | undefined, asOf: number, requestedBaseQty: n
 }
 
 /** Read-only research projection over the existing Binance spot candle and depth caches. */
-export function readCexActivity(instrumentId: string, asOf = Date.now(), requestedSellBaseQty?: number) {
+export function readCexActivity(instrumentId: string, asOf = Date.now(), requestedSellBaseQty?: number): CexActivityReport {
   if (!Number.isFinite(asOf) || asOf < 0 || (requestedSellBaseQty !== undefined &&
       (!Number.isFinite(requestedSellBaseQty) || requestedSellBaseQty <= 0))) {
     throw new RangeError('CEX activity requires a valid timestamp and positive exit quantity');
@@ -185,7 +133,7 @@ export function readCexActivity(instrumentId: string, asOf = Date.now(), request
   const supported = instrument?.market === 'crypto' && instrument.venue === 'binance';
   const deep = supported ? market.deep.get(instrumentId) : undefined;
   return {
-    schemaVersion: 1 as const, instrumentId, asOf, source: supported ? 'binance' as const : null,
+    schemaVersion: 1, instrumentId, asOf, source: supported ? 'binance' : null,
     baseAsset: instrument?.base ?? null, quoteAsset: instrument?.quote ?? null,
     volume: [unavailableVolume('5m', 'NO_CANDLE_FEED'), ...WINDOWS.map(spec =>
       supported ? readVolumeWindow(spec, deep, asOf) : unavailableVolume(spec.window, 'NO_CANDLE_FEED'))],

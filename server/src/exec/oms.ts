@@ -119,15 +119,15 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     return { ok: false, reason: 'PENDING_APPROVAL_REQUIRED' };
   }
   if (existing && existing.status !== 'PENDING_APPROVAL') return { ok: false, reason: `DUPLICATE: order ${existing.id} already ${existing.status}` };
-  const ctl = getControl();
-  if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
-  if (actor === 'bot' && ctl.mode !== 'PAPER') return { ok: false, reason: `mode ${ctl.mode} does not permit automatic paper entries` };
-  if (Date.parse(report.consensus.expiresAt) <= Date.now()) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data');
   const runtimeStrategy = STRATEGIES.find(strategy => strategy.id === s.strategy.id);
   const enrollment = get<{ version: string }>('SELECT version FROM strategies WHERE id=?', s.strategy.id);
   if (!runtimeStrategy || enrollment?.version !== s.strategy.version || runtimeStrategy.version !== s.strategy.version) {
     return reject('STRATEGY_VERSION_MISMATCH: re-evaluate against the enrolled strategy');
   }
+  const ctl = getControl();
+  if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
+  if (actor === 'bot' && ctl.mode !== 'PAPER') return { ok: false, reason: `mode ${ctl.mode} does not permit automatic paper entries` };
+  if (Date.parse(report.consensus.expiresAt) <= Date.now()) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data');
   // Last-moment revalidation: fresh risk evaluation on current data
   const fresh = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId });
   const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');

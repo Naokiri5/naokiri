@@ -1,11 +1,11 @@
-import type { readCexActivity } from '../../../server/src/market/cexActivity';
+import type { CexActivityReport } from '../../../server/src/market/cexActivityTypes';
 import { fmt } from '../api';
 import { Card } from '../ui';
 
 const explain = (value: string | null) => value?.toLowerCase().replaceAll('_', ' ');
 const percent = (ratio: number | null) => ratio === null ? '—' : fmt.num(ratio * 100, 1) + '%';
 
-export function CexActivity({ report }: { report?: ReturnType<typeof readCexActivity> }) {
+export function CexActivity({ report }: { report?: CexActivityReport }) {
   if (!report) return null;
   const { volume, book } = report;
   return <Card title="Sense · Spot volume and liquidity">
