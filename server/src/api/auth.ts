@@ -63,10 +63,14 @@ export function verifyPassphrase(pass: unknown, client: string, purpose: string,
 }
 export function login(pass: string, ip: string, opts: { directLocal?: boolean } = {}) {
   verifyPassphrase(pass, ip, 'login', { exemptFromGlobalLockout: opts.directLocal });
+  return createSession(ip, 'passphrase');
+}
+/** Opens an owner session. Callers must have authenticated the owner first (passphrase, or a linked Privy identity). */
+export function createSession(ip: string, method: 'passphrase' | 'privy') {
   run('DELETE FROM sessions WHERE expires_at <= ?', Date.now()); // expired sessions are otherwise kept forever
   const token = randomBytes(32).toString('hex');
   run('INSERT INTO sessions(token_hash, created_at, expires_at) VALUES (?,?,?)', sha256(token), Date.now(), Date.now() + SESSION_MS);
-  audit('owner', 'auth.login', { ip }); return token;
+  audit('owner', 'auth.login', method === 'passphrase' ? { ip } : { ip, method }); return token;
 }
 export function validSession(token?: string) {
   if (!token) return false;

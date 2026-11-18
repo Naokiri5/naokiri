@@ -1,6 +1,7 @@
 import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { VikeNotConfiguredError } from '../providers/vike.js';
+import * as privy from '../security/privy.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -156,6 +157,20 @@ export async function routes(app: FastifyInstance) {
   });
   app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
+  // Privy sign-in (optional). Login requires a Privy identity the owner already linked; link/unlink need a session + step-up.
+  app.get('/api/auth/privy/config', async () => privy.privyPublicConfig());
+  app.post('/api/auth/privy/login', async (req, reply) => {
+    const { accessToken } = z.object({ accessToken: z.string().min(20).max(4096) }).strict().parse(req.body);
+    return issue(reply, await privy.loginWithPrivy(accessToken, req.ip, { directLocal: isDirectLocal(req) }));
+  });
+  app.post('/api/security/privy/link', async (req) => {
+    const b = z.object({ accessToken: z.string().min(20).max(4096), password: PW.optional() }).strict().parse(req.body);
+    return privy.linkPrivy(b.accessToken, b.password, stepUpClient(req), isDirectLocal(req));
+  });
+  app.post('/api/security/privy/unlink', async (req) => {
+    const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
+    return privy.unlinkPrivy(b.password, stepUpClient(req), isDirectLocal(req));
+  });
   app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; ${cookieFlags}; Max-Age=0`); return { ok: true }; });
   app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, stepUpClient(req), { exemptFromGlobalLockout: true }); /* I-01: keyed by the authenticated session, like step-up */ return { ok: true }; });
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }

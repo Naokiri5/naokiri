@@ -8,6 +8,7 @@ import './providers/binance.js'; import './providers/coinbase.js'; import './pro
 import './providers/dexscreener.js'; import './providers/frankfurter.js'; import './providers/googlenews.js'; import './providers/pending.js';
 import './providers/vike.js'; // one credentialed, read-only research provider; no trading authority
 import { routes } from './api/routes.js';
+import { contentSecurityPolicy, privyConfigProblem } from './security/privy.js';
 import { seedStrategies } from './lab/lab.js';
 import { seedCatalog, resumeIngestion } from './knowledge/store.js';
 import { seedConcepts } from './knowledge/concepts.js';
@@ -18,7 +19,7 @@ export async function buildApp() {
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('x-request-id', req.id);
     reply.header('x-content-type-options', 'nosniff'); reply.header('x-frame-options', 'DENY'); reply.header('referrer-policy', 'no-referrer');
-    reply.header('content-security-policy', "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+    reply.header('content-security-policy', contentSecurityPolicy()); // strict unless Privy sign-in is enabled
     // API responses (balances, positions, CSV exports) must not be cached by the browser or an intermediary.
     if (req.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
     return payload;
@@ -30,6 +31,7 @@ export async function buildApp() {
     if (code >= 500) { req.log.error({ err }, 'unhandled server error'); return reply.code(code).send({ error: 'internal server error', requestId: req.id }); }
     return reply.code(code).send({ error: String(err?.message ?? 'request failed') });
   });
+  const privyProblem = privyConfigProblem(); if (privyProblem) app.log.warn(privyProblem);
   await app.register(routes);
   if (existsSync(config.webDist)) {
     await app.register(fastifyStatic, { root: config.webDist });

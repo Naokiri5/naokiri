@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Page, Stat, Tabs , rowProps} from '../ui';
 import { StepUp } from './Trading';
 import { VikeResearchPanel } from './VikeResearch';
+import { PrivyAccountCard, type PrivyClientConfig } from '../privy/lazy';
 
 /** Asset Discovery — ranked lists from live feeds only. */
 export function Discover() {
@@ -56,11 +57,13 @@ export function SecurityCenter() {
   const { data, error, reload } = useApi('/api/security'); const [pw, setPw] = useState(''); const [area, setArea] = useState('All');
   const areas = ['All', ...new Set<string>((data?.checks ?? []).map((c: any) => c.area))];
   const checks = (data?.checks ?? []).filter((c: any) => area === 'All' || c.area === area);
+  const privy = useApi<PrivyClientConfig>('/api/auth/privy/config');
   return <Page title="Security Center" sub="Live security checks, sessions and sign-in activity. Secrets are reported as configured or not, never shown.">
     <ErrorLine e={error} />
     <div className="grid g3" style={{ marginBottom: 14 }}><Stat k="Passing" v={data?.summary.pass ?? '—'} tone="up" /><Stat k="Warnings" v={data?.summary.warn ?? '—'} tone={data?.summary.warn ? 'warn' : undefined} /><Stat k="Failing" v={data?.summary.fail ?? '—'} tone={data?.summary.fail ? 'down' : undefined} /></div>
     <Card title="Security checks" flush right={<select value={area} onChange={(e) => setArea(e.target.value)} aria-label="Area">{areas.map((a) => <option key={a}>{a}</option>)}</select>}>
       <table><tbody>{checks.map((c: any) => <tr key={c.id}><td className="mono faint">{c.id}</td><td>{c.area}</td><td><b>{c.name}</b><div className="hint">{c.detail}</div></td><td><Badge v={c.status} tone={c.status === 'PASS' ? 'b-good' : c.status === 'FAIL' ? 'b-bad' : c.status === 'WARN' ? 'b-warn' : 'b-neutral'} /></td></tr>)}</tbody></table></Card>
+    {privy.data?.enabled && <div style={{ marginTop: 14 }}><Suspense fallback={<Card title="Privy account"><Empty>Loading Privy…</Empty></Card>}><PrivyAccountCard config={privy.data} onChange={privy.reload} /></Suspense></div>}
     <div className="grid g2" style={{ marginTop: 14 }}>
       <Card title={`Active sessions (${data?.sessions.length ?? 0})`}><div className="col">
         <table><tbody>{(data?.sessions ?? []).map((s: any) => <tr key={s.id}><td className="mono faint">{s.id}…</td><td>signed in {fmt.ago(s.createdAt)}</td><td className="faint">expires {fmt.time(s.expiresAt)}</td><td>{s.current && <Badge v="THIS DEVICE" tone="b-info" />}</td></tr>)}</tbody></table>

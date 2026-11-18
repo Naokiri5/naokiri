@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased: Privy sign-in (2026-11-18)
+- **New: sign in with Privy** (email, phone, Google, Apple, passkey, wallet, as enabled in your Privy dashboard). Link your Privy account once in Security Center, with your passphrase; after that the login screen offers "Sign in with Privy".
+- **Safety:** the server checks every Privy token, and only your linked account can sign in. Your passphrase is still needed for sensitive actions. Wallets are view-only; creating embedded wallets and signing, sending, funding or exporting are LOCKED.
+- **Off by default:** nothing changes, and the browser security policy stays strict, unless `MIA_PRIVY_APP_ID` is set.
+- **Known issue:** Privy's wallet libraries trigger a high-severity `npm audit` warning (old `zod`), so the CI audit job fails until Privy updates.
+- **Docs:** `docs/operations/PRIVY_SIGN_IN.md`.
+
 ## Unreleased: Vike research provider and Paper/Live contract (2026-11-18)
 - **New: Vike on-chain research** (Discover → Vike research tab): token screener and search from data.vike.io, read-only. It is labelled research only and can never place, approve or size a trade.
 - **Key safety:** the key is read only from the server setting `MIA_VIKE_API_KEY`. Without it MIA shows PENDING_CREDENTIALS and sends nothing. Presigned archive links never leave the server.
