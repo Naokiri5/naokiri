@@ -1,11 +1,11 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import { readTestSetupCode, TEST_OWNER_PASSPHRASE as PW } from './owner-fixture';
 
 /**
  * QA-02 Frontend Testing · end-to-end, in order: owner setup → risk policy → funding → PAPER mode →
  * every workspace renders with zero console errors → command palette → mobile layout.
  * Runs against an OFFLINE server (no live data), so pages must show honest empty/stale states, not crash.
  */
-const PW = 'e2e owner passphrase';
 const ROUTES = ['/', '/terminal/BTCUSDT', '/scanner', '/discover', '/intelligence', '/qhef', '/joe', '/bubbles', '/whales', '/copy', '/holders', '/news',
   '/bot', '/risk', '/portfolio', '/history', '/journal', '/calendar', '/lab', '/wallet', '/security', '/connections', '/notifications', '/qa', '/settings', '/academy'];
 const errors: string[] = [];
@@ -34,6 +34,7 @@ test.beforeAll(async ({ browser }) => {
 test('owner setup and sign-in', async () => {
   await page.goto('/');
   const pws = page.locator('input[type=password]'); await pws.nth(0).fill(PW); await pws.nth(1).fill(PW);
+  await page.getByLabel('Setup code').fill(readTestSetupCode());
   await page.getByRole('button', { name: 'Create owner' }).click();
   await expect(page.locator('.mode')).toHaveText('READ-ONLY');
   await expect(page.getByText('Market data is stale or disconnected')).toBeVisible(); // offline ⇒ honest stale banner

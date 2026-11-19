@@ -1,6 +1,6 @@
 import { expect, test, type Route, type Page } from '@playwright/test';
 
-const PW = 'e2e owner passphrase';
+import { signInTestOwner } from './owner-fixture';
 const instrument = (base: string) => ({ instrument: { base, symbol: `${base}USDT` }, cross: {}, candles: [], features: null, indicators: [], prints: [] });
 
 async function installFixtureStream(page: Page) {
@@ -18,22 +18,25 @@ async function installFixtureStream(page: Page) {
   });
 }
 
+async function ignoreFetchCancellation(page: Page, fragment: string) {
+  await page.addInitScript((pathFragment) => {
+    const original = window.fetch.bind(window);
+    window.fetch = (input, options) => {
+      const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
+      return original(input, path.includes(pathFragment) ? { ...options, signal: undefined } : options);
+    };
+  }, fragment);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.context().route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
-  const state = await (await page.request.get('/api/auth/state')).json();
-  expect((await page.request.post(state.setup ? '/api/auth/login' : '/api/auth/setup', { data: { password: PW } })).status()).toBe(200);
+  await signInTestOwner(page);
 });
 
 for (const staleStatus of [200, 401]) {
   test(`an obsolete asset response (${staleStatus}) cannot replace the current resource or revoke its session`, async ({ page }) => {
     // Deliberately simulate a transport which completes despite cancellation. Logical request ownership must still hold.
-    await page.addInitScript(() => {
-      const original = window.fetch.bind(window);
-      window.fetch = (input, options) => {
-        const path = typeof input === 'string' ? input : input instanceof URL ? input.pathname : input.url;
-        return original(input, path.includes('/api/instrument/') ? { ...options, signal: undefined } : options);
-      };
-    });
+    await ignoreFetchCancellation(page, '/api/instrument/');
     let previous: Route | undefined;
     await page.route('**/api/markets', route => route.fulfill({ json: { tickers: [{ symbol: 'RACEBUSDT', base: 'RACEB', last: 200, changePct: 0 }] } }));
     await page.route('**/api/instrument/RACEAUSDT?interval=1h', route => { previous = route; });
@@ -48,6 +51,33 @@ for (const staleStatus of [200, 401]) {
     await expect(page.getByRole('heading', { name: 'Market Terminal · RACEB', exact: true })).toBeVisible();
     await expect(page.getByText('Market Terminal · RACEA', { exact: true })).toHaveCount(0);
     await expect(page.locator('input[type=password]')).toHaveCount(0);
+  });
+}
+
+for (const staleStatus of [200, 503]) {
+  test(`an obsolete Vike search (${staleStatus}) cannot replace the latest result or error state`, async ({ page }) => {
+    await ignoreFetchCancellation(page, '/api/research/vike/search');
+    const result = (symbol: string) => ({ data: [{ symbol }], fetchedAt: Date.now() });
+    let obsolete: Route | undefined;
+    await page.route('**/api/research/vike/status', route => route.fulfill({ json: { configured: true } }));
+    await page.route('**/api/research/vike/tokens?*', route => route.fulfill({ json: result('SCREENER_FIXTURE') }));
+    await page.route('**/api/research/vike/search?q=OLD&limit=20', route => { obsolete = route; });
+    await page.route('**/api/research/vike/search?q=NEW&limit=20', route => route.fulfill({ json: result('LATEST_FIXTURE') }));
+
+    await page.goto('/discover');
+    await page.getByRole('tab', { name: 'Vike research' }).click();
+    const input = page.getByRole('textbox', { name: 'Vike search' });
+    await input.fill('OLD');
+    await input.press('Enter');
+    await expect.poll(() => !!obsolete).toBe(true);
+    await input.fill('NEW');
+    await input.press('Enter');
+    await expect(page.getByText('LATEST_FIXTURE', { exact: true })).toBeVisible();
+    await obsolete!.fulfill({ status: staleStatus, json: staleStatus === 200 ? result('OBSOLETE_FIXTURE') : { error: 'obsolete search failed' } });
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(page.getByText('LATEST_FIXTURE', { exact: true })).toBeVisible();
+    await expect(page.getByText('OBSOLETE_FIXTURE', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('obsolete search failed', { exact: true })).toHaveCount(0);
   });
 }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { freshDb } from './helpers.js';
+import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { RESEARCH_LIMITS } from '../src/knowledge/routes.js';
 
@@ -9,7 +9,7 @@ describe('academy research rate limits', () => {
   it('a second strategy comparison within the burst window is refused with 429 before any work starts', async () => {
     const app = await buildApp();
     try {
-      const s = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'research limit owner' } });
+      const s = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('research limit owner') });
       const h = { cookie: String(s.headers['set-cookie']).split(';')[0], 'x-mia-csrf': '1', 'content-type': 'application/json' };
       const body = { symbol: 'BTCUSDT', interval: '1h', bars: 1500 };
       const first = await app.inject({ method: 'POST', url: '/api/academy/strategy-comparison', headers: h, payload: body });
@@ -22,7 +22,7 @@ describe('academy research rate limits', () => {
   it('experiments allow a burst of 2, then 429', async () => {
     const app = await buildApp();
     try {
-      const s = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'research limit owner' } });
+      const s = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('research limit owner') });
       const h = { cookie: String(s.headers['set-cookie']).split(';')[0], 'x-mia-csrf': '1', 'content-type': 'application/json' };
       const body = { kind: 'volatility_clustering', symbol: 'BTCUSDT', interval: '1h', bars: 500 };
       const codes: number[] = [];

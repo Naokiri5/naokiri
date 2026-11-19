@@ -210,7 +210,7 @@ export function syncDepthStreams(ids: string[], seams: Partial<Pick<StreamDeps, 
     snapshot: seams.snapshot ?? (async (sym) => {
       const b = await binance.depth(sym, 100);
       if (b.lastUpdateId == null) throw new Error('snapshot without lastUpdateId cannot be synchronized');
-      return { lastUpdateId: b.lastUpdateId, bids: b.bids, asks: b.asks };
+      return { ...b, lastUpdateId: b.lastUpdateId };
     }),
     publish: (sym, b: StreamBook) => {
       const id = `crypto:binance:${sym}`; const inst = market.instruments.get(id); if (!inst) return;

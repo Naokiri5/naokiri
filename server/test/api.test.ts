@@ -1,6 +1,7 @@
-import { seedInstrument, seedBacktestFixture } from './helpers.js';
+import { seedInstrument, seedBacktestFixture, ownerSetupPayload } from './helpers.js';
 import { describe, it, expect, beforeAll, afterAll , vi } from 'vitest';
-import { all, closeDb, openDb } from '../src/db/db.js';
+import { all, closeDb, getDb, openDb } from '../src/db/db.js';
+import { cashBalance, ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { buildApp } from '../src/index.js';
 import { DEFAULT_POLICY } from '../src/risk/policy.js';
 import { commandMode, JOE_TOOL_NAMES } from '../src/joe/joe.js';
@@ -22,7 +23,7 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect((await app.inject({ method: 'POST', url: '/api/auth/login', headers: { 'content-type': 'application/octet-stream' }, payload: Buffer.alloc(1024) })).statusCode).toBe(415);
     expect((await app.inject({ method: 'POST', url: '/api/academy/documents', headers: { 'content-type': 'application/octet-stream', 'x-mia-csrf': '1' }, payload: Buffer.from('x') })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'short' } })).statusCode).toBe(400);
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'correct horse battery' } });
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('correct horse battery') });
     expect(r.statusCode).toBe(200); cookie = String(r.headers['set-cookie']).split(';')[0];
     expect(String(r.headers['set-cookie'])).toMatch(/HttpOnly; SameSite=Strict/);
     expect((await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'another passphrase' } })).statusCode).toBe(400);
@@ -126,6 +127,33 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(audit).toContain('auth.stepup.failed'); expect(audit).not.toContain(password); expect(audit).not.toContain('incorrect step-up passphrase');
     expect(JSON.stringify(getControl())).not.toContain('password');
   });
+  it('refuses a withdrawal when an entry uses cash before the allocation write lock', async () => {
+    const post = (direction: 'DEPOSIT' | 'WITHDRAW', amount: number) => app.inject({
+      method: 'POST', url: '/api/bot/allocation', headers: H(), payload: { direction, amount },
+    });
+    const initial = cashBalance();
+    expect((await post('DEPOSIT', 100)).statusCode).toBe(200);
+    const existingWithdrawals = all("SELECT id FROM ledger_entries WHERE kind='WITHDRAW'");
+    const db = getDb();
+    const exec = db.exec.bind(db);
+    let interleaved = false;
+    const hook = vi.spyOn(db, 'exec').mockImplementation(sql => {
+      if (sql === 'BEGIN IMMEDIATE' && !interleaved) {
+        interleaved = true;
+        // Simulate a paper entry that already committed its cash debit before allocation acquired the lock.
+        ledger(PAPER_ACCOUNT, 'BUY', -75);
+      }
+      exec(sql);
+    });
+    try {
+      const response = await post('WITHDRAW', initial + 80);
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/available paper cash/);
+      expect(interleaved).toBe(true);
+      expect(cashBalance()).toBe(initial + 25);
+      expect(all("SELECT id FROM ledger_entries WHERE kind='WITHDRAW'")).toEqual(existingWithdrawals);
+    } finally { hook.mockRestore(); }
+  });
   it('every GET workspace endpoint responds', async () => {
     for (const u of ['/api/overview', '/api/markets', '/api/scanner', '/api/intelligence', '/api/risk', '/api/bot', '/api/portfolio', '/api/orders', '/api/journal', '/api/calendar', '/api/lab', '/api/news', '/api/whales', '/api/wallet', '/api/connections', '/api/notifications', '/api/settings', '/api/qa', '/api/audit', '/api/joe', '/api/bubbles', '/api/dex', '/api/fx'])
       expect((await app.inject({ url: u, headers: { cookie } })).statusCode, u).toBe(200);
@@ -176,7 +204,7 @@ describe('HTTP hardening (auth gate, validation, error classes, step-up limits)'
   const H = () => ({ cookie, 'x-mia-csrf': '1' });
   beforeAll(async () => {
     closeDb(); openDb(':memory:'); failureGate.reset(); app = await buildApp();
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: PW } }); cookie = String(r.headers['set-cookie']).split(';')[0];
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload(PW) }); cookie = String(r.headers['set-cookie']).split(';')[0];
   });
   it('a percent-encoded path cannot skip the session check', async () => {
     for (const url of ['/%61pi/shell', '/%61pi/audit', '/%2561pi/audit', '/api/%61udit']) {
@@ -225,7 +253,7 @@ describe('shell status payload (independent setup)', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
   beforeAll(async () => {
     closeDb(); openDb(':memory:'); failureGate.reset(); app = await buildApp();
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'correct horse battery' } });
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('correct horse battery') });
     cookie = String(r.headers['set-cookie']).split(';')[0];
     expect((await app.inject({ method: 'POST', url: '/api/risk/policy', headers: { cookie, 'x-mia-csrf': '1' }, payload: { policy: DEFAULT_POLICY, password: 'correct horse battery' } })).statusCode).toBe(200);
   });

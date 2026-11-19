@@ -5,9 +5,9 @@ runs it for you, so you can skip to "First use".)
 
 ## 1. Install Node.js (one time)
 1. Open **https://nodejs.org/** in your browser.
-2. Click the big **LTS** download button (version 22.13 or newer).
+2. Click the big **LTS** download button (Node 22.16+ in the 22 LTS line, or Node 24+).
 3. Run the installer and accept the defaults.
-4. **Success looks like:** opening a terminal and typing `node -v` prints a version that is `v22.13` or higher.
+4. **Success looks like:** opening a terminal and typing `node -v` prints Node 22.16+ in the 22 LTS line or Node 24+.
    - Windows: press the Start key, type **PowerShell**, open it.
    - Mac: press ⌘ + Space, type **Terminal**, open it.
 
@@ -35,7 +35,8 @@ while you use MIA. Closing it stops the app.
 
 ## 4. First use (in the browser)
 1. Open **http://localhost:8787/**.
-2. Create your **owner passphrase** (10+ characters). Store it in a password manager. There is no "forgot password" yet.
+2. Enter the **first-time setup code** shown in the MIA terminal or service log and create your **owner passphrase**
+   (10+ characters). Store the passphrase in a password manager. There is no "forgot password" yet.
 3. Click **Risk Center** in the left menu → read the limits → type your passphrase in the box → **Accept policy**.
 4. Click **Strategy Lab** → run a backtest → read the *out-of-sample* numbers → only if you accept them, click
    **Promote to paper**.
@@ -47,7 +48,7 @@ The orange **PAPER** badge at the top means everything is simulated. No real mon
 | You see | Do this |
 |---|---|
 | "Port 8787 is already in use" | MIA is already running in another window. Use that one, or close it and run `npm start` again. |
-| "requires Node.js 22.13 or newer" | Repeat step 1. |
+| "requires Node.js 22.16+" | Repeat step 1. |
 | "Dependencies are not installed" | Run `npm install`, then `npm start`. |
 | The page never loads | Make sure the terminal still shows "MIA 4.1 is running", then reload the page. |
 

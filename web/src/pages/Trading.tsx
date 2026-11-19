@@ -95,6 +95,7 @@ export function Risk() {
   return <Page title="Risk Center" sub="Deterministic, fail-closed risk authority (Part 17). No agent, QCI result or assistant can bypass it. Limits change only through this authenticated, versioned workflow.">
     <ErrorLine e={error} />
     {!data?.policy && <div className="banner info">No risk policy accepted yet. Review the conservative paper defaults below and accept them (or adjust) to enable paper execution.</div>}
+    {data?.policy?.invalid && <div className="banner warn">Stored risk policy v{data.policy.version} is invalid. Review and accept a valid policy before opening paper positions.</div>}
     <div className="grid g-1-2">
       <div className="col" style={{ gap: 14 }}>
         <Card title="Circuit breakers">{a && p ? <div className="col">
@@ -125,7 +126,7 @@ export function Risk() {
           </div>}
         </Card>
         <Card title="Correlation of open positions (1h returns)" flush>{data?.correlation.instruments.length ? <table><thead><tr><th />{data.correlation.instruments.map((i: string) => <th key={i}>{i.split(':')[2].replace('USDT', '')}</th>)}</tr></thead><tbody>{data.correlation.matrix.map((row: any[], i: number) => <tr key={i}><td>{data.correlation.instruments[i].split(':')[2].replace('USDT', '')}</td>{row.map((c, j) => <td key={j} className="num" style={{ background: c == null ? undefined : `rgba(240,80,90,${Math.max(0, c) * 0.35})` }}>{c == null ? '?' : c.toFixed(2)}</td>)}</tr>)}</tbody></table> : <Empty>No open positions.</Empty>}</Card>
-        <Card title="Policy history" flush><table><tbody>{(data?.history ?? []).map((h: any) => <tr key={h.version}><td>v{h.version}</td><td className="faint">{fmt.time(h.created_at)}</td><td>{h.accepted_by}</td><td className="hint">risk {h.policy.riskPerTradePct}% · day {h.policy.dailyLossPct}% · DD {h.policy.drawdownHaltPct}%</td></tr>)}</tbody></table>{!data?.history.length && <Empty>No versions yet.</Empty>}</Card>
+        <Card title="Policy history" flush><table><tbody>{(data?.history ?? []).map((h: any) => <tr key={h.version}><td>v{h.version}</td><td className="faint">{fmt.time(h.created_at)}</td><td>{h.accepted_by}</td><td className="hint">{h.policy ? <>risk {h.policy.riskPerTradePct}% · day {h.policy.dailyLossPct}% · DD {h.policy.drawdownHaltPct}%</> : 'Invalid stored policy'}</td></tr>)}</tbody></table>{!data?.history.length && <Empty>No versions yet.</Empty>}</Card>
       </div>
     </div>
   </Page>;

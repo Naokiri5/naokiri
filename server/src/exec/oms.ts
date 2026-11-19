@@ -2,9 +2,9 @@ import { all, get, run, tx, J, P } from '../db/db.js';
 import { uid, iso, floorToStep, expiredAt } from '../core/util.js';
 import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
-import { evaluateRisk } from '../risk/gate.js';
+import { entryAuthorityVetoes, evaluateRisk, positionNotionalLimit } from '../risk/gate.js';
 import { currentPolicy, exitPolicy } from '../risk/policy.js';
-import { ledger, cashBalance, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
+import { accountState, ledger, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
 import { journal } from '../journal/journal.js';
 import { notify } from '../notify/notify.js';
 import { bus } from '../core/bus.js';
@@ -127,16 +127,15 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   if (!sim.fill) return reject(sim.reason!);
   const fill = sim.fill;
   const pv = currentPolicy();
-  if (!pv || pv.invalid) return reject('POLICY_INVALID: entries need a valid owner-accepted risk policy');
+  if (!pv?.policy) return reject('POLICY_INVALID: entries need a valid owner-accepted risk policy');
   const pol = pv.policy;
   if (fill.impactBps > pol.maxSlippageBps) return reject(`SLIPPAGE ${fill.impactBps.toFixed(1)}bps at submission`);
   if (fill.price <= s.stopLoss) return reject('PRICE_THROUGH_STOP');
   if (s.takeProfit.some((t) => t.price <= fill.price)) return reject('PRICE_THROUGH_TARGET: fill would be at or above a take-profit level');
   // E-03: take-profit fractions must be finite, positive and sum to at most the whole position.
   if (s.takeProfit.some((t) => !Number.isFinite(t.fraction) || t.fraction <= 0) || s.takeProfit.reduce((x, t) => x + t.fraction, 0) > 1 + 1e-9) return reject('INVALID_TARGET_FRACTIONS: each fraction must be > 0 and together at most 1');
-  const fee = fill.price * qty * pol.feeRate;
-  const cash = cashBalance(PAPER_ACCOUNT);
-  if (fill.price * qty + fee > cash + 1e-9) return reject(`INSUFFICIENT_CASH: need ${(fill.price * qty + fee).toFixed(2)}, have ${cash.toFixed(2)}`);
+  const notional = fill.price * qty;
+  const fee = notional * pol.feeRate;
   const R = fill.price - s.stopLoss;
   const tgts = s.takeProfit.map((t) => ({ r: (t.price - fill.price) / R, fraction: t.fraction }));
   const st = newExitState(fill.price, s.stopLoss, qty, tgts, null, 0);
@@ -144,16 +143,37 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   const strat = s.strategy.id;
   const maxHoldMs = (strat === 'range_reversion' ? 24 : strat === 'trend_pullback' ? 48 : 72) * 3600_000;
   const trailAfterR = strat === 'trend_pullback' ? 1 : strat === 'donchian_breakout' ? 1.5 : null;
-  let orderId: string;
+  let outcome: { orderId: string } | { rejected: string | null };
   crashpoint('entry.preTx');
-  try { orderId = tx(() => {
+  try { outcome = tx(() => {
     assertWriteFence();
     // MA-20: the gate's duplicate-instrument check ran before this transaction. Re-check inside it (BEGIN IMMEDIATE holds
     // the write lock), so a second writer that opened a position in between cannot produce two OPEN positions.
     // Same decision submitted twice: report it as the duplicate ORDER it is (checked first, under the same lock).
-    const sameOrder = get<{ id: string }>('SELECT id FROM orders WHERE client_order_id=?', coid);
-    if (sameOrder && sameOrder.id !== existing?.id) throw new DuplicateOrder();
+    const sameOrder = get<{ id: string; status: string }>('SELECT id,status FROM orders WHERE client_order_id=?', coid);
+    if (existing ? !sameOrder || sameOrder.id !== existing.id || sameOrder.status !== 'PENDING_APPROVAL' : !!sameOrder) throw new DuplicateOrder();
     if (get("SELECT 1 FROM positions WHERE account=? AND instrument=? AND status='OPEN' LIMIT 1", PAPER_ACCOUNT, s.instrumentId)) throw new DuplicatePosition();
+
+    // The entry gate and sizing used a read before this write lock. A pause, strategy or policy change, or withdrawal
+    // committed by another process must take effect before the fill and debit.
+    const authority = getControl();
+    const vetoes = entryAuthorityVetoes(strat, authority);
+    if (actor === 'bot' && authority.mode !== 'PAPER') vetoes.push(`mode ${authority.mode} does not permit automatic paper entries`);
+    const lockedPolicy = currentPolicy();
+    if (!lockedPolicy?.policy || lockedPolicy.version !== pv.version || pv.version !== fresh.policyVersion) {
+      vetoes.push('POLICY_CHANGED: re-evaluate under the current risk policy');
+    }
+    if (vetoes.length) return { rejected: persistRejection(`LAST_MOMENT_RISK_DENY: ${vetoes.join('; ')}`) };
+    const { cash, equity, marksMissing } = accountState(PAPER_ACCOUNT, nowTs);
+    const total = notional + fee;
+    if (!Number.isFinite(total) || !Number.isFinite(cash) || total > cash + 1e-9) {
+      return { rejected: persistRejection(`INSUFFICIENT_CASH: need ${total.toFixed(2)}, have ${cash.toFixed(2)}`) };
+    }
+    if (marksMissing.length) return { rejected: persistRejection(`POSITION_MARKS_MISSING:${marksMissing.join(',')}`) };
+    const notionalLimit = positionNotionalLimit(equity, pol);
+    if (!Number.isFinite(notionalLimit) || notionalLimit <= 0 || notional > notionalLimit + 1e-9) {
+      return { rejected: persistRejection(`POSITION_NOTIONAL_LIMIT: fill ${notional.toFixed(2)}, current equity limit ${notionalLimit.toFixed(2)}`) };
+    }
     const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
     run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);
     crashpoint('entry.order');
@@ -165,9 +185,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     // Protective stop: paper venue has no exchange-native stop; OMS monitors it. Recorded explicitly.
     insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: 'STOP_MARKET (OMS-monitored, paper)', qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId, at: nowTs });
     crashpoint('entry.stop');
-    ledger(PAPER_ACCOUNT, 'BUY', -fill.price * qty, oid, `${s.asset} entry`, nowTs); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee', nowTs);
+    ledger(PAPER_ACCOUNT, 'BUY', -notional, oid, `${s.asset} entry`, nowTs); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee', nowTs);
     crashpoint('entry.precommit');
-    return oid;
+    return { orderId: oid };
   }); } catch (e: any) {
     // UNIQUE(client_order_id) is the last line of defence against a concurrent duplicate submission.
     if (e instanceof DuplicateOrder) return { ok: false, reason: `DUPLICATE: entry ${coid} was already submitted` };
@@ -175,6 +195,8 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     if (/UNIQUE|constraint/i.test(String(e?.message))) return { ok: false, reason: `DUPLICATE: entry ${coid} was already submitted` };
     throw e;
   }
+  if ('rejected' in outcome) return announceRejection(outcome.rejected);
+  const { orderId } = outcome;
   crashpoint('entry.committed');
   record('oms.submit', performance.now() - t0);
   journal('FILL', `BUY ${qty} ${s.asset} @ ${fill.price.toPrecision(6)} (${strat}) — stop ${s.stopLoss.toPrecision(6)}, slippage ${fill.impactBps.toFixed(1)}bps`, posId, { decisionId: s.id, fill, fee, risk: fresh, actor });
@@ -183,8 +205,19 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   return { ok: true, orderId, positionId: posId };
 
   function reject(reason: string) {
-    if (existing) run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=?", reason, Date.now(), existing.id);
-    else insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
+    return announceRejection(persistRejection(reason));
+  }
+
+  function persistRejection(reason: string): string | null {
+    if (existing) {
+      const changed = run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", reason, nowTs, existing.id);
+      if (Number(changed.changes) !== 1) return null;
+    } else insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
+    return reason;
+  }
+
+  function announceRejection(reason: string | null) {
+    if (reason === null) return { ok: false, reason: 'APPROVAL_NO_LONGER_PENDING' };
     journal('ORDER', `Entry rejected for ${s.asset}: ${reason}`, s.id);
     bus.publish('order', { status: 'REJECTED', reason });
     return { ok: false, reason };
@@ -208,7 +241,12 @@ export function decideApproval(orderId: string, approve: boolean) {
   const o = get<any>('SELECT * FROM orders WHERE id=?', orderId);
   if (!o || o.status !== 'PENDING_APPROVAL') throw new OmsError('order is not pending approval');
   audit('owner', approve ? 'order.approve' : 'order.reject', { orderId });
-  if (!approve) { run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=?", Date.now(), orderId); journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId); return { ok: true }; }
+  if (!approve) {
+    const changed = run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), orderId);
+    if (Number(changed.changes) !== 1) throw new OmsError('order is no longer pending approval');
+    journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId);
+    return { ok: true };
+  }
   const rep = get<any>('SELECT report FROM decisions WHERE id=?', o.decision_id);
   if (!rep) throw new OmsError('decision record missing');
   return submitEntry(P(rep.report), 'owner');

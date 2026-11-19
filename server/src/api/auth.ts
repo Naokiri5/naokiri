@@ -17,10 +17,8 @@ export function setupOwner(pass: string) {
   setSetting('owner', { salt, hash, createdAt: Date.now() }); audit('owner', 'auth.setup');
 }
 /**
- * One-time setup code (SEC-SETUP). Network location alone no longer authorizes the first owner claim: a request that
- * is not a direct loopback connection must present this code, which is printed only to the server's own console
- * (terminal, `journalctl`, container log). Whoever can read the server output can claim ownership; a remote visitor
- * cannot. ~100 bits of entropy, compared in constant time, discarded once the owner exists.
+ * One-time setup code (SEC-SETUP). Every first-owner request must present the code printed to the server console
+ * (terminal, `journalctl`, container log). ~100 bits of entropy, compared in constant time, discarded after setup.
  */
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
 const normalizeCode = (c: string) => c.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -35,7 +33,7 @@ export function ensureSetupCode(announce = false, log: (msg: string) => void = (
     setSetting('setup_code', { code, createdAt: Date.now() });
   }
   const shown = code.match(/.{1,5}/g)!.join('-');
-  if (created || announce) log(`\n  ➜ First-time setup code: ${shown}\n    A browser that is not on this machine (forwarded port, container, LAN) must enter it to create the owner.\n`);
+  if (created || announce) log(`\n  ➜ First-time setup code: ${shown}\n    Enter this code in the browser to create the owner.\n`);
   return shown;
 }
 export function checkSetupCode(given: unknown) {
@@ -62,7 +60,8 @@ export function verifyPassphrase(pass: unknown, client: string, purpose: string,
   throw new AuthError(purpose === 'login' ? 'invalid passphrase' : 'step-up authentication failed: passphrase required for this action', purpose === 'login' ? 401 : 403);
 }
 export function login(pass: string, ip: string, opts: { directLocal?: boolean } = {}) {
-  verifyPassphrase(pass, ip, 'login', { exemptFromGlobalLockout: opts.directLocal });
+  const client = opts.directLocal ? `direct-local:${ip}` : ip;
+  verifyPassphrase(pass, client, 'login', { exemptFromGlobalLockout: opts.directLocal });
   return createSession(ip, 'passphrase');
 }
 /** Opens an owner session. Callers must have authenticated the owner first (passphrase, or a linked Privy identity). */

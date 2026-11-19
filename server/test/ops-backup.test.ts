@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { freshDb } from './helpers.js';
+import { getDb } from '../src/db/db.js';
 import { audit } from '../src/core/audit.js';
 import { backupKey, createBackup, decrypt, encrypt, listBackups, pruneBackups, verifyBackup } from '../src/ops/backup.js';
 
@@ -48,6 +49,17 @@ describe('database backups', () => {
     const v = verifyBackup(f, null);
     expect(v.ok).toBe(false); expect(v.checks.find((c) => c.name === 'audit chain')).toMatchObject({ ok: false });
   });
+  it.each(['ditas_twin_runs', 'ditas_blobs'])('fails restore verification when a required %s table is missing', (table) => {
+    const m = createBackup({ dir, key: null, nowTs: 1_800_000_000_000 });
+    const file = join(dir, m.file);
+    const snapshot = new DatabaseSync(file);
+    try { snapshot.exec(`DROP TABLE ${table}`); }
+    finally { snapshot.close(); }
+    writeFileSync(`${file}.json`, JSON.stringify({ ...m, sha256: sealHash(file) }));
+    const result = verifyBackup(file, null);
+    expect(result.ok).toBe(false);
+    expect(result.checks.at(-1)).toMatchObject({ name: 'open', ok: false, detail: expect.stringContaining(table) });
+  });
   it('fails closed on an invalid key instead of writing plaintext', () => {
     expect(() => backupKey('too-short')).toThrow(/32 bytes/);
     expect(backupKey('')).toBeNull(); expect(backupKey(undefined)).toBeNull();
@@ -65,11 +77,36 @@ describe('database backups', () => {
     expect(listBackups(dir)).toEqual([]); expect(verifyBackup(join(dir, m.file), null).ok).toBe(false);
     expect(existsSync(join(dir, m.file))).toBe(true);
   });
-  it('I-03: a plaintext backup file is owner-only (0600) even when the backup directory already existed', async () => {
-    const { statSync, chmodSync } = await import('node:fs');
+  it.each([false, true])('stages owner-only files before SQLite writes (encryption: %s)', (encrypted) => {
     chmodSync(dir, 0o755);
-    const m = createBackup({ dir, key: null, nowTs: 1_800_000_000_000 });
+    const db = getDb();
+    const originalPrepare = db.prepare.bind(db);
+    let observed = false;
+    const prepare = vi.spyOn(db, 'prepare').mockImplementation(sql => {
+      const statement = originalPrepare(sql);
+      if (sql === 'VACUUM INTO ?') {
+        const originalRun = statement.run.bind(statement);
+        vi.spyOn(statement, 'run').mockImplementationOnce((...args) => {
+          const path = String(args[0]);
+          expect(statSync(path).mode & 0o777).toBe(0o600);
+          expect(statSync(dirname(path)).mode & 0o777).toBe(0o700);
+          observed = true;
+          return originalRun(...args);
+        });
+      }
+      return statement;
+    });
+    let m: ReturnType<typeof createBackup>;
+    try { m = createBackup({ dir, key: encrypted ? KEY : null, nowTs: 1_800_000_000_000 }); }
+    finally { prepare.mockRestore(); }
+    expect(observed).toBe(true);
     expect(statSync(join(dir, m.file)).mode & 0o777).toBe(0o600);
+    expect(readdirSync(dir).sort()).toEqual([m.file, `${m.file}.json`]);
+    expect(verifyBackup(join(dir, m.file), encrypted ? KEY : null).ok).toBe(true);
+  });
+  it('removes staging files if encryption fails before publication', () => {
+    expect(() => createBackup({ dir, key: Buffer.alloc(1) })).toThrow();
+    expect(readdirSync(dir)).toEqual([]);
   });
 });
 function sealHash(f: string) { return createHash('sha256').update(readFileSync(f)).digest('hex'); }

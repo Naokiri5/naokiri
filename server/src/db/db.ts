@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { chmodSync } from 'node:fs';
+import { chmodSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { config, ensureDataDir } from '../config.js';
 import { migrate } from './migrations.js';
@@ -10,6 +10,17 @@ export function openDb(file?: string) {
   if (db) return db;
   let path = file;
   if (!path) { ensureDataDir(); path = join(config.dataDir, 'mia.db'); }
+  // Restrict existing sidecars before SQLite opens them. New sidecars inherit the main file's mode.
+  if (path !== ':memory:') {
+    for (const sidecar of [`${path}-wal`, `${path}-shm`]) {
+      try {
+        if (lstatSync(sidecar).isFile()) chmodSync(sidecar, 0o600);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') process.emitWarning(`Could not restrict SQLite sidecar permissions (${code ?? 'unknown error'})`, { code: 'MIA_DB_PERMISSIONS' });
+      }
+    }
+  }
   db = new DatabaseSync(path);
   // The database holds the owner's passphrase hash, session hashes and the paper ledger: owner-only (0600). SQLite gives
   // the -wal/-shm files the same mode. Best effort: a file owned by another account (mounted volume) is left unchanged.
@@ -26,7 +37,7 @@ export function closeDb() { db?.close(); db = null; }
 export function all<T = any>(sql: string, ...p: any[]): T[] { return getDb().prepare(sql).all(...p) as T[]; }
 export function get<T = any>(sql: string, ...p: any[]): T | undefined { return getDb().prepare(sql).get(...p) as T | undefined; }
 export function run(sql: string, ...p: any[]) { return getDb().prepare(sql).run(...p); }
-/** Transaction depth tracked here, not via DatabaseSync.isTransaction (that property needs Node >= 22.16; we support 22.13). */
+/** Track the depth of transactions managed by this wrapper so nested calls join the outer transaction. */
 let txDepth = 0;
 export const inTransaction = () => txDepth > 0;
 /** Atomic block. Nested calls join the outer transaction, so an inner failure still rolls back everything. */

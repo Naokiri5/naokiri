@@ -8,7 +8,7 @@
  *   6. quantity 0 removes a level; malformed, crossed or non-finite data is rejected and forces a resync.
  *
  * Paper-only market data: this never places orders. Stream books feed the same `market.deep.book` the REST path does,
- * stamped with LOCAL receive time, so every freshness/depth check (risk gate, OMS, quality) applies unchanged. REST
+ * stamped with local receive time for deltas and request start time for snapshot-only books. REST
  * polling stays the fallback: a symbol whose stream book is not fresh is refreshed by REST as before.
  * Off by default; enable with MIA_STREAMING=1.
  */
@@ -37,8 +37,8 @@ const parseLevel = (l: unknown): [number, number] | null => {
 export function parseDepthEvent(raw: unknown): DepthEvent | null {
   const r = raw as any;
   if (!r || r.e !== 'depthUpdate' || typeof r.s !== 'string') return null;
-  const U = Number(r.U), u = Number(r.u), E = Number(r.E);
-  if (![U, u, E].every(Number.isSafeInteger) || U > u || !Array.isArray(r.b) || !Array.isArray(r.a)) return null;
+  const U = num(r.U), u = num(r.u), E = num(r.E);
+  if (![U, u, E].every(Number.isSafeInteger) || U <= 0 || E <= 0 || U > u || !Array.isArray(r.b) || !Array.isArray(r.a)) return null;
   return { E, s: r.s, U, u, b: r.b, a: r.a };
 }
 
@@ -46,8 +46,10 @@ export function parseDepthEvent(raw: unknown): DepthEvent | null {
 export class BookSync {
   state: SyncState = 'BUFFERING';
   lastUpdateId = 0;
+  lastAppliedEventAt: number | null = null;
   resyncs = 0;
   private buffer: DepthEvent[] = [];
+  private requiredSnapshotId = 0;
   /** True until the first event after a snapshot: that one only has to OVERLAP the snapshot (U <= L+1 <= u). */
   private first = false;
   private bids = new Map<number, number>();
@@ -67,13 +69,21 @@ export class BookSync {
     // SYNCED while never publishing (CodeRabbit PR #18).
     return this.apply(ev) && this.sane() ? 'APPLIED' : this.gap();
   }
-  /** Feed the REST snapshot while buffering. Returns false when the snapshot is too old for the buffered events. */
+  /** A discarded update can only be recovered from a snapshot covering it. */
+  requireSnapshotThrough(updateId: number): boolean {
+    if (this.state === 'SYNCED' && updateId <= this.lastUpdateId) return false;
+    this.requiredSnapshotId = Math.max(this.requiredSnapshotId, updateId);
+    if (this.state === 'SYNCED') this.gap();
+    return true;
+  }
+  /** Feed the REST snapshot while buffering. */
   onSnapshot(s: Snapshot): 'SYNCED' | 'SNAPSHOT_TOO_OLD' | 'WAITING' {
     const L = s.lastUpdateId;
+    if (L < this.requiredSnapshotId) return 'SNAPSHOT_TOO_OLD';
     const pending = this.buffer.filter((e) => e.u > L);
     if (!pending.length) {
       // Nothing newer buffered yet: start from the snapshot; the next event only has to overlap it.
-      this.load(s); this.state = 'SYNCED'; this.buffer = []; return 'SYNCED';
+      this.load(s); this.state = 'SYNCED'; this.buffer = []; this.requiredSnapshotId = 0; return 'SYNCED';
     }
     if (pending[0].U > L + 1) return 'SNAPSHOT_TOO_OLD'; // events are missing between the snapshot and the buffer
     this.load(s); this.state = 'SYNCED'; this.buffer = [];
@@ -82,6 +92,7 @@ export class BookSync {
       if (!this.continues(ev) || !this.apply(ev)) { this.gap(); return 'WAITING'; }
     }
     if (!this.sane()) { this.gap(); return 'WAITING'; }
+    this.requiredSnapshotId = 0;
     return 'SYNCED';
   }
   book(ts: number): StreamBook | null {
@@ -104,7 +115,7 @@ export class BookSync {
   }
   private load(s: Snapshot) {
     this.bids = new Map(s.bids.filter(([p, q]) => p > 0 && q > 0)); this.asks = new Map(s.asks.filter(([p, q]) => p > 0 && q > 0));
-    this.lastUpdateId = s.lastUpdateId; this.first = true;
+    this.lastUpdateId = s.lastUpdateId; this.lastAppliedEventAt = null; this.first = true;
   }
   private apply(ev: DepthEvent): boolean {
     const b = ev.b.map(parseLevel), a = ev.a.map(parseLevel);
@@ -112,7 +123,7 @@ export class BookSync {
     for (const [p, q] of b as [number, number][]) q === 0 ? this.bids.delete(p) : this.bids.set(p, q);
     for (const [p, q] of a as [number, number][]) q === 0 ? this.asks.delete(p) : this.asks.set(p, q);
     this.trim();
-    this.lastUpdateId = ev.u; this.first = false;
+    this.lastUpdateId = ev.u; this.lastAppliedEventAt = ev.E; this.first = false;
     return true;
   }
   /**
@@ -136,7 +147,7 @@ export class BookSync {
 // ── transport ─────────────────────────────────────────────────────────────────────────────────────────────────────
 export interface StreamDeps {
   url: (symbols: string[]) => string;
-  snapshot: (symbol: string) => Promise<Snapshot>;
+  snapshot: (symbol: string) => Promise<Snapshot & { ts: number }>;
   publish: (symbol: string, book: StreamBook) => void;
   /** Called when a symbol's published book can no longer be extended (gap, disconnect): REST should take over now. */
   invalidate?: (symbol: string) => void;
@@ -177,33 +188,66 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
         const snap = await deps.snapshot(sym);
         if (stopped || gen !== generation) return; // stale completion: discard
         const r = syncs.get(sym)!.onSnapshot(snap);
-        if (r === 'SYNCED') { failures.delete(sym); nextSnapshotAt.delete(sym); const b = syncs.get(sym)!.book(now()); if (b) deps.publish(sym, b); return; }
+        if (r === 'SYNCED') {
+          failures.delete(sym);
+          nextSnapshotAt.delete(sym);
+          const sync = syncs.get(sym)!;
+          const at = now();
+          const eventAt = sync.lastAppliedEventAt;
+          if (eventAt !== null && (eventAt > at || at - eventAt > MAX_EVENT_LAG_MS)) {
+            invalidate(sym);
+            return;
+          }
+          const ts = eventAt === null ? snap.ts : at;
+          if (!Number.isFinite(ts) || ts <= 0 || ts > at) { invalidate(sym); return; }
+          const book = sync.book(ts);
+          if (book) deps.publish(sym, book);
+          return;
+        }
         if (r === 'WAITING') return; // a gap was found while replaying; the next event triggers a new snapshot
       }
       backoff(sym); // still too old after 3 tries
     } catch { if (!stopped && gen === generation) backoff(sym); /* snapshot failed: REST polling remains the fallback; retry after the backoff */ }
-    finally { inFlight.delete(sym); }
+    finally { if (gen === generation) inFlight.delete(sym); }
   };
   const connect = () => {
     if (stopped || !WS) return;
     generation++; inFlight.clear();
     for (const s of syncs.values()) s.state = 'BUFFERING';
     const sock: WebSocket = new WS(deps.url(symbols)); ws = sock;
-    sock.onopen = () => { status.connected = true; status.lastMessageAt = now(); for (const s of symbols) void snapshot(s); };
+    sock.onopen = () => {
+      if (stopped || ws !== sock) return;
+      status.connected = true; status.lastMessageAt = now();
+      for (const s of symbols) void snapshot(s);
+    };
     sock.onmessage = (m: MessageEvent) => {
+      if (stopped || ws !== sock) return;
       const received = now(); status.lastMessageAt = received;
       let msg: any; try { msg = JSON.parse(String(m.data)); } catch { return; }
       const ev = parseDepthEvent(msg?.data ?? msg); if (!ev) return;
       attempt = 0; // reconnect backoff resets only after a VALID event, not on open (a server that accepts then closes must not cause a storm)
-      const lag = Math.max(0, received - ev.E);
-      record('stream.binance.eventLagMs', lag); // provider event time → local receipt
       const sync = syncs.get(ev.s); if (!sync) return;
+      const lag = received - ev.E;
+      if (lag < 0) {
+        if (sync.requireSnapshotThrough(ev.u)) {
+          status.resyncs++;
+          invalidate(ev.s);
+          void snapshot(ev.s);
+        }
+        return;
+      }
+      record('stream.binance.eventLagMs', lag); // provider event time → local receipt
       const r = sync.onEvent(ev);
       if (r === 'SNAPSHOT_NEEDED') { status.resyncs++; invalidate(ev.s); void snapshot(ev.s); }
-      else if (r === 'APPLIED') { if (lag <= MAX_EVENT_LAG_MS) { const b = sync.book(received); if (b) deps.publish(ev.s, b); } }
+      else if (r === 'APPLIED') {
+        if (lag > MAX_EVENT_LAG_MS) invalidate(ev.s);
+        else { const b = sync.book(received); if (b) deps.publish(ev.s, b); }
+      }
       else if (r === 'BUFFERED' && sync.state === 'BUFFERING') void snapshot(ev.s);
     };
     sock.onclose = () => {
+      if (ws !== sock) return;
+      generation++;
       status.connected = false; ws = null; for (const s of symbols) invalidate(s);
       if (stopped) return;
       status.reconnects++; const delay = Math.min(60_000, 1_000 * 2 ** attempt++) * (0.5 + rand() / 2);

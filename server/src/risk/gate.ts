@@ -24,24 +24,36 @@ const currentPolicySafe = () => { try { return currentPolicy()?.version ?? null;
 
 const floorStep = floorToStep; // canonical helper (core/util.ts)
 
+export function positionNotionalLimit(equity: number, policy: RiskPolicy): number {
+  return equity * (policy.maxPositionNotionalPct / 100);
+}
+
+/** Mutable entry permissions shared by the risk evaluation and the locked OMS write. */
+export function entryAuthorityVetoes(strategyId: string, ctl = getControl()): string[] {
+  const deny: string[] = [];
+  if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');
+  if (ctl.pausedNewOrders) deny.push('NEW_ORDERS_PAUSED');
+  if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
+  else if (ctl.mode !== 'PAPER' && ctl.mode !== 'APPROVAL') deny.push('MODE_NOT_PAPER');
+  if (ctl.disabledStrategies.includes(strategyId)) deny.push(`STRATEGY_DISABLED:${strategyId}`);
+  const suspended = getSetting<string[]>('suspendedStrategies', []);
+  if (suspended.includes(strategyId)) deny.push(`STRATEGY_SUSPENDED:${strategyId}`);
+  // Part 18 lifecycle: only strategies the owner promoted (after reviewing a backtest) may trade.
+  const st = get<{ status: string }>('SELECT status FROM strategies WHERE id=?', strategyId);
+  if (!st) deny.push(`STRATEGY_NOT_REGISTERED:${strategyId}`);
+  else if (!['PAPER', 'LIVE_CANDIDATE'].includes(st.status)) deny.push(`STRATEGY_NOT_PROMOTED:${strategyId} is ${st.status} (promote to PAPER in Strategy Lab)`);
+  return deny;
+}
+
 function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const deny: string[] = []; const review: string[] = []; const ev: RiskDecision['evaluated'] = {};
   const pv = currentPolicy();
   if (!pv) return { decision: 'DENY', reasonCodes: ['POLICY_NOT_ACCEPTED: owner must review and accept a risk policy'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
-  if (pv.invalid) return { decision: 'DENY', reasonCodes: [`POLICY_INVALID: stored policy v${pv.version} failed validation (${pv.invalid}); the owner must review and re-accept it`], evaluated: {}, sizing: null, policyVersion: pv.version, ts: iso(nowTs), traceId: p.traceId };
+  if (!pv.policy) return { decision: 'DENY', reasonCodes: [`POLICY_INVALID: stored policy v${pv.version} failed validation (${pv.invalid}); the owner must review and re-accept it`], evaluated: {}, sizing: null, policyVersion: pv.version, ts: iso(nowTs), traceId: p.traceId };
   const pol: RiskPolicy = pv.policy; const account = p.account ?? PAPER_ACCOUNT;
   const ctl = getControl();
   ev.mode = ctl.mode;
-  if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');
-  if (ctl.pausedNewOrders) deny.push('NEW_ORDERS_PAUSED');
-  if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
-  if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
-  const suspended = getSetting<string[]>('suspendedStrategies', []);
-  if (suspended.includes(p.strategyId)) deny.push(`STRATEGY_SUSPENDED:${p.strategyId}`);
-  // Part 18 lifecycle: only strategies the owner promoted (after reviewing a backtest) may trade.
-  const st = get<{ status: string }>('SELECT status FROM strategies WHERE id=?', p.strategyId);
-  if (!st) deny.push(`STRATEGY_NOT_REGISTERED:${p.strategyId}`);
-  else if (!['PAPER', 'LIVE_CANDIDATE'].includes(st.status)) deny.push(`STRATEGY_NOT_PROMOTED:${p.strategyId} is ${st.status} (promote to PAPER in Strategy Lab)`);
+  deny.push(...entryAuthorityVetoes(p.strategyId, ctl));
 
   const inst = market.instruments.get(p.instrumentId);
   if (!inst) { deny.push('INSTRUMENT_UNKNOWN'); return out(); }
@@ -92,7 +104,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const perUnitLoss = estEntry - conservativeStopFill + pol.feeRate * (estEntry + conservativeStopFill);
   const riskBudget = acct.equity * (pol.riskPerTradePct / 100);
   let qty = perUnitLoss > 0 ? riskBudget / perUnitLoss : 0;
-  const maxNotional = Math.min(acct.equity * (pol.maxPositionNotionalPct / 100), acct.cash * 0.98);
+  const maxNotional = Math.min(positionNotionalLimit(acct.equity, pol), acct.cash * 0.98);
   if (qty * estEntry > maxNotional) qty = maxNotional / estEntry;
   qty = floorStep(qty, inst.stepSize);
   const notional = qty * estEntry;

@@ -115,8 +115,10 @@ export function memoryDetail(id: string) {
     relatedEvents: all<any>('SELECT * FROM ditas_events WHERE parent_event_id=? ORDER BY seq', id).map(eventRow) };
 }
 /** Verifies the event chain and snapshot hashes; rows may come from a backup snapshot instead of the live database. */
+export type BlobHashRow = { hash: string; payload: string };
+export type TwinRunHashRow = { id: string; hash: string; result: string };
 export function verifyMemory(events: any[] = all<any>('SELECT * FROM ditas_events ORDER BY seq'), snapshots: any[] = all<any>('SELECT * FROM ditas_snapshots'),
-  blobs: any[] = all<any>('SELECT * FROM ditas_blobs'), twinRuns: any[] = all<any>('SELECT * FROM ditas_twin_runs')) {
+  blobs = all<BlobHashRow>('SELECT hash, payload FROM ditas_blobs'), twinRuns = all<TwinRunHashRow>('SELECT id, hash, result FROM ditas_twin_runs')) {
   let prev = 'GENESIS';
   for (const r of events) { if (r.prev_hash !== prev || r.hash !== hashEvent(r)) return { ok: false, brokenAt: r.id }; prev = r.hash; }
   // G-02 / G-03 (100-agent audit): a twin run's stored hash must match its result, and every snapshot an event

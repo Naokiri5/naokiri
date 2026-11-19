@@ -19,6 +19,10 @@ describe('global lockout cannot block the owner (SEC-14)', () => {
     // 20 wrong guesses, each from a different address: the server-wide budget is now exhausted.
     for (let i = 0; i < 20; i++) await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: `198.51.100.${i}`, headers: json, payload: { password: 'wrong-guess-' + i } });
   });
+  it('keeps the direct owner session available when a shared proxy key is locked', () => {
+    for (let i = 0; i < 5; i++) failureGate.fail('127.0.0.1');
+    expect(auth.login(PW, '127.0.0.1', { directLocal: true })).toMatch(/^[0-9a-f]{64}$/);
+  });
   it('remote sign-in and risk-increasing step-up stay locked (brute-force protection unchanged)', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '10.0.0.1', headers: json, payload: { password: PW } })).statusCode).toBe(429);
     const h = { cookie, 'x-mia-csrf': '1', ...json };

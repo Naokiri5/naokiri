@@ -132,6 +132,30 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS idx_audit_action_ts ON audit_log(action, ts);
   CREATE INDEX IF NOT EXISTS idx_ditas_events_parent ON ditas_events(parent_event_id);
   `,
+  // v8 — Telegram command hub: owner link, update deduplication and delivery outbox.
+  `
+  CREATE TABLE telegram_links (id TEXT PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('PENDING','ACTIVE','REVOKED')),
+    code_hash TEXT, code_expires_at INTEGER, code_attempts INTEGER NOT NULL DEFAULT 0,
+    telegram_user_id INTEGER, telegram_chat_id INTEGER,
+    created_at INTEGER NOT NULL, linked_at INTEGER, revoked_at INTEGER);
+  CREATE UNIQUE INDEX telegram_links_one_active ON telegram_links(status) WHERE status = 'ACTIVE';
+  CREATE UNIQUE INDEX telegram_links_pending_code ON telegram_links(code_hash) WHERE status = 'PENDING';
+  CREATE TABLE telegram_update_dedupe (update_id INTEGER PRIMARY KEY, received_at INTEGER NOT NULL);
+  CREATE INDEX telegram_update_dedupe_age ON telegram_update_dedupe(received_at);
+  CREATE TABLE telegram_outbox (id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, text TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('QUEUED','PROVIDER_ACCEPTED','FAILED')),
+    attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL, last_error TEXT,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+  CREATE INDEX telegram_outbox_due ON telegram_outbox(status, next_attempt_at);
+  `,
+  // v9 — queued account replies must carry the link that authorized them. Old queued rows have unknown scope.
+  `
+  ALTER TABLE telegram_outbox ADD COLUMN link_id TEXT REFERENCES telegram_links(id);
+  CREATE INDEX telegram_outbox_queued_link ON telegram_outbox(link_id) WHERE status = 'QUEUED';
+  UPDATE telegram_outbox SET status = 'FAILED', text = '', last_error = 'Legacy reply has no link authorization'
+    WHERE status = 'QUEUED';
+  `,
 ];
 
 const OBJECT_RE = /CREATE\s+(?:UNIQUE\s+)?(?:VIRTUAL\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;

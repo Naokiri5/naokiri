@@ -6,8 +6,8 @@ import { networkInterfaces } from 'node:os';
 import { config, inContainer } from './config.js';
 
 const [maj, min] = process.versions.node.split('.').map(Number);
-if (maj < 22 || (maj === 22 && min < 13)) {
-  console.error(`\n✖ MIA requires Node.js 22.13 or newer (found ${process.versions.node}).\n  It uses the built-in node:sqlite module. Install Node 22 LTS or newer: https://nodejs.org/\n`);
+if (!(maj >= 24 || (maj === 22 && min >= 16))) {
+  console.error(`\n✖ MIA requires Node.js 22.16+ in the 22 LTS line, or Node.js 24+ (found ${process.versions.node}).\n  It uses the built-in SQLite FTS5 module. Download Node.js LTS: https://nodejs.org/\n`);
   process.exit(1);
 }
 
@@ -36,7 +36,7 @@ if (config.host === '0.0.0.0' || config.host === '::') {
 lines.push(`  ➜ Data:      ${config.dataDir}`, config.offline ? '  ➜ OFFLINE mode: market data polling disabled' : '');
 console.log(lines.filter(Boolean).join('\n') + '\n');
 
-// SEC-SETUP: until an owner exists, print the one-time code a non-local browser needs to create one.
+// SEC-SETUP: until an owner exists, print the one-time code required to create one.
 { const auth = await import('./api/auth.js'); if (!auth.isSetup()) auth.ensureSetupCode(true); }
 startBot();
 // Graceful drain: stop starting lanes, let in-flight ones finish, release the engine lease, stop HTTP, close SQLite.

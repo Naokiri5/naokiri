@@ -52,6 +52,22 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     updateControl('owner', { mode: 'APPROVAL' }, modeGate);
     expect(submitEntry(report(id, last), 'bot').ok).toBe(false);
   });
+  it('preserves an approval cancelled before the entry transaction starts', async () => {
+    const { setCrashHook } = await import('../src/exec/crashpoint.js');
+    updateControl('owner', { mode: 'APPROVAL' }, modeGate);
+    const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      rep.id, rep.candidateId, id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
+    const orderId = queueForApproval(rep)!;
+    setCrashHook(point => {
+      if (point === 'entry.preTx') run("UPDATE orders SET status='CANCELLED' WHERE id=?", orderId);
+    });
+    try { expect(decideApproval(orderId, true).ok).toBe(false); }
+    finally { setCrashHook(null); }
+    expect(get('SELECT status FROM orders WHERE id=?', orderId)).toMatchObject({ status: 'CANCELLED' });
+    expect(all('SELECT id FROM fills WHERE order_id=?', orderId)).toHaveLength(0);
+    expect(openPositions()).toHaveLength(0);
+  });
   it('approval workflow: queued → owner approves → filled', () => {
     updateControl('owner', { mode: 'APPROVAL' }, modeGate);
     const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });

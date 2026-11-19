@@ -3,7 +3,7 @@ import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { evaluateRisk } from '../src/risk/gate.js';
-import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
+import { acceptPolicy, currentPolicy, DEFAULT_POLICY, exitPolicy, policyHistory } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState } from '../src/portfolio/ledger.js';
 import { setSetting } from '../src/core/settings.js';
@@ -13,6 +13,17 @@ describe('Risk gate (Part 17)', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
     freshDb(); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
+  });
+  it('denies new risk and preserves the last valid exit policy after a stored JSON decoding failure', async () => {
+    const { run } = await import('../src/db/db.js');
+    const accepted = { ...DEFAULT_POLICY, feeRate: 0.002 };
+    acceptPolicy('owner', accepted);
+    run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (2, ?, 0, ?)', '{', 'fixture');
+    expect(currentPolicy()).toMatchObject({ version: 2, invalid: 'stored policy is not valid JSON' });
+    expect(currentPolicy()).not.toHaveProperty('policy');
+    expect(evaluateRisk(prop(id, last))).toMatchObject({ decision: 'DENY', reasonCodes: [expect.stringContaining('POLICY_INVALID')] });
+    expect(exitPolicy()).toEqual(accepted);
+    expect(policyHistory()[0].invalid).toBe('stored policy is not valid JSON');
   });
   it('denies when no policy is accepted', () => { expect(evaluateRisk(prop(id, last)).reasonCodes[0]).toMatch(/POLICY_NOT_ACCEPTED/); });
   it('denies in read-only mode and when unfunded', () => {
@@ -117,6 +128,10 @@ describe('stored risk policy is re-validated (MIA-RISK-006)', () => {
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     const { maxCostR: _drop, ...partial } = DEFAULT_POLICY;
     run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (2, ?, ?, ?)', JSON.stringify(partial), Date.now(), 'owner');
+    expect(currentPolicy()).toMatchObject({ version: 2, rawPolicy: partial });
+    expect(currentPolicy()).not.toHaveProperty('policy');
+    expect(policyHistory()[0]).not.toHaveProperty('policy');
+    expect(exitPolicy()).toEqual(DEFAULT_POLICY);
     const r = evaluateRisk(prop(id, last));
     expect(r.decision).toBe('DENY'); expect(r.reasonCodes[0]).toMatch(/^POLICY_INVALID: stored policy v2 .*maxCostR/);
     acceptPolicy('owner', DEFAULT_POLICY); // the owner re-accepts a valid policy

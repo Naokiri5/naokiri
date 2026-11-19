@@ -3,7 +3,7 @@ import { BookSync, parseDepthEvent, startDepthStream, type DepthEvent, type Stre
 
 /** Blueprint milestone 3: sequence-checked streaming books (Binance diff-depth algorithm), fully offline. */
 const ev = (U: number, u: number, b: [string, string][] = [], a: [string, string][] = [], s = 'BTCUSDT'): DepthEvent => ({ E: 1_000 + u, s, U, u, b, a });
-const snap = (L: number) => ({ lastUpdateId: L, bids: [[100, 1], [99, 2]] as [number, number][], asks: [[101, 1], [102, 3]] as [number, number][] });
+const snap = (L: number, ts = 1_000) => ({ lastUpdateId: L, ts, bids: [[100, 1], [99, 2]] as [number, number][], asks: [[101, 1], [102, 3]] as [number, number][] });
 
 describe('BookSync (Binance diff-depth synchronization)', () => {
   it('buffers until a snapshot, drops events already in it, and applies the overlapping one', () => {
@@ -60,7 +60,7 @@ describe('depth stream transport (fake socket)', () => {
     const published: StreamBook[] = []; let snaps = 0; let L = 10;
     const h = startDepthStream(['BTCUSDT'], { url: () => 'wss://test', snapshot: async () => { snaps++; return snap(L); }, publish: (_s, b) => published.push(b), now: () => 5_000, WebSocketImpl: FakeWS as any });
     await tick(); await tick();
-    expect(snaps).toBe(1); expect(published.at(-1)!.lastUpdateId).toBe(10);
+    expect(snaps).toBe(1); expect(published.at(-1)).toMatchObject({ lastUpdateId: 10, ts: 1_000 });
     FakeWS.last!.send({ e: 'depthUpdate', E: 4_990, s: 'BTCUSDT', U: 11, u: 12, b: [['100', '7']], a: [] });
     expect(published.at(-1)).toMatchObject({ lastUpdateId: 12, ts: 5_000 }); expect(published.at(-1)!.bids[0]).toEqual([100, 7]);
     L = 40; FakeWS.last!.send({ e: 'depthUpdate', E: 4_995, s: 'BTCUSDT', U: 30, u: 31, b: [], a: [] }); // gap → resync
@@ -95,6 +95,67 @@ describe('stream retry, lag and stall safety (MA-10, MA-18)', () => {
     FakeWS.last!.send(upd(13, 14, t - 100));
     expect(published.at(-1)!.lastUpdateId).toBe(14); // continuity kept across the lagging update
     h.stop();
+  });
+  it('keeps REST active until a snapshot covers a rejected future update', async () => {
+    const published: StreamBook[] = [];
+    const invalid: string[] = [];
+    const pending: ((value: ReturnType<typeof snap>) => void)[] = [];
+    const t = 50_000;
+    const h = startDepthStream(['BTCUSDT'], {
+      url: () => 'wss://test', snapshot: () => new Promise(resolve => pending.push(resolve)),
+      publish: (_symbol, book) => published.push(book), invalidate: symbol => invalid.push(symbol),
+      now: () => t, WebSocketImpl: FakeWS as any,
+    });
+    try {
+      await tick();
+      FakeWS.last!.send(upd(11, 12, t + 1));
+      pending.shift()!(snap(10, t - 100));
+      await tick();
+      expect(invalid).toEqual(['BTCUSDT']);
+      expect(published).toHaveLength(0);
+      FakeWS.last!.send(upd(13, 14, t - 10));
+      pending.shift()!(snap(12, t - 50));
+      await tick();
+      expect(published).toEqual([expect.objectContaining({ lastUpdateId: 14, ts: t })]);
+    } finally { h.stop(); }
+  });
+  it('discards a pending snapshot that completes after its socket closed', async () => {
+    const published: StreamBook[] = [];
+    let resolveSnapshot!: (value: ReturnType<typeof snap>) => void;
+    const h = startDepthStream(['BTCUSDT'], {
+      url: () => 'wss://test', snapshot: () => new Promise(resolve => { resolveSnapshot = resolve; }),
+      publish: (_symbol, book) => published.push(book), now: () => 50_000, WebSocketImpl: FakeWS as any,
+    });
+    try {
+      await tick();
+      FakeWS.last!.close();
+      resolveSnapshot(snap(10));
+      await tick();
+      expect(published).toHaveLength(0);
+    } finally { h.stop(); }
+  });
+  it('rejects malformed metadata and does not publish future or stale buffered events', async () => {
+    const published: StreamBook[] = [];
+    const invalid: string[] = [];
+    const t = 50_000;
+    let resolveSnapshot!: (value: ReturnType<typeof snap>) => void;
+    expect(parseDepthEvent({ ...upd(11, 12, t), E: [t] })).toBeNull();
+    expect(parseDepthEvent({ ...upd(11, 12, t), U: false })).toBeNull();
+    const h = startDepthStream(['BTCUSDT'], {
+      url: () => 'wss://test', snapshot: () => new Promise(resolve => { resolveSnapshot = resolve; }),
+      publish: (_symbol, book) => published.push(book), invalidate: symbol => invalid.push(symbol),
+      now: () => t, WebSocketImpl: FakeWS as any,
+    });
+    try {
+      await tick();
+      FakeWS.last!.send(upd(11, 12, t - 6_000));
+      resolveSnapshot(snap(10));
+      await tick();
+      expect(published).toHaveLength(0);
+      FakeWS.last!.send(upd(13, 14, t + 1));
+      expect(published).toHaveLength(0);
+      expect(invalid).toEqual(['BTCUSDT', 'BTCUSDT']);
+    } finally { h.stop(); }
   });
   it('a gap and a disconnect invalidate the published book; a silent socket is closed', async () => {
     const invalid: string[] = []; let t = 70_000;
