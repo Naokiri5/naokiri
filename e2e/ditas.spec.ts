@@ -1,12 +1,9 @@
 import { test, expect } from '@playwright/test';
 
-const PW = 'e2e owner passphrase';
+import { signInTestOwner } from './owner-fixture';
 test.beforeEach(async ({ page }) => {
   await page.context().route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
-  const auth = await page.request.get('/api/auth/state');
-  const state = await auth.json();
-  const response = await page.request.post(state.setup ? '/api/auth/login' : '/api/auth/setup', { data: { password: PW } });
-  expect(response.status()).toBe(200);
+  await signInTestOwner(page);
 });
 
 test('DITAS shows honest empty records and no fabricated simulation results', async ({ page }) => {

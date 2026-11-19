@@ -36,7 +36,7 @@ function Login({ setup, codeRequired, onDone }: { setup: boolean; codeRequired: 
         <label className="col" style={{ gap: 4 }}>Passphrase<input type="password" autoFocus value={p} onChange={(e) => setP(e.target.value)} autoComplete={setup ? 'current-password' : 'new-password'} /></label>
         {!setup && <label className="col" style={{ gap: 4 }}>Confirm<input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" /></label>}
         {!setup && codeRequired && <label className="col" style={{ gap: 4 }}>Setup code<input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" spellCheck={false} placeholder="XXXXX-XXXXX-XXXXX-XXXXX" />
-          <span className="hint">You are not on the machine running MIA, so creating the owner needs the one-time code printed in the MIA server console (the terminal running <code>npm start</code>, or the service log).</span></label>}
+          <span className="hint">Enter the one-time code printed in the MIA server console (the terminal running <code>npm start</code>, or the service log).</span></label>}
         <ErrorLine e={err} /><button className="primary" type="submit">{setup ? 'Sign in' : 'Create owner'}</button>
         {setup && privy?.enabled && privy.linked && <><div className="hint" style={{ textAlign: 'center' }}>or</div><Suspense fallback={<div className="hint">Loading Privy…</div>}><PrivySignIn config={privy} onDone={onDone} /></Suspense></>}
       </div>

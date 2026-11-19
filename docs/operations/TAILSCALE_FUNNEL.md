@@ -92,7 +92,7 @@ MIA_PRIVY_APP_ID=<your 25-character Privy App ID>
 Notes:
 - **Leave `MIA_HOST` unset.** MIA keeps listening only on this computer, and Funnel reaches it locally.
 - **`MIA_SECURE_COOKIE=1` keeps your sign-in cookie on HTTPS.** Modern browsers still allow it on `http://localhost`.
-- **MIA treats every visitor through Funnel as remote,** even though Funnel connects from this computer. So the setup code and normal lockout rules apply to them.
+- **First-time owner setup always requires the console code.** MIA applies the remote sign-in lockout rules to visitors through Funnel.
 
 ## 6. Paste the address into Privy
 

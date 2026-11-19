@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
-import { freshDb } from './helpers.js';
+import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { failureGate } from '../src/core/ratelimit.js';
 import { config } from '../src/config.js';
@@ -17,7 +17,7 @@ describe('Vike research routes', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
   beforeAll(async () => {
     freshDb(); failureGate.reset(); app = await buildApp();
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', headers: json, payload: { password: 'vike route owner' } });
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', headers: json, payload: ownerSetupPayload('vike route owner') });
     cookie = String(r.headers['set-cookie']).split(';')[0];
   });
   afterEach(() => { globalThis.fetch = realFetch; Object.assign(config, flags); delete process.env.MIA_VIKE_API_KEY; _resetProviderBlocks(); });

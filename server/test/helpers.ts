@@ -19,6 +19,12 @@ import { seedStrategies } from '../src/lab/lab.js';
 import type { Instrument } from '../src/market/types.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
 import { stats, type BtResult, type BtTrade } from '../src/lab/backtest.js';
+import { ensureSetupCode } from '../src/api/auth.js';
+
+export function ownerSetupPayload(password: string) {
+  return { password, setupCode: ensureSetupCode(false, () => {}) };
+}
+
 export function seedBacktestFixture(strategyId = STRATEGIES[0].id, oosTrades = 30) {
   const strategy = STRATEGIES.find((s) => s.id === strategyId)!;
   const trade: BtTrade = {

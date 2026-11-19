@@ -44,7 +44,7 @@ import { recentAudit, verifyAuditChain } from '../core/audit.js';
 import { botStatus, botStatusView } from '../bot/bot.js';
 import { readiness } from '../ops/readiness.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
-import { all, get, P } from '../db/db.js';
+import { all, get, P, tx } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { config } from '../config.js';
@@ -140,20 +140,25 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/ready', async (_req, reply) => { const r = readiness(botStatus); return reply.code(r.ready ? 200 : 503).send(r); });
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
   app.get('/api/auth/state', async (req) => {
-    const codeRequired = !auth.isSetup() && setupAccess(req) === 'code';
-    if (codeRequired) auth.ensureSetupCode(); // created (and printed once) on the first remote visit
-    return { setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: codeRequired };
+    const setup = auth.isSetup();
+    if (!setup) auth.ensureSetupCode();
+    return { setup, authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: !setup };
   });
   app.post('/api/auth/setup', async (req, reply) => {
-    // SEC-SETUP: first-run setup is open only to a direct loopback connection (no proxy headers) or when the owner
-    // explicitly sets MIA_ALLOW_REMOTE_SETUP=1. Everyone else — including forwarded ports and containers, which used to
-    // be allowed by location alone — must enter the one-time code printed in the server console.
+    // A connection to loopback can come from a forwarder. Only the console code authorizes first-owner setup.
     const { password, setupCode } = z.object({ password: PW, setupCode: z.string().max(64).optional() }).strict().parse(req.body);
-    if (!auth.isSetup() && setupAccess(req) === 'code') {
-      auth.ensureSetupCode();
-      if (!auth.checkSetupCode(setupCode)) { audit('anonymous', 'auth.setup.code_rejected', { ip: req.ip }); throw httpError(403, 'first-time setup from another device needs the one-time setup code printed in the MIA server console (terminal or service log)'); }
+    if (auth.isSetup()) throw httpError(400, 'owner already configured');
+    auth.ensureSetupCode();
+    if (!auth.checkSetupCode(setupCode)) {
+      audit('anonymous', 'auth.setup.code_rejected', { ip: req.ip });
+      throw httpError(403, 'first-time setup needs the one-time setup code printed in the MIA server console (terminal or service log)');
     }
-    auth.setupOwner(password); auth.clearSetupCode(); return issue(reply, auth.login(password, req.ip));
+    const token = tx(() => {
+      auth.setupOwner(password);
+      auth.clearSetupCode();
+      return auth.createSession(req.ip, 'passphrase');
+    });
+    return issue(reply, token);
   });
   app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
@@ -406,6 +411,3 @@ const isLoopback = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === 
  *  Tailscale Serve/Funnel), so the request is NOT the owner sitting at the machine. */
 const PROXY_HEADERS = ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip', 'tailscale-funnel-request', 'tailscale-user-login'];
 const isDirectLocal = (req: FastifyRequest) => isLoopback(req.ip) && !PROXY_HEADERS.some((h) => req.headers[h] !== undefined);
-function setupAccess(req: FastifyRequest): 'open' | 'code' {
-  return isDirectLocal(req) || process.env.MIA_ALLOW_REMOTE_SETUP === '1' ? 'open' : 'code';
-}

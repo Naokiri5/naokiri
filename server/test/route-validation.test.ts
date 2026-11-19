@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { freshDb } from './helpers.js';
+import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { failureGate } from '../src/core/ratelimit.js';
 
@@ -10,7 +10,7 @@ describe('route input validation', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let h: Record<string, string> = {};
   beforeAll(async () => {
     freshDb(); failureGate.reset(); app = await buildApp();
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', headers: json, payload: { password: PW } });
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', headers: json, payload: ownerSetupPayload(PW) });
     h = { ...json, cookie: String(r.headers['set-cookie']).split(';')[0], 'x-mia-csrf': '1' };
   });
   afterAll(async () => { await app.close(); });

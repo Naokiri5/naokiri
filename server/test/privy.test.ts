@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
-import { freshDb } from './helpers.js';
+import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { failureGate } from '../src/core/ratelimit.js';
 import { _setPrivyKeyForTests, contentSecurityPolicy } from '../src/security/privy.js';
@@ -28,7 +28,7 @@ describe('Privy sign-in', () => {
     otherPriv = (await generateKeyPair('ES256')).privateKey as CryptoKey;
     _setPrivyKeyForTests({ keys: [{ ...(await exportJWK(k.publicKey)), kid: 'k1', alg: 'ES256', use: 'sig' }] });
     freshDb(); failureGate.reset(); app = await buildApp();
-    cookie = String((await post('/api/auth/setup', { password: PW })).headers['set-cookie']).split(';')[0];
+    cookie = String((await post('/api/auth/setup', ownerSetupPayload(PW))).headers['set-cookie']).split(';')[0];
   });
   beforeEach(() => failureGate.reset());
   afterAll(async () => { await app.close(); delete process.env.MIA_PRIVY_APP_ID; _setPrivyKeyForTests(null); });
