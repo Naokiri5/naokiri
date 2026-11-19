@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { migrate } from '../src/db/migrations.js';
 
-describe('Telegram v8 migration', () => {
+describe('Telegram migrations', () => {
   it.each([5, 7])('preserves data and applied migrations when upgrading from v%i', (version) => {
     const db = new DatabaseSync(':memory:');
     try {
@@ -30,6 +30,27 @@ describe('Telegram v8 migration', () => {
       migrate(db);
       expect(db.prepare('SELECT received_at FROM telegram_update_dedupe WHERE update_id = 123').get())
         .toEqual({ received_at: 456 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it('invalidates legacy queued replies when adding link authorization', () => {
+    const db = new DatabaseSync(':memory:');
+    try {
+      migrate(db, 8);
+      const v8 = db.prepare('SELECT checksum FROM schema_migrations WHERE version = 8');
+      const checksum = v8.get();
+      const insert = db.prepare('INSERT INTO telegram_outbox(id, chat_id, text, status, next_attempt_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      insert.run('queued', 123, 'Legacy account reply', 'QUEUED', 1, 1, 1);
+      insert.run('sent', 123, 'Already accepted', 'PROVIDER_ACCEPTED', 1, 1, 1);
+
+      migrate(db);
+      expect(v8.get()).toEqual(checksum);
+      expect(db.prepare('SELECT id, link_id, status, text FROM telegram_outbox ORDER BY id').all()).toEqual([
+        { id: 'queued', link_id: null, status: 'FAILED', text: '' },
+        { id: 'sent', link_id: null, status: 'PROVIDER_ACCEPTED', text: 'Already accepted' },
+      ]);
     } finally {
       db.close();
     }

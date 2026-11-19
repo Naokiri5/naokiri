@@ -149,6 +149,13 @@ const MIGRATIONS: string[] = [
     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
   CREATE INDEX telegram_outbox_due ON telegram_outbox(status, next_attempt_at);
   `,
+  // v9 — queued account replies must carry the link that authorized them. Old queued rows have unknown scope.
+  `
+  ALTER TABLE telegram_outbox ADD COLUMN link_id TEXT REFERENCES telegram_links(id);
+  CREATE INDEX telegram_outbox_queued_link ON telegram_outbox(link_id) WHERE status = 'QUEUED';
+  UPDATE telegram_outbox SET status = 'FAILED', text = '', last_error = 'Legacy reply has no link authorization'
+    WHERE status = 'QUEUED';
+  `,
 ];
 
 const OBJECT_RE = /CREATE\s+(?:UNIQUE\s+)?(?:VIRTUAL\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;
