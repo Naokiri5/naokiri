@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/index.js';
 import { closeDb, run } from '../src/db/db.js';
-import { freshDb } from './helpers.js';
+import { freshDb, ownerSetupPayload } from './helpers.js';
 
 describe('paper execution API boundary', () => {
   let app: Awaited<ReturnType<typeof buildApp>>, cookie: string;
   beforeEach(async () => {
     freshDb(false); app = await buildApp();
-    const setup = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'execution integration owner' } });
+    const setup = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('execution integration owner') });
     expect(setup.statusCode).toBe(200); cookie = String(setup.headers['set-cookie']).split(';')[0];
   });
   afterEach(async () => { await app.close(); closeDb(); });
