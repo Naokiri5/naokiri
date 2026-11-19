@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { config } from '../src/config.js';
 import { market } from '../src/market/store.js';
 import { syncDepthStreams, stopDepthStreams, streamFresh, refreshBooks } from '../src/market/fabric.js';
@@ -14,7 +14,8 @@ class FakeWS {
 }
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const flags = { streaming: config.streaming, offline: config.offline };
-afterEach(() => { stopDepthStreams(); Object.assign(config, flags); FakeWS.last = null; });
+beforeEach(() => { vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 10, 19)); });
+afterEach(() => { stopDepthStreams(); Object.assign(config, flags); FakeWS.last = null; vi.restoreAllMocks(); });
 
 describe('streaming books wired into the market fabric', () => {
   it('is a no-op unless MIA_STREAMING is on (and never runs offline)', () => {

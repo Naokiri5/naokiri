@@ -24,8 +24,14 @@ export const LIVE_EXECUTION_AVAILABLE = false;
  * SAFE-01 (ticket #1): a mode TRANSITION fails closed. It needs the owner AND an explicit release-gate check that
  * returns ok; a missing gate is a refusal, never an approval. Risk-reducing patches (pause, emergency, disabling
  * strategies) need no gate and remain available to every actor.
+ * Callers with a surrounding database transaction can defer the event until after commit.
  */
-export function updateControl(actor: string, patch: Partial<ControlState>, gateCheck?: (m: Mode) => { ok: boolean; reason?: string }) {
+export function updateControl(
+  actor: string,
+  patch: Partial<ControlState>,
+  gateCheck?: (m: Mode) => { ok: boolean; reason?: string },
+  deferPublish?: (publish: () => void) => void,
+) {
   const cur = getControl();
   if (patch.mode && patch.mode !== cur.mode) {
     if (actor !== 'owner') throw new Error('only the authenticated owner may change execution mode');
@@ -42,6 +48,8 @@ export function updateControl(actor: string, patch: Partial<ControlState>, gateC
   const next = { ...cur, ...patch, updatedAt: Date.now() };
   setSetting('control', next);
   audit(actor, 'control.update', { from: cur, to: next });
-  bus.publish('mode', { ...next, display: displayMode(next) });
+  const publish = () => bus.publish('mode', { ...next, display: displayMode(next) });
+  if (deferPublish) deferPublish(publish);
+  else publish();
   return next;
 }

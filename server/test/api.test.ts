@@ -1,6 +1,7 @@
 import { seedInstrument, seedBacktestFixture, ownerSetupPayload } from './helpers.js';
 import { describe, it, expect, beforeAll, afterAll , vi } from 'vitest';
-import { all, closeDb, openDb } from '../src/db/db.js';
+import { all, closeDb, getDb, openDb } from '../src/db/db.js';
+import { cashBalance, ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { buildApp } from '../src/index.js';
 import { DEFAULT_POLICY } from '../src/risk/policy.js';
 import { commandMode, JOE_TOOL_NAMES } from '../src/joe/joe.js';
@@ -125,6 +126,33 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     const audit = JSON.stringify(all('SELECT * FROM audit_log'));
     expect(audit).toContain('auth.stepup.failed'); expect(audit).not.toContain(password); expect(audit).not.toContain('incorrect step-up passphrase');
     expect(JSON.stringify(getControl())).not.toContain('password');
+  });
+  it('refuses a withdrawal when an entry uses cash before the allocation write lock', async () => {
+    const post = (direction: 'DEPOSIT' | 'WITHDRAW', amount: number) => app.inject({
+      method: 'POST', url: '/api/bot/allocation', headers: H(), payload: { direction, amount },
+    });
+    const initial = cashBalance();
+    expect((await post('DEPOSIT', 100)).statusCode).toBe(200);
+    const existingWithdrawals = all("SELECT id FROM ledger_entries WHERE kind='WITHDRAW'");
+    const db = getDb();
+    const exec = db.exec.bind(db);
+    let interleaved = false;
+    const hook = vi.spyOn(db, 'exec').mockImplementation(sql => {
+      if (sql === 'BEGIN IMMEDIATE' && !interleaved) {
+        interleaved = true;
+        // Simulate a paper entry that already committed its cash debit before allocation acquired the lock.
+        ledger(PAPER_ACCOUNT, 'BUY', -75);
+      }
+      exec(sql);
+    });
+    try {
+      const response = await post('WITHDRAW', initial + 80);
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatch(/available paper cash/);
+      expect(interleaved).toBe(true);
+      expect(cashBalance()).toBe(initial + 25);
+      expect(all("SELECT id FROM ledger_entries WHERE kind='WITHDRAW'")).toEqual(existingWithdrawals);
+    } finally { hook.mockRestore(); }
   });
   it('every GET workspace endpoint responds', async () => {
     for (const u of ['/api/overview', '/api/markets', '/api/scanner', '/api/intelligence', '/api/risk', '/api/bot', '/api/portfolio', '/api/orders', '/api/journal', '/api/calendar', '/api/lab', '/api/news', '/api/whales', '/api/wallet', '/api/connections', '/api/notifications', '/api/settings', '/api/qa', '/api/audit', '/api/joe', '/api/bubbles', '/api/dex', '/api/fx'])
