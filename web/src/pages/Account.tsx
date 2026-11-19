@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Empty, ErrorLine, Page, Tabs } from '../ui';
 import { StepUp } from './Trading';
+import { TelegramConnection } from './TelegramConnection';
 
 export function Wallet() {
   const { data, error, reload } = useApi('/api/wallet');
@@ -52,7 +53,7 @@ export function Connections() {
     <div style={{ height: 14 }} />
     <div className="grid g3">
       <Card title="X (Twitter)"><Badge v="PENDING_CREDENTIALS" /><p className="muted">OAuth 2.0 PKCE linking requires an X developer app (paid read tier). Social posts would be untrusted data feeding the news/social worker only.</p></Card>
-      <Card title="Telegram"><p className="muted">Notifications: set <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> server-side (never in the browser). Launch-source monitoring requires approved channel configuration.</p></Card>
+      <TelegramConnection />
       <Card title="Exchange / broker (read-only)"><p className="muted">Read-only API keys for balance sync and a licensed equities/commodities feed are not configured. Live trading keys are deliberately unsupported until release gates pass.</p></Card>
     </div>
   </Page>;

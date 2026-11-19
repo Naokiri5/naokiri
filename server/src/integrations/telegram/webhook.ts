@@ -9,7 +9,7 @@ import { uid } from '../../core/util.js';
 import { releaseLease, tryAcquireLease } from '../../ops/lease.js';
 import * as auth from '../../api/auth.js';
 import { handleCommand, type TelegramReply } from './commands.js';
-import { createLinkCode, linkStatus, LinkError, revokeLink } from './link.js';
+import { cancelLinkCode, createLinkCode, linkStatus, LinkError, revokeLink } from './link.js';
 
 /**
  * Telegram webhook + owner link API (MIA-TG-01). Registered as its own Fastify plugin so the session guard in
@@ -221,6 +221,11 @@ export async function telegramRoutes(app: FastifyInstance) {
       if (e instanceof LinkError) return reply.code(409).send({ error: e.message });
       throw e;
     }
+  });
+
+  app.post('/api/integrations/telegram/link/cancel', async (req, reply) => {
+    if (!ownerGuard(req, reply, true)) return;
+    return { ok: true, canceled: cancelLinkCode() };
   });
 
   app.post('/api/integrations/telegram/unlink', async (req, reply) => {
