@@ -89,11 +89,12 @@ describe('Telegram webhook (MIA-TG-01)', () => {
     const { code } = createLinkCode();
     redeemLinkCode(code, OWNER_USER, chat);
     await hook(msg('/pause', OWNER_USER, chat));
+    expect(outbox().at(-1)!.text).toMatch(/Resume only in the MIA app/);
     expect(getControl().pausedNewOrders).toBe(true);
     expect(all<{ action: string }>("SELECT action FROM audit_log WHERE action='control.update'").length).toBeGreaterThan(0);
     await hook(msg('/resume', OWNER_USER, chat));
     expect(getControl().pausedNewOrders).toBe(true);
-    expect(outbox().at(-1)!.text).toMatch(/Resume only in the MIA app/);
+    expect(outbox().at(-1)!.text).toMatch(/Not supported over Telegram/);
   });
 
   it('denies trading commands and never echoes their arguments', async () => {
