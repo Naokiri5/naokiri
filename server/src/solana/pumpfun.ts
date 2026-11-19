@@ -85,13 +85,16 @@ export function decodeMigration(data: Buffer, signature: string, slot: number): 
   } catch { return null; }
 }
 
-const INVOKE = /^Program (\S+) invoke \[\d+\]$/;
-const LEAVE = /^Program (\S+) (?:success|failed.*)$/;
+// Program ids are base58, so a line a program prints itself ("Program log: …", always prefixed by the runtime) can never
+// match these frame lines (review fix: an id like "log:" used to be accepted).
+const INVOKE = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) invoke \[(\d+)\]$/;
+const LEAVE = /^Program ([1-9A-HJ-NP-Za-km-z]{32,44}) (?:success|failed.*)$/;
 
 /**
  * Decode the Pump.fun events of one successful transaction from its log lines. A "Program data:" line counts only while
  * the Pump.fun program itself is the executing program: any program can print bytes that look like a Pump.fun event,
- * so lines emitted by another program (or outside any invocation) are ignored.
+ * so lines emitted by another program (or outside any invocation) are ignored. The invoke stack must stay consistent
+ * (depth N follows N-1, each success/failed closes the frame on top); any inconsistency rejects the whole transaction.
  */
 export function parsePumpLogs(logs: readonly unknown[], signature: string, slot: number): Array<PumpLaunch | PumpGraduation> {
   const out: Array<PumpLaunch | PumpGraduation> = [];
@@ -99,9 +102,15 @@ export function parsePumpLogs(logs: readonly unknown[], signature: string, slot:
   for (const line of logs) {
     if (typeof line !== 'string') continue;
     const inv = INVOKE.exec(line);
-    if (inv) { stack.push(inv[1]); continue; }
+    if (inv) {
+      if (Number(inv[2]) !== stack.length + 1) return []; // a frame line out of order: do not trust this transaction
+      stack.push(inv[1]); continue;
+    }
     const leave = LEAVE.exec(line);
-    if (leave) { if (stack.at(-1) === leave[1]) stack.pop(); continue; }
+    if (leave) {
+      if (stack.at(-1) !== leave[1]) return [];
+      stack.pop(); continue;
+    }
     if (!line.startsWith('Program data: ') || stack.at(-1) !== PUMP_PROGRAM) continue;
     const data = Buffer.from(line.slice('Program data: '.length), 'base64');
     const ev = decodeCreate(data, signature, slot) ?? decodeMigration(data, signature, slot);

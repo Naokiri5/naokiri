@@ -59,6 +59,7 @@ Full-suite results for this branch are recorded in the PR description.
 | Traffic guard, reconnect, stop | Over 600 messages a minute disconnects and pauses 10 min; backoff reconnect; stop is final | same | pass; fails without the guard |
 | Error storm (found live) | Stopping or erroring a connecting socket fires one error, not a loop (Pump.fun feed and Binance depth stream) | same, `server/test/depth-stream.test.ts` | pass; both fail on the old handlers |
 | Watchlist | Feed view present; a graduated mint gets a note; status unchanged; never tradable | `server/test/solana-pumpfun.test.ts` | pass |
+| Security review fixes | Printed `Program log:` text cannot open or close a frame; wrong invoke depth or a frame closed by another program rejects the transaction; non-base58 signatures dropped; bot stop is sticky until bot start, while turning the setting off and on reopens; a half-open stalled socket is replaced without waiting for `onclose` | same | pass; each of the 8 checks fails when its fix is removed |
 | UI | Panel shows launches and graduations, no buttons or links; off state explains how to enable | `e2e/solana.spec.ts` | pass |
 | Live (manual) | MIA's feed code on mainnet for 60 s: 21 launches decoded, no errors; real graduation decoded from a fetched `migrate_v2` | scratch scripts (not committed) | **pass** (2026-11-19) |
 

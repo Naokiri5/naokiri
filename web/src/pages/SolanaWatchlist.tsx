@@ -40,12 +40,12 @@ function PumpFunPanel({ feed }: { feed: PumpFeedView }) {
     <div className="hint">New tokens sit on a bonding curve and are extremely risky; names are chosen by their creators. Graduated means the curve filled and liquidity moved to a PumpSwap pool. Not a trade signal.</div>
     <div className="grid g2" style={{ marginTop: 8 }}>
       <div className="tablewrap"><table><thead><tr><th>Latest launches</th><th>Mint</th><th>Creator</th><th className="num">When</th></tr></thead><tbody>
-        {feed.launches.map((l) => <tr key={l.signature}><td><b>{l.symbol}</b> <span className="faint">{l.name}</span></td>
+        {feed.launches.map((l) => <tr key={`${l.signature}:${l.mint}`}><td><b>{l.symbol}</b> <span className="faint">{l.name}</span></td>
           <td className="mono faint" style={{ fontSize: 11, wordBreak: 'break-all', userSelect: 'all' }}>{l.mint}</td>
           <td className="mono faint" title={l.creator}>{short(l.creator)}</td><td className="num">{l.createdAt ? fmt.ago(l.createdAt) : '—'}</td></tr>)}
       </tbody></table>{!feed.launches.length && <Empty>No launches seen since the server started.</Empty>}</div>
       <div className="tablewrap"><table><thead><tr><th>Latest graduations</th><th>PumpSwap pool</th><th className="num">When</th></tr></thead><tbody>
-        {feed.graduations.map((g) => <tr key={g.signature}><td className="mono faint" style={{ fontSize: 11, wordBreak: 'break-all', userSelect: 'all' }}>{g.mint}</td>
+        {feed.graduations.map((g) => <tr key={`${g.signature}:${g.mint}`}><td className="mono faint" style={{ fontSize: 11, wordBreak: 'break-all', userSelect: 'all' }}>{g.mint}</td>
           <td className="mono faint" title={g.pool}>{short(g.pool)}</td><td className="num">{g.graduatedAt ? fmt.ago(g.graduatedAt) : '—'}</td></tr>)}
       </tbody></table>{!feed.graduations.length && <Empty>No graduations seen since the server started.</Empty>}</div>
     </div>

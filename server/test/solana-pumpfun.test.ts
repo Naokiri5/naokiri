@@ -5,7 +5,7 @@ import { freshDb } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { discover } from '../src/market/discover.js';
 import { parsePumpLogs, decodeCreate, PUMP_PROGRAM, PUMP_MINT_AUTHORITY, PUMP_WITHDRAW_AUTHORITY, type PumpLaunch, type PumpGraduation } from '../src/solana/pumpfun.js';
-import { syncPumpFeed, stopPumpFeed, pumpFeedView, pumpFeedUrl, handlePumpMessage, _resetPumpFeed, PUMP_FEED_MAX_MSGS_PER_MIN } from '../src/solana/pumpFeed.js';
+import { syncPumpFeed, stopPumpFeed, resumePumpFeed, pumpFeedView, pumpFeedUrl, handlePumpMessage, _resetPumpFeed, PUMP_FEED_MAX_MSGS_PER_MIN } from '../src/solana/pumpFeed.js';
 
 /**
  * Omega PR-07: read-only Pump.fun launch/graduation feed. The decoder is tested on real mainnet transaction logs
@@ -14,6 +14,8 @@ import { syncPumpFeed, stopPumpFeed, pumpFeedView, pumpFeedUrl, handlePumpMessag
 const fx = JSON.parse(readFileSync(join(__dirname, 'fixtures', 'pumpfun-mainnet-logs.json'), 'utf8')) as Record<'create' | 'graduation' | 'duplicateMigration', { signature: string; slot: number; logs: string[] }>;
 const CREATE_MINT = 'GS6Ab6FQbmv8cthkYXJRsazhy2wXMVzymmiQrcc2pump';
 const GRAD_MINT = 'Fch8UPaxDCz1QMR2ZMwcDykk9FNih26LmgyGKveRpump';
+/** Well-formed (base58, 87 chars) but not a real transaction: lets a test isolate one check from the signature check. */
+const OTHER_SIG = '2'.repeat(87);
 
 class FakeWS {
   static all: FakeWS[] = [];
@@ -62,6 +64,23 @@ describe('decoding real mainnet logs with the official IDL layout', () => {
     expect(decodeCreate(huge, 's', 1)).toBeNull();
     expect(parsePumpLogs([`Program ${PUMP_PROGRAM} invoke [1]`, 'Program data: !!!not base64', 'Program data: ', 42, null], 'sig', 1)).toEqual([]);
   });
+  describe('the invoke stack cannot be forged (review fixes)', () => {
+    const dataLine = () => fx.create.logs.find((l) => l.startsWith('Program data: ') && decodeCreate(Buffer.from(l.slice(14), 'base64'), 's', 1))!;
+    const FAKE = 'Fake111111111111111111111111111111111111111';
+    it('text a program prints ("Program log: ...") never opens or closes a frame', () => {
+      // Inside a real Pump.fun frame, printed frame-like text must not hide the real event...
+      expect(parsePumpLogs([`Program ${PUMP_PROGRAM} invoke [1]`, 'Program log: invoke [2]', dataLine(), 'Program log: success', `Program ${PUMP_PROGRAM} success`], 'sig', 1)).toHaveLength(1);
+      // ...and inside another program's frame, a printed "success" must not pop it to expose a Pump.fun frame below.
+      expect(parsePumpLogs([`Program ${PUMP_PROGRAM} invoke [1]`, `Program ${FAKE} invoke [2]`, 'Program log: success', dataLine(), `Program ${FAKE} success`, `Program ${PUMP_PROGRAM} success`], 'sig', 1)).toEqual([]);
+    });
+    it('a frame at the wrong depth rejects the whole transaction', () => {
+      expect(parsePumpLogs([`Program ${PUMP_PROGRAM} invoke [2]`, dataLine(), `Program ${PUMP_PROGRAM} success`], 'sig', 1)).toEqual([]);
+    });
+    it('a frame closed by a different program rejects the whole transaction, including events already decoded', () => {
+      expect(parsePumpLogs([`Program ${PUMP_PROGRAM} invoke [1]`, dataLine(), `Program ${FAKE} success`], 'sig', 1)).toEqual([]);
+      expect(parsePumpLogs([`Program ${PUMP_PROGRAM} invoke [1]`, dataLine(), `Program ${FAKE} failed: custom program error: 0x1`], 'sig', 1)).toEqual([]);
+    });
+  });
 });
 
 describe('the live feed (fake WebSocket)', () => {
@@ -96,7 +115,7 @@ describe('the live feed (fake WebSocket)', () => {
     ws.msg(note(11, fx.graduation)); // a graduation on the launch subscription is trusted as neither kind
     expect(pumpFeedView().graduations).toEqual([]);
     ws.msg(note(22, fx.graduation));
-    ws.msg(note(22, { ...fx.graduation, signature: 'failed-tx' }, { InstructionError: [0, 'x'] }));
+    ws.msg(note(22, { ...fx.graduation, signature: OTHER_SIG }, { InstructionError: [0, 'x'] })); // failed transaction
     ws.msg(note(99, fx.create)); ws.msg('not json');
     const v = pumpFeedView();
     expect(v.launches.map((l) => l.mint)).toEqual([CREATE_MINT]);
@@ -127,6 +146,40 @@ describe('the live feed (fake WebSocket)', () => {
     const subs = new Map<number, 'launch' | 'graduation'>([[11, 'launch']]);
     expect(handlePumpMessage(JSON.stringify({ method: 'somethingElse' }), subs, 1)).toBe(0);
     expect(handlePumpMessage(JSON.stringify(note(11, fx.create)), subs, 1)).toBe(1);
+  });
+  it('a message whose signature is not a base58 transaction signature is dropped (review fix)', () => {
+    const subs = new Map<number, 'launch' | 'graduation'>([[11, 'launch']]);
+    for (const signature of ['not a signature!', 'abc', `${fx.create.signature}<b>`, '2'.repeat(89), 42]) {
+      expect(handlePumpMessage(note(11, { ...fx.create, signature: signature as string }), subs, 1), String(signature)).toBe(0);
+    }
+    expect(pumpFeedView().launches).toEqual([]);
+    expect(handlePumpMessage(note(11, fx.create), subs, 1)).toBe(1); // the real one (already parsed object) is accepted
+  });
+  it('after the bot stops, a background pass cannot start the feed again until the bot starts (review fix)', () => {
+    stopPumpFeed();
+    syncPumpFeed({ WebSocketImpl: FakeWS as unknown as typeof WebSocket });
+    expect(FakeWS.all).toHaveLength(0);
+    resumePumpFeed();
+    syncPumpFeed({ WebSocketImpl: FakeWS as unknown as typeof WebSocket });
+    expect(FakeWS.all).toHaveLength(1);
+  });
+  it('turning the setting off closes the socket; turning it back on reopens it (not a bot stop)', () => {
+    const ws = start();
+    delete process.env.MIA_PUMPFUN_FEED; start();
+    expect(ws.closed).toBe(true);
+    process.env.MIA_PUMPFUN_FEED = '1'; start();
+    expect(FakeWS.all).toHaveLength(2);
+  });
+  it('a silent half-open socket (close() never reports back) is dropped and replaced (review fix)', () => {
+    vi.useFakeTimers();
+    class HalfOpenWS extends FakeWS { close() { this.closed = true; } } // never fires onclose
+    syncPumpFeed({ WebSocketImpl: HalfOpenWS as unknown as typeof WebSocket, random: () => 0.5 });
+    const ws = FakeWS.all[0]; subscribe(ws);
+    vi.advanceTimersByTime(110_000); expect(FakeWS.all).toHaveLength(1);       // quiet, but not yet stalled
+    vi.advanceTimersByTime(20_000);
+    expect(ws.closed).toBe(true);
+    expect(pumpFeedView()).toMatchObject({ connected: false, lastError: 'STALLED', reconnects: 1 });
+    vi.advanceTimersByTime(1_000); expect(FakeWS.all).toHaveLength(2);          // replaced without waiting for onclose
   });
 });
 

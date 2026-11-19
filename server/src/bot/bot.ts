@@ -1,5 +1,5 @@
 import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBooks, syncDepthStreams, stopDepthStreams, depthStreamStatus } from '../market/fabric.js';
-import { stopPumpFeed } from '../solana/pumpFeed.js'; // Omega PR-07: read-only Pump.fun feed stops with the bot
+import { stopPumpFeed, resumePumpFeed } from '../solana/pumpFeed.js'; // Omega PR-07: read-only Pump.fun feed follows the bot
 import { relayOnce } from '../fabric/relay.js';
 import { market } from '../market/store.js';
 import { scanOnce } from '../market/scanner.js';
@@ -161,6 +161,7 @@ async function backupPass() {
 export function startBot() {
   if (botStatus.running || config.offline) return;
   botStatus.running = true; botStatus.startedAt = Date.now(); botStatus.monitorFailing = false; takeoverRefused = false;
+  resumePumpFeed();
   journal('SYSTEM', `MIA engine started in ${displayMode()} mode`);
   hotLane().then(() => backgroundLane()).then(() => scanLane()).catch((e: any) => { botStatus.lastError = `startup: ${e?.message ?? e}`; });
   timers = [

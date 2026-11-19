@@ -8,6 +8,8 @@
  *
  * Opt-in: MIA_PUMPFUN_FEED=1 and a Solana RPC (MIA_SOLANA_RPC_URL; the WebSocket URL is the same host over wss, or
  * MIA_SOLANA_WS_URL). In memory only (latest 50 of each): a restart starts empty. Never an order, signal or link.
+ * Anyone can send cheap transactions that mention these accounts, so the traffic guard can be tripped on purpose; that
+ * only pauses the feed for 10 minutes (availability), it never costs unbounded bandwidth.
  */
 import { solanaRpcUrl } from '../providers/solanaRpc.js';
 import { closeSocketOnce } from '../core/util.js';
@@ -30,6 +32,9 @@ const launches: PumpLaunch[] = [];
 const graduations: PumpGraduation[] = [];
 const status: PumpFeedStatus = { enabled: false, connected: false, lastEventAt: null, reconnects: 0, lastError: null, launchesSeen: 0, graduationsSeen: 0 };
 let stopFn: (() => void) | null = null;
+/** Set by stopPumpFeed (the bot stopped): a background pass still in flight must not start the feed again. */
+let halted = false;
+const SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 
 export const pumpFeedEnabled = () => process.env.MIA_PUMPFUN_FEED?.trim() === '1';
 
@@ -58,14 +63,14 @@ function remember<T extends { signature: string; mint: string }>(list: T[], item
   return added;
 }
 
-/** Handle one raw WebSocket message. Exported for tests. Returns the number of events stored. */
+/** Handle one WebSocket message (raw text or already parsed). Exported for tests. Returns the number of events stored. */
 export function handlePumpMessage(raw: unknown, subs: Map<number, 'launch' | 'graduation'>, now: number): number {
-  let m: any;
-  try { m = JSON.parse(String(raw)); } catch { return 0; }
+  let m: any = raw;
+  if (typeof raw === 'string') { try { m = JSON.parse(raw); } catch { return 0; } }
   if (m?.method !== 'logsNotification') return 0;
   const kind = subs.get(m.params?.subscription);
   const v = m.params?.result?.value; const slot = m.params?.result?.context?.slot;
-  if (!kind || !v || v.err !== null || typeof v.signature !== 'string' || !Array.isArray(v.logs) || !Number.isSafeInteger(slot)) return 0;
+  if (!kind || !v || v.err !== null || typeof v.signature !== 'string' || !SIGNATURE.test(v.signature) || !Array.isArray(v.logs) || !Number.isSafeInteger(slot)) return 0;
   const events = parsePumpLogs(v.logs, v.signature, slot);
   const ls = events.filter((e): e is PumpLaunch => e.kind === 'LAUNCH');
   const gs = events.filter((e): e is PumpGraduation => e.kind === 'GRADUATION');
@@ -78,14 +83,19 @@ export function handlePumpMessage(raw: unknown, subs: Map<number, 'launch' | 'gr
 /** Start (idempotent) or stop the feed to match the settings. Called from the background refresh. */
 export function syncPumpFeed(deps: PumpFeedDeps = {}) {
   status.enabled = pumpFeedEnabled();
+  if (halted) { closeFeed(); return; }
   const url = status.enabled ? pumpFeedUrl() : null;
   if (status.enabled && !url) status.lastError = 'NO_SOLANA_ENDPOINT';
-  if (!url) { stopPumpFeed(); return; }
+  if (!url) { closeFeed(); return; }
   if (stopFn) return;
   stopFn = startPumpFeed(url, deps);
 }
 
-export function stopPumpFeed() { stopFn?.(); stopFn = null; status.connected = false; }
+/** Close the socket now. A later syncPumpFeed may open it again (unlike stopPumpFeed). */
+function closeFeed() { stopFn?.(); stopFn = null; status.connected = false; }
+/** Stop the feed and keep it stopped until resumePumpFeed() (bot start). */
+export function stopPumpFeed() { halted = true; closeFeed(); }
+export function resumePumpFeed() { halted = false; }
 
 function startPumpFeed(url: string, deps: PumpFeedDeps) {
   const WS = deps.WebSocketImpl ?? (globalThis as any).WebSocket;
@@ -93,7 +103,11 @@ function startPumpFeed(url: string, deps: PumpFeedDeps) {
   let ws: WebSocket | null = null; let stopped = false; let attempt = 0; let timer: ReturnType<typeof setTimeout> | null = null;
   let lastMessageAt = 0; let window: number[] = [];
   const subs = new Map<number, 'launch' | 'graduation'>(); const pending = new Map<number, 'launch' | 'graduation'>();
-  const scheduleReconnect = (delay: number) => { status.reconnects++; timer = setTimeout(connect, delay); };
+  const scheduleReconnect = (delay: number) => {
+    status.reconnects++; timer = setTimeout(connect, delay);
+    (timer as unknown as { unref?: () => void }).unref?.(); // never keeps the process alive on its own
+  };
+  const backoff = () => Math.min(60_000, 1_000 * 2 ** attempt++) * (0.5 + rand() / 2);
   function connect() {
     if (stopped || !WS) { if (!WS) status.lastError = 'NO_WEBSOCKET'; return; }
     subs.clear(); pending.clear(); window = [];
@@ -122,13 +136,13 @@ function startPumpFeed(url: string, deps: PumpFeedDeps) {
         if (Number.isSafeInteger(m.result)) subs.set(m.result, kind); else status.lastError = 'SUBSCRIBE_REJECTED';
         return;
       }
-      if (handlePumpMessage(String(ev.data), subs, t) > 0) { attempt = 0; status.lastError = null; }
+      if (handlePumpMessage(m, subs, t) > 0) { attempt = 0; status.lastError = null; }
     };
     sock.onclose = () => {
       if (ws !== sock) return;
       status.connected = false; ws = null;
       if (stopped) return;
-      scheduleReconnect(Math.min(60_000, 1_000 * 2 ** attempt++) * (0.5 + rand() / 2));
+      scheduleReconnect(backoff());
     };
     sock.onerror = () => {
       if (stopped) return; // errors from a socket we are closing on purpose are expected
@@ -137,7 +151,12 @@ function startPumpFeed(url: string, deps: PumpFeedDeps) {
     };
   }
   const watchdog = setInterval(() => {
-    if (status.connected && ws && now() - lastMessageAt > PUMP_FEED_STALL_MS) { status.lastError = 'STALLED'; closeSocketOnce(ws); }
+    // A half-open socket may never deliver onclose, so do not wait for it: drop it and reconnect now (review fix).
+    if (status.connected && ws && now() - lastMessageAt > PUMP_FEED_STALL_MS) {
+      const stale = ws; ws = null; status.connected = false; status.lastError = 'STALLED';
+      closeSocketOnce(stale);
+      scheduleReconnect(backoff());
+    }
   }, 10_000);
   (watchdog as unknown as { unref?: () => void }).unref?.();
   connect();
@@ -154,6 +173,6 @@ export const pumpLaunchOf = (mint: string) => launches.find((l) => l.mint === mi
 
 /** Tests only. */
 export function _resetPumpFeed() {
-  stopPumpFeed(); launches.length = 0; graduations.length = 0;
+  stopPumpFeed(); halted = false; launches.length = 0; graduations.length = 0;
   Object.assign(status, { enabled: false, connected: false, lastEventAt: null, reconnects: 0, lastError: null, launchesSeen: 0, graduationsSeen: 0 });
 }
