@@ -9,6 +9,7 @@
 | DEX Screener | api.dexscreener.com | token profiles, pairs, liquidity, txns | Near-real-time | none | DEX Screener API terms, 60 req/min | LIVE |
 | Frankfurter (ECB) | api.frankfurter.dev | FX reference fixing | **Daily**, not tradeable | none | ECB reuse with attribution | LIVE (display only) |
 | Google News RSS | news.google.com | headlines | Near-real-time | none | **Personal, non-commercial only**. Replace before commercial use | LIVE |
+| SEC EDGAR | data.sec.gov | Recent filing metadata by CIK | Near-real-time | Contact User-Agent | SEC Fair Access policy | Disabled until configured |
 | Anthropic Claude API | api.anthropic.com | Trader Joe | — | `ANTHROPIC_API_KEY` | Anthropic Commercial Terms | PENDING_CREDENTIALS |
 | Telegram Bot API | api.telegram.org | notifications | — | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Telegram Bot ToS | PENDING_CREDENTIALS |
 | Equities (Alpaca/Polygon/IEX) | — | stocks | — | API key + exchange data license | vendor | PENDING_CREDENTIALS |
@@ -24,3 +25,9 @@ Notes
 - Binance lists some tokenized-equity tokens as spot pairs (e.g. tickers ending in `B`). MIA treats them as crypto spot
   instruments with the same safety checks. It does not present them as stock-exchange data.
 - Node's built-in `fetch` ignores `HTTPS_PROXY`. The start scripts set `NODE_USE_ENV_PROXY=1` so proxied environments work.
+
+## SEC filing research
+
+Set `MIA_SEC_USER_AGENT` to your application or organization name followed by a real contact email. The server sends that value to `data.sec.gov` for SEC Fair Access identification. The authenticated `GET /api/research/filings/:cik` accepts a numeric CIK, an optional UTC ISO timestamp `asOf`, and `limit` from 1 to 100. It returns recent 10-K, 10-Q, 8-K, 20-F and 6-K filings and amendments, with filing dates, report periods, available 8-K item codes and official SEC source links.
+
+The cutoff uses EDGAR acceptance time and the SEC filing date. For submissions accepted on a day earlier than their filing date, the authenticated report waits until the filing day has passed in New York before including them at a historical cutoff. Acceptance time approximates availability. The recent feed omits historical archive contents and does not certify exact publication timing or historical completeness. Filing text and financial-statement comparisons remain outside this integration.

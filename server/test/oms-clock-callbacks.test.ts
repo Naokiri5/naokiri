@@ -5,10 +5,10 @@ import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, type ControlState } from '../src/core/mode.js';
 import { cashBalance, ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js';
-import { submitEntry, monitorPositions } from '../src/exec/oms.js';
+import { submitEntry, monitorPositions, queueForApproval } from '../src/exec/oms.js';
 import { listIncidents } from '../src/exec/incidents.js';
 import { bus } from '../src/core/bus.js';
-import { get, run } from '../src/db/db.js';
+import { get, J, run } from '../src/db/db.js';
 import { setCrashHook } from '../src/exec/crashpoint.js';
 
 const report = (id: string, last: number, expiresAt: number): any => {
@@ -94,6 +94,13 @@ describe('paper entry rechecks mutable state under its write lock', () => {
     });
     try {
       const proposed = report(id, last, Date.now() + 60_000);
+      if (actor === 'owner') {
+        // An owner fill must come from the matching pending approval (Codex four-layer rule), as decideApproval does.
+        proposed.decision = 'APPROVED_FOR_USER_CONFIRMATION';
+        run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)',
+          proposed.id, proposed.candidateId, id, 'crypto', 'LONG', proposed.strategy.id, proposed.decision, 70, Date.now(), J(proposed));
+        expect(queueForApproval(proposed)).toBeTruthy();
+      }
       const result = submitEntry(proposed, actor);
       expect(openPositions()).toHaveLength(0);
       expect(get('SELECT id FROM fills')).toBeUndefined();

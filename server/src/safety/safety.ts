@@ -45,8 +45,8 @@ export function assessCexAsset(instrumentId: string, nowTs = Date.now()): Safety
   return { status, reasons, checks, eligibleForAutomation: eligible };
 }
 
-/** DEX token heuristics. Contract-level checks need an RPC provider (pending) ⇒ never better than CAUTION, never automation-eligible. */
-export function assessDexPair(p: DexPair, nowTs = Date.now()): SafetyResult {
+/** DEX aggregate observations support research and screening. Critical safety checks require verified on-chain evidence. */
+export function assessDexPair(p: DexPair, nowTs = Date.now()): SafetyResult & { eligibleForAutomation: false } {
   const checks: SafetyResult['checks'] = []; const reasons: string[] = [];
   let status: SafetyStatus = 'CAUTION';
   const add = (name: string, result: SafetyResult['checks'][0]['result'], detail: string, s?: SafetyStatus) => { checks.push({ name, result, detail }); if (s) { status = worst(status, s); reasons.push(`${name}: ${detail}`); } };
@@ -54,7 +54,7 @@ export function assessDexPair(p: DexPair, nowTs = Date.now()): SafetyResult {
   if (!Number.isFinite(p.liquidityUsd)) add('pool liquidity', 'FAIL', 'liquidity not reported', 'REJECTED'); // MIA-SAFE-002
   else if (p.liquidityUsd < 10_000) add('pool liquidity', 'FAIL', `$${fmt(p.liquidityUsd)}`, 'REJECTED');
   else if (p.liquidityUsd < 100_000) add('pool liquidity', 'WARN', `$${fmt(p.liquidityUsd)}`, 'HIGH_RISK');
-  else add('pool liquidity', 'PASS', `$${fmt(p.liquidityUsd)}`);
+  else add('pool liquidity', 'PASS', `$${fmt(p.liquidityUsd)} in reported aggregate liquidity`);
   if (p.buys24h > 30 && p.sells24h === 0) add('sell activity', 'FAIL', `${p.buys24h} buys, 0 sells — possible honeypot`, 'REJECTED');
   else if (p.sells24h > 0 && p.buys24h / p.sells24h > 5) add('buy/sell imbalance', 'WARN', `${p.buys24h}/${p.sells24h}`, 'HIGH_RISK');
   else add('sell activity', 'PASS', `${p.buys24h} buys / ${p.sells24h} sells`);
@@ -67,6 +67,12 @@ export function assessDexPair(p: DexPair, nowTs = Date.now()): SafetyResult {
   if (p.volume24h > 0 && p.liquidityUsd > 0 && p.volume24h / p.liquidityUsd > 50) add('volume/liquidity (wash proxy)', 'WARN', `${(p.volume24h / p.liquidityUsd).toFixed(0)}×`, 'HIGH_RISK');
   if (Math.abs(p.change24h) > 300) add('pump/dump pattern', 'WARN', `${p.change24h.toFixed(0)}% 24h`, 'HIGH_RISK');
   if (!p.hasWebsite && !p.hasSocials) add('project metadata', 'WARN', 'no website or socials', 'CAUTION');
+  add('executable sell-side depth', 'NOT_AVAILABLE',
+    'DEX Screener reports aggregate USD liquidity. Verified route data is required to evaluate exit reserves and price impact at the intended size.', 'UNVERIFIED');
+  add('intended sell proceeds', 'NOT_AVAILABLE',
+    'Historical sell counts describe past activity. A verified full-size sell simulation is required to estimate proceeds and transfer taxes.', 'UNVERIFIED');
+  add('LP control and lock', 'NOT_AVAILABLE', 'Pool withdrawal permissions and liquidity lock claims require on-chain verification.', 'UNVERIFIED');
+  add('holder concentration', 'NOT_AVAILABLE', 'Ownership concentrations and related holder wallets require verified on-chain evidence.', 'UNVERIFIED');
   return { status, reasons, checks, eligibleForAutomation: false };
 }
 const fmt = (x: number) => (x >= 1e9 ? `${(x / 1e9).toFixed(2)}B` : x >= 1e6 ? `${(x / 1e6).toFixed(2)}M` : x >= 1e3 ? `${(x / 1e3).toFixed(1)}K` : x.toFixed(0));

@@ -47,7 +47,7 @@ describe('consensus expiry fails closed (J-04)', () => {
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     for (const bad of ['garbage', undefined]) {
       const rep = report(id, last, [0.5, 0.5]); rep.consensus.expiresAt = bad;
-      const r = submitEntry(rep, 'bot'); expect(r.ok).toBe(false); expect(r.reason).toMatch(/CONSENSUS_EXPIRED/);
+      const r = submitEntry(rep, 'bot'); expect(r.ok).toBe(false); expect(r.reason).toMatch(/CONSENSUS_EXPIR(ED|Y_INVALID)/); // Codex four-layer reports the specific invalid-expiry code
     }
     expect(openPositions()).toHaveLength(0);
   });

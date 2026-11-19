@@ -1,3 +1,4 @@
+import { filingRoutes } from '../fundamentals/routes.js';
 import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { VikeNotConfiguredError } from '../providers/vike.js';
@@ -17,6 +18,7 @@ import { replayDecision, ReplayError } from '../ditas/replay.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
+import { summarizeTimeframes } from '../chart/timeframes.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -40,8 +42,9 @@ import { latencyReport } from '../core/latency.js';
 import { getControl, updateControl, displayMode } from '../core/mode.js';
 import { acceptPolicy, currentPolicy, DEFAULT_POLICY, policyHistory } from '../risk/policy.js';
 import { accountState, cashBalance, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio/ledger.js';
+import { portfolioStress } from '../portfolio/stress.js';
 import { correlation } from '../portfolio/correlation.js';
-import { calendar, reconcile } from '../portfolio/calendar.js';
+import { calendar, calendarTimeZone, reconcile, setCalendarTimeZone, tzOffsetMin } from '../portfolio/calendar.js';
 import * as oms from '../exec/oms.js';
 import { listIncidents, acknowledgeIncident, IncidentError } from '../exec/incidents.js';
 import { listJournal } from '../journal/journal.js';
@@ -64,6 +67,9 @@ import { config } from '../config.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { qhefReport } from '../qhef/qhef.js';
 import { securityOverview, revokeOtherSessions } from '../security/security.js';
+import { timeZoneName } from '../core/time.js';
+import { readCexActivity } from '../market/cexActivity.js';
+import { marketCoverage } from '../market/coverage.js';
 import { discover } from '../market/discover.js';
 import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js';
 import { provider, ProviderError } from '../providers/http.js';
@@ -154,6 +160,7 @@ export async function routes(app: FastifyInstance) {
   await predictionRoutes(app); // read-only Polymarket/Kalshi research, analytics and book replay (no order path)
   /** Paper/Live environments for the shared UI layout. Read-only; Live is reported as LOCKED, never as available. */
   app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
+  await filingRoutes(app); // Codex: read-only SEC EDGAR filings research
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
   app.post('/api/risk/incidents/:id/ack', async (req) => {
@@ -327,6 +334,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/overview', async () => overviewSnapshot());
 
   // ── markets ──
+  app.get('/api/markets/coverage', async () => marketCoverage(Date.now(), calendarTimeZone() ?? 'UTC'));
   app.get('/api/markets', async () => ({ tickers: [...market.tickers.values()].filter((t) => t.quoteVolume > 1e6 && isEligibleSpot(t.base, t.quote)).sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 300), universe: market.universe, asOf: market.tickersFetchedAt }));
   app.get('/api/markets/search', async (req) => { const q = z.object({ q: z.string().max(30).default('') }).parse(req.query).q.toUpperCase(); return [...market.instruments.values()].filter((i) => i.symbol.includes(q) || i.base.startsWith(q)).slice(0, 20).map((i) => ({ id: i.id, symbol: i.symbol, base: i.base })); });
   app.get('/api/instrument/:symbol', async (req, reply) => {
@@ -344,7 +352,12 @@ export async function routes(app: FastifyInstance) {
     }
     const d = market.deep.get(i.id);
     const f = d ? { '15m': d.engines['15m'].last, '1h': d.engines['1h'].last, '4h': d.engines['4h'].last } : {};
-    return { chartIntelligence: analyzeChart(i.id, iv, d?.engines[iv].candles ?? [], Date.now()), instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
+    const chartIntelligence = analyzeChart(i.id, iv, d?.engines[iv].candles ?? [], Date.now());
+    const timeframeAgreement = summarizeTimeframes(chartIntelligence, d);
+    const selectedReading = timeframeAgreement.readings.find(reading => reading.timeframe === iv);
+    const featuresResearch = selectedReading?.status === 'VALID' ? d?.engines[iv].research ?? null : null;
+    return { chartIntelligence, timeframeAgreement, featuresResearch, cexActivity: readCexActivity(i.id, chartIntelligence.asOf),
+      instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
       quality: assessQuality(i.id), safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };
   });
@@ -371,7 +384,14 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/decisions/:id/replay', async (req, reply) => {
     try { return replayDecision(idOf(req)); } catch (e) { if (e instanceof ReplayError) return bad(reply, 404, e.message); throw e; }
   });
-  app.get('/api/decisions/:id', async (req, reply) => { const r = get<any>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found'); const c = get<any>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id); return { report: P(r.report), consensus: c ? P(c.record) : null }; });
+  app.get('/api/decisions/:id', async (req, reply) => {
+    const id = idOf(req);
+    const row = get<{ report: string; consensus_id: string | null; instrument: string }>(
+      'SELECT report, consensus_id, instrument FROM decisions WHERE id=?', id);
+    if (!row) return bad(reply, 404, 'not found');
+    const consensus = get<{ record: string }>('SELECT record FROM consensus_records WHERE id=?', row.consensus_id);
+    return { report: P(row.report), consensus: consensus ? P(consensus.record) : null, paperEntry: oms.paperEntryForDecision(id, row.instrument) };
+  });
   app.post('/api/analyze', async (req) => { const { symbol, strategyId } = z.object({ symbol: z.string().min(1).max(20), strategyId: z.string().max(60).optional() }).parse(req.body); const i = market.bySymbol(symbol); if (!i) throw httpError(404, 'unknown symbol'); limit(req, 'analyze', 'analysis'); return analyzeInstrument(i.id, strategyId); });
 
   // ── AI intelligence (workers / QCI) ──
@@ -391,6 +411,7 @@ export async function routes(app: FastifyInstance) {
   });
 
   // ── risk center ──
+  app.get('/api/risk/stress', async () => portfolioStress());
   app.get('/api/risk', async () => {
     const acct = accountState(); const pos = openPositions();
     const corr = pos.map((a) => pos.map((b) => correlation(a.instrument, b.instrument)));
@@ -427,7 +448,7 @@ export async function routes(app: FastifyInstance) {
   });
 
   // ── bot account / portfolio / orders ──
-  app.get('/api/bot', async () => ({ status: botStatusView(), account: accountState(), positions: oms.listPositions('OPEN'), pending: all("SELECT * FROM orders WHERE status='PENDING_APPROVAL' ORDER BY created_at DESC"), strategies: lab.listStrategies(), ledger: all('SELECT * FROM ledger_entries WHERE account=? ORDER BY ts DESC LIMIT 100', PAPER_ACCOUNT) }));
+  app.get('/api/bot', async () => ({ status: botStatusView(), account: accountState(), positions: oms.listPositions('OPEN'), pending: all("SELECT * FROM orders WHERE account=? AND venue=? AND status='PENDING_APPROVAL' ORDER BY created_at DESC", PAPER_ACCOUNT, oms.VENUE), strategies: lab.listStrategies(), ledger: all('SELECT * FROM ledger_entries WHERE account=? ORDER BY ts DESC LIMIT 100', PAPER_ACCOUNT) }));
   app.post('/api/bot/allocation', async (req) => {
     const b = z.object({ amount: z.number().positive().max(10_000_000), direction: z.enum(['DEPOSIT', 'WITHDRAW']) }).parse(req.body);
     tx(() => {
@@ -439,7 +460,7 @@ export async function routes(app: FastifyInstance) {
   });
   app.get('/api/portfolio', async () => {
     const acct = accountState(); const pos = oms.listPositions();
-    const curve = all<any>("SELECT closed_at t, realized_pnl p FROM positions WHERE status='CLOSED' ORDER BY closed_at"); let eq = acct.deposits; const equityCurve = curve.map((c) => ({ t: c.t, equity: (eq += c.p) }));
+    const curve = all<{ t: number; p: number }>("SELECT closed_at t, realized_pnl p FROM positions WHERE account=? AND status='CLOSED' ORDER BY closed_at", PAPER_ACCOUNT); let eq = acct.deposits; const equityCurve = curve.map((c) => ({ t: c.t, equity: (eq += c.p) }));
     return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
   });
   app.get('/api/orders', async () => oms.listOrders(300));
@@ -449,8 +470,16 @@ export async function routes(app: FastifyInstance) {
 
   // ── journal / calendar ──
   app.get('/api/journal', async (req) => listJournal(400, z.object({ kind: TOKEN.optional() }).parse(req.query).kind));
-  app.get('/api/calendar', async (req) => calendar(z.object({ month: MONTH.default(new Date().toISOString().slice(0, 7)) }).parse(req.query ?? {}).month));
-  app.post('/api/calendar/tz', async (req) => { const { offsetMin } = z.object({ offsetMin: z.number().int().min(-720).max(840) }).parse(req.body); setSetting('calendarTzOffsetMin', offsetMin); return { ok: true }; });
+  app.get('/api/calendar', async (req) => calendar(z.object({ month: MONTH.optional() }).parse(req.query ?? {}).month));
+  app.post('/api/calendar/tz', async (req) => {
+    const timezone = z.string().trim().max(64).transform(timeZoneName).pipe(z.string({ error: 'expected an IANA timezone identifier' }));
+    const preference = z.union([
+      z.strictObject({ timeZone: timezone }),
+      z.strictObject({ offsetMin: z.number().int().min(-720).max(840) }),
+    ]).parse(req.body);
+    setCalendarTimeZone(preference);
+    return { ok: true };
+  });
 
   // ── strategy lab ──
   app.get('/api/lab', async () => ({ strategies: lab.listStrategies(), backtests: lab.listBacktests(30), universe: lab._universeSymbols() }));
@@ -532,7 +561,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/notifications', async () => listNotifications(300));
   app.post('/api/notifications/read', async (req) => { const { id } = z.object({ id: z.string().min(1).max(64).optional() }).parse(req.body ?? {}); markRead(id); return { ok: true }; });
   app.post('/api/notifications/test', async () => ({ id: notify('INFO', 'Test notification', 'Delivery check from Settings', 'settings') }));
-  app.get('/api/settings', async () => ({ notifyPrefs: getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null }), calendarTzOffsetMin: getSetting('calendarTzOffsetMin', 0), joe: { model: config.joeModel, llm: !!config.anthropicApiKey, tools: JOE_TOOL_NAMES }, telegram: { configured: !!config.telegramBotToken } }));
+  app.get('/api/settings', async () => ({ notifyPrefs: getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null }), calendarTzOffsetMin: tzOffsetMin(), calendarTimeZone: calendarTimeZone(), joe: { model: config.joeModel, llm: !!config.anthropicApiKey, tools: JOE_TOOL_NAMES }, telegram: { configured: !!config.telegramBotToken } }));
   app.post('/api/settings/notify', async (req) => { const b = z.object({ telegramMinSeverity: z.enum(['INFO', 'WARNING', 'CRITICAL']), quietHoursUtc: z.tuple([z.number().int().min(0).max(23), z.number().int().min(0).max(23)]).nullable() }).parse(req.body); setSetting('notifyPrefs', b); return { ok: true }; });
   app.get('/api/qa', async () => ({ ...releaseGates(), audit: verifyAuditChain() }));
   app.get('/api/audit', async () => recentAudit(200));

@@ -93,7 +93,7 @@ describe('paper trade lifecycle story', () => {
 
 describe('approvals, denials and no-trade outcomes', () => {
   it('a pending approval is shown, then replaced by the fill once approved (never regresses)', () => {
-    const rep = saveDecision(report(), 'APPROVED_FOR_USER_CONFIRMATION', 'ALLOW');
+    const rep = saveDecision(report({ decision: 'APPROVED_FOR_USER_CONFIRMATION' }), 'APPROVED_FOR_USER_CONFIRMATION', 'ALLOW');
     const orderId = queueForApproval(rep)!;
     const pending = joeEvents().events.find((e) => e.kind === 'APPROVAL_PENDING')!;
     expect(pending).toMatchObject({ severity: 'WARNING', links: { orderId, decisionId: rep.id }, presentation: { joeState: 'APPROVAL' } });
@@ -104,9 +104,9 @@ describe('approvals, denials and no-trade outcomes', () => {
     expect(after).toContain('PAPER_ENTRY_FILLED');
   });
   it('owner rejection and expiry are reported as nothing filled', () => {
-    const a = saveDecision(report(), 'APPROVED_FOR_USER_CONFIRMATION', 'ALLOW');
+    const a = saveDecision(report({ decision: 'APPROVED_FOR_USER_CONFIRMATION' }), 'APPROVED_FOR_USER_CONFIRMATION', 'ALLOW');
     decideApproval(queueForApproval(a)!, false);
-    const b = saveDecision(report({ consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 0.7, opposition: 0.1, expiresAt: new Date(Date.now() - 1000).toISOString() } } as any), 'APPROVED_FOR_USER_CONFIRMATION', 'ALLOW');
+    const b = saveDecision(report({ decision: 'APPROVED_FOR_USER_CONFIRMATION', consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 0.7, opposition: 0.1, expiresAt: new Date(Date.now() - 1000).toISOString() } } as any), 'APPROVED_FOR_USER_CONFIRMATION', 'ALLOW');
     queueForApproval(b); expireApprovals();
     const evs = joeEvents().events;
     expect(evs.find((e) => e.kind === 'ORDER_CANCELLED')!.presentation.text).toMatch(/rejected by owner\. Nothing was filled/);
@@ -232,7 +232,7 @@ describe('contract, ordering and idempotency', () => {
     expect(seen.size).toBe(120);
   });
   it('a very long rejection reason is shortened, not silently dropped (review finding 5)', () => {
-    const rep = saveDecision(report(), 'APPROVED_FOR_USER_CONFIRMATION', 'ALLOW');
+    const rep = saveDecision(report({ decision: 'APPROVED_FOR_USER_CONFIRMATION' }), 'APPROVED_FOR_USER_CONFIRMATION', 'ALLOW');
     const oid = queueForApproval(rep)!;
     run("UPDATE orders SET status='REJECTED', reject_reason=? WHERE id=?", 'RISK_CODE_'.repeat(200), oid);
     const ev = joeEvents().events.find((e) => e.kind === 'ORDER_REJECTED')!;

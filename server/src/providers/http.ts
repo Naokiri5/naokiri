@@ -7,7 +7,7 @@ export type ProviderStatus = 'LIVE' | 'DEGRADED' | 'DOWN' | 'PENDING_CREDENTIALS
 export interface ProviderInfo {
   id: string;
   name: string;
-  sourceClass: 'cex' | 'dex' | 'aggregator' | 'fx_reference' | 'news' | 'onchain' | 'social' | 'broker' | 'messaging';
+  sourceClass: 'cex' | 'dex' | 'aggregator' | 'fx_reference' | 'news' | 'onchain' | 'social' | 'broker' | 'messaging' | 'regulator';
   markets: string[];
   license: string;
   realtime: 'REALTIME' | 'NEAR_REALTIME' | 'DELAYED' | 'DAILY_REFERENCE';
@@ -67,11 +67,20 @@ export class ProviderError extends Error { constructor(public providerId: string
 
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
 /**
- * `redirectMode: 'error'` is for credentialed providers: a redirect must never carry an API key to another host
+ * `redirectMode`/`redirect: 'error'` is for credentialed providers: a redirect must never carry an API key to another host
  * (fetch keeps custom headers across redirects). Default stays 'follow' for the public, keyless providers.
+ * `jsonBody` sends a JSON POST (used only for read-only JSON-RPC such as eth_call); everything else is a GET.
+ * `decode` (Codex four-layer) validates the raw payload into a typed result inside the provider boundary.
  */
-/** `jsonBody` sends a JSON POST (used only for read-only JSON-RPC such as eth_call); everything else is a GET. */
-export async function fetchProvider(id: string, url: string, opts: { timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string>; redirectMode?: 'error' | 'follow'; jsonBody?: unknown } = {}): Promise<any> {
+export async function fetchProvider<T = any>(id: string, url: string, opts: {
+  timeoutMs?: number;
+  as?: 'json' | 'text';
+  headers?: Record<string, string>;
+  redirect?: 'follow' | 'error';
+  redirectMode?: 'error' | 'follow';
+  jsonBody?: unknown;
+  decode?: (raw: unknown) => T;
+} = {}): Promise<T> {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
   if (config.offline) throw new ProviderError(id, 'offline mode');
@@ -83,7 +92,7 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
   try {
     const post = opts.jsonBody !== undefined;
-    const res = await fetch(url, { signal: ctl.signal, redirect: opts.redirectMode ?? 'follow', method: post ? 'POST' : 'GET', body: post ? JSON.stringify(opts.jsonBody) : undefined,
+    const res = await fetch(url, { signal: ctl.signal, redirect: opts.redirect ?? opts.redirectMode ?? 'follow', method: post ? 'POST' : 'GET', body: post ? JSON.stringify(opts.jsonBody) : undefined,
       headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...(post ? { 'content-type': 'application/json' } : {}), ...opts.headers } });
     if (res.status === 404) { // resource-level miss (e.g. product not listed) — provider itself is reachable
       Object.assign(info, { lastOkAt: Date.now(), lastLatencyMs: Math.round(performance.now() - t0) });
@@ -93,7 +102,8 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
       if (res.status === 429 || res.status === 418 || res.status === 503) { const ms = retryAfterMs(res, res.status); if (ms != null) blockedUntil.set(id, Date.now() + ms); }
       throw new ProviderError(id, `HTTP ${res.status}`, res.status);
     }
-    const body = opts.as === 'text' ? await res.text() : await res.json();
+    const raw: unknown = opts.as === 'text' ? await res.text() : await res.json();
+    const body = opts.decode ? opts.decode(raw) : raw as T;
     const ms = performance.now() - t0;
     record(`provider.${id}`, ms);
     const prev = info.status;

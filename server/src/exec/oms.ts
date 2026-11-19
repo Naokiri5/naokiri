@@ -11,11 +11,14 @@ import { bus } from '../core/bus.js';
 import { audit } from '../core/audit.js';
 import { getControl, updateControl } from '../core/mode.js';
 import { stepExit, newExitState, type ExitState } from '../lab/exits.js';
+import { STRATEGIES } from '../lab/strategies.js';
 import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { assertWriteFence, LeaseLostError } from '../ops/lease.js';
 import { crashpoint } from './crashpoint.js';
+
+const paperPosition = (id: string) => get<PositionRow>('SELECT * FROM positions WHERE id=? AND account=?', id, PAPER_ACCOUNT);
 
 /**
  * Paper OMS (Part 26 / 32.6). Fills are simulated by walking the LIVE Binance order book
@@ -111,9 +114,27 @@ function simulateExitFill(instrumentId: string, qty: number, bufferPct: number, 
 export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowTs = Date.now()): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
   const t0 = performance.now();
   const s = report;
+  if (actor !== 'bot' && actor !== 'owner') return { ok: false, reason: 'ENTRY_ACTOR_UNSUPPORTED' };
+  if (!Number.isFinite(Date.parse(s.consensus?.expiresAt))) return { ok: false, reason: 'CONSENSUS_EXPIRY_INVALID' };
   const coid = `entry-${report.candidateId}`;
   const existing = get<any>('SELECT * FROM orders WHERE client_order_id=?', coid);
+  if (existing && (existing.account !== PAPER_ACCOUNT || existing.venue !== VENUE)) {
+    return { ok: false, reason: 'ORDER_ACCOUNT_MISMATCH' };
+  }
+  if (existing && existing.status === 'PENDING_APPROVAL' &&
+      (actor !== 'owner' || existing.purpose !== 'ENTRY' || existing.side !== 'BUY' ||
+       existing.instrument !== s.instrumentId || existing.decision_id !== s.id)) {
+    return { ok: false, reason: 'PENDING_APPROVAL_MISMATCH' };
+  }
+  if (actor === 'owner' && (!existing || s.decision !== 'APPROVED_FOR_USER_CONFIRMATION')) {
+    return { ok: false, reason: 'PENDING_APPROVAL_REQUIRED' };
+  }
   if (existing && existing.status !== 'PENDING_APPROVAL') return { ok: false, reason: `DUPLICATE: order ${existing.id} already ${existing.status}` };
+  const runtimeStrategy = STRATEGIES.find(strategy => strategy.id === s.strategy.id);
+  const enrollment = get<{ version: string }>('SELECT version FROM strategies WHERE id=?', s.strategy.id);
+  if (!runtimeStrategy || enrollment?.version !== s.strategy.version || runtimeStrategy.version !== s.strategy.version) {
+    return reject('STRATEGY_VERSION_MISMATCH: re-evaluate against the enrolled strategy');
+  }
   const ctl = getControl();
   if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
   if (actor === 'bot' && ctl.mode !== 'PAPER') return { ok: false, reason: `mode ${ctl.mode} does not permit automatic paper entries` };
@@ -233,7 +254,7 @@ export function queueForApproval(report: DecisionReport) {
   return id;
 }
 export function decideApproval(orderId: string, approve: boolean) {
-  const o = get<any>('SELECT * FROM orders WHERE id=?', orderId);
+  const o = get<any>("SELECT * FROM orders WHERE id=? AND account=? AND venue=? AND purpose='ENTRY' AND side='BUY'", orderId, PAPER_ACCOUNT, VENUE);
   if (!o || o.status !== 'PENDING_APPROVAL') throw new OmsError('order is not pending approval');
   audit('owner', approve ? 'order.approve' : 'order.reject', { orderId });
   if (!approve) {
@@ -244,12 +265,16 @@ export function decideApproval(orderId: string, approve: boolean) {
   }
   const rep = get<any>('SELECT report FROM decisions WHERE id=?', o.decision_id);
   if (!rep) throw new OmsError('decision record missing');
-  return submitEntry(P(rep.report), 'owner');
+  const decision = P<DecisionReport>(rep.report);
+  if (decision?.id !== o.decision_id || decision.instrumentId !== o.instrument || `entry-${decision.candidateId}` !== o.client_order_id) {
+    throw new OmsError('pending order does not match its decision');
+  }
+  return submitEntry(decision, 'owner');
 }
 export function expireApprovals() {
-  for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.status='PENDING_APPROVAL'")) {
-    // J-04: an unreadable report or a missing/garbage expiry expires the approval (fail closed), and one bad row can no
-    // longer stop the rest of the loop.
+  // Codex four-layer: only this paper account's ENTRY approvals. J-04: an unreadable report or a missing/garbage expiry
+  // expires the approval (fail closed), and one bad row can no longer stop the rest of the loop.
+  for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.account=? AND o.venue=? AND o.purpose='ENTRY' AND o.status='PENDING_APPROVAL'", PAPER_ACCOUNT, VENUE)) {
     let r: DecisionReport | null = null; try { r = P<DecisionReport>(o.report); } catch { r = null; }
     if (expiredAt(r?.consensus?.expiresAt)) tx(() => { assertWriteFence(); run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed or unreadable', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), o.id); });
   }
@@ -295,7 +320,7 @@ export function monitorPositions(nowTs = Date.now()) {
         const cas = run("UPDATE positions SET stop_price=?, targets=?, mfe=?, mae=? WHERE id=? AND status='OPEN' AND qty=? AND stop_price=? AND targets=? AND mfe IS ? AND mae IS ?", st.stop, J(meta), st.mfe, st.mae, p.id, p.qty, p.stop_price, p.targets, p.mfe ?? null, p.mae ?? null);
         if (Number(cas.changes) !== 1) throw new StaleSnapshot();
         crashpoint('monitor.state');
-        if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id); crashpoint('monitor.stop'); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }
+        if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND account=? AND venue=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id, PAPER_ACCOUNT, VENUE); crashpoint('monitor.stop'); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }
         let consumed = 0; // depth already taken by earlier exits in this pass
         // stepExit (shared with the backtester) marks a target done before lot rounding; a target whose slice rounds to
         // zero sold nothing, so it is reopened here and stays eligible on later passes.
@@ -326,7 +351,7 @@ export function monitorPositions(nowTs = Date.now()) {
   }
 }
 /** Persistent, de-duplicated protection incident (survives restarts; see exec/incidents.ts). */
-function flagUnprotected(p: PositionRow, why: string) { reportUnprotected(p, why); }
+function flagUnprotected(p: PositionRow, why: string) { if (p.account === PAPER_ACCOUNT) reportUnprotected(p, why); }
 
 /**
  * Apply one exit fill. MUST run inside tx(): it re-reads the position there, so the quantity it sells is the
@@ -335,7 +360,7 @@ function flagUnprotected(p: PositionRow, why: string) { reportUnprotected(p, why
  * so nothing is announced for a transaction that rolls back.
  */
 function applyExit(positionId: string, wantQty: number, reason: string, fr: number, nowTs: number, after: Deferred, consumedQty = 0) {
-  const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId);
+  const p = paperPosition(positionId);
   if (!p || p.status !== 'OPEN' || !(p.qty > 0)) return null;
   const inst = market.instruments.get(p.instrument); const step = inst?.stepSize ?? 0;
   let qty = floorStep(Math.min(wantQty, p.qty), step);
@@ -364,8 +389,8 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   run('UPDATE positions SET qty=?, realized_pnl=realized_pnl+?, fees=fees+?, status=?, closed_at=?, exit_price=?, exit_reason=? WHERE id=?',
     remaining, pnl, fee, closed ? 'CLOSED' : 'OPEN', closed ? nowTs : null, closed ? px : null, closed ? reason : null, positionId);
   crashpoint('exit.position');
-  if (closed) run("UPDATE orders SET status='CANCELLED', updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", nowTs, positionId);
-  else run("UPDATE orders SET qty=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", remaining, nowTs, positionId);
+  if (closed) run("UPDATE orders SET status='CANCELLED', updated_at=? WHERE position_id=? AND account=? AND venue=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", nowTs, positionId, PAPER_ACCOUNT, VENUE);
+  else run("UPDATE orders SET qty=?, updated_at=? WHERE position_id=? AND account=? AND venue=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", remaining, nowTs, positionId, PAPER_ACCOUNT, VENUE);
   crashpoint('exit.stop');
   after.push(() => {
     journal('EXIT', `SELL ${qty} ${p.instrument.split(':')[2]} @ ${px.toPrecision(6)} — ${reason}, PnL ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}${fill.basis === 'BOOK' ? '' : ` [${fill.basis}]`}`, positionId, { fill, fee, reason });
@@ -387,7 +412,8 @@ export function executeExit(positionId: string, qty: number, reason: string, fr 
 
 /** Part 20.4 deterministic trade autopsy. */
 export function autopsy(positionId: string) {
-  const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId)!;
+  const p = paperPosition(positionId);
+  if (!p) return;
   const dec = p.decision_id ? P<DecisionReport>(get<any>('SELECT report FROM decisions WHERE id=?', p.decision_id)?.report) : null;
   const r = p.planned_risk > 0 ? p.realized_pnl / p.planned_risk : 0;
   const findings = [
@@ -408,13 +434,13 @@ export function autopsy(positionId: string) {
 // ── Part 17.8 emergency semantics — distinct actions with distinct reported states ──
 export function pauseNewOrders(actor: string) { updateControl(actor, { pausedNewOrders: true }); journal('INTERVENTION', `New orders paused by ${actor}`); return { state: 'CONFIRMED' }; }
 export function cancelPendingEntries(actor: string) {
-  const r = run("UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=? WHERE purpose='ENTRY' AND status IN ('NEW','PENDING_APPROVAL')", `cancelled by ${actor}`, Date.now());
+  const r = run("UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=? WHERE account=? AND venue=? AND purpose='ENTRY' AND status IN ('NEW','PENDING_APPROVAL')", `cancelled by ${actor}`, Date.now(), PAPER_ACCOUNT, VENUE);
   audit(actor, 'orders.cancelPendingEntries', { count: Number(r.changes) }); journal('INTERVENTION', `${r.changes} pending entries cancelled by ${actor}`);
   return { state: 'CONFIRMED', cancelled: Number(r.changes) };
 }
 export function protectPositions(log = false, nowTs = Date.now()) {
   const res = openPositions().map((p) => {
-    const stop = get<any>("SELECT * FROM orders WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", p.id);
+    const stop = get<any>("SELECT * FROM orders WHERE position_id=? AND account=? AND venue=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", p.id, PAPER_ACCOUNT, VENUE);
     const px = market.price(p.instrument);
     const now = nowTs; const book = market.deep.get(p.instrument)?.book ?? null;
     const stopOk = !!stop && Math.abs(stop.qty - p.qty) < 1e-9 && stop.stop_price === p.stop_price;
@@ -453,6 +479,17 @@ export function emergencyStop(actor: string) {
   notify('CRITICAL', 'EMERGENCY STOP engaged', `new orders blocked, ${c.cancelled} pending entries cancelled, protection ${p.state}. Positions NOT auto-closed (policy).`, 'risk');
   return { pause: 'CONFIRMED', cancel: c, protect: p, close: 'NOT_REQUESTED' };
 }
-export const listOrders = (limit = 200) => all('SELECT * FROM orders ORDER BY created_at DESC LIMIT ?', limit);
-export const listPositions = (status?: string) => (status ? all<PositionRow>('SELECT * FROM positions WHERE status=? ORDER BY opened_at DESC', status) : all<PositionRow>('SELECT * FROM positions ORDER BY opened_at DESC LIMIT 500')).map((p) => ({ ...p, targets: P(p.targets), mark: market.price(p.instrument)?.price ?? null }));
+/** Recorded entry outcome for the original decision. Approval and decision do not imply a fill. */
+export function paperEntryForDecision(decisionId: string, instrumentId: string) {
+  const order = get<{ id: string; status: string; filled_qty: number; avg_price: number | null; reject_reason: string | null }>(
+    "SELECT id, status, filled_qty, avg_price, reject_reason FROM orders WHERE decision_id=? AND instrument=? AND account=? AND venue=? AND purpose='ENTRY' AND side='BUY' ORDER BY created_at DESC, id DESC LIMIT 1",
+    decisionId, instrumentId, PAPER_ACCOUNT, VENUE,
+  );
+  return order ? {
+    orderId: order.id, status: order.status, filledQty: order.filled_qty,
+    averageFillPrice: order.avg_price, rejectReason: order.reject_reason,
+  } : null;
+}
+export const listOrders = (limit = 200) => all('SELECT * FROM orders WHERE account=? AND venue=? ORDER BY created_at DESC LIMIT ?', PAPER_ACCOUNT, VENUE, limit);
+export const listPositions = (status?: string) => (status ? all<PositionRow>('SELECT * FROM positions WHERE account=? AND status=? ORDER BY opened_at DESC', PAPER_ACCOUNT, status) : all<PositionRow>('SELECT * FROM positions WHERE account=? ORDER BY opened_at DESC LIMIT 500', PAPER_ACCOUNT)).map((p) => ({ ...p, targets: P(p.targets), mark: market.price(p.instrument)?.price ?? null }));
 export { iso };

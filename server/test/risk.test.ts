@@ -42,6 +42,20 @@ describe('Risk gate (Part 17)', () => {
     expect(s.notional).toBeLessThanOrEqual(2500.01);        // 25% max notional
     expect(r.policyVersion).toBe(1); expect(r.traceId).toBe('t');
   });
+  it('denies proposals against another account even if it has cash', () => {
+    acceptPolicy('owner', DEFAULT_POLICY);
+    setSetting('control', { mode: 'PAPER' });
+    ledger('other-account', 'DEPOSIT', 10_000);
+    expect(evaluateRisk(prop(id, last, { account: 'other-account' }))).toMatchObject({
+      decision: 'DENY', reasonCodes: ['ACCOUNT_UNSUPPORTED'], sizing: null,
+    });
+  });
+  it('denies entry if persisted execution mode is outside the Paper runtime', () => {
+    acceptPolicy('owner', DEFAULT_POLICY);
+    ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    setSetting('control', { mode: 'BOUNDED_LIVE' });
+    expect(evaluateRisk(prop(id, last))).toMatchObject({ decision: 'DENY', reasonCodes: expect.arrayContaining(['MODE_NOT_PAPER']) });
+  });
   it('enforces daily loss breaker, stop direction, duplicates, pause and emergency', () => {
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     evaluateRisk(prop(id, last)); // establishes start-of-day mark

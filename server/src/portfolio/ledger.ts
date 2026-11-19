@@ -5,7 +5,8 @@ import { quoteAgeOk } from '../market/quality.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { exitPolicy } from '../risk/policy.js';
 
-export const PAPER_ACCOUNT = 'paper-bot';
+import { PAPER_ACCOUNT } from '../core/accounts.js';
+export { PAPER_ACCOUNT };
 export type LedgerKind = 'DEPOSIT' | 'WITHDRAW' | 'BUY' | 'SELL' | 'FEE';
 export function ledger(account: string, kind: LedgerKind, amount: number, ref?: string, note?: string, ts = Date.now()) {
   run('INSERT INTO ledger_entries(id,account,ts,kind,amount,ref,note) VALUES (?,?,?,?,?,?,?)', uid('led'), account, ts, kind, amount, ref ?? null, note ?? null);
