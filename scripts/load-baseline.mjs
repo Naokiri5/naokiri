@@ -22,7 +22,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = mkdtempSync(join(tmpdir(), 'mia-load-'));
 const port = 8890 + Math.floor(Math.random() * 50);
 const base = `http://127.0.0.1:${port}`;
-const ROUTES = ['/api/health', '/api/ready', '/api/shell', '/api/overview', '/api/bot', '/api/portfolio', '/api/risk', '/api/history?from=0', '/api/intelligence', '/api/academy/stats'];
+const ROUTES = ['/api/health', '/api/ready', '/api/shell', '/api/overview', '/api/bot', '/api/portfolio', '/api/risk', '/api/history', '/api/intelligence', '/api/academy/stats'];
 
 const pct = (xs, p) => { const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))]; };
 const r2 = (x) => Math.round(x * 100) / 100;
