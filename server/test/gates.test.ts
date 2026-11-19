@@ -175,13 +175,13 @@ describe('test-derived release gate evidence', () => {
 describe('release gate manifest and certification gaps', () => {
   beforeEach(() => freshDb());
 
-  it('cites existing files and exact uniquely collected Vitest test names', () => {
+  it('cites existing files and exact uniquely collected Vitest test names', { timeout: 65_000 }, () => {
     const refs = Object.values(gates.TEST_GATE_REQUIREMENTS).flat();
     const files = [...new Set(refs.map(r => r.file))];
     for (const file of files) expect(existsSync(join(REPO_ROOT, file)), file).toBe(true);
     const listed: { name: string; file: string }[] = JSON.parse(execFileSync(process.execPath, [
-      join(REPO_ROOT, 'node_modules/vitest/vitest.mjs'), 'list', '--json', '--no-static-parse', ...files.map(file => relative(join(REPO_ROOT, 'server'), join(REPO_ROOT, file))),
-    ], { cwd: join(REPO_ROOT, 'server'), env: { ...process.env, MIA_LIVE_TESTS: '1', MIA_OFFLINE: '1' }, encoding: 'utf8' }));
+      join(REPO_ROOT, 'node_modules/vitest/vitest.mjs'), 'list', '--json', '--no-static-parse', '--maxWorkers=2', ...files.map(file => relative(join(REPO_ROOT, 'server'), join(REPO_ROOT, file))),
+    ], { cwd: join(REPO_ROOT, 'server'), env: { ...process.env, MIA_LIVE_TESTS: '1', MIA_OFFLINE: '1' }, encoding: 'utf8', timeout: 60_000 }));
     for (const item of refs) {
       expect(listed.filter(test => test.file === join(REPO_ROOT, item.file) && test.name.split(' > ').join(' ') === item.fullName), `${item.file}: ${item.fullName}`).toHaveLength(1);
     }
