@@ -22,7 +22,7 @@ Read `docs/ARCHITECTURE.md`, `docs/SECURITY.md` and the relevant domain document
 
 ## Commands
 
-Use Node.js >= 22.13 and npm workspaces.
+Use Node.js 22.16+ in the 22 LTS line or Node.js 24+, with npm workspaces.
 - Install: `npm ci`
 - Develop: `npm run dev`
 - Typecheck: `npm run typecheck`
@@ -109,3 +109,7 @@ Validation: `npm run typecheck`, `npm test`, `npm run test:e2e`, `npm run scan:s
 ## DITAS foundation
 
 For the newer Decision Intelligence, Trust & Adaptive Strategy System work, start with `docs/ditas/IMPLEMENTATION_STATUS.md`, `DITAS_ARCHITECTURE_AUDIT.md`, and the test/certification reports in that directory. The feature branch stacks on the chart intelligence increment. Preserve immutable pre-QCI snapshots, exact probability cohorts and separation of hypothetical simulations from actual paper OMS records. Continue the remaining phases from the status table; no live certification or automatic promotion is implied.
+
+## Autopilot presentation and monitor
+
+See [the preserved Autopilot requirements and Claude handoff](docs/autopilot/README.md) before continuing the 100-function blueprint. The compact paper cockpit, presentation presets and read-only monitor reuse existing services. [Implementation and verification](docs/autopilot/IMPLEMENTATION_REPORT.md) distinguishes delivered behavior from remaining requirements.

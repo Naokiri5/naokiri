@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { rejections } from '../src/market/scanner.js';
@@ -31,7 +32,7 @@ describe('overview dashboard snapshot', () => {
     expect(o.risk.gates).toMatch(/LOCKED/);
   });
   it('risk monitor reads limits from the accepted policy and usage from the ledger', () => {
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     const { inst, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
     expect(submitEntry(report(inst.id, last), 'bot').ok).toBe(true);
     const r = riskMonitor();

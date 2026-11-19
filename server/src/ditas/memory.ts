@@ -3,7 +3,7 @@ import { uid, sha256 } from '../core/util.js';
 import { market } from '../market/store.js';
 import { assessQuality } from '../market/quality.js';
 import { getControl } from '../core/mode.js';
-import type { Interval } from '../market/types.js';
+import { INTERVAL_MS, type Interval } from '../market/types.js';
 import type { Candidate, WorkerContext } from '../workers/types.js';
 import type { DecisionReport } from '../decision/engine.js';
 import { classifyRegime } from '../regime/regime.js';
@@ -24,7 +24,7 @@ const feature = (f: any) => f ? pick(f, 't n close ema9 ema20 ema50 ema200 rsi14
 function capture(instrumentId: string, interval: Interval, asOf: number, ctx?: WorkerContext) {
   const d = market.deep.get(instrumentId), t = market.tickers.get(instrumentId);
   return {
-    schemaVersion: 'ditas.snapshot.v1', asOf, instrumentId, interval, regime: classifyRegime(d?.engines[interval].last ?? null).regime,
+    schemaVersion: 'ditas.snapshot.v2', asOf, instrumentId, interval, regime: classifyRegime(d?.engines[interval].last ?? null).regime,
     ticker: t ? pick(t, 'instrumentId symbol base quote last bid ask changePct quoteVolume high low open trades providerTs receivedAt source') : null,
     candles: Object.fromEntries((['15m', '1h', '4h'] as const).map(iv => [iv, d?.engines[iv].candles.map(c => pick(c, 't o h l c v qv n tbv closeTime')) ?? []])),
     features: Object.fromEntries((['15m', '1h', '4h'] as const).map(iv => [iv, feature(ctx ? ctx.f[iv] : d?.engines[iv].last)])),
@@ -36,8 +36,45 @@ function capture(instrumentId: string, interval: Interval, asOf: number, ctx?: W
   };
 }
 
+/**
+ * Store-once market data. The heavy, highly repetitive parts of a snapshot — each interval's candle window and the order
+ * book — are written to ditas_blobs under the sha256 of their canonical JSON and replaced by {"$blob": hash}. Strategies
+ * evaluated on the same market state, and slower intervals that did not change, therefore share one stored copy.
+ * The snapshot itself (and its own hash) still commits to every referenced hash, so evidence stays immutable.
+ */
+export const isBlobRef = (v: unknown): v is { $blob: string } => !!v && typeof v === 'object' && !Array.isArray(v) && typeof (v as any).$blob === 'string' && Object.keys(v as object).length === 1;
+function putBlob(kind: string, value: unknown, ts: number) {
+  const payload = J(value); const hash = sha256(payload);
+  run('INSERT OR IGNORE INTO ditas_blobs(hash,kind,created_at,payload) VALUES (?,?,?,?)', hash, kind, ts, payload);
+  return { $blob: hash };
+}
+/** Candle windows slide by one bar per interval, so they are stored in time-aligned chunks of CANDLE_CHUNK bars: when a
+ *  window advances only its first and last chunk change and every chunk in between is shared with earlier snapshots. */
+export const CANDLE_CHUNK = 50;
+function candleChunks(iv: string, candles: any[], ts: number) {
+  const step = INTERVAL_MS[iv as Interval] * CANDLE_CHUNK; const groups = new Map<number, any[]>();
+  for (const c of candles) { const k = Math.floor(Number(c.t) / step); const g = groups.get(k) ?? []; g.push(c); groups.set(k, g); }
+  return { $chunks: [...groups.values()].map((g) => putBlob(`candles.${iv}`, g, ts).$blob) };
+}
+function externalize(s: ReturnType<typeof capture>, ts: number) {
+  return { ...s, candles: Object.fromEntries(Object.entries(s.candles).map(([iv, c]) => [iv, candleChunks(iv, c as any[], ts)])), book: s.book ? putBlob('book', s.book, ts) : null };
+}
+const isChunkRef = (v: unknown): v is { $chunks: string[] } => !!v && typeof v === 'object' && Array.isArray((v as any).$chunks) && (v as any).$chunks.every((h: unknown) => typeof h === 'string');
+/** Expand blob references (v2) for readers; v1 snapshots pass through unchanged. A missing blob is an integrity error. */
+export function expandSnapshot(payload: any) {
+  const load = (hash: string) => { const b = get<{ payload: string }>('SELECT payload FROM ditas_blobs WHERE hash=?', hash); if (!b) throw new Error(`DITAS blob missing: ${hash}`); return P<any>(b.payload); };
+  const blob = (ref: any) => (isBlobRef(ref) ? load(ref.$blob) : isChunkRef(ref) ? ref.$chunks.flatMap((h) => load(h)) : ref);
+  if (!payload || payload.schemaVersion !== 'ditas.snapshot.v2') return payload;
+  return { ...payload, candles: Object.fromEntries(Object.entries(payload.candles ?? {}).map(([iv, c]) => [iv, blob(c)])), book: blob(payload.book) };
+}
+/** All blob hashes a stored snapshot payload references. */
+export function blobRefs(payloadText: string): string[] {
+  const p = P<any>(payloadText); if (!p || p.schemaVersion !== 'ditas.snapshot.v2') return [];
+  return [...Object.values(p.candles ?? {}), p.book].flatMap((r) => (isBlobRef(r) ? [r.$blob] : isChunkRef(r) ? r.$chunks : []));
+}
+
 function eventRow(r: any): MemoryEvent { return { id: r.id, kind: r.kind, instrumentId: r.instrument, strategyId: r.strategy, decisionId: r.decision_id, createdAt: r.created_at, snapshotId: r.snapshot_id, parentEventId: r.parent_event_id, payload: P(r.payload), hash: r.hash }; }
-function hashEvent(r: any) {
+export function hashEvent(r: any) {
   return sha256(J([r.id, r.dedupe_key, r.created_at, r.kind, r.instrument, r.strategy, r.decision_id, r.snapshot_id, r.parent_event_id, r.payload, r.prev_hash]));
 }
 
@@ -48,7 +85,7 @@ export function recordOpportunity(input: { kind: Exclude<MemoryKind, 'CORRECTION
     const ts = Date.now(), id = uid('evt');
     let snapshotId = input.snapshotId ?? input.ctx?.memorySnapshotId;
     if (snapshotId) { const original = get<any>('SELECT instrument FROM ditas_snapshots WHERE id=?', snapshotId); if (!original || original.instrument !== input.instrumentId) throw new Error('invalid original snapshot reference'); }
-    else { const snapshot = J(capture(input.instrumentId, input.interval ?? '1h', ts, input.ctx)); const hash = sha256(snapshot); snapshotId = `snap_${hash}`;
+    else { const snapshot = J(externalize(capture(input.instrumentId, input.interval ?? '1h', ts, input.ctx), ts)); const hash = sha256(snapshot); snapshotId = `snap_${hash}`;
       run('INSERT OR IGNORE INTO ditas_snapshots(id,created_at,instrument,payload,hash) VALUES (?,?,?,?,?)', snapshotId, ts, input.instrumentId, snapshot, hash); }
 
     const payload = J({ reason: input.reason, strategy: input.strategyId ? { id: input.strategyId, version: strategyById(input.strategyId)?.version ?? null } : null, candidate: input.candidate ?? null, report: input.report ?? null, prediction: { probability: null, status: 'UNCALIBRATED' } });
@@ -74,13 +111,26 @@ export function memoryEvents(limit = 100) { return all<any>('SELECT * FROM ditas
 export function memoryDetail(id: string) {
   const r = get<any>('SELECT * FROM ditas_events WHERE id=?', id); if (!r) return null;
   const snapshot = r.snapshot_id ? get<any>('SELECT * FROM ditas_snapshots WHERE id=?', r.snapshot_id) : null;
-  return { event: eventRow(r), snapshot: snapshot ? { id: snapshot.id, createdAt: snapshot.created_at, hash: snapshot.hash, ...P(snapshot.payload) } : null,
+  return { event: eventRow(r), snapshot: snapshot ? { id: snapshot.id, createdAt: snapshot.created_at, hash: snapshot.hash, ...expandSnapshot(P(snapshot.payload)) } : null,
     relatedEvents: all<any>('SELECT * FROM ditas_events WHERE parent_event_id=? ORDER BY seq', id).map(eventRow) };
 }
 /** Verifies the event chain and snapshot hashes; rows may come from a backup snapshot instead of the live database. */
-export function verifyMemory(events: any[] = all<any>('SELECT * FROM ditas_events ORDER BY seq'), snapshots: any[] = all<any>('SELECT * FROM ditas_snapshots')) {
+export type BlobHashRow = { hash: string; payload: string };
+export type TwinRunHashRow = { id: string; hash: string; result: string };
+export function verifyMemory(events: any[] = all<any>('SELECT * FROM ditas_events ORDER BY seq'), snapshots: any[] = all<any>('SELECT * FROM ditas_snapshots'),
+  blobs = all<BlobHashRow>('SELECT hash, payload FROM ditas_blobs'), twinRuns = all<TwinRunHashRow>('SELECT id, hash, result FROM ditas_twin_runs')) {
   let prev = 'GENESIS';
   for (const r of events) { if (r.prev_hash !== prev || r.hash !== hashEvent(r)) return { ok: false, brokenAt: r.id }; prev = r.hash; }
-  for (const r of snapshots) if (sha256(r.payload) !== r.hash || r.id !== `snap_${r.hash}`) return { ok: false, brokenAt: r.id };
-  return { ok: true, entries: events.length };
+  // G-02 / G-03 (100-agent audit): a twin run's stored hash must match its result, and every snapshot an event
+  // references must be present (a backup with the snapshots removed used to verify).
+  for (const t of twinRuns) if (t.hash !== sha256(t.result)) return { ok: false, brokenAt: `twin:${t.id}` };
+  const snapIds = new Set(snapshots.map((s) => s.id));
+  for (const r of events) if (r.snapshot_id && !snapIds.has(r.snapshot_id)) return { ok: false, brokenAt: `${r.id} (missing snapshot ${r.snapshot_id})` };
+  const blobHashes = new Set<string>();
+  for (const b of blobs) { if (sha256(b.payload) !== b.hash) return { ok: false, brokenAt: `blob:${b.hash}` }; blobHashes.add(b.hash); }
+  for (const r of snapshots) {
+    if (sha256(r.payload) !== r.hash || r.id !== `snap_${r.hash}`) return { ok: false, brokenAt: r.id };
+    for (const h of blobRefs(r.payload)) if (!blobHashes.has(h)) return { ok: false, brokenAt: `${r.id} (missing blob ${h})` };
+  }
+  return { ok: true, entries: events.length }; // shape unchanged for /api/ditas/verify callers
 }

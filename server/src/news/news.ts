@@ -1,6 +1,6 @@
 import { searchNews } from '../providers/googlenews.js';
 import { all, run, J, P } from '../db/db.js';
-import { sha256 } from '../core/util.js';
+import { sha256, escapeRegExp, safeHttpUrl } from '../core/util.js';
 import { market } from '../market/store.js';
 import { bus } from '../core/bus.js';
 import { notify } from '../notify/notify.js';
@@ -29,7 +29,8 @@ export function matchAssets(title: string): string[] {
   for (const m of [...market.cg.values()].slice(0, 120)) {
     const name = m.name.toLowerCase();
     if (name.length >= 4 && T.includes(` ${name}`)) out.add(m.symbol);
-    else if (m.symbol.length >= 3 && new RegExp(`\\b${m.symbol}\\b`).test(title)) out.add(m.symbol);
+    // MIA-SEC-004: provider symbols are untrusted text; escape before building a pattern ("USD+(" used to throw).
+    else if (m.symbol.length >= 3 && new RegExp(`\\b${escapeRegExp(m.symbol)}\\b`).test(title)) out.add(m.symbol);
   }
   if (/\bbitcoin\b/i.test(title)) out.add('BTC'); if (/\bether(eum)?\b/i.test(title)) out.add('ETH');
   return [...out].slice(0, 8);
@@ -45,7 +46,7 @@ export async function refreshNews() {
       const c = classify(title, it.source);
       const assets = matchAssets(title);
       const r = run('INSERT OR IGNORE INTO news(id,ts,fetched_at,title,source,url,query,impact,assets,credibility) VALUES (?,?,?,?,?,?,?,?,?,?)',
-        id, it.ts, Date.now(), title, it.source, it.link, q, c.impact, J({ assets, sentiment: c.sentiment, macro: c.macro }), c.credibility);
+        id, it.ts, Date.now(), title, it.source, safeHttpUrl(it.link), q, c.impact, J({ assets, sentiment: c.sentiment, macro: c.macro }), c.credibility);
       if (Number(r.changes) > 0) {
         added++;
         if (c.impact === 'HIGH' && Date.now() - it.ts < 3 * 3600_000) notify('WARNING', `Heads-up: ${title.slice(0, 120)}`, `${it.source} · ${c.macro ? 'macro event' : c.sentiment.toLowerCase()} · affected: ${assets.join(', ') || 'market-wide'}`, 'news');

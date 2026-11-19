@@ -69,7 +69,7 @@ merged in Phase 3.
 | 13.1 | 50 indicator specialists | `workers/indicators.ts` | IMPLEMENTED | — |
 | 13.2 | Telegram launch intelligence | — | BLOCKED | Telegram API access + approved channels. |
 | 13.3 | Telegram & push notifications | `notify/notify.ts` | PARTIAL | In-app done; Telegram code written but BLOCKED (bot token); native push MISSING. |
-| 14 | Consolidated roadmap | `IMPLEMENTATION_ROADMAP.md` | IMPLEMENTED | — |
+| 14 | Consolidated roadmap | `docs/planning/IMPLEMENTATION_ROADMAP.md` | IMPLEMENTED | — |
 | 15.4–15.12 | Overview, terminal, scanner cards, risk UX, design system, accessibility, responsive, data-integrity rules | `web/src` | PARTIAL | The command palette and keyboard navigation are implemented; accessibility audit and automated responsive tests remain outstanding. |
 | 16 | Opportunity intelligence, adversarial analyst, calibration, rejection intel, execution feasibility | `decision/`, `qci/challenge.ts` | PARTIAL | Calibration MISSING (needs outcome data). |
 | 17 | Deterministic risk engine, sizing, stops, breakers, emergency semantics | `risk/`, `exec/oms.ts`, `lab/exits.ts` | IMPLEMENTED | — |

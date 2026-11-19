@@ -17,10 +17,17 @@ export function isApplicable(w: WorkerDef, ctx: WorkerContext) {
   return true;
 }
 
-async function runOne(w: WorkerDef, ctx: WorkerContext): Promise<SignedPacket | { failed: string; worker_id: string }> {
+/** Run one worker. Exported for tests. */
+export async function runOne(w: WorkerDef, ctx: WorkerContext): Promise<SignedPacket | { failed: string; worker_id: string }> {
   let res: WorkerResult; let ms = 0;
   try {
-    res = await withDeadline(Promise.resolve().then(() => { const t0 = performance.now(); const r = w.evaluate(ctx); ms = performance.now() - t0; return r; }), POOL.deadlineMs);
+    res = await withDeadline(Promise.resolve().then(() => {
+      const t0 = performance.now(); const r = w.evaluate(ctx); ms = performance.now() - t0;
+      // C-03 / J-01 (100-agent audit): evaluate() is synchronous, so the timer in withDeadline cannot fire while it runs.
+      // Measure instead: a result that took longer than the deadline is a DEADLINE failure (counts toward quarantine).
+      if (ms > POOL.deadlineMs) throw new Error('DEADLINE');
+      return r;
+    }), POOL.deadlineMs);
     failures.set(w.id, 0);
   } catch (e: any) {
     const n = (failures.get(w.id) ?? 0) + 1; failures.set(w.id, n);
@@ -56,7 +63,7 @@ export async function dispatch(ctx: WorkerContext) {
   await Promise.all(Array.from({ length: Math.min(POOL.concurrency, active.length) }, async () => {
     while (i < active.length) { const w = active[i++]; results.push(await runOne(w, ctx)); }
   }));
-  return { eligible: eligible.length, quarantined: eligible.length - active.length, results };
+  return { eligible: eligible.length, quarantined: eligible.length - active.length, results, activeIds: active.map((w) => w.id) };
 }
 
 type Col = 'support' | 'oppose' | 'abstain' | 'failed';

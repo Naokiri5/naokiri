@@ -29,7 +29,7 @@ Start a fresh Claude Code session after adding the first .claude/agents/ folder 
 
 Paste this into Claude Code after opening the repository:
 
-    Read CLAUDE.md, docs/CLAUDE_CODE_WORKFLOW.md and docs/REFACTORING_BACKLOG.md.
+    Read CLAUDE.md, docs/engineering/CLAUDE_CODE_WORKFLOW.md and docs/planning/REFACTORING_BACKLOG.md.
     Inspect the current branch and git status before editing. Continue from the current repair branch;
     do not reset, force-push, merge or modify main.
     First run /release-review on the current diff and inspect the latest CI result.

@@ -26,7 +26,7 @@ executes **paper trades against live order books**. Built from the MIA 4.1 Unifi
 
 ## Quick start
 
-Requirements: **Node.js ≥ 22.13** (uses the built-in `node:sqlite`; `.nvmrc` pins 22), npm, outbound HTTPS to the hosts in
+Requirements: **Node.js 22.16+ in the 22 LTS line or Node.js 24+** (uses built-in SQLite FTS5; `.nvmrc` selects 22), npm, outbound HTTPS to the hosts in
 `docs/API_INTEGRATIONS.md`. Works on macOS, Linux and Windows (cmd/PowerShell); all scripts are cross-platform.
 
 ```bash
@@ -41,7 +41,7 @@ Open **http://localhost:8787/**. The terminal prints the exact URLs:
   ➜ Network:   http://<container-ip>:8787/      (only when bound to all interfaces)
 ```
 
-Then create the **owner passphrase**, and:
+Enter the one-time setup code from the MIA terminal or service log and create your **owner passphrase**. Then:
 
 1. **Risk Center**: review and accept the risk policy (step-up passphrase).
 2. **Strategy Lab**: run backtests, then **promote** a strategy to PAPER only if you accept its out-of-sample record.
@@ -60,6 +60,10 @@ Development with hot reload: `npm run dev` starts the backend (8787) and Vite (h
 `MIA_HOST` and `MIA_PORT` always override the defaults. Binding `0.0.0.0` exposes the login page to the network; MIA
 requires the owner passphrase for every API call, but put it behind TLS before exposing it beyond a trusted network.
 
+**First-time setup.** Every new MIA instance asks for a **setup code** before you can create the owner account.
+It appears in the MIA terminal or service log as `First-time setup code: XXXXX-XXXXX-XXXXX-XXXXX`.
+The code is consumed when the account is created. Existing owners can sign in as usual.
+
 ### Troubleshooting
 
 | Symptom | Cause | Fix |
@@ -67,7 +71,8 @@ requires the owner passphrase for every API call, but put it behind TLS before e
 | `✖ Port 8787 is already in use` | another MIA instance or program | stop it, or `MIA_PORT=8788 npm start` (PowerShell: `$env:MIA_PORT=8788; npm start`) |
 | Browser shows "connection refused" via a forwarded port | server bound to loopback only | `MIA_HOST=0.0.0.0 npm start` |
 | Page says "MIA API is running … UI not built" | `web/dist` missing | `npm run build` |
-| `✖ MIA requires Node.js 22.13 or newer` | old Node | install Node 22 LTS+ (`nvm use`) |
+| Setup screen asks for a setup code | the owner account has not been created yet | copy the code from the MIA terminal or service log (`journalctl -u mia`) |
+| `✖ MIA requires Node.js 22.16+` | unsupported Node version | install the latest Node 22 LTS or Node 24 LTS (`nvm use`) |
 | `✖ Dependencies are not installed` | skipped `npm install` | run `npm install` in the repository root |
 | Market data never loads behind a corporate proxy | proxy env | set `HTTPS_PROXY`; the launcher enables `NODE_USE_ENV_PROXY` for Node's fetch |
 
@@ -81,29 +86,27 @@ npm run qa -w server             # records evidence used by the Release Gates pa
 npm run scan:secrets             # fails if a key/token/private key is in a tracked file
 ```
 
+Release QA requires Git, npm and tar. It installs the committed lockfile in an isolated snapshot of `HEAD`,
+runs the full offline server suite there, and records the commit, exit status and report hash. Commit code
+before collecting release evidence. Use `npm test -w server -- <filter>` for focused work on your checkout.
+
 CI (`.github/workflows/ci.yml`) runs the secret scan, `npm audit`, typecheck, unit tests and the browser suite on every push
 and pull request.
 
 ## Documentation
 
-Start with `docs/PROJECT_STATUS.md` (plain-language status) and `docs/SETUP_GUIDE_BEGINNER.md`. For AI-assisted development, read `docs/CLAUDE_CODE_WORKFLOW.md` and `docs/REFACTORING_BACKLOG.md`.
+**Start at [`docs/README.md`](docs/README.md)**: it maps every document by purpose (start here, run and operate, security, features, engineering, planning, history) and shows where each part of the code lives.
 
-| File | Contents |
+| Most-used documents | Contents |
 |---|---|
-| `docs/PROJECT_STATUS.md` | where the project stands, what needs you |
-| `docs/ARCHITECTURE.md` | design, trust boundaries, technology choices, dependencies |
-| `docs/REQUIREMENTS_TRACEABILITY.md` | every spec part (1–33) → code → status |
-| `docs/IMPLEMENTATION_ROADMAP.md` | phases and prioritized backlog |
-| `docs/SETUP_GUIDE_BEGINNER.md` | step-by-step install and first use |
-| `docs/API_INTEGRATIONS.md` | data providers, licences, credentials |
-| `docs/SECURITY.md` | security audit and controls |
-| `docs/TEST_REPORT.md` | test evidence |
-| `docs/DEPLOYMENT_GUIDE.md` | running, backups, incidents, rollback |
-| `docs/KNOWN_LIMITATIONS.md` | what does not work yet and why |
-| `docs/QHEF_LATENCY_BASELINE.md` | measured performance |
-| `docs/CHANGELOG.md` | history |
-| `docs/CLAUDE_CODE_WORKFLOW.md` | Claude Code setup, specialist agents, slash skills and optional GitHub @claude workflow |
-| `docs/REFACTORING_BACKLOG.md` | evidence-based code-organization and duplication-removal plan |
+| `docs/operations/SETUP_GUIDE_BEGINNER.md` | step-by-step install and first use |
+| `docs/operations/DEPLOYMENT_GUIDE.md` | always-on PAPER operation, readiness, backups, incidents |
+| `docs/engineering/DEBUG_AUDIT_2026-11-17.md` | current bug register, test results, performance baseline |
+| `docs/SECURITY.md` | security register and controls |
+| `docs/ARCHITECTURE.md` | design and trust boundaries |
+| `docs/CHANGELOG.md` | history, newest first |
+
+Dated reports from earlier phases (project status, known limitations, test report) are kept under `docs/history/`.
 
 ## Global Chart Intelligence
 
@@ -112,3 +115,7 @@ The first phased increment adds closed-candle chart evidence to the Market Termi
 ## DITAS decision intelligence
 
 Open **DITAS Decision Intelligence** in the sidebar for data health, immutable decision memory, Market DNA, strategy passports, separate paper/hypothetical records and exact-cohort calibration. Research APIs support frozen-decision Twin evaluation and explicit forecast/outcome records. See [DITAS implementation status](docs/ditas/IMPLEMENTATION_STATUS.md) for delivered scope, remaining phases and certification limits.
+
+## Autopilot presentation and monitor
+
+See [the preserved Autopilot requirements and Claude handoff](docs/autopilot/README.md) before continuing the 100-function blueprint. The compact paper cockpit, presentation presets and read-only monitor reuse existing services. [Implementation and verification](docs/autopilot/IMPLEMENTATION_REPORT.md) distinguishes delivered behavior from remaining requirements.

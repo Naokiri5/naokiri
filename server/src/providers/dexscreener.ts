@@ -1,4 +1,5 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
+import { safeHttpUrl } from '../core/util.js';
 registerProvider({
   id: 'dexscreener', name: 'DEX Screener (public API)', sourceClass: 'dex', markets: ['crypto-dex'],
   license: 'DEX Screener API Terms — rate-limited public use.', realtime: 'NEAR_REALTIME', requiresCredentials: false,
@@ -11,13 +12,14 @@ export interface DexPair {
   buys24h: number; sells24h: number; buys1h: number; sells1h: number; change1h: number; change24h: number; pairCreatedAt: number | null;
   hasSocials: boolean; hasWebsite: boolean;
 }
+export const SAFE_CHAIN = /^[a-z0-9-]{1,32}$/; export const SAFE_ADDRESS = /^[A-Za-z0-9]{20,64}$/;
 function mapPair(p: any): DexPair {
   return {
-    chainId: p.chainId, dexId: p.dexId, pairAddress: p.pairAddress, url: p.url, baseSymbol: p.baseToken?.symbol ?? '?', baseName: p.baseToken?.name ?? '?',
-    baseAddress: p.baseToken?.address ?? '', quoteSymbol: p.quoteToken?.symbol ?? '?', priceUsd: +(p.priceUsd ?? 0), liquidityUsd: +(p.liquidity?.usd ?? 0),
+    chainId: p.chainId, dexId: p.dexId, pairAddress: p.pairAddress, url: safeHttpUrl(p.url), baseSymbol: p.baseToken?.symbol ?? '?', baseName: p.baseToken?.name ?? '?',
+    baseAddress: p.baseToken?.address ?? '', quoteSymbol: p.quoteToken?.symbol ?? '?', priceUsd: +(p.priceUsd ?? 0), liquidityUsd: p.liquidity?.usd == null ? NaN : +p.liquidity.usd,
     fdv: +(p.fdv ?? 0), marketCap: +(p.marketCap ?? 0), volume24h: +(p.volume?.h24 ?? 0), volume1h: +(p.volume?.h1 ?? 0),
     buys24h: +(p.txns?.h24?.buys ?? 0), sells24h: +(p.txns?.h24?.sells ?? 0), buys1h: +(p.txns?.h1?.buys ?? 0), sells1h: +(p.txns?.h1?.sells ?? 0),
-    change1h: +(p.priceChange?.h1 ?? 0), change24h: +(p.priceChange?.h24 ?? 0), pairCreatedAt: p.pairCreatedAt ?? null,
+    change1h: +(p.priceChange?.h1 ?? 0), change24h: +(p.priceChange?.h24 ?? 0), pairCreatedAt: Number.isFinite(+p.pairCreatedAt) ? +p.pairCreatedAt : null,
     hasSocials: !!p.info?.socials?.length, hasWebsite: !!p.info?.websites?.length,
   };
 }
@@ -26,7 +28,8 @@ export async function latestTokenPairs(max = 30): Promise<DexPair[]> {
   const profiles: any[] = await fetchProvider('dexscreener', 'https://api.dexscreener.com/token-profiles/latest/v1');
   const byChain = new Map<string, string[]>();
   for (const p of profiles.slice(0, max)) {
-    if (!p.chainId || !p.tokenAddress) continue;
+    // Provider strings go into a URL path: accept only plain chain ids and addresses (MIA-PROV-003).
+    if (!SAFE_CHAIN.test(String(p.chainId ?? '')) || !SAFE_ADDRESS.test(String(p.tokenAddress ?? ''))) continue;
     const a = byChain.get(p.chainId) ?? []; a.push(p.tokenAddress); byChain.set(p.chainId, a);
   }
   const out: DexPair[] = [];

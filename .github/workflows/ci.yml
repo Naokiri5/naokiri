@@ -8,9 +8,50 @@ permissions:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
+# Independent jobs (MA-05): a failing security job no longer hides typecheck, build or test results.
+# Every job stays REQUIRED — the dependency audit is not suppressed, weakened or allowed to fail; it just runs alongside.
 jobs:
-  checks:
-    name: Typecheck, unit tests, audit, secret scan
+  audit:
+    name: Dependency audit (fail on high/critical)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Production dependencies
+        run: npm audit --omit=dev --audit-level=high
+      - name: All dependencies, including development tools
+        run: npm audit --audit-level=high
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - run: node scripts/secret-scan.mjs
+  build:
+    name: Typecheck and production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Production build (web + compiled server)
+        run: npm run build
+  server-tests:
+    name: Server unit & integration tests (offline, deterministic)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -19,28 +60,27 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: npm ci
-      - name: Secret scan
-        run: node scripts/secret-scan.mjs
-      - name: Dependency audit (fail on high/critical)
-        run: npm audit --audit-level=high
-      - name: Typecheck
-        run: npm run typecheck
-      - name: Production build (web + compiled server)
-        run: npm run build
-      - name: Unit & integration tests (offline, deterministic)
-        run: npm run qa -w server
-      - name: Web unit tests (status ribbon model)
-        run: npm test -w web
+      - run: npm run qa -w server
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: unit-test-results
-          path: data/qa/test-results.json
+          path: data/qa/
+  web-tests:
+    name: Web unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm test -w web
   e2e:
     name: Browser end-to-end (Playwright)
     runs-on: ubuntu-latest
-    needs: checks
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

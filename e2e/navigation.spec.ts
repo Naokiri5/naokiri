@@ -1,10 +1,10 @@
 import { test, expect, type Page } from '@playwright/test';
+import { readTestSetupCode, TEST_OWNER_PASSPHRASE as PW } from './owner-fixture';
 
 /**
  * PR A — six-destination navigation. Presentation only: every original URL must still open its page, and nothing in
  * the navigation can change the operating mode. Runs after app.spec.ts has created the owner (serial, same server).
  */
-const PW = 'e2e owner passphrase';
 const GROUPS: [string, string[]][] = [
   ['Markets', ['/terminal', '/scanner', '/discover', '/bubbles', '/whales', '/holders', '/copy', '/news']],
   ['Autopilot', ['/bot', '/risk', '/lab']],
@@ -18,7 +18,11 @@ async function login(p: Page) {
   await p.context().route('https://fonts.googleapis.com/**', (r) => r.fulfill({ contentType: 'text/css', body: '' }));
   p.on('pageerror', (e) => errors.push(e.message)); p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await p.goto('/'); const pw = p.locator('input[type=password]');
-  if (await p.getByText('Owner setup').count()) { await pw.nth(0).fill(PW); await pw.nth(1).fill(PW); } else await pw.first().fill(PW);
+  await pw.first().fill(PW);
+  if (await p.getByText('Owner setup').count()) {
+    await pw.nth(1).fill(PW);
+    await p.getByLabel('Setup code').fill(readTestSetupCode());
+  }
   await p.locator('form button').first().click(); await expect(p.locator('h1')).toBeVisible();
 }
 test.beforeAll(async ({ browser }) => { page = await browser.newPage(); await login(page); });
@@ -67,8 +71,11 @@ test('collapsed rail keeps every destination one click away', async () => {
 });
 
 test('command palette understands plain-language synonyms', async () => {
-  await page.goto('/'); await expect(page.locator('h1')).toBeVisible(); await page.keyboard.press('Control+k');
-  const box = page.getByRole('textbox', { name: 'Command' }); const opts = page.getByRole('option');
+  await page.goto('/'); await expect(page.locator('h1')).toBeVisible();
+  await expect(page.locator('.mode')).not.toHaveText('…'); // Shell effects and authenticated state must be ready before the shortcut.
+  await page.keyboard.press('Control+k');
+  const palette = page.getByRole('dialog', { name: 'Command palette' });
+  const box = palette.getByRole('textbox', { name: 'Command' }); const opts = palette.getByRole('option');
   await box.fill('profit'); await expect(opts.filter({ hasText: 'Portfolio' }).first()).toBeVisible(); await expect(opts.filter({ hasText: 'Profit Calendar' })).toBeVisible();
   await box.fill('ai bots'); await expect(opts.filter({ hasText: 'AI Intelligence' })).toBeVisible();
   await box.fill('fund'); await expect(opts.filter({ hasText: 'Bot Account' })).toBeVisible(); await expect(opts.filter({ hasText: 'Wallet & Withdrawals' })).toBeVisible();

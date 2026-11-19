@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { modeGate } from '../src/qa/gates.js';
 import { mkdtempSync, readFileSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -24,7 +25,7 @@ describe('risk gate: order-book freshness and non-finite inputs', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
     freshDb(); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
   it('baseline: fresh data is allowed', () => { expect(evaluateRisk(prop(id, last)).decision).toBe('ALLOW'); });
   it('denies sizing against a book older than the execution limit', () => {

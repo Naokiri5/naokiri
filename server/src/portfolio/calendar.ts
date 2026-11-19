@@ -26,12 +26,35 @@ export function calendar(month: string /* YYYY-MM */, account = PAPER_ACCOUNT) {
   };
 }
 
-/** Independent reconciliation: positions' realized PnL vs ledger cash flows for the same orders. */
+/**
+ * Independent reconciliation (used by the integrity check, release gate G05 and the portfolio badge):
+ *  1. closed positions' realized PnL equals the ledger flows of their orders;
+ *  2. every BUY/SELL/FEE posting references a FILLED order in the same account;
+ *  3. every FILLED order has a fill, its trade posting, and its fee posting;
+ *  4. the trade postings equal the cash implied by the fills themselves (price × qty ∓ fee).
+ * Checks 2 and 3 were added after the 100-agent audit (E-01): an orphan or edited cash row used to reconcile as OK.
+ */
 export function reconcile(account = PAPER_ACCOUNT) {
   const closed = get<{ s: number; n: number }>("SELECT COALESCE(SUM(realized_pnl),0) s, COUNT(*) n FROM positions WHERE account=? AND status='CLOSED'", account)!;
-  const flows = get<{ s: number }>(`SELECT COALESCE(SUM(l.amount),0) s FROM ledger_entries l JOIN orders o ON o.id=l.ref JOIN positions p ON p.id=o.position_id
+  const flows = get<{ s: number }>(`SELECT COALESCE(SUM(l.amount),0) s FROM ledger_entries l JOIN orders o ON o.id=l.ref AND o.account=l.account
+    JOIN positions p ON p.id=o.position_id AND p.account=o.account
     WHERE l.account=? AND p.status='CLOSED' AND l.kind IN ('BUY','SELL','FEE')`, account)!;
   const diff = Math.abs(closed.s - flows.s);
   const cash = get<{ s: number }>('SELECT COALESCE(SUM(amount),0) s FROM ledger_entries WHERE account=?', account)!.s;
-  return { ok: diff < 1e-6, positionsRealized: closed.s, ledgerFlows: flows.s, difference: diff, closedPositions: closed.n, cash, detail: `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (Δ ${diff.toExponential(2)})` };
+  const orphans = get<{ n: number }>(`SELECT COUNT(*) n FROM ledger_entries l WHERE l.account=? AND l.kind IN ('BUY','SELL','FEE')
+    AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.id=l.ref AND o.account=l.account AND o.status='FILLED')`, account)!.n;
+  const posted = get<{ s: number }>("SELECT COALESCE(SUM(amount),0) s FROM ledger_entries WHERE account=? AND kind IN ('BUY','SELL','FEE')", account)!.s;
+  const implied = get<{ s: number }>(`SELECT COALESCE(SUM(CASE o.side WHEN 'BUY' THEN -f.price*f.qty ELSE f.price*f.qty END - f.fee),0) s
+    FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.account=? AND o.status='FILLED'`, account)!.s;
+  const { unfilled, unposted } = get<{ unfilled: number; unposted: number }>(`SELECT
+    COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM fills f WHERE f.order_id=o.id)) AS unfilled,
+    COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM ledger_entries l WHERE l.ref=o.id AND l.kind=o.side AND l.account=o.account)
+      OR NOT EXISTS (SELECT 1 FROM ledger_entries l WHERE l.ref=o.id AND l.kind='FEE' AND l.account=o.account)) AS unposted
+    FROM orders o WHERE o.account=? AND o.status='FILLED'`, account)!;
+  const cashDiff = Math.abs(posted - implied);
+  const ok = diff < 1e-6 && orphans === 0 && cashDiff < 1e-6 && unfilled === 0 && unposted === 0;
+  const detail = `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (Δ ${diff.toExponential(2)}); `
+    + `trade cash vs fills Δ ${cashDiff.toExponential(2)}; ${orphans} orphan posting(s); `
+    + `${unfilled} filled order(s) missing fills; ${unposted} filled order(s) missing postings`;
+  return { ok, positionsRealized: closed.s, ledgerFlows: flows.s, difference: diff, closedPositions: closed.n, cash, orphanPostings: orphans, filledOrdersMissingFills: unfilled, unpostedOrders: unposted, cashVsFillsDifference: cashDiff, detail };
 }
