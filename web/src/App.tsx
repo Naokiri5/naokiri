@@ -112,6 +112,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <Route path="/" element={<P.Overview />} />
         <Route path="/ditas" element={<P.Ditas />} />
         <Route path="/academy" element={<P.Academy />} />
+        <Route path="/prediction" element={<P.Prediction />} />
         <Route path="/terminal" element={<P.Terminal />} /><Route path="/terminal/:symbol" element={<P.Terminal />} />
         <Route path="/scanner" element={<P.Scanner />} /><Route path="/intelligence" element={<P.Intelligence />} />
         <Route path="/joe" element={<P.JoePage />} /><Route path="/bubbles" element={<P.Bubbles />} /><Route path="/whales" element={<P.Whales />} />
