@@ -553,7 +553,9 @@ export async function routes(app: FastifyInstance) {
     return { status: 'BLOCKED', trackedWallets: [], copyRules: [],
       requirements: [
         { name: 'EVM RPC + explorer (wallet discovery, transfers, ranking)', providerId: 'evm_rpc', status: evm?.status ?? 'PENDING_CREDENTIALS' },
-        { name: 'Solana RPC (wallet activity, token authorities)', providerId: 'solana_rpc', status: sol?.status ?? 'PENDING_CREDENTIALS' },
+        // Omega PR-06 connects Solana RPC for watchlist mint checks only; wallet activity is not built, so it is never LIVE here.
+        { name: 'Solana wallet activity (needs Solana RPC plus wallet indexing; not built yet)', providerId: 'solana_rpc',
+          status: !sol || sol.status === 'PENDING_CREDENTIALS' ? 'PENDING_CREDENTIALS' : 'NOT_IMPLEMENTED' },
       ],
       pipeline: ['Discover candidate whale wallets from on-chain transfers', 'Rank by verified, cost-adjusted historical performance (Part 4.3)', 'Detect a new trade by a followed wallet',
         'Treat it as a candidate: asset safety → 100-worker QCI → decision engine → deterministic risk gate', 'Paper-execute only within your limits; never mirror size blindly'],

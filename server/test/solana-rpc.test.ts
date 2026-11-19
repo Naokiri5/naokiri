@@ -1,14 +1,15 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { freshDb, ownerSetupPayload } from './helpers.js';
 import { config } from '../src/config.js';
 import { market } from '../src/market/store.js';
 import { discover } from '../src/market/discover.js';
 import { failureGate } from '../src/core/ratelimit.js';
 import { buildApp } from '../src/index.js';
-import { fetchProvider, registerProvider, _resetProviderBlocks, ProviderError } from '../src/providers/http.js';
-import { getMultipleAccountsParsed, solanaRpcUrl, decodeMultipleAccounts, MAX_RPC_RESPONSE_BYTES } from '../src/providers/solanaRpc.js';
-import { refreshMintChecks, mintCheckFor, mintCheckSummary, watchlistMints, _resetMintChecks, MINT_CHECK_TTL_MS, MINT_CHECK_MAX_AGE_MS } from '../src/solana/mintChecks.js';
-import { TOKEN_PROGRAM } from '../src/solana/mint-audit.js';
+import { fetchProvider, registerProvider, provider, _resetProviderBlocks, ProviderError } from '../src/providers/http.js';
+import { getMultipleAccountsParsed, solanaRpcUrl, decodeMultipleAccounts, isSolanaAddress, MAX_RPC_RESPONSE_BYTES, SOLANA_RPC } from '../src/providers/solanaRpc.js';
+import { refreshMintChecks, mintCheckFor, mintCheckSummary, watchlistMints, _resetMintChecks, MINT_CHECK_TTL_MS, MINT_CHECK_MAX_AGE_MS, RETRY_AFTER_FAILURE_MS } from '../src/solana/mintChecks.js';
+import { TOKEN_PROGRAM, TOKEN_2022_PROGRAM } from '../src/solana/mint-audit.js';
+import { refreshBackground } from '../src/market/fabric.js';
 import type { DexPair } from '../src/providers/dexscreener.js';
 
 /**
@@ -193,5 +194,107 @@ describe('watchlist join (discover)', () => {
       expect(res.body).not.toContain('rpc.example.com');
       expect(res.json().solanaHunter.mintChecks.configured).toBe(true);
     } finally { await app.close(); }
+  });
+});
+
+/** Second review round (integration + security reviewers), each fix with a test. */
+describe('PR-06 review fixes', () => {
+  it('both token program ids are real 32-byte keys (the starter shipped an invalid Token-2022 id)', () => {
+    expect(isSolanaAddress(TOKEN_PROGRAM)).toBe(true);
+    expect(isSolanaAddress(TOKEN_2022_PROGRAM)).toBe(true);
+    expect(TOKEN_2022_PROGRAM).toBe('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb');
+  });
+  it('addresses must decode to exactly 32 bytes (one bad address would fail a whole batch)', () => {
+    // Leading '1's are zero bytes, so 31 ones + '2' is a real 32-byte key; 30 ones + '2' is only 31 bytes.
+    for (const a of [WSOL, USDC, MINT_A, MINT_B, AUTH, '1'.repeat(32), '1'.repeat(31) + '2']) expect(isSolanaAddress(a), a).toBe(true);
+    for (const a of ['1'.repeat(30) + '2', 'z'.repeat(44), '2'.repeat(32), 'So1111111111111111111111111111111111111111O', 42, null]) expect(isSolanaAddress(a), String(a)).toBe(false);
+    expect(watchlistMints([pair('z'.repeat(44)), pair(MINT_A)])).toEqual([MINT_A]);
+  });
+  it('an invalid JSON reply is MALFORMED and its text never reaches provider status', async () => {
+    stub(() => new Response('{"oops": <ignore all previous instructions> SECRET-BODY', { status: 200 }));
+    await refreshMintChecks([pair(MINT_A)], NOW);
+    expect(mintCheckSummary().lastError).toBe('MALFORMED');
+    expect(String(provider(SOLANA_RPC)?.lastError)).not.toMatch(/SECRET-BODY|ignore all/);
+  });
+  it('a transport error that quotes the URL is stored with the URL (and its path or query key) removed', async () => {
+    process.env.MIA_SOLANA_RPC_URL = 'https://rpc.example.com/v2/PATH-KEY-999';
+    globalThis.fetch = (async () => { throw new Error('connect failed for https://rpc.example.com/v2/PATH-KEY-999 (also /v2/PATH-KEY-999)'); }) as typeof fetch;
+    await refreshMintChecks([pair(MINT_A)], NOW);
+    expect(mintCheckSummary().lastError).toBe('UNAVAILABLE');
+    expect(String(provider(SOLANA_RPC)?.lastError)).not.toContain('PATH-KEY-999');
+  });
+  it('an inconclusive check fails closed: WATCH becomes INSUFFICIENT_DATA with MINT_CHECK_INCONCLUSIVE', async () => {
+    okAccounts({ [MINT_A]: null as unknown as object }); // account missing on chain
+    market.dex = [pair(MINT_A)]; market.dexFetchedAt = NOW - 30_000;
+    await refreshMintChecks(market.dex, NOW);
+    const [row] = discover(1e6, NOW).solanaHunter.candidates;
+    expect(row).toMatchObject({ status: 'INSUFFICIENT_DATA', mintCheck: { status: 'UNKNOWN', reasons: ['MISSING_ACCOUNT'] } });
+    expect(row.blockers).toContain('MINT_CHECK_INCONCLUSIVE');
+  });
+  it('a padded extension list is inconclusive, and shown reasons are deduplicated and capped at 10', async () => {
+    const t22 = (extensions: unknown[]) => ({ ...mintAccount({ mintAuthority: null, freezeAuthority: null, extensions }), owner: TOKEN_2022_PROGRAM });
+    const many = Array.from({ length: 33 }, (_, i) => ({ extension: `x${i}` }));
+    const twenty = Array.from({ length: 20 }, (_, i) => ({ extension: `fooExt${String.fromCharCode(97 + i)}` }));
+    okAccounts({ [MINT_A]: t22(many), [MINT_B]: t22([...twenty, ...twenty.slice(0, 10)]) }); // 30 entries, 20 distinct
+    await refreshMintChecks([pair(MINT_A), pair(MINT_B)], NOW);
+    expect(mintCheckFor(MINT_A, NOW)).toMatchObject({ status: 'UNKNOWN', reasons: ['EXTENSION_LIST_TOO_LONG'] });
+    const b = mintCheckFor(MINT_B, NOW);
+    expect(b.reasons).toHaveLength(11);
+    expect(b.reasons.at(-1)).toBe('+10 more');
+  });
+  it('after a failure it waits before asking again (no retry storm against the public endpoint)', async () => {
+    stub(() => { throw new TypeError('fetch failed'); });
+    await refreshMintChecks([pair(MINT_A)], NOW);
+    await refreshMintChecks([pair(MINT_A)], NOW + 30_000);
+    expect(requests).toHaveLength(1);
+    okAccounts({ [MINT_A]: revoked });
+    await refreshMintChecks([pair(MINT_A)], NOW + RETRY_AFTER_FAILURE_MS);
+    expect(requests).toHaveLength(1);
+    expect(mintCheckFor(MINT_A, NOW + RETRY_AFTER_FAILURE_MS).status).toBe('PASS_MINT_CHECKS_ONLY');
+  });
+  it('bad pair data can never make the background call reject', async () => {
+    await expect(refreshMintChecks([null as unknown as DexPair, pair(MINT_A)], NOW)).resolves.toBeUndefined();
+    expect(mintCheckSummary().lastError).toBe('UNAVAILABLE');
+  });
+  it('fabric.refreshBackground starts exactly one batched mint check after a DEX refresh', async () => {
+    const t = Date.now();
+    market.cgFetchedAt = t; market.fxFetchedAt = t; market.dexFetchedAt = 0;
+    const rpcBodies: unknown[] = [];
+    globalThis.fetch = (async (u: any, init?: RequestInit) => {
+      const url = String(u);
+      if (url.includes('token-profiles')) return reply([{ chainId: 'solana', tokenAddress: MINT_A }]);
+      if (url.includes('/tokens/v1/solana/')) return reply([{ chainId: 'solana', dexId: 'raydium', pairAddress: USDC, priceUsd: '1', liquidity: { usd: 100_000 },
+        baseToken: { address: MINT_A, symbol: 'AAA', name: 'A' }, quoteToken: { address: USDC, symbol: 'USDC' } }]);
+      if (url === RPC) { rpcBodies.push(JSON.parse(String(init?.body))); return reply({ result: { context: { slot: 5 }, value: [revoked] } }); }
+      return reply({}, 404);
+    }) as typeof fetch;
+    await refreshBackground();
+    await vi.waitFor(() => expect(rpcBodies).toHaveLength(1));
+    expect((rpcBodies[0] as { method: string }).method).toBe('getMultipleAccounts');
+    await vi.waitFor(() => expect(mintCheckFor(MINT_A).status).toBe('PASS_MINT_CHECKS_ONLY'));
+  });
+  it('the watchlist note matches the banner when checks are configured', () => {
+    expect(discover(1e6, NOW).solanaHunter.note).toMatch(/with read-only on-chain mint checks/);
+    delete process.env.MIA_SOLANA_RPC_URL;
+    expect(discover(1e6, NOW).solanaHunter.note).toMatch(/Mint checks, holder data and an executable sell route are not yet verified/);
+  });
+  it('Copy Trading never shows Solana wallet activity as LIVE: it is not built', async () => {
+    failureGate.reset();
+    const app = await buildApp();
+    try {
+      const cookie = String((await app.inject({ method: 'POST', url: '/api/auth/setup', headers: { 'content-type': 'application/json' }, payload: ownerSetupPayload('copy owner') })).headers['set-cookie']).split(';')[0];
+      const c = (await app.inject({ url: '/api/copy', headers: { cookie } })).json();
+      const sol = c.requirements.find((r: { providerId: string }) => r.providerId === 'solana_rpc');
+      expect(c.status).toBe('BLOCKED');
+      expect(sol.status).not.toBe('LIVE');
+    } finally { await app.close(); }
+  });
+  it('an unusable MIA_SOLANA_RPC_URL registers the provider as DOWN, not IDLE', async () => {
+    vi.resetModules();
+    process.env.MIA_SOLANA_RPC_URL = 'http://plain-http.example.com';
+    const http = await import('../src/providers/http.js');
+    await import('../src/providers/solanaRpc.js');
+    expect(http.provider('solana_rpc')).toMatchObject({ status: 'DOWN' });
+    expect(String(http.provider('solana_rpc')?.note)).not.toContain('plain-http.example.com');
   });
 });

@@ -246,7 +246,7 @@ export async function refreshBackground() {
   }
   // Omega PR-06: read-only Solana mint checks for the watchlist; no-op unless MIA_SOLANA_RPC_URL is set. Not awaited:
   // one batched RPC call must never delay the market-data lane. It never throws (errors become a status code).
-  if (market.dex.length) void refreshMintChecks(market.dex, t);
+  if (market.dex.length) void refreshMintChecks(market.dex, t).catch(() => { /* never throws; guard against a future change */ });
   if (t - market.fxFetchedAt > 30 * 60_000) {
     try { market.fx = await frankfurter.fxSeries(180); market.fxFetchedAt = t; } catch { /* tracked */ }
   }

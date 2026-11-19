@@ -62,14 +62,18 @@ describe.skipIf(!LIVE)('live paper execution (real order book, simulated fills)'
  * USDC keeps both (block). Proves the parser on real chain data; it does not prove any token is safe to buy.
  */
 describe.skipIf(!LIVE || !process.env.MIA_SOLANA_RPC_URL)('live Solana RPC (read-only mint checks)', () => {
-  it('reads wSOL and USDC mints at a real slot and judges them as expected', async () => {
+  it('reads wSOL, USDC and PYUSD mints at a real slot and judges them as expected', async () => {
     const { config } = await import('../src/config.js'); (config as any).offline = false;
     const { getMultipleAccountsParsed } = await import('../src/providers/solanaRpc.js');
     const { assessParsedMint } = await import('../src/solana/mint-audit.js');
     const WSOL = 'So11111111111111111111111111111111111111112'; const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-    const { slot, accounts } = await getMultipleAccountsParsed([WSOL, USDC]);
+    const PYUSD = '2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo'; // a Token-2022 mint with risky extensions
+    const { slot, accounts } = await getMultipleAccountsParsed([WSOL, USDC, PYUSD]);
     expect(slot).toBeGreaterThan(0);
     expect(assessParsedMint(WSOL, accounts[0]).status).toBe('PASS_MINT_CHECKS_ONLY');
     expect(assessParsedMint(USDC, accounts[1])).toMatchObject({ status: 'BLOCK', reasons: expect.arrayContaining(['BLOCK_ACTIVE_MINT_AUTHORITY']) });
+    // Token-2022 is recognized (not BLOCK_NOT_TOKEN_PROGRAM) and its extensions are actually judged.
+    expect(assessParsedMint(PYUSD, accounts[2])).toMatchObject({ status: 'BLOCK', tokenProgram: 'TOKEN_2022',
+      reasons: expect.arrayContaining(['BLOCK_RISKY_EXTENSION_permanentDelegate', 'BLOCK_RISKY_EXTENSION_transferHook']) });
   }, 30_000);
 });

@@ -9,6 +9,7 @@ import { applyMintChecks, mintCheckSummary } from '../solana/mintChecks.js';
 /** Solana watchlist freshness: DEX Screener cache older than this, missing, or future-dated (clock jump) is stale. */
 const SOLANA_HUNTER_MAX_AGE_MS = 5 * 60_000;
 const SOLANA_HUNTER_NOTE = 'DEX Screener watchlist only. Mint checks, holder data and an executable sell route are not yet verified.';
+const SOLANA_HUNTER_NOTE_WITH_MINT_CHECKS = 'DEX Screener watchlist with read-only on-chain mint checks. Holder data, pool custody and an executable sell route are not yet verified.';
 
 /**
  * Explicitly fresh, read-only Solana watchlist: never an order-authorizing signal (Omega PR-01).
@@ -33,7 +34,9 @@ export function solanaWatchlist(nowMs: number) {
       candidates = applyMintChecks(rankSolanaPairs(trusted, { nowMs }), nowMs);
     } catch { rankerFailed = true; candidates = []; }
   }
-  return { asOf, stale: !fresh, rankerFailed, skippedUntrustedQuote, candidates, mintChecks: mintCheckSummary(), executionReady: false as const, note: SOLANA_HUNTER_NOTE };
+  const mintChecks = mintCheckSummary();
+  return { asOf, stale: !fresh, rankerFailed, skippedUntrustedQuote, candidates, mintChecks, executionReady: false as const,
+    note: mintChecks.configured ? SOLANA_HUNTER_NOTE_WITH_MINT_CHECKS : SOLANA_HUNTER_NOTE };
 }
 
 /** Asset Discovery (Part 10 "Discover"): ranked lists drawn only from live feeds. */

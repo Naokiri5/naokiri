@@ -16,20 +16,26 @@ export const SOLANA_RPC = 'solana_rpc';
 export const MAX_ACCOUNTS_PER_CALL = 100;
 /** jsonParsed mints are small (Token-2022 metadata included); 2 MB for 100 accounts is a generous ceiling. */
 export const MAX_RPC_RESPONSE_BYTES = 2_000_000;
-const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const BASE58_SHAPE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-const configuredAtStart = !!process.env.MIA_SOLANA_RPC_URL?.trim();
-registerProvider({
-  id: SOLANA_RPC, name: 'Solana RPC (read-only mint and freeze authority checks)', sourceClass: 'onchain', markets: ['crypto-dex'],
-  license: 'Terms of the configured endpoint. The public api.mainnet.solana.com is rate-limited and not for production.',
-  realtime: 'NEAR_REALTIME', requiresCredentials: false, status: configuredAtStart ? 'IDLE' : 'PENDING_CREDENTIALS',
-  note: configuredAtStart ? 'Read-only getMultipleAccounts for Solana watchlist mint checks. No transactions, no signer.'
-    : 'Set MIA_SOLANA_RPC_URL (https) on the server to enable read-only Solana mint checks.',
-});
-setRateLimit(SOLANA_RPC, 30); // far below the public limits; MIA needs about one call per DEX refresh
+/**
+ * A Solana public key: base58 that decodes to exactly 32 bytes. The shape regex alone accepts strings that decode to 31
+ * or 33 bytes, and one such address makes the node reject a whole getMultipleAccounts batch.
+ */
+export function isSolanaAddress(s: unknown): s is string {
+  if (typeof s !== 'string' || !BASE58_SHAPE.test(s)) return false;
+  let n = 0n;
+  for (const c of s) n = n * 58n + BigInt(BASE58.indexOf(c));
+  let bytes = 0;
+  for (; n > 0n; n >>= 8n) bytes++;
+  let zeros = 0;
+  for (const c of s) { if (c !== '1') break; zeros++; }
+  return bytes + zeros === 32;
+}
 
 /** Why the RPC could not be used, as a short code that is safe to show (never the URL). */
-export type SolanaRpcErrorCode = 'NOT_CONFIGURED' | 'URL_INVALID' | 'HTTP' | 'TOO_LARGE' | 'RPC_ERROR' | 'MALFORMED' | 'UNAVAILABLE';
+export type SolanaRpcErrorCode = 'NOT_CONFIGURED' | 'URL_INVALID' | 'TOO_LARGE' | 'RPC_ERROR' | 'MALFORMED' | 'UNAVAILABLE';
 export class SolanaRpcError extends ProviderError {
   constructor(public code: SolanaRpcErrorCode, msg: string, status?: number) { super(SOLANA_RPC, msg, status); }
 }
@@ -44,6 +50,17 @@ export function solanaRpcUrl(): string | null {
   if (u.username || u.password || u.hash) throw new SolanaRpcError('URL_INVALID', 'MIA_SOLANA_RPC_URL must not contain credentials or a fragment');
   return u.href;
 }
+
+const startStatus = (() => { try { return solanaRpcUrl() ? 'IDLE' as const : 'PENDING_CREDENTIALS' as const; } catch { return 'DOWN' as const; } })();
+registerProvider({
+  id: SOLANA_RPC, name: 'Solana RPC (read-only mint and freeze authority checks)', sourceClass: 'onchain', markets: ['crypto-dex'],
+  license: 'Terms of the configured endpoint. The public api.mainnet.solana.com is rate-limited and not for production.',
+  realtime: 'NEAR_REALTIME', requiresCredentials: false, status: startStatus,
+  note: startStatus === 'IDLE' ? 'Read-only getMultipleAccounts for Solana watchlist mint checks. No transactions, no signer.'
+    : startStatus === 'DOWN' ? 'MIA_SOLANA_RPC_URL is set but unusable: it must be an https URL without credentials or a fragment.'
+    : 'Set MIA_SOLANA_RPC_URL (https) on the server to enable read-only Solana mint checks.',
+});
+setRateLimit(SOLANA_RPC, 30); // far below the public limits; MIA needs about one call per DEX refresh
 
 export interface AccountsAtSlot { slot: number; accounts: unknown[] }
 
@@ -67,8 +84,8 @@ export function decodeMultipleAccounts(raw: unknown, expected: number): Accounts
  * account does not exist). Redirects are refused so a keyed URL is never replayed to another host.
  */
 export async function getMultipleAccountsParsed(addresses: readonly string[]): Promise<AccountsAtSlot> {
-  if (!addresses.length || addresses.length > MAX_ACCOUNTS_PER_CALL || !addresses.every((a) => B58.test(a))) {
-    throw new SolanaRpcError('MALFORMED', 'getMultipleAccounts needs 1 to 100 base58 addresses');
+  if (!addresses.length || addresses.length > MAX_ACCOUNTS_PER_CALL || !addresses.every(isSolanaAddress)) {
+    throw new SolanaRpcError('MALFORMED', 'getMultipleAccounts needs 1 to 100 Solana addresses');
   }
   const url = solanaRpcUrl();
   if (!url) throw new SolanaRpcError('NOT_CONFIGURED', 'MIA_SOLANA_RPC_URL is not set');
@@ -85,6 +102,7 @@ export function solanaRpcErrorCode(e: unknown): SolanaRpcErrorCode | `HTTP_${num
   if (e instanceof ProviderError) {
     if (typeof e.status === 'number') return `HTTP_${e.status}`;
     if (/exceeds \d+ bytes/.test(e.message)) return 'TOO_LARGE';
+    if (/invalid JSON body/.test(e.message)) return 'MALFORMED';
   }
   return 'UNAVAILABLE';
 }

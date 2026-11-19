@@ -83,10 +83,18 @@ async function readLimited(id: string, res: Response, max: number): Promise<Uint
   for (const c of chunks) { out.set(c, at); at += c.byteLength; }
   return out;
 }
-const decodeLimited = (bytes: Uint8Array, as: 'json' | 'text' | undefined): unknown => {
+/** Never let a parser error quote the untrusted body (V8 SyntaxErrors include a snippet) into provider status. */
+function decodeLimited(id: string, bytes: Uint8Array, as: 'json' | 'text' | undefined): unknown {
   const text = new TextDecoder().decode(bytes);
-  return as === 'text' ? text : JSON.parse(text);
-};
+  if (as === 'text') return text;
+  try { return JSON.parse(text); } catch { throw new ProviderError(id, 'invalid JSON body'); }
+}
+/** Defence in depth: a configured URL can carry a key in its path (for example /v2/<key>); never store it in a message. */
+function redactUrl(msg: string, url: string): string {
+  let out = msg.split(url).join('[url]');
+  try { const u = new URL(url); const tail = u.pathname + u.search; if (tail.length > 1) out = out.split(tail).join('[url]'); } catch { /* not a URL */ }
+  return out;
+}
 
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
 /**
@@ -129,7 +137,7 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
       throw new ProviderError(id, `HTTP ${res.status}`, res.status);
     }
     const raw: unknown = opts.maxBytes
-      ? decodeLimited(await readLimited(id, res, opts.maxBytes), opts.as)
+      ? decodeLimited(id, await readLimited(id, res, opts.maxBytes), opts.as)
       : opts.as === 'text' ? await res.text() : await res.json();
     const body = opts.decode ? opts.decode(raw) : raw as T;
     const ms = performance.now() - t0;
@@ -140,7 +148,7 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
     return body;
   } catch (e: any) {
     if (e?.resourceMiss) throw e;
-    const msg = e?.name === 'AbortError' ? 'timeout' : String(e?.message ?? e).replace(/(key|token)=[^&\s]+/gi, '$1=***');
+    const msg = e?.name === 'AbortError' ? 'timeout' : redactUrl(String(e?.message ?? e), url).replace(/(key|token)=[^&\s]+/gi, '$1=***');
     info.errorCount++; info.lastErrorAt = Date.now(); info.lastError = msg;
     const recentOk = info.lastOkAt && Date.now() - info.lastOkAt < 120_000;
     const prev = info.status;

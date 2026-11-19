@@ -32,10 +32,12 @@ Full-suite results for this branch are recorded in the PR description.
 | Mint checks | Trusted-quote Solana mints only (deduplicated, at most 100); pass, block and missing account recorded with the slot in one request; TTL; dropped mints; error codes without the URL; stale pass becomes "not checked"; block always stands; no request without the setting; one request at a time | same | pass; fails if a stale pass still counts |
 | Watchlist join | A block turns WATCH into REJECT (sorted last); a pass adds a note; nothing becomes tradable; `/api/discover` never contains the RPC URL or key | same | pass; fails without the join |
 | UI | Mint check column; "authorities revoked" and "blocked" badges; failed-check banner; no buttons | `e2e/solana.spec.ts` | pass |
-| Live (opt-in) | wSOL passes and USDC blocks on real chain data | `server/test/live.providers.test.ts` | **not run**: the sandbox network refuses the Solana host |
+| Review fixes | 32-byte address check; both token program ids valid; invalid JSON is MALFORMED and never quoted; URL scrubbed from errors; UNKNOWN fails closed (WATCH becomes INSUFFICIENT_DATA); padded extension lists inconclusive; reasons capped at 10; backoff after failure; bad pair data never rejects; fabric wiring fires one batched request; honest note; Copy Trading never LIVE; invalid setting registers DOWN | `server/test/solana-rpc.test.ts` | pass; six fixes each checked by breaking them |
+| Live (opt-in) | wSOL passes, USDC blocks (mint authority), PYUSD is recognised as Token-2022 and blocks (risky extensions), on real chain data | `server/test/live.providers.test.ts` | **pass** (2026-11-19, `api.mainnet.solana.com`, owner-approved network access) |
+| Live end-to-end | Real DEX Screener sample plus one batched mint check (slot 471406626): 12 mints checked, 1 pass, 11 inconclusive (Token-2022 metadata authority flags); nothing tradable | scratch script (not committed) | **pass** |
 
 ## Not run (no credentials or network; recorded honestly)
 - **GMGN:** live API calls (no key).
-- **Solana RPC:** the owner chose `https://api.mainnet.solana.com` (PR-06). The live test is written but not run here, because this sandbox's network policy refuses the host. It needs to run on the server. Real Token-2022 accounts with every extension type are not covered yet.
+- **Solana RPC:** the owner chose `https://api.mainnet.solana.com` (PR-06). The live test **passed** on 2026-11-19 after the owner allowed the host. Token-2022 is now covered (PYUSD). Not every extension type is covered on real accounts yet.
 - **DEX Screener:** live fetch (the sandbox has no outbound access to it).
 - **Latency:** the subsecond scorecard (requirement 006). Not measured.
