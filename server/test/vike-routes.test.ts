@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
 import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { failureGate } from '../src/core/ratelimit.js';
@@ -10,8 +10,14 @@ import { executionAdapter, LiveLockedError, environmentsOverview } from '../src/
 const KEY = 'vk_' + 'Y'.repeat(32);
 const json = { 'content-type': 'application/json' };
 const realFetch = globalThis.fetch; const flags = { offline: config.offline };
-let seen: { url: string; headers: Record<string, string>; redirect?: string }[] = [];
-const stub = (body: unknown, status = 200) => { seen = []; globalThis.fetch = (async (u: any, init: any) => { seen.push({ url: String(u), headers: init?.headers ?? {}, redirect: init?.redirect }); return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); }) as typeof fetch; };
+let seen: { url: string; headers: Headers; redirect?: RequestRedirect }[] = [];
+const stub = (body: unknown, status = 200) => {
+  seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), headers: new Headers(init?.headers), redirect: init?.redirect });
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  };
+};
 
 describe('Vike research routes', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
@@ -20,7 +26,8 @@ describe('Vike research routes', () => {
     const r = await app.inject({ method: 'POST', url: '/api/auth/setup', headers: json, payload: ownerSetupPayload('vike route owner') });
     cookie = String(r.headers['set-cookie']).split(';')[0];
   });
-  afterEach(() => { globalThis.fetch = realFetch; Object.assign(config, flags); delete process.env.MIA_VIKE_API_KEY; _resetProviderBlocks(); });
+  beforeEach(() => { vi.stubEnv('MIA_VIKE_API_KEY', undefined); });
+  afterEach(() => { globalThis.fetch = realFetch; Object.assign(config, flags); vi.unstubAllEnvs(); _resetProviderBlocks(); });
   afterAll(async () => { await app.close(); });
   const get = (url: string, auth = true) => app.inject({ url, headers: auth ? { cookie } : {} });
 
@@ -44,7 +51,7 @@ describe('Vike research routes', () => {
     expect(r.json()).toMatchObject({ source: 'vike-data', kind: 'RESEARCH_ONLY', tradeEligible: false, data: { tokens: [{ symbol: 'PEPE' }] } });
     expect(r.body).not.toContain(KEY);
     expect(seen[0].url).toMatch(/^https:\/\/data\.vike\.io\/v1\/onchain\/tokens\/screener\?/);
-    expect(seen[0].headers['X-API-KEY']).toBe(KEY); expect(seen[0].redirect).toBe('error');
+    expect(seen[0].headers.get('X-API-KEY')).toBe(KEY); expect(seen[0].redirect).toBe('error');
   });
   it('validate input (400) before any request, including unknown query keys', async () => {
     process.env.MIA_VIKE_API_KEY = KEY; Object.assign(config, { offline: false }); stub({});

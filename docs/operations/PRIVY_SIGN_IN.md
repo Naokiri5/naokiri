@@ -25,10 +25,7 @@ Status: **implemented and offline-tested; not yet tried with a real Privy app.**
 - **Sensitive actions still need your passphrase.** Mode changes, risk policy, withdrawals and similar actions ask for it even after a Privy sign-in.
 - **Failed Privy sign-ins count toward lockout,** sharing the same brute-force limit as wrong passphrases.
 - **No Privy secret on the server.** It uses only the public App ID and Privy's public verification key.
-- **The browser security policy (CSP) only opens up when Privy is on.** It stays strict unless `MIA_PRIVY_APP_ID` is set. Then only these hosts are allowed:
-  - Privy (`auth.privy.io`);
-  - Cloudflare's bot check;
-  - the WalletConnect relay and verify hosts.
+- **Privy adds browser security policy (CSP) sources when enabled.** Connections allow `auth.privy.io`, the WalletConnect relay, explorer and pulse services, and `api.web3modal.org`. Frames allow `auth.privy.io`, the WalletConnect verify hosts, and `challenges.cloudflare.com`. Cloudflare's challenge scripts are allowed. Images and workers can use `blob:` URLs.
 - **Privy code loads only when Privy is enabled.** It is in a separate bundle, not the main one.
 - **A Privy failure stays contained.** A bad App ID or a blocked network breaks only the Privy card, never the passphrase login.
 
