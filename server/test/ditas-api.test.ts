@@ -57,6 +57,22 @@ describe('DITAS authenticated API and persisted service integration', () => {
     expect(matches).toContain(prior.id);
     expect(matches).not.toContain(later.id);
   });
+  it('excludes a reused fingerprint captured after the anchor even when its event timestamp qualifies', async () => {
+    const prior = createEvent({ suffix: 'prior', withFingerprint: true, symbol: 'BEFOREUSDT' });
+    vi.setSystemTime(T + 6_000);
+    const future = createEvent({ suffix: 'future-capture', withFingerprint: true, symbol: 'FUTUREUSDT' });
+    vi.setSystemTime(T);
+    const reused = recordOpportunity({
+      kind: 'NO_SIGNAL', instrumentId: future.instrumentId, snapshotId: future.snapshotId!,
+      reason: 'system clock returned to its previous time', dedupeKey: 'reuse-future-capture',
+    });
+    const anchor = createEvent({ suffix: 'anchor', withFingerprint: true, symbol: 'ANCHORUSDT' });
+    const response = await app.inject({ url: `/api/ditas/events/${anchor.id}/similar`, headers: headers() });
+    expect(response.statusCode).toBe(200);
+    const matches = response.json().map((row: { eventId: string }) => row.eventId);
+    expect(matches).toContain(prior.id);
+    expect(matches).not.toContain(reused.id);
+  });
   it('uses frozen depth, stores hashed provenance, and cannot write actual execution ledgers', async () => {
     const event = createEvent(), snapshot = memoryDetail(event.id)!.snapshot!;
     market.deep.get(event.instrumentId)!.book = null; // Later live-store changes must not rewrite the frozen evidence.

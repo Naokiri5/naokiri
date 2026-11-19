@@ -67,10 +67,9 @@ test('collapsed rail keeps every destination one click away', async () => {
 });
 
 test('command palette understands plain-language synonyms', async () => {
-  const shellReady = page.waitForResponse(response => new URL(response.url()).pathname === '/api/shell' && response.ok());
   await page.goto('/');
-  await shellReady;
   await expect(page.locator('h1')).toBeVisible();
+  await expect(page.locator('.mode')).not.toHaveText(/^(…|CHECKING)$/);
   await page.keyboard.press('Control+k');
   const box = page.getByRole('textbox', { name: 'Command' }); const opts = page.getByRole('option');
   await box.fill('profit'); await expect(opts.filter({ hasText: 'Portfolio' }).first()).toBeVisible(); await expect(opts.filter({ hasText: 'Profit Calendar' })).toBeVisible();

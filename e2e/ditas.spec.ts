@@ -23,6 +23,7 @@ test('DITAS shows honest empty records and no fabricated simulation results', as
 
 test('DITAS separates hypothetical results and exposes stored decision evidence', async ({ page }) => {
   const stamp = 1_700_000_000_000;
+  let decisionResponse = Promise.resolve();
   await page.route('**/api/ditas', route => route.fulfill({ json: {
     counts: { snapshots: 1, events: 1, twins: 1, forecasts: 0, outcomes: 0 },
     dataHealth: [{ instrumentId: 'fixture:BTC', status: 'OK', issues: [] }],
@@ -36,10 +37,13 @@ test('DITAS separates hypothetical results and exposes stored decision evidence'
       assumptions: { feeRate: 0.001, availableNotional: 100 }, limitations: ['Hypothetical fills are conditional estimates.']
     } }]
   } }));
-  await page.route('**/api/ditas/events/event-fixture', route => route.fulfill({ json: {
-    event: { id: 'event-fixture', payload: { reason: 'Rejected because the fixture spread was too wide.' } },
-    snapshot: { id: 'snapshot-fixture', source: 'test-fixture' }, relatedEvents: []
-  } }));
+  await page.route('**/api/ditas/events/event-fixture', async route => {
+    await decisionResponse;
+    await route.fulfill({ json: {
+      event: { id: 'event-fixture', payload: { reason: 'Rejected because the fixture spread was too wide.' } },
+      snapshot: { id: 'snapshot-fixture', source: 'test-fixture' }, relatedEvents: []
+    } });
+  });
   await page.goto('/ditas');
   await expect(page.getByText('$12.00', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Decision ledger' }).click();
@@ -47,12 +51,23 @@ test('DITAS separates hypothetical results and exposes stored decision evidence'
   await expect(page.getByRole('dialog')).toContainText('Rejected because the fixture spread was too wide.');
   await expect(page.getByRole('dialog')).toContainText('snapshot-fixture');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('tab', { name: 'Decision Twin' }).click();
-  await expect(page.getByText('HYPOTHETICAL', { exact: true })).toBeVisible();
-  await expect(page.getByText('-$5.00', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Inspect simulation' }).click();
-  await expect(page.getByRole('dialog')).toContainText('availableNotional');
-  await expect(page.getByRole('dialog')).toContainText('Hypothetical fills are conditional estimates.');
+
+  let releaseDecision!: () => void;
+  decisionResponse = new Promise(resolve => { releaseDecision = resolve; });
+  try {
+    const pending = page.waitForRequest('**/api/ditas/events/event-fixture');
+    await page.getByRole('button', { name: 'Inspect decision' }).click();
+    await pending;
+    await page.getByRole('tab', { name: 'Decision Twin' }).click();
+    await expect(page.getByText('HYPOTHETICAL', { exact: true })).toBeVisible();
+    await expect(page.getByText('-$5.00', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Inspect simulation' }).click();
+    await expect(page.getByRole('dialog')).toContainText('availableNotional');
+    await expect(page.getByRole('dialog')).toContainText('Hypothetical fills are conditional estimates.');
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.getByRole('tab', { name: 'Decision ledger' }).click();
+    await expect(page.getByRole('button', { name: 'Inspect decision' })).toBeEnabled();
+  } finally { releaseDecision(); }
 });
 
 test('DITAS remains usable on mobile', async ({ page }) => {

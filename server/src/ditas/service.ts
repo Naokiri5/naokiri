@@ -6,7 +6,7 @@ import { market } from '../market/store.js';
 import { assessQuality } from '../market/quality.js';
 import { memoryDetail, memoryEvents } from './memory.js';
 import { strategyPassports } from './passports.js';
-import { compareFingerprints } from './fingerprint.js';
+import { compareFingerprints, type MarketFingerprint } from './fingerprint.js';
 import { calibrationReport } from './calibration.js';
 import { simulateTwin, type TwinAssumptions } from './twin.js';
 import { INTERVAL_MS, type Candle } from '../market/types.js';
@@ -60,10 +60,22 @@ export function runDecisionTwin(eventId: string, candles: Candle[], assumptions:
 }
 
 export function similarEnvironments(eventId: string) {
-  const d = memoryDetail(eventId), f = d?.snapshot?.fingerprint;
-  if (!f) throw new Error('event has no fingerprint');
-  return all<any>(`SELECT e.id,json_extract(s.payload,'$.fingerprint') fingerprint FROM ditas_events e JOIN ditas_snapshots s ON s.id=e.snapshot_id WHERE e.seq < (SELECT seq FROM ditas_events WHERE id=?) AND e.created_at<=? AND e.snapshot_id<>? AND json_extract(s.payload,'$.fingerprint') IS NOT NULL ORDER BY e.seq DESC LIMIT 500`, eventId, d!.event.createdAt, d!.event.snapshotId).flatMap(r => {
-    const fp = P(r.fingerprint); const comparison = compareFingerprints(f, fp); return comparison.comparable ? [{ eventId: r.id, instrumentId: fp.instrumentId, asOf: fp.asOf, ...comparison }] : [];
+  const detail = memoryDetail(eventId);
+  const anchor: MarketFingerprint | undefined = detail?.snapshot?.fingerprint;
+  if (!detail || !anchor) throw new Error('event has no fingerprint');
+  if (!Number.isFinite(anchor.asOf) || anchor.asOf > detail.event.createdAt) return [];
+  return all<{ id: string; fingerprint: string }>(`
+    SELECT e.id, json_extract(s.payload, '$.fingerprint') AS fingerprint
+    FROM ditas_events e JOIN ditas_snapshots s ON s.id = e.snapshot_id
+    WHERE e.seq < (SELECT seq FROM ditas_events WHERE id = ?)
+      AND e.created_at <= ? AND e.snapshot_id <> ?
+      AND json_type(s.payload, '$.fingerprint.asOf') IN ('integer', 'real')
+      AND json_extract(s.payload, '$.fingerprint.asOf') <= ?
+    ORDER BY e.seq DESC LIMIT 500
+  `, eventId, detail.event.createdAt, detail.event.snapshotId, anchor.asOf).flatMap(r => {
+    const fp = P<MarketFingerprint>(r.fingerprint);
+    const comparison = compareFingerprints(anchor, fp);
+    return comparison.comparable ? [{ eventId: r.id, instrumentId: fp.instrumentId, asOf: fp.asOf, ...comparison }] : [];
   }).sort((a, b) => b.similarity! - a.similarity!).slice(0, 20);
 }
 

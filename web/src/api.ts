@@ -38,14 +38,30 @@ export function useApi<T = any>(path: string | null, opts: { topics?: string[]; 
   const [requestedAt, setRequestedAt] = useState<number | null>(null);
   const timer = useRef<number | null>(null); const seq = useRef(0);
   const load = useCallback(async () => {
-    if (!path) return; setLoading(true);
+    if (!path) { setLoading(false); return; }
+    setLoading(true);
     const n = ++seq.current; const sent = performance.now();
     try { const d = await api<T>(path); if (n !== seq.current) return; setData(d); setError(null); setRequestedAt(sent); }
     catch (e: any) { if (n === seq.current) setError(e.message); }
     finally { if (n === seq.current) setLoading(false); }
   }, [path]);
-  useEffect(() => { load(); if (!opts.every) return; const t = window.setInterval(load, opts.every); return () => clearInterval(t); }, [load, opts.every]);
-  useStream((t) => { if (opts.topics?.includes(t)) { if (timer.current) clearTimeout(timer.current); timer.current = window.setTimeout(load, 600); } });
+  useEffect(() => {
+    void load();
+    const interval = opts.every ? window.setInterval(load, opts.every) : null;
+    return () => {
+      seq.current++;
+      if (interval !== null) window.clearInterval(interval);
+      if (timer.current !== null) {
+        window.clearTimeout(timer.current);
+        timer.current = null;
+      }
+    };
+  }, [load, opts.every]);
+  useStream((topic) => {
+    if (!opts.topics?.includes(topic)) return;
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { timer.current = null; void load(); }, 600);
+  });
   return { data, error, loading, requestedAt, reload: load, setData };
 }
 
