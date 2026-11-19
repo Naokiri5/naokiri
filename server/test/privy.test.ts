@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
@@ -22,16 +22,24 @@ const token = (o: { sub?: string; aud?: string; iss?: string; exp?: number; key?
 describe('Privy sign-in', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
   const post = (url: string, payload: unknown, withCookie = false) => app.inject({ method: 'POST', url, headers: withCookie ? { ...json, cookie } : json, payload: payload as any });
+  const linkOwner = async () => {
+    const result = await post('/api/security/privy/link', { accessToken: await token(), password: PW }, true);
+    expect(result.statusCode).toBe(200);
+  };
   beforeAll(async () => {
     process.env.MIA_PRIVY_APP_ID = APP;
     const k = await generateKeyPair('ES256'); priv = k.privateKey as CryptoKey;
     otherPriv = (await generateKeyPair('ES256')).privateKey as CryptoKey;
     _setPrivyKeyForTests({ keys: [{ ...(await exportJWK(k.publicKey)), kid: 'k1', alg: 'ES256', use: 'sig' }] });
-    freshDb(); failureGate.reset(); app = await buildApp();
-    cookie = String((await post('/api/auth/setup', ownerSetupPayload(PW))).headers['set-cookie']).split(';')[0];
   });
-  beforeEach(() => failureGate.reset());
-  afterAll(async () => { await app.close(); delete process.env.MIA_PRIVY_APP_ID; _setPrivyKeyForTests(null); });
+  beforeEach(async () => {
+    freshDb(); failureGate.reset(); app = await buildApp();
+    const setup = await post('/api/auth/setup', ownerSetupPayload(PW));
+    expect(setup.statusCode).toBe(200);
+    cookie = String(setup.headers['set-cookie']).split(';')[0];
+  });
+  afterEach(async () => { await app.close(); });
+  afterAll(() => { delete process.env.MIA_PRIVY_APP_ID; _setPrivyKeyForTests(null); });
 
   it('public config exposes only the app id and state; wallet actions are LOCKED', async () => {
     const r = (await app.inject({ url: '/api/auth/privy/config' })).json();
@@ -49,6 +57,7 @@ describe('Privy sign-in', () => {
     expect(ok.statusCode).toBe(200); expect(ok.json()).toEqual({ linked: true, userId: OWNER });
   });
   it('the linked owner signs in with a valid Privy token and gets a working session', async () => {
+    await linkOwner();
     const r = await post('/api/auth/privy/login', { accessToken: await token() });
     expect(r.statusCode).toBe(200);
     const c = String(r.headers['set-cookie']); expect(c).toMatch(/HttpOnly/); expect(c).toMatch(/SameSite=Strict/);
@@ -63,10 +72,12 @@ describe('Privy sign-in', () => {
     ['a token signed with a different key', () => token({ key: otherPriv })],
     ['a non-Privy subject', () => token({ sub: 'owner' })],
   ])('refuses %s', async (_name, make) => {
+    await linkOwner();
     const r = await post('/api/auth/privy/login', { accessToken: await make() });
     expect(r.statusCode).toBe(401); expect(r.headers['set-cookie']).toBeUndefined();
   });
   it('failed Privy logins hit the shared brute-force limiter', async () => {
+    await linkOwner();
     let last = 0;
     for (let i = 0; i < 12; i++) last = (await post('/api/auth/privy/login', { accessToken: await token({ sub: 'did:privy:attacker000001' }) })).statusCode;
     expect(last).toBe(429);
@@ -76,6 +87,7 @@ describe('Privy sign-in', () => {
     expect((await post('/api/auth/privy/login', { accessToken: await token(), extra: 1 })).statusCode).toBe(400);
   });
   it('unlink needs step-up, and afterwards Privy login is refused again', async () => {
+    await linkOwner();
     expect((await post('/api/security/privy/unlink', {}, true)).statusCode).toBe(403);
     expect((await post('/api/security/privy/unlink', { password: PW }, true)).json()).toEqual({ linked: false });
     expect((await post('/api/auth/privy/login', { accessToken: await token() })).statusCode).toBe(401);

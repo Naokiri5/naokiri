@@ -18,6 +18,7 @@ import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { failureGate } from '../core/ratelimit.js';
 import { AuthError, createSession, verifyPassphrase } from '../api/auth.js';
+import { tx } from '../db/db.js';
 
 /** Privy app ids are exactly 25 characters (the React SDK refuses anything else). */
 const APP_ID_RE = /^[A-Za-z0-9]{25}$/;
@@ -111,14 +112,19 @@ export function unlinkPrivy(password: unknown, stepUpClient: string, exemptFromG
 /** Sign in with Privy: the verified Privy user must be the linked owner. Shares the brute-force limiter. */
 export async function loginWithPrivy(token: unknown, client: string, opts: { directLocal?: boolean } = {}) {
   failureGate.check(client, Date.now(), { global: !opts.directLocal });
-  const link = getLink();
   let userId: string | null = null;
   try { userId = await verifyPrivyAccessToken(token); } catch (e) { if ((e as AuthError).statusCode === 404) throw e; }
-  if (!link || !userId || userId !== link.userId) {
+  // Verification may wait for the remote key. Read the current link and issue the session in one database transaction.
+  const { link, sessionToken } = tx(() => {
+    const link = getLink();
+    const sessionToken = link && userId && userId === link.userId ? createSession(client, 'privy') : null;
+    return { link, sessionToken };
+  });
+  if (!sessionToken) {
     failureGate.fail(client);
     audit('anonymous', 'auth.login.failed', { ip: client, method: 'privy', reason: !link ? 'not-linked' : !userId ? 'bad-token' : 'not-owner' });
     throw new AuthError(!link ? 'Privy sign-in is not linked to the MIA owner yet: sign in with your passphrase and link it in Security Center' : 'this Privy account is not the MIA owner');
   }
   failureGate.ok(client);
-  return createSession(client, 'privy');
+  return sessionToken;
 }
