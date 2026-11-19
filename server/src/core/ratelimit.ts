@@ -24,6 +24,11 @@ export function limiter(perMin: number, burst = perMin, maxKeys = 5_000) {
       if (b.tokens < 1) throw new RateLimitError(`rate limit: ${what} is limited to ${perMin}/min — try again shortly`, Math.ceil(((1 - b.tokens) / perMin) * 60));
       b.tokens -= 1;
     },
+    /** Restore a successful charge when its synchronous operation rolls back. */
+    refund(key: string) {
+      const b = buckets.get(key);
+      if (b) b.tokens = Math.min(burst, b.tokens + 1);
+    },
     reset() { buckets.clear(); },
   };
 }

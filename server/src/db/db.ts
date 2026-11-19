@@ -37,7 +37,7 @@ export function closeDb() { db?.close(); db = null; }
 export function all<T = any>(sql: string, ...p: any[]): T[] { return getDb().prepare(sql).all(...p) as T[]; }
 export function get<T = any>(sql: string, ...p: any[]): T | undefined { return getDb().prepare(sql).get(...p) as T | undefined; }
 export function run(sql: string, ...p: any[]) { return getDb().prepare(sql).run(...p); }
-/** Transaction depth tracked here, not via DatabaseSync.isTransaction (that property needs Node >= 22.16; we support 22.13). */
+/** Track the depth of transactions managed by this wrapper so nested calls join the outer transaction. */
 let txDepth = 0;
 export const inTransaction = () => txDepth > 0;
 /** Atomic block. Nested calls join the outer transaction, so an inner failure still rolls back everything. */

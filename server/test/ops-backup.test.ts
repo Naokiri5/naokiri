@@ -48,6 +48,17 @@ describe('database backups', () => {
     const v = verifyBackup(f, null);
     expect(v.ok).toBe(false); expect(v.checks.find((c) => c.name === 'audit chain')).toMatchObject({ ok: false });
   });
+  it.each(['ditas_twin_runs', 'ditas_blobs'])('fails restore verification when a required %s table is missing', (table) => {
+    const m = createBackup({ dir, key: null, nowTs: 1_800_000_000_000 });
+    const file = join(dir, m.file);
+    const snapshot = new DatabaseSync(file);
+    try { snapshot.exec(`DROP TABLE ${table}`); }
+    finally { snapshot.close(); }
+    writeFileSync(`${file}.json`, JSON.stringify({ ...m, sha256: sealHash(file) }));
+    const result = verifyBackup(file, null);
+    expect(result.ok).toBe(false);
+    expect(result.checks.at(-1)).toMatchObject({ name: 'open', ok: false, detail: expect.stringContaining(table) });
+  });
   it('fails closed on an invalid key instead of writing plaintext', () => {
     expect(() => backupKey('too-short')).toThrow(/32 bytes/);
     expect(backupKey('')).toBeNull(); expect(backupKey(undefined)).toBeNull();

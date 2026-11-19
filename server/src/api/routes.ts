@@ -29,7 +29,7 @@ import { providers } from '../providers/http.js';
 import { latencyReport } from '../core/latency.js';
 import { getControl, updateControl, displayMode } from '../core/mode.js';
 import { acceptPolicy, currentPolicy, DEFAULT_POLICY, policyHistory } from '../risk/policy.js';
-import { accountState, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio/ledger.js';
+import { accountState, cashBalance, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio/ledger.js';
 import { correlation } from '../portfolio/correlation.js';
 import { calendar, reconcile } from '../portfolio/calendar.js';
 import * as oms from '../exec/oms.js';
@@ -314,9 +314,12 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/bot', async () => ({ status: botStatusView(), account: accountState(), positions: oms.listPositions('OPEN'), pending: all("SELECT * FROM orders WHERE status='PENDING_APPROVAL' ORDER BY created_at DESC"), strategies: lab.listStrategies(), ledger: all('SELECT * FROM ledger_entries WHERE account=? ORDER BY ts DESC LIMIT 100', PAPER_ACCOUNT) }));
   app.post('/api/bot/allocation', async (req) => {
     const b = z.object({ amount: z.number().positive().max(10_000_000), direction: z.enum(['DEPOSIT', 'WITHDRAW']) }).parse(req.body);
-    if (b.direction === 'WITHDRAW' && b.amount > accountState().cash) throw new Error('cannot remove more than available paper cash');
-    ledger(PAPER_ACCOUNT, b.direction, b.direction === 'DEPOSIT' ? b.amount : -b.amount, undefined, 'owner paper allocation change');
-    audit('owner', 'bot.allocation', b); return accountState();
+    tx(() => {
+      if (b.direction === 'WITHDRAW' && b.amount > cashBalance(PAPER_ACCOUNT)) throw new Error('cannot remove more than available paper cash');
+      ledger(PAPER_ACCOUNT, b.direction, b.direction === 'DEPOSIT' ? b.amount : -b.amount, undefined, 'owner paper allocation change');
+      audit('owner', 'bot.allocation', b);
+    });
+    return accountState();
   });
   app.get('/api/portfolio', async () => {
     const acct = accountState(); const pos = oms.listPositions();

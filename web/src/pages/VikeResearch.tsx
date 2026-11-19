@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Empty, ErrorLine, Freshness } from '../ui';
 
@@ -38,10 +38,22 @@ export function VikeResearchPanel() {
   const configured = !!status.data?.configured;
   const screener = useApi(configured ? `/api/research/vike/tokens?chain=${chain}&window=24h&limit=50` : null, { every: 120_000 });
   const [q, setQ] = useState(''); const [found, setFound] = useState<{ rows: Record<string, unknown>[]; at: number } | null>(null); const [searchErr, setSearchErr] = useState<string | null>(null);
+  const currentSearch = useRef<AbortController | null>(null);
+  useLayoutEffect(() => () => currentSearch.current?.abort(), []);
   const search = async () => {
+    currentSearch.current?.abort();
+    const request = new AbortController();
+    currentSearch.current = request;
+    setFound(null);
     setSearchErr(null);
-    try { const r = await api<any>(`/api/research/vike/search?q=${encodeURIComponent(q.trim())}&limit=20`); setFound({ rows: rowsOf(r.data), at: r.fetchedAt }); }
-    catch (e) { setSearchErr(e instanceof Error ? e.message : String(e)); }
+    try {
+      const r = await api<{ data: unknown; fetchedAt: number }>(`/api/research/vike/search?q=${encodeURIComponent(q.trim())}&limit=20`, { signal: request.signal });
+      if (!request.signal.aborted) setFound({ rows: rowsOf(r.data), at: r.fetchedAt });
+    } catch (e) {
+      if (!request.signal.aborted) setSearchErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (currentSearch.current === request) currentSearch.current = null;
+    }
   };
   return <>
     <div className="banner info" style={{ marginBottom: 12 }}>Vike data is <b>research only</b>: it is never a trade signal and cannot place, approve or size an order. Names and symbols are untrusted external content and can collide.</div>

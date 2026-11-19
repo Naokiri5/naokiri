@@ -20,6 +20,7 @@ import { createLinkCode, linkStatus, LinkError, revokeLink } from './link.js';
 const SECRET_RE = /^[A-Za-z0-9_-]{1,256}$/;
 const STALE_MESSAGE_S = 600;          // Telegram message dates older than 10 minutes are treated as replays
 const DEDUPE_RETENTION_MS = 7 * 86_400_000;
+const DEDUPE_PRUNE_MS = 3_600_000;
 const OUTBOX_MAX_ATTEMPTS = 5;
 const BACKOFF_MS = [5_000, 30_000, 120_000, 600_000];
 const OUTBOX_LEASE = 'telegram-outbox';
@@ -107,7 +108,6 @@ export async function drainOutbox(send: (chatId: number, text: string) => Promis
       status, pending.attempts, retryAt, accepted ? null : 'Telegram delivery failed', finished, id, OUTBOX_LEASE, holder);
       processed++;
     }
-    run('DELETE FROM telegram_update_dedupe WHERE received_at < ?', now - DEDUPE_RETENTION_MS);
   } finally {
     releaseLease(OUTBOX_LEASE, holder);
   }
@@ -126,9 +126,14 @@ function ownerGuard(req: FastifyRequest, reply: FastifyReply, mutating: boolean)
 }
 
 export async function telegramRoutes(app: FastifyInstance) {
-  if (!config.offline && config.telegramBotToken && webhookSecret()) {
-    let timer: ReturnType<typeof setInterval> | undefined;
+  if (webhookSecret()) {
+    let pruneTimer: ReturnType<typeof setInterval> | undefined;
+    let outboxTimer: ReturnType<typeof setInterval> | undefined;
     let activeDrain: Promise<void> | undefined;
+    const pruneDedupe = () => {
+      try { run('DELETE FROM telegram_update_dedupe WHERE received_at < ?', Date.now() - DEDUPE_RETENTION_MS); }
+      catch { app.log.warn('Telegram deduplication cleanup failed'); }
+    };
     const tick = () => {
       if (activeDrain) return;
       // One request per poll keeps graceful shutdown bounded by the Bot API timeout.
@@ -137,12 +142,17 @@ export async function telegramRoutes(app: FastifyInstance) {
         .finally(() => { activeDrain = undefined; });
     };
     app.addHook('onListen', async () => {
-      timer = setInterval(tick, OUTBOX_POLL_MS);
-      timer.unref();
+      pruneDedupe();
+      pruneTimer = setInterval(pruneDedupe, DEDUPE_PRUNE_MS);
+      pruneTimer.unref();
+      if (config.offline || !config.telegramBotToken) return;
+      outboxTimer = setInterval(tick, OUTBOX_POLL_MS);
+      outboxTimer.unref();
       tick();
     });
     app.addHook('onClose', async () => {
-      clearInterval(timer);
+      clearInterval(pruneTimer);
+      clearInterval(outboxTimer);
       await activeDrain;
     });
   }
@@ -166,22 +176,35 @@ export async function telegramRoutes(app: FastifyInstance) {
     // Edits, callbacks, channel posts and other update types are acknowledged but not processed in v1.
     if (!m || !sender || sender.is_bot) return reply.send({ ok: true, ignored: true });
     if (m.chat.type !== 'private') return reply.send({ ok: true, ignored: true });
-    if (Math.floor(Date.now() / 1000) - m.date > STALE_MESSAGE_S) return reply.send({ ok: true, ignored: true, reason: 'stale' });
+    const receivedAt = Date.now();
+    if (Math.floor(receivedAt / 1000) - m.date > STALE_MESSAGE_S) return reply.send({ ok: true, ignored: true, reason: 'stale' });
 
-    const result = tx(() => {
-      // A failed command or reply insert rolls back the deduplication marker so Telegram can retry it.
-      const ins = run('INSERT OR IGNORE INTO telegram_update_dedupe(update_id, received_at) VALUES (?,?)', update.update_id, Date.now());
-      if (Number(ins.changes) === 0) return { ok: true, duplicate: true };
-      if (typeof m.text !== 'string') return { ok: true, ignored: true };
-      try { chatLimiter.take(String(m.chat.id), 'telegram commands'); }
-      catch (error) {
-        if (!(error instanceof RateLimitError)) throw error;
-        return { ok: true, ignored: true, reason: 'rate limited' };
-      }
-      const commandReply = handleCommand(m.text, { userId: sender.id, chatId: m.chat.id, chatType: m.chat.type });
-      enqueueReply(m.chat.id, commandReply);
-      return { ok: true };
-    });
+    const chatKey = String(m.chat.id);
+    let charged = false;
+    let publishMode: (() => void) | undefined;
+    let result;
+    try {
+      result = tx(() => {
+        // A failed command or reply insert rolls back the deduplication marker so Telegram can retry it.
+        const ins = run('INSERT OR IGNORE INTO telegram_update_dedupe(update_id, received_at) VALUES (?,?)', update.update_id, receivedAt);
+        if (Number(ins.changes) === 0) return { ok: true, duplicate: true };
+        if (typeof m.text !== 'string') return { ok: true, ignored: true };
+        try { chatLimiter.take(chatKey, 'telegram commands', receivedAt); }
+        catch (error) {
+          if (!(error instanceof RateLimitError)) throw error;
+          return { ok: true, ignored: true, reason: 'rate limited' };
+        }
+        charged = true;
+        const commandReply = handleCommand(m.text, { userId: sender.id, chatId: m.chat.id, chatType: m.chat.type }, receivedAt,
+          (publish) => { publishMode = publish; });
+        enqueueReply(m.chat.id, commandReply, receivedAt);
+        return { ok: true };
+      });
+    } catch (error) {
+      if (charged) chatLimiter.refund(chatKey);
+      throw error;
+    }
+    publishMode?.();
     return reply.send(result);
   });
 

@@ -5,7 +5,7 @@
 - Squad H fuzzed all 107 routes and found no 5xx and no authentication bypass.
 - Squad I verified authentication, CSRF and leader election at runtime.
 
-**S1 (high): none found in this audit.** The highest severity found was **S2**: 12 items, of which 11 are fixed and 1 is open.
+**S1 (high): none found in this audit.** The audit recorded 11 S2 items. Nine are fixed, C-02 is open, and G-02 still needs forecast and outcome verification.
 
 | ID | Area | Status |
 |---|---|---|
