@@ -123,8 +123,6 @@ export interface AuthState {
 }
 /** Set by App after /api/auth/state; read by StepUp inputs and sign-out. The server stays authoritative. */
 export const authInfo: { mode: AuthMode; stepUp: StepUpMethod } = { mode: 'privy', stepUp: 'unavailable' };
-/** Marks that the Privy browser session must also be ended the next time the sign-in screen mounts. */
-export const PRIVY_LOGOUT_FLAG = 'mia:privy-logout';
 /**
  * Step-up proof for a protected request. A 6-digit value is an authenticator code; anything else is the legacy
  * passphrase (passphrases are at least 10 characters, so the two can never be confused). Empty sends nothing and the

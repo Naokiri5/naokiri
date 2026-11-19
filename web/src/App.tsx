@@ -1,7 +1,8 @@
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import { PrivySignIn, type PrivyClientConfig } from './privy/lazy';
+import { requirePrivyLogout } from './privy/browserSession';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { api, ApiError, authInfo, connectStream, disconnectStream, PRIVY_LOGOUT_FLAG, useApi, fmt, type AuthState } from './api';
+import { api, ApiError, authInfo, connectStream, disconnectStream, useApi, fmt, type AuthState } from './api';
 import { PrivyLoginScreen, ServerProblem } from './auth/LoginScreen';
 import { ErrorLine, PageErrorBoundary } from './ui';
 import { JoeDrawer } from './pages/Joe';
@@ -60,8 +61,8 @@ export default function App() {
       : <Login setup={auth.setup} codeRequired={!!auth.setupCodeRequired} privy={auth.privy} googleSignIn={!!auth.googleSignIn} onDone={load} />;
   }
   return <PresentationProvider><Shell onLogout={() => {
-    // The Privy browser session is ended by the sign-in screen once it mounts (it owns the Privy SDK).
-    if (auth.mode === 'privy') { try { sessionStorage.setItem(PRIVY_LOGOUT_FLAG, '1'); } catch { /* storage blocked */ } }
+    // The sign-in screen owns the Privy SDK, including when Privy is linked alongside passphrase sign-in.
+    if (auth.privy.enabled && auth.privy.appId && (auth.mode === 'privy' || auth.privy.linked)) requirePrivyLogout(auth.privy.appId);
     load();
   }} /></PresentationProvider>;
 }

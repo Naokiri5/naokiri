@@ -9,11 +9,12 @@
  *    Wallets are shown read-only. MIA never asks a wallet to sign or send a transaction, fund, export keys or
  *    delegate signing: those actions are LOCKED (paper trading only).
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { PrivyProvider, useCreateWallet, usePrivy } from '@privy-io/react-auth';
-import { api, ApiError, authInfo, PRIVY_LOGOUT_FLAG, stepUpBody, type AuthState } from '../api';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { PrivyProvider, useCreateWallet, useLogin, usePrivy } from '@privy-io/react-auth';
+import { api, ApiError, authInfo, stepUpBody, type AuthState } from '../api';
 import { Action, Badge, Card, Empty, ErrorLine, PageErrorBoundary } from '../ui';
 import { StepUp } from '../pages/Trading';
+import { completePrivyLogout, privyLogoutPending, requestPrivySignIn, requirePrivyLogout, takePrivySignIn } from './browserSession';
 
 export type PrivyClientConfig = AuthState['privy'];
 
@@ -33,47 +34,87 @@ type SignInError = { kind: 'auth' | 'network' | 'rate' | 'server'; msg: string }
 function classify(e: unknown): SignInError {
   if (e instanceof ApiError) {
     if (e.status === 429) return { kind: 'rate', msg: 'Too many sign-in attempts. Wait a moment, then try again.' };
-    if (e.status >= 500) return { kind: 'server', msg: `The MIA server could not finish sign-in (HTTP ${e.status}). Nothing was changed; try again.` };
+    if (e.status === 503) return { kind: 'server', msg: e.message };
+    if (e.status >= 500) return { kind: 'server', msg: `The MIA server could not finish sign-in (HTTP ${e.status}). Try again.` };
     return { kind: 'auth', msg: e.message };
   }
   if (e instanceof TypeError) return { kind: 'network', msg: "Can't reach the MIA server. Check that it is running, then try again." };
   return { kind: 'auth', msg: errText(e) };
 }
 
-function SignInInner({ onDone }: { onDone: () => void }) {
-  const { ready, authenticated, login, logout, getAccessToken } = usePrivy();
+type LogoutStage = 'idle' | 'pending' | 'running' | 'confirming' | 'failed';
+
+function SignInInner({ appId, onDone }: { appId: string; onDone: () => void }) {
+  const { ready, authenticated, logout, getAccessToken } = usePrivy();
   const [err, setErr] = useState<SignInError | null>(null); const [busy, setBusy] = useState(false); const [slow, setSlow] = useState(false);
-  const wanted = useRef(false);
+  const [logoutStage, setLogoutStage] = useState<LogoutStage>(() => privyLogoutPending(appId) ? 'pending' : 'idle');
+  const exchanging = useRef(false);
+  const loggingOut = useRef(false);
+  const { login } = useLogin({
+    onError: (code) => {
+      if (!takePrivySignIn(appId)) return;
+      if (code === 'exited_auth_flow' || code === 'oauth_user_denied') return;
+      setErr({ kind: 'auth', msg: 'Privy could not complete sign-in. Try again.' });
+    },
+  });
   // Privy that never becomes ready usually means a wrong app id, an origin not allowed in the Privy dashboard, or a
   // blocked network/CSP. Say so instead of spinning forever.
   useEffect(() => { if (ready) { setSlow(false); return; } const t = setTimeout(() => setSlow(true), 15_000); return () => clearTimeout(t); }, [ready]);
-  // Signing out of MIA also ends the Privy browser session (flag set by the shell after the server confirmed logout).
+  const signOut = useCallback(async () => {
+    if (loggingOut.current) return;
+    loggingOut.current = true;
+    setLogoutStage('running'); setErr(null);
+    try { await logout(); setLogoutStage('confirming'); }
+    catch { setLogoutStage('failed'); }
+    finally { loggingOut.current = false; }
+  }, [logout]);
+  // Keep the browser logout marker until both the SDK operation and the account state confirm sign-out.
   useEffect(() => {
-    if (!ready) return;
-    let pending = false; try { pending = sessionStorage.getItem(PRIVY_LOGOUT_FLAG) === '1'; sessionStorage.removeItem(PRIVY_LOGOUT_FLAG); } catch { /* storage blocked */ }
-    if (pending && authenticated) void logout();
-  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
-  const exchange = async () => {
+    if (!ready || logoutStage === 'idle' || logoutStage === 'running') return;
+    if (!authenticated) { completePrivyLogout(appId); setLogoutStage('idle'); }
+    else if (logoutStage === 'pending') void signOut();
+  }, [appId, authenticated, logoutStage, ready, signOut]);
+  const exchange = useCallback(async () => {
+    if (!ready || !authenticated || logoutStage !== 'idle' || exchanging.current || !takePrivySignIn(appId)) return;
+    exchanging.current = true;
     setBusy(true); setErr(null);
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) throw new Error('Privy did not return a session token. Sign in with Privy again.');
       await api('/api/auth/privy/login', { body: { accessToken } }); // the server verifies it and sets the MIA session cookie
       onDone();
-    } catch (e) { setErr(classify(e)); } finally { setBusy(false); wanted.current = false; }
+    } catch (e) { setErr(classify(e)); } finally { exchanging.current = false; setBusy(false); }
+  }, [appId, authenticated, getAccessToken, logoutStage, onDone, ready]);
+  useEffect(() => { void exchange(); }, [exchange]);
+  const start = () => {
+    if (logoutStage !== 'idle' || exchanging.current || !requestPrivySignIn(appId)) return;
+    setErr(null);
+    if (authenticated) { void exchange(); return; }
+    try { login(); }
+    catch {
+      takePrivySignIn(appId);
+      setErr({ kind: 'auth', msg: 'Privy could not open sign-in. Try again.' });
+    }
   };
-  useEffect(() => { if (ready && authenticated && wanted.current) void exchange(); }, [ready, authenticated]); // eslint-disable-line react-hooks/exhaustive-deps
-  const start = () => { wanted.current = true; if (authenticated) void exchange(); else login(); };
+  const switchAccount = () => {
+    if (exchanging.current) return;
+    requirePrivyLogout(appId);
+    setLogoutStage('pending');
+  };
   return <div className="col" style={{ gap: 8 }}>
-    <button type="button" className="primary login-btn" onClick={start} disabled={!ready || busy}>{!ready ? 'Loading Privy…' : busy ? 'Signing in…' : 'Continue with Privy'}</button>
+    <button type="button" className="primary login-btn" onClick={start} disabled={!ready || busy || logoutStage !== 'idle'}>{!ready ? 'Loading Privy…' : busy ? 'Signing in…' : 'Continue with Privy'}</button>
     {slow && !ready && <div className="hint warn" role="status">Privy is taking unusually long to load. Check the internet connection, that this address is an allowed origin in the Privy dashboard, and that MIA_PRIVY_APP_ID is correct. <button type="button" className="ghost sm" onClick={() => window.location.reload()}>Reload</button></div>}
     {err && <div className={`banner ${err.kind === 'auth' ? 'stale' : 'info'}`} role="alert" style={{ margin: 0, overflowWrap: 'anywhere' }}>{err.msg}</div>}
-    {authenticated && <button type="button" className="ghost" onClick={() => { setErr(null); void logout(); }}>Use a different Privy account</button>}
+    {ready && logoutStage !== 'idle' && <div className="hint" role={logoutStage === 'failed' ? 'alert' : 'status'}>
+      {logoutStage === 'failed' ? 'Privy sign-out failed. Retry before signing in.' : 'Signing out of Privy…'}
+      {(logoutStage === 'failed' || logoutStage === 'confirming') && <button type="button" className="ghost sm" onClick={() => void signOut()}>Retry Privy sign-out</button>}
+    </div>}
+    {authenticated && logoutStage === 'idle' && <button type="button" className="ghost" onClick={switchAccount} disabled={busy}>Use a different Privy account</button>}
   </div>;
 }
 export function PrivySignIn({ config, onDone }: { config: PrivyClientConfig; onDone: () => void }) {
   if (!config.appId) return null;
-  return <PageErrorBoundary label="Privy sign-in"><PrivyRoot appId={config.appId}><SignInInner onDone={onDone} /></PrivyRoot></PageErrorBoundary>;
+  return <PageErrorBoundary label="Privy sign-in"><PrivyRoot appId={config.appId}><SignInInner key={config.appId} appId={config.appId} onDone={onDone} /></PrivyRoot></PageErrorBoundary>;
 }
 
 // ---- Security Center ------------------------------------------------------------------------------------------------
