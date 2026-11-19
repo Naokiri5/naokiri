@@ -2,9 +2,9 @@ import { all, get, run, tx, J, P } from '../db/db.js';
 import { uid, iso, floorToStep, expiredAt } from '../core/util.js';
 import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
-import { entryAuthorityVetoes, evaluateRisk } from '../risk/gate.js';
+import { entryAuthorityVetoes, evaluateRisk, positionNotionalLimit } from '../risk/gate.js';
 import { currentPolicy, exitPolicy } from '../risk/policy.js';
-import { ledger, cashBalance, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
+import { accountState, ledger, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
 import { journal } from '../journal/journal.js';
 import { notify } from '../notify/notify.js';
 import { bus } from '../core/bus.js';
@@ -164,10 +164,15 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
       vetoes.push('POLICY_CHANGED: re-evaluate under the current risk policy');
     }
     if (vetoes.length) return { rejected: persistRejection(`LAST_MOMENT_RISK_DENY: ${vetoes.join('; ')}`) };
-    const cash = cashBalance(PAPER_ACCOUNT);
+    const { cash, equity, marksMissing } = accountState(PAPER_ACCOUNT, nowTs);
     const total = notional + fee;
     if (!Number.isFinite(total) || !Number.isFinite(cash) || total > cash + 1e-9) {
       return { rejected: persistRejection(`INSUFFICIENT_CASH: need ${total.toFixed(2)}, have ${cash.toFixed(2)}`) };
+    }
+    if (marksMissing.length) return { rejected: persistRejection(`POSITION_MARKS_MISSING:${marksMissing.join(',')}`) };
+    const notionalLimit = positionNotionalLimit(equity, pol);
+    if (!Number.isFinite(notionalLimit) || notionalLimit <= 0 || notional > notionalLimit + 1e-9) {
+      return { rejected: persistRejection(`POSITION_NOTIONAL_LIMIT: fill ${notional.toFixed(2)}, current equity limit ${notionalLimit.toFixed(2)}`) };
     }
     const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
     run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);
