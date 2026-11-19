@@ -80,9 +80,10 @@ describe('duplicate instrument position under a concurrent writer (MA-20)', () =
 });
 
 describe('paper entry rechecks mutable state under its write lock', () => {
+  const now = Date.UTC(2026, 10, 19, 12);
   let id = ''; let last = 0;
   beforeEach(() => {
-    freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }));
+    freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2, nowTs: now }));
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
 
@@ -93,13 +94,13 @@ describe('paper entry rechecks mutable state under its write lock', () => {
       change();
     });
     try {
-      const proposed = report(id, last, Date.now() + 60_000);
-      const result = submitEntry(proposed, actor);
+      const proposed = report(id, last, now + 60_000);
+      const result = submitEntry(proposed, actor, now);
       expect(openPositions()).toHaveLength(0);
       expect(get('SELECT id FROM fills')).toBeUndefined();
       expect(get('SELECT id FROM orders WHERE purpose=?', 'PROTECTIVE_STOP')).toBeUndefined();
       expect(get('SELECT status FROM orders WHERE client_order_id=?', `entry-${proposed.candidateId}`)).toMatchObject({ status: 'REJECTED' });
-      expect(submitEntry(proposed, actor).reason).toMatch(/DUPLICATE/);
+      expect(submitEntry(proposed, actor, now).reason).toMatch(/DUPLICATE/);
       return result;
     } finally { setCrashHook(null); }
   }
@@ -108,6 +109,13 @@ describe('paper entry rechecks mutable state under its write lock', () => {
     const result = submitAfter(() => ledger(PAPER_ACCOUNT, 'WITHDRAW', -9_999), 'bot');
     expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('INSUFFICIENT_CASH') });
     expect(cashBalance()).toBe(1);
+  });
+
+  it('refuses a fill that still fits cash but exceeds the current equity cap', () => {
+    const result = submitAfter(() => ledger(PAPER_ACCOUNT, 'WITHDRAW', -8_000), 'bot');
+    expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('POSITION_NOTIONAL_LIMIT') });
+    expect(cashBalance()).toBe(2_000);
+    expect(get("SELECT id FROM ledger_entries WHERE kind IN ('BUY','FEE')")).toBeUndefined();
   });
 
   it('refuses a fill sized under a superseded risk policy', () => {

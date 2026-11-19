@@ -24,6 +24,10 @@ const currentPolicySafe = () => { try { return currentPolicy()?.version ?? null;
 
 const floorStep = floorToStep; // canonical helper (core/util.ts)
 
+export function positionNotionalLimit(equity: number, policy: RiskPolicy): number {
+  return equity * (policy.maxPositionNotionalPct / 100);
+}
+
 /** Mutable entry permissions shared by the risk evaluation and the locked OMS write. */
 export function entryAuthorityVetoes(strategyId: string, ctl = getControl()): string[] {
   const deny: string[] = [];
@@ -100,7 +104,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const perUnitLoss = estEntry - conservativeStopFill + pol.feeRate * (estEntry + conservativeStopFill);
   const riskBudget = acct.equity * (pol.riskPerTradePct / 100);
   let qty = perUnitLoss > 0 ? riskBudget / perUnitLoss : 0;
-  const maxNotional = Math.min(acct.equity * (pol.maxPositionNotionalPct / 100), acct.cash * 0.98);
+  const maxNotional = Math.min(positionNotionalLimit(acct.equity, pol), acct.cash * 0.98);
   if (qty * estEntry > maxNotional) qty = maxNotional / estEntry;
   qty = floorStep(qty, inst.stepSize);
   const notional = qty * estEntry;
