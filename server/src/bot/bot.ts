@@ -1,4 +1,5 @@
 import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBooks, syncDepthStreams, stopDepthStreams, depthStreamStatus } from '../market/fabric.js';
+import { stopPumpFeed } from '../solana/pumpFeed.js'; // Omega PR-07: read-only Pump.fun feed stops with the bot
 import { relayOnce } from '../fabric/relay.js';
 import { market } from '../market/store.js';
 import { scanOnce } from '../market/scanner.js';
@@ -168,7 +169,7 @@ export function startBot() {
     setInterval(backgroundLane, 60_000),
   ];
 }
-export function stopBot() { timers.forEach(clearInterval); timers = []; botStatus.running = false; botStatus.role = 'STOPPED'; stopDepthStreams(); }
+export function stopBot() { timers.forEach(clearInterval); timers = []; botStatus.running = false; botStatus.role = 'STOPPED'; stopDepthStreams(); stopPumpFeed(); }
 /** Hand the engine lease to a successor now (graceful stop), instead of letting it expire. */
 export function releaseEngineLease() { try { releaseLease(ENGINE_LEASE, botStatus.instanceId); } catch { /* DB already closed: lease expires */ } }
 /** Lanes currently executing (graceful drain waits for these before the lease is released and the DB closed). */

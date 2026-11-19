@@ -49,6 +49,19 @@ Full-suite results for this branch are recorded in the PR description.
 | Settings and wiring | Defaults off, can be enabled, an older payload turns it off; the background refresh sends one alert after a DEX refresh and a passing mint check | same | pass; fails without the fabric hook |
 | UI | Settings checkbox off by default, saved when ticked | `e2e/solana.spec.ts` | pass |
 
+## PR-07: read-only Pump.fun feed
+
+| Area | Test | File | Result (local, this branch) |
+|---|---|---|---|
+| Decoding real mainnet logs | `create_v2` gives one launch with the right mint, curve, creator and Token-2022; `migrate_v2` gives the graduation with its pool; a duplicate migration gives nothing | `server/test/solana-pumpfun.test.ts` with `fixtures/pumpfun-mainnet-logs.json` | pass |
+| Forgery and junk | Event bytes from another program or outside any program are ignored (CPI accepted); truncated data, oversized names and non-base64 never throw | same | pass; fails if any program can emit events |
+| Feed | Off unless enabled; wss derived or explicit, others refused; exactly two narrow `logsSubscribe` requests and nothing else; per-subscription trust; failed, unknown and replayed messages ignored; copies only | same | pass; fails with a broad subscription, accepted failed transactions, no dedupe or cross-subscription trust |
+| Traffic guard, reconnect, stop | Over 600 messages a minute disconnects and pauses 10 min; backoff reconnect; stop is final | same | pass; fails without the guard |
+| Error storm (found live) | Stopping or erroring a connecting socket fires one error, not a loop (Pump.fun feed and Binance depth stream) | same, `server/test/depth-stream.test.ts` | pass; both fail on the old handlers |
+| Watchlist | Feed view present; a graduated mint gets a note; status unchanged; never tradable | `server/test/solana-pumpfun.test.ts` | pass |
+| UI | Panel shows launches and graduations, no buttons or links; off state explains how to enable | `e2e/solana.spec.ts` | pass |
+| Live (manual) | MIA's feed code on mainnet for 60 s: 21 launches decoded, no errors; real graduation decoded from a fetched `migrate_v2` | scratch scripts (not committed) | **pass** (2026-11-19) |
+
 ## Not run (no credentials or network; recorded honestly)
 - **GMGN:** live API calls (no key).
 - **Solana RPC:** the owner chose `https://api.mainnet.solana.com` (PR-06). The live test **passed** on 2026-11-19 after the owner allowed the host. Token-2022 is now covered (PYUSD). Not every extension type is covered on real accounts yet.

@@ -13,6 +13,8 @@ export interface SolanaHunterView {
   mintChecks?: { configured: boolean; lastRunAt: number | null; lastError: string | null; checked: number };
   /** Omega 06a: opt-in Telegram alerts (Settings → Notifications). Absent on older servers. */
   alerts?: { enabled: boolean; lastRunAt: number | null; lastError: string | null };
+  /** Omega PR-07: read-only Pump.fun launch/graduation feed from Solana. Absent on older servers. */
+  pumpfun?: PumpFeedView;
   candidates: Array<{
     mint: string; symbol: string; pairAddress: string; dex: string; ageMinutes: number | null; liquidityUsd: number;
     volume1hUsd: number; observedBuys1h: number; observedSells1h: number; momentum1hPct: number; rankScore: number;
@@ -20,6 +22,36 @@ export interface SolanaHunterView {
     mintCheck?: MintCheckView;
   }>;
 }
+export interface PumpFeedView {
+  enabled: boolean; connected: boolean; lastEventAt: number | null; reconnects: number; lastError: string | null; launchesSeen: number; graduationsSeen: number;
+  launches: Array<{ signature: string; mint: string; creator: string; name: string; symbol: string; createdAt: number | null }>;
+  graduations: Array<{ signature: string; mint: string; pool: string; graduatedAt: number | null }>;
+}
+const short = (a: string) => (a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a);
+
+/** Omega PR-07: what Pump.fun is launching and graduating right now, read from Solana. Display only: no actions. */
+function PumpFunPanel({ feed }: { feed: PumpFeedView }) {
+  if (!feed.enabled) return <div className="hint" style={{ padding: '8px 12px 0' }}>
+    Pump.fun live feed: off. To turn it on, set MIA_PUMPFUN_FEED=1 on the server (it uses the Solana endpoint in MIA_SOLANA_RPC_URL).
+  </div>;
+  return <div style={{ padding: '8px 12px' }} aria-label="Pump.fun live feed">
+    <div className="row between"><b>Pump.fun live (read-only, from Solana)</b>
+      <span className="hint">{feed.connected ? 'connected' : 'disconnected'} · last event {feed.lastEventAt ? fmt.ago(feed.lastEventAt) : 'none yet'}{feed.lastError ? ` · ${feed.lastError}` : ''}</span></div>
+    <div className="hint">New tokens sit on a bonding curve and are extremely risky; names are chosen by their creators. Graduated means the curve filled and liquidity moved to a PumpSwap pool. Not a trade signal.</div>
+    <div className="grid g2" style={{ marginTop: 8 }}>
+      <div className="tablewrap"><table><thead><tr><th>Latest launches</th><th>Mint</th><th>Creator</th><th className="num">When</th></tr></thead><tbody>
+        {feed.launches.map((l) => <tr key={l.signature}><td><b>{l.symbol}</b> <span className="faint">{l.name}</span></td>
+          <td className="mono faint" style={{ fontSize: 11, wordBreak: 'break-all', userSelect: 'all' }}>{l.mint}</td>
+          <td className="mono faint" title={l.creator}>{short(l.creator)}</td><td className="num">{l.createdAt ? fmt.ago(l.createdAt) : '—'}</td></tr>)}
+      </tbody></table>{!feed.launches.length && <Empty>No launches seen since the server started.</Empty>}</div>
+      <div className="tablewrap"><table><thead><tr><th>Latest graduations</th><th>PumpSwap pool</th><th className="num">When</th></tr></thead><tbody>
+        {feed.graduations.map((g) => <tr key={g.signature}><td className="mono faint" style={{ fontSize: 11, wordBreak: 'break-all', userSelect: 'all' }}>{g.mint}</td>
+          <td className="mono faint" title={g.pool}>{short(g.pool)}</td><td className="num">{g.graduatedAt ? fmt.ago(g.graduatedAt) : '—'}</td></tr>)}
+      </tbody></table>{!feed.graduations.length && <Empty>No graduations seen since the server started.</Empty>}</div>
+    </div>
+  </div>;
+}
+
 export interface MintCheckView {
   status: 'PASS_MINT_CHECKS_ONLY' | 'BLOCK' | 'UNKNOWN' | 'NOT_CHECKED';
   reasons: string[]; tokenProgram: string; slot: number | null; checkedAt: number | null;
@@ -90,6 +122,7 @@ export function SolanaWatchlist({ view, loaded }: { view: SolanaHunterView | und
     {!!view?.skippedUntrustedQuote && <div className="hint" style={{ padding: '8px 12px 0' }}>
       {view.skippedUntrustedQuote} Solana pool{view.skippedUntrustedQuote === 1 ? '' : 's'} left out: priced against a token other than SOL, USDC or USDT, so the liquidity figure cannot be trusted.
     </div>}
+    {view?.pumpfun && <PumpFunPanel feed={view.pumpfun} />}
     {view?.alerts && <div className="hint" style={{ padding: '8px 12px 0' }}>
       Telegram alerts: {view.alerts.enabled ? 'on' : 'off'} (Settings → Notifications){view.alerts.lastError ? ` · last run failed: ${view.alerts.lastError}` : ''}
     </div>}

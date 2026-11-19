@@ -16,6 +16,7 @@ import type { Book } from '../providers/binance.js';
 import { startDepthStream, binanceStreamUrl, type StreamBook, type StreamDeps } from './depthStream.js';
 import { refreshMintChecks } from '../solana/mintChecks.js';
 import { alertNewWatchRows, watchAlertsEnabled } from '../solana/watchAlerts.js';
+import { syncPumpFeed } from '../solana/pumpFeed.js';
 
 /** Install a book snapshot unless it is older than the one already held (concurrent refreshes can land out of order). */
 /** Install a book unless it is older than the held one. Returns whether it was installed. */
@@ -247,6 +248,8 @@ export async function refreshBackground() {
   }
   // Omega PR-06: read-only Solana mint checks for the watchlist; no-op unless MIA_SOLANA_RPC_URL is set. Not awaited:
   // one batched RPC call must never delay the market-data lane. It never throws (errors become a status code).
+  // Omega PR-07: keep the opt-in Pump.fun launch/graduation feed running only while MIA_PUMPFUN_FEED=1 (idempotent).
+  try { syncPumpFeed(); } catch { /* the feed reports its own status; never blocks the market lane */ }
   // Omega 06a: then send opt-in watchlist alerts. Nothing is built unless the owner enabled them. discover.ts imports this
   // module, so it is loaded lazily here rather than creating an import cycle.
   if (market.dex.length) void refreshMintChecks(market.dex, t)

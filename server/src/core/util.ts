@@ -42,6 +42,18 @@ export function safeHttpUrl(u: unknown): string {
   try { const x = new URL(u.trim()); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : ''; } catch { return ''; }
 }
 export const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const closingSockets = new WeakSet<object>();
+/**
+ * Close a WebSocket at most once. Node's WebSocket fires another `error` event when a still-connecting socket is
+ * closed, so an `onerror` handler that calls close() again looped (measured: ~900 events from one socket stopped while
+ * connecting). Every close path should go through here.
+ */
+export function closeSocketOnce(sock: { close(): void } | null | undefined): void {
+  if (!sock || closingSockets.has(sock)) return;
+  closingSockets.add(sock);
+  try { sock.close(); } catch { /* already closed */ }
+}
+
 /**
  * Display-safe text from an untrusted provider string (token symbols and names are attacker-controlled). Removes
  * control and format characters (including bidi overrides that make one ticker render as another), line/paragraph
