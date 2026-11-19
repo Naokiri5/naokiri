@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
 
 const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Foundation coverage'];
 const count = (v: unknown) => Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0;
+type EvidenceDetail = { title: string; value: unknown };
 
 /** Read-only DITAS evidence. No control, strategy promotion, simulation or execution authority. */
 export function Ditas() {
@@ -12,17 +13,31 @@ export function Ditas() {
   const { data, error, loading, reload } = useApi(`/api/ditas${cohort ? `?cohort=${encodeURIComponent(cohort)}` : ''}`, { topics: ['scan', 'decision', 'order', 'position', 'mode'], every: 30_000 });
   const [tab, setTab] = useState(tabs[0]);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [detail, setDetail] = useState<{ title: string; value: unknown } | null>(null);
+  const [detail, setDetail] = useState<EvidenceDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const inspection = useRef(0);
+  const selectDetail = (next: EvidenceDetail | null) => {
+    inspection.current++;
+    setOpening(null);
+    setDetailError(null);
+    setDetail(next);
+  };
   const inspectEvent = async (id: string) => {
+    const request = ++inspection.current;
     setOpening(id); setDetailError(null);
-    try { setDetail({ title: 'Decision evidence and market snapshot', value: await api(`/api/ditas/events/${encodeURIComponent(id)}`) }); }
-    catch (e: any) { setDetailError(e.message); }
-    finally { setOpening(null); }
+    try {
+      const value = await api(`/api/ditas/events/${encodeURIComponent(id)}`);
+      if (request === inspection.current) setDetail({ title: 'Decision evidence and market snapshot', value });
+    } catch (error) {
+      if (request === inspection.current) setDetailError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (request === inspection.current) setOpening(null);
+    }
   };
   const counts = data?.counts;
-  const calibration = data?.calibration;
+  const lastCalibration = data?.calibration;
+  const calibration = (lastCalibration?.cohort ?? '') === cohort ? lastCalibration : undefined;
   return <Page title="DITAS · Decision intelligence" sub="Inspect the evidence behind decisions, strategy health and hypothetical alternatives. Every result is tied to stored records."
     right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={() => { reload(); setRefreshKey((k) => k + 1); }} disabled={loading}>Refresh</button></>}>
     <ErrorLine e={error} /><ErrorLine e={detailError} />
@@ -52,7 +67,7 @@ export function Ditas() {
         {(data.dataHealth ?? []).map((d: any) => <tr key={d.instrumentId}><td>{d.instrumentId}</td><td><Badge v={d.status} /></td><td>{d.issues?.join('; ') || 'No validation issue reported'}</td></tr>)}
       </tbody></table>{!data.dataHealth?.length && <Empty>No market data loaded. No health status is inferred.</Empty>}</div></Card>
       <Card title="Stored market fingerprints" flush><div className="tablewrap"><table><thead><tr><th>Instrument</th><th>Recorded</th><th>Evidence</th></tr></thead><tbody>
-        {(data.fingerprints ?? []).map((f: any, i: number) => <tr key={f.id ?? i}><td>{f.instrumentId ?? f.instrument ?? 'See stored record'}</td><td>{fmt.time(f.createdAt ?? f.asOf)}</td><td><button className="sm" onClick={() => setDetail({ title: 'Market DNA fingerprint', value: f })}>Inspect fingerprint</button></td></tr>)}
+        {(data.fingerprints ?? []).map((f: any, i: number) => <tr key={f.id ?? i}><td>{f.instrumentId ?? f.instrument ?? 'See stored record'}</td><td>{fmt.time(f.createdAt ?? f.asOf)}</td><td><button className="sm" onClick={() => selectDetail({ title: 'Market DNA fingerprint', value: f })}>Inspect fingerprint</button></td></tr>)}
       </tbody></table>{!data.fingerprints?.length && <Empty>No stored fingerprints yet. Missing fundamentals and other inputs remain explicit.</Empty>}</div></Card>
     </div>}
     {data && tab === 'Decision ledger' && <Card title="Permanent decision memory" flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Event</th><th>Instrument</th><th>Strategy</th><th>Evidence</th></tr></thead><tbody>
@@ -61,35 +76,35 @@ export function Ditas() {
     {data && tab === 'Decision Twin' && <Card title="Shadow & counterfactual portfolios · HYPOTHETICAL" right={<Badge v="HYPOTHETICAL" tone="b-warn" />}>
       <p className="hint">Stored simulations use the original decision evidence and explicit fee, spread, slippage and fill assumptions. Hypothetical orders do not create paper positions or change strategy settings.</p>
       <div className="tablewrap"><table><thead><tr><th>Recorded</th><th>Shadow result</th><th>Delayed entry alternative</th><th>WAIT baseline</th><th>Assumptions</th></tr></thead><tbody>
-        {(data.twins ?? []).map((t: any) => <tr key={t.id}><td>{fmt.time(t.createdAt)}<div className="hint">Event {t.eventId}</div></td><td><Badge v={t.result?.shadow?.state ?? 'UNKNOWN'} /><div>{fmt.usd(t.result?.shadow?.netPnL)}</div></td><td><Badge v={t.result?.counterfactual?.state ?? 'UNKNOWN'} /><div>{fmt.usd(t.result?.counterfactual?.netPnL)}</div></td><td>{fmt.usd(t.result?.waitBaseline?.netPnL)}</td><td><button className="sm" onClick={() => setDetail({ title: 'Hypothetical Decision Twin · assumptions and alternatives', value: t.result })}>Inspect simulation</button></td></tr>)}
+        {(data.twins ?? []).map((t: any) => <tr key={t.id}><td>{fmt.time(t.createdAt)}<div className="hint">Event {t.eventId}</div></td><td><Badge v={t.result?.shadow?.state ?? 'UNKNOWN'} /><div>{fmt.usd(t.result?.shadow?.netPnL)}</div></td><td><Badge v={t.result?.counterfactual?.state ?? 'UNKNOWN'} /><div>{fmt.usd(t.result?.counterfactual?.netPnL)}</div></td><td>{fmt.usd(t.result?.waitBaseline?.netPnL)}</td><td><button className="sm" onClick={() => selectDetail({ title: 'Hypothetical Decision Twin · assumptions and alternatives', value: t.result })}>Inspect simulation</button></td></tr>)}
       </tbody></table></div>
       {!data.twins?.length && <Empty>No Decision Twin results recorded. No simulated performance is displayed.</Empty>}
     </Card>}
     {data && tab === 'Strategy passports' && <div className="col" style={{ gap: 14 }}>{(data.passports ?? []).map((p: any) => <Card key={p.id ?? p.strategyId} title={`${p.name ?? p.id ?? p.strategyId} · v${p.version ?? p.strategyVersion}`} right={<Badge v={p.ditasState ?? p.currentStatus ?? 'RESEARCH'} />}>
-      <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
+      <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => selectDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
     {tab === 'Execution quality' && <ExecutionQuality refreshKey={refreshKey} />}
     {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibration?.status ?? 'UNCALIBRATED'} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
             <option value="">Select a cohort to evaluate</option>
-            {(calibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{c.cohort} · {c.n} forecasts</option>)}
+            {(lastCalibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{c.cohort} · {c.n} forecasts</option>)}
           </select>
         </label>
         <div className="hint">Calibration evaluates stored probability forecasts against outcomes. It does not turn chart confidence, opportunity scores or votes into win probabilities.</div>
-        <div className="kv"><span>Matched outcomes</span><span>{calibration?.sample ?? calibration?.sampleSize ?? 0}</span><span>Brier score</span><span>{fmt.num(calibration?.brierScore, 4)}</span><span>Log loss</span><span>{fmt.num(calibration?.logLoss, 4)}</span><span>Expected calibration error</span><span>{fmt.num(calibration?.ece, 4)}</span></div>
+        <div className="kv"><span>Matched outcomes</span><span>{calibration?.sample ?? calibration?.sampleSize ?? '—'}</span><span>Brier score</span><span>{fmt.num(calibration?.brierScore, 4)}</span><span>Log loss</span><span>{fmt.num(calibration?.logLoss, 4)}</span><span>Expected calibration error</span><span>{fmt.num(calibration?.ece, 4)}</span></div>
         <div className="hint">{calibration?.note ?? 'An insufficient sample remains UNCALIBRATED. No production model is promoted automatically.'}</div>
         <div className="tablewrap"><table><thead><tr><th>Probability bin</th><th>Outcomes</th><th>Mean prediction</th><th>Observed frequency</th><th>95% Wilson interval</th><th>Evidence status</th></tr></thead><tbody>
           {(calibration?.bins ?? []).map((b: any) => <tr key={b.lower}><td>{fmt.num(b.lower, 1)}–{fmt.num(b.upper, 1)}</td><td>{b.count}</td><td>{fmt.num(b.prediction, 3)}</td><td>{fmt.num(b.observed, 3)}</td><td>{b.wilson95 ? `${fmt.num(b.wilson95[0], 3)}–${fmt.num(b.wilson95[1], 3)}` : '—'}</td><td><Badge v={b.status} /></td></tr>)}
         </tbody></table></div>
         {(calibration?.uncertainty ?? []).map((u: string) => <div className="hint warn" key={u}>{u}</div>)}
-        <button className="sm" onClick={() => setDetail({ title: 'Calibration metrics, reliability bins and uncertainty', value: calibration })}>Inspect calibration evidence</button>
+        <button className="sm" disabled={!calibration} onClick={() => selectDetail({ title: 'Calibration metrics, reliability bins and uncertainty', value: calibration })}>Inspect calibration evidence</button>
       </div>
     </Card>}
     {data && tab === 'Foundation coverage' && <Card title="Implementation coverage" flush><div className="tablewrap"><table><thead><tr><th>Foundation</th><th>Status</th><th>Scope and limitations</th></tr></thead><tbody>
       {(data.coverage ?? []).map((c: any) => <tr key={c.foundation}><td>{c.foundation}</td><td><Badge v={c.status} /></td><td>{c.detail}</td></tr>)}
     </tbody></table></div><div style={{ padding: 14 }} className="hint">A passing test suite does not certify live trading, calibrated forecasts or strategy profitability. See the release gates for outstanding evidence.</div></Card>}
-    {detail && <Modal title={detail.title} onClose={() => setDetail(null)}><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '65vh', overflowY: 'auto', fontSize: 12 }}>{JSON.stringify(detail.value, null, 2)}</pre></Modal>}
+    {detail && <Modal title={detail.title} onClose={() => selectDetail(null)}><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '65vh', overflowY: 'auto', fontSize: 12 }}>{JSON.stringify(detail.value, null, 2)}</pre></Modal>}
   </Page>;
 }
 
