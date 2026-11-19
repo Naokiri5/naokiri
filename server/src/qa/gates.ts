@@ -136,12 +136,12 @@ export function runOutcomeProblem(outcome: unknown, reportText: string, ctx: { c
   if (!isRecord(outcome)) return 'run outcome missing or unreadable (data/qa/test-run.json); run `npm run qa -w server`';
   if (outcome.exitCode !== 0) return `QA run did not succeed (exit code ${String(outcome.exitCode)}${outcome.signal ? `, signal ${String(outcome.signal)}` : ''})`;
   if (typeof outcome.reportSha256 !== 'string' || outcome.reportSha256 !== createHash('sha256').update(reportText).digest('hex')) return 'run outcome does not belong to this report (sha256 mismatch)';
-  // Bound to the exact code that is running, from a clean tree, and recent (blueprint Q-01).
+  // Require a run from an isolated snapshot of the running commit (blueprint Q-01).
   const current = ctx.currentCommit === undefined ? currentBuildCommit() : ctx.currentCommit;
   if (typeof outcome.commit !== 'string' || !/^[0-9a-f]{40}$/.test(outcome.commit)) return 'run outcome has no commit SHA; re-run `npm run qa -w server` from a git checkout';
   if (!current) return 'running build commit is unknown (set MIA_BUILD_SHA); evidence cannot be bound to this build';
   if (outcome.commit !== current) return `evidence is from commit ${outcome.commit.slice(0, 12)}, but the running build is ${current.slice(0, 12)}`;
-  if (outcome.dirty !== false) return 'QA run had uncommitted changes; evidence must come from a clean checkout';
+  if (outcome.source !== 'git-archive-v1') return 'QA run lacks an isolated Git snapshot; regenerate the evidence';
   const finished = Number(outcome.finishedAt); const now = ctx.nowTs ?? Date.now();
   if (!Number.isFinite(finished) || finished > now + 60_000) return 'run outcome has an invalid finish time';
   if (now - finished > QA_EVIDENCE_MAX_AGE_MS) return `evidence is stale (${Math.floor((now - finished) / 86_400_000)} days old; limit ${QA_EVIDENCE_MAX_AGE_MS / 86_400_000})`;
