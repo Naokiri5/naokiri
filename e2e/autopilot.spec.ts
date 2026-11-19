@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const PW = 'e2e owner passphrase';
+import { signInTestOwner } from './owner-fixture';
 const monitor = (page: Page) => page.locator('section[aria-label="Read-only paper monitor"]');
 const fixtureShell = (patch: Record<string, unknown> = {}) => {
   const now = Date.now();
@@ -50,9 +50,7 @@ async function installMockPip(page: Page, pending = false) {
 
 test.beforeEach(async ({ page }) => {
   await page.context().route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
-  const state = await (await page.request.get('/api/auth/state')).json();
-  const result = await page.request.post(state.setup ? '/api/auth/login' : '/api/auth/setup', { data: { password: PW } });
-  expect(result.status()).toBe(200);
+  await signInTestOwner(page);
 });
 
 test('presentation presets persist without hiding critical warnings or mutating the account', async ({ page }, testInfo) => {

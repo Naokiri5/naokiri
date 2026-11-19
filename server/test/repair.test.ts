@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { modeGate } from '../src/qa/gates.js';
-import { freshDb, seedInstrument, setBook } from './helpers.js';
+import { freshDb, seedInstrument, setBook, ownerSetupPayload } from './helpers.js';
 import { closeDb, openDb, get, all, run, tx, inTransaction } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { market } from '../src/market/store.js';
@@ -119,7 +119,7 @@ describe('R-API: validation and error classification', () => {
     app = await buildApp();
     // a deliberately faulty route, registered before the app starts, to exercise the error classifier
     app.get('/api/__boom_test', async () => { throw new TypeError("Cannot read properties of undefined (reading 'secretInternal')"); });
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'repair passphrase' } }); cookie = String(r.headers['set-cookie']).split(';')[0];
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('repair passphrase') }); cookie = String(r.headers['set-cookie']).split(';')[0];
   });
   it('R-API-1 rejects an invalid chart interval with 400, never a crash', async () => {
     for (const iv of ['foo', '__proto__', 'constructor']) {

@@ -35,7 +35,8 @@ while you use MIA. Closing it stops the app.
 
 ## 4. First use (in the browser)
 1. Open **http://localhost:8787/**.
-2. Create your **owner passphrase** (10+ characters). Store it in a password manager. There is no "forgot password" yet.
+2. Enter the **first-time setup code** shown in the MIA terminal or service log and create your **owner passphrase**
+   (10+ characters). Store the passphrase in a password manager. There is no "forgot password" yet.
 3. Click **Risk Center** in the left menu → read the limits → type your passphrase in the box → **Accept policy**.
 4. Click **Strategy Lab** → run a backtest → read the *out-of-sample* numbers → only if you accept them, click
    **Promote to paper**.

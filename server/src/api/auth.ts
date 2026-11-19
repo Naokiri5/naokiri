@@ -17,10 +17,8 @@ export function setupOwner(pass: string) {
   setSetting('owner', { salt, hash, createdAt: Date.now() }); audit('owner', 'auth.setup');
 }
 /**
- * One-time setup code (SEC-SETUP). Network location alone no longer authorizes the first owner claim: a request that
- * is not a direct loopback connection must present this code, which is printed only to the server's own console
- * (terminal, `journalctl`, container log). Whoever can read the server output can claim ownership; a remote visitor
- * cannot. ~100 bits of entropy, compared in constant time, discarded once the owner exists.
+ * One-time setup code (SEC-SETUP). Every first-owner request must present the code printed to the server console
+ * (terminal, `journalctl`, container log). ~100 bits of entropy, compared in constant time, discarded after setup.
  */
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I
 const normalizeCode = (c: string) => c.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -35,7 +33,7 @@ export function ensureSetupCode(announce = false, log: (msg: string) => void = (
     setSetting('setup_code', { code, createdAt: Date.now() });
   }
   const shown = code.match(/.{1,5}/g)!.join('-');
-  if (created || announce) log(`\n  ➜ First-time setup code: ${shown}\n    A browser that is not on this machine (forwarded port, container, LAN) must enter it to create the owner.\n`);
+  if (created || announce) log(`\n  ➜ First-time setup code: ${shown}\n    Enter this code in the browser to create the owner.\n`);
   return shown;
 }
 export function checkSetupCode(given: unknown) {
@@ -64,13 +62,14 @@ export function verifyPassphrase(pass: unknown, client: string, purpose: string,
 export function login(pass: string, ip: string, opts: { directLocal?: boolean } = {}) {
   const client = opts.directLocal ? `direct-local:${ip}` : ip;
   verifyPassphrase(pass, client, 'login', { exemptFromGlobalLockout: opts.directLocal });
-  return issueSession(ip, 'passphrase');
+  return createSession(ip, 'passphrase');
 }
-export function issueSession(ip: string, method: 'passphrase' | 'google') {
+/** Opens an owner session. Callers must have authenticated the owner first (passphrase or a linked identity). */
+export function createSession(ip: string, method: 'passphrase' | 'privy' | 'google') {
   run('DELETE FROM sessions WHERE expires_at <= ?', Date.now()); // expired sessions are otherwise kept forever
   const token = randomBytes(32).toString('hex');
   run('INSERT INTO sessions(token_hash, created_at, expires_at) VALUES (?,?,?)', sha256(token), Date.now(), Date.now() + SESSION_MS);
-  audit('owner', 'auth.login', { ip, method }); return token;
+  audit('owner', 'auth.login', method === 'passphrase' ? { ip } : { ip, method }); return token;
 }
 export function validSession(token?: string) {
   if (!token) return false;
@@ -81,8 +80,8 @@ export function validSessionHash(hash: string) {
   return !!r && r.expires_at > Date.now();
 }
 export function logout(token?: string) { if (token) run('DELETE FROM sessions WHERE token_hash=?', sha256(token)); }
-export function changePassword(oldP: string, newP: string, client = 'local') {
-  verifyPassphrase(oldP, client, 'password.change');
+export function changePassword(oldP: string, newP: string, client = 'local', opts: { exemptFromGlobalLockout?: boolean } = {}) {
+  verifyPassphrase(oldP, client, 'password.change', opts);
   if (newP.length < 10) throw new Error('passphrase must be at least 10 characters');
   const salt = randomBytes(16).toString('hex'); setSetting('owner', { salt, hash: scryptSync(newP, salt, 64).toString('hex'), createdAt: Date.now() });
   run('DELETE FROM sessions'); audit('owner', 'auth.password.change');

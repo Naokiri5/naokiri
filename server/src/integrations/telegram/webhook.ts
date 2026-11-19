@@ -6,8 +6,9 @@ import { config } from '../../config.js';
 import { audit } from '../../core/audit.js';
 import { limiter, RateLimitError } from '../../core/ratelimit.js';
 import { uid } from '../../core/util.js';
+import { releaseLease, tryAcquireLease } from '../../ops/lease.js';
 import * as auth from '../../api/auth.js';
-import { handleCommand } from './commands.js';
+import { handleCommand, type TelegramReply } from './commands.js';
 import { cancelLinkCode, createLinkCode, linkStatus, LinkError, revokeLink } from './link.js';
 
 /**
@@ -21,6 +22,9 @@ const STALE_MESSAGE_S = 600;          // Telegram message dates older than 10 mi
 const DEDUPE_RETENTION_MS = 7 * 86_400_000;
 const OUTBOX_MAX_ATTEMPTS = 5;
 const BACKOFF_MS = [5_000, 30_000, 120_000, 600_000];
+const OUTBOX_LEASE = 'telegram-outbox';
+const OUTBOX_LEASE_MS = 30_000; // Each Bot API request has a 10-second timeout.
+const OUTBOX_POLL_MS = 1_000;
 const rejectLimiter = limiter(60, 20);   // bad-secret attempts per source address
 const chatLimiter = limiter(20, 10);     // accepted commands per chat
 
@@ -50,9 +54,9 @@ const Update = z.object({
 
 // ── reply outbox: QUEUED → PROVIDER_ACCEPTED | FAILED, with bounded retries and backoff ──────────────────────────
 
-export function enqueueReply(chatId: number, text: string, now = Date.now()) {
-  run("INSERT INTO telegram_outbox(id,chat_id,text,status,attempts,next_attempt_at,created_at,updated_at) VALUES (?,?,?,?,0,?,?,?)",
-    uid('tgo'), chatId, text.slice(0, 3500), 'QUEUED', now, now, now);
+function enqueueReply(chatId: number, reply: TelegramReply, now = Date.now()) {
+  run("INSERT INTO telegram_outbox(id,chat_id,text,link_id,status,attempts,next_attempt_at,created_at,updated_at) VALUES (?,?,?,?,'QUEUED',0,?,?,?)",
+    uid('tgo'), chatId, reply.text.slice(0, 3500), reply.linkId, now, now, now);
 }
 
 /** Sends one message through the Bot API. Plain text (no parse_mode), so untrusted text is never markup. */
@@ -71,28 +75,43 @@ export async function sendViaBotApi(chatId: number, text: string): Promise<void>
 }
 
 export async function drainOutbox(send: (chatId: number, text: string) => Promise<void> = sendViaBotApi, now = Date.now(), limit = 20): Promise<number> {
-  const due = all<{ id: string; chat_id: number; text: string; attempts: number }>(
-    "SELECT id, chat_id, text, attempts FROM telegram_outbox WHERE status='QUEUED' AND next_attempt_at <= ? ORDER BY created_at LIMIT ?", now, limit);
-  for (const row of due) {
-    try {
-      await send(row.chat_id, row.text);
-      run("UPDATE telegram_outbox SET status='PROVIDER_ACCEPTED', attempts=attempts+1, last_error=NULL, updated_at=? WHERE id=?", Date.now(), row.id);
-    } catch {
-      const attempts = row.attempts + 1;
-      const failed = attempts >= OUTBOX_MAX_ATTEMPTS;
-      run("UPDATE telegram_outbox SET status=?, attempts=?, next_attempt_at=?, last_error=?, updated_at=? WHERE id=?",
-        failed ? 'FAILED' : 'QUEUED', attempts, Date.now() + BACKOFF_MS[Math.min(attempts - 1, BACKOFF_MS.length - 1)],
-        'Telegram delivery failed', Date.now(), row.id);
+  const due = all<{ id: string }>("SELECT id FROM telegram_outbox WHERE status='QUEUED' AND next_attempt_at <= ? ORDER BY created_at LIMIT ?", now, limit);
+  if (!due.length) return 0;
+  const holder = uid('telegram-outbox');
+  if (!tryAcquireLease(OUTBOX_LEASE, holder, OUTBOX_LEASE_MS)) return 0;
+  let processed = 0;
+  try {
+    for (const { id } of due) {
+      // Renew before each request. Recheck authorization in the same write transaction that starts the request.
+      const pending = tx(() => {
+        if (!tryAcquireLease(OUTBOX_LEASE, holder, OUTBOX_LEASE_MS)) return;
+        const row = get<{ chat_id: number; text: string; attempts: number; link_id: string | null; active_link_id: string | null }>(`
+          SELECT q.chat_id, q.text, q.attempts, q.link_id, l.id AS active_link_id FROM telegram_outbox q
+          LEFT JOIN telegram_links l ON l.id=q.link_id AND l.status='ACTIVE' AND l.telegram_chat_id=q.chat_id
+          WHERE q.id=? AND q.status='QUEUED' AND q.next_attempt_at <= ?`, id, now);
+        if (!row) return;
+        if (row.link_id !== null && row.active_link_id === null) {
+          run("UPDATE telegram_outbox SET status='FAILED', text='', last_error='Telegram link inactive', updated_at=? WHERE id=?", Date.now(), id);
+          return;
+        }
+        return { attempts: row.attempts + 1, accepted: send(row.chat_id, row.text).then(() => true, () => false) };
+      });
+      if (!pending) continue;
+      const accepted = await pending.accepted;
+      const status = accepted ? 'PROVIDER_ACCEPTED' : pending.attempts >= OUTBOX_MAX_ATTEMPTS ? 'FAILED' : 'QUEUED';
+      const finished = Date.now();
+      const retryAt = finished + BACKOFF_MS[Math.min(pending.attempts - 1, BACKOFF_MS.length - 1)];
+      // A revoked row stays cancelled even if a request that started earlier returns afterwards.
+      run(`UPDATE telegram_outbox SET status=?, attempts=?, next_attempt_at=?, last_error=?, updated_at=?
+        WHERE id=? AND status='QUEUED' AND EXISTS (SELECT 1 FROM runtime_leases WHERE name=? AND holder=?)`,
+      status, pending.attempts, retryAt, accepted ? null : 'Telegram delivery failed', finished, id, OUTBOX_LEASE, holder);
+      processed++;
     }
+    run('DELETE FROM telegram_update_dedupe WHERE received_at < ?', now - DEDUPE_RETENTION_MS);
+  } finally {
+    releaseLease(OUTBOX_LEASE, holder);
   }
-  run('DELETE FROM telegram_update_dedupe WHERE received_at < ?', now - DEDUPE_RETENTION_MS);
-  return due.length;
-}
-
-/** Sends queued replies in the background. No-op without a bot token, so tests and offline runs never call Telegram. */
-function kickOutbox() {
-  if (!config.telegramBotToken) return;
-  void drainOutbox().catch(() => { /* failures are recorded per row */ });
+  return processed;
 }
 
 // ── session guard for owner-facing endpoints (same cookie and CSRF rules as api/routes.ts) ─────────────────────
@@ -107,6 +126,27 @@ function ownerGuard(req: FastifyRequest, reply: FastifyReply, mutating: boolean)
 }
 
 export async function telegramRoutes(app: FastifyInstance) {
+  if (!config.offline && config.telegramBotToken && webhookSecret()) {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    let activeDrain: Promise<void> | undefined;
+    const tick = () => {
+      if (activeDrain) return;
+      // One request per poll keeps graceful shutdown bounded by the Bot API timeout.
+      activeDrain = drainOutbox(sendViaBotApi, Date.now(), 1)
+        .then(() => {}, () => { app.log.warn('Telegram outbox processing failed'); })
+        .finally(() => { activeDrain = undefined; });
+    };
+    app.addHook('onListen', async () => {
+      timer = setInterval(tick, OUTBOX_POLL_MS);
+      timer.unref();
+      tick();
+    });
+    app.addHook('onClose', async () => {
+      clearInterval(timer);
+      await activeDrain;
+    });
+  }
+
   app.post('/api/integrations/telegram/webhook', async (req, reply) => {
     const secret = webhookSecret();
     if (!secret) return reply.code(404).send({ error: 'not found' });
@@ -138,11 +178,10 @@ export async function telegramRoutes(app: FastifyInstance) {
         if (!(error instanceof RateLimitError)) throw error;
         return { ok: true, ignored: true, reason: 'rate limited' };
       }
-      const text = handleCommand(m.text, { userId: sender.id, chatId: m.chat.id, chatType: m.chat.type });
-      if (text) enqueueReply(m.chat.id, text);
+      const commandReply = handleCommand(m.text, { userId: sender.id, chatId: m.chat.id, chatType: m.chat.type });
+      enqueueReply(m.chat.id, commandReply);
       return { ok: true };
     });
-    if (!result.duplicate && !result.ignored) kickOutbox();
     return reply.send(result);
   });
 

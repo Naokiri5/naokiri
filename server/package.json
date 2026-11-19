@@ -19,6 +19,7 @@
     "@fastify/static": "^10.1.11",
     "fast-xml-parser": "^5.12.1",
     "fastify": "^5.12.8",
+    "jose": "^4.15.9",
     "pdfjs-dist": "^6.5.438",
     "zod": "^4.6.7"
   },

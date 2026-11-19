@@ -1,12 +1,9 @@
 import { expect, test } from '@playwright/test';
-
-const password = 'e2e owner passphrase';
+import { signInTestOwner, TEST_OWNER_PASSPHRASE as password } from './owner-fixture';
 
 test('owner can pair and unlink Telegram from the Connections Hub', async ({ page }) => {
   await page.context().route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
-  const auth = await (await page.request.get('/api/auth/state')).json();
-  const session = await page.request.post(auth.setup ? '/api/auth/login' : '/api/auth/setup', { data: { password } });
-  expect(session.ok()).toBe(true);
+  await signInTestOwner(page);
 
   // Keep the browser test independent of Telegram credentials and network access.
   let configured = false;

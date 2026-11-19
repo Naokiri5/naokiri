@@ -80,21 +80,23 @@ export function redeemLinkCode(raw: string, telegramUserId: number, telegramChat
   });
 }
 
-/** True only for the exact Telegram user AND private chat that redeemed the active link. */
-export function isLinkedIdentity(telegramUserId: number, telegramChatId: number): boolean {
+/** Finds the active link only for the exact Telegram user AND private chat that redeemed it. */
+export function linkForIdentity(telegramUserId: number, telegramChatId: number): LinkRow | undefined {
   const l = activeLink();
-  return !!l && l.telegram_user_id === telegramUserId && l.telegram_chat_id === telegramChatId;
+  return l?.telegram_user_id === telegramUserId && l.telegram_chat_id === telegramChatId ? l : undefined;
 }
 
 /** Revokes the active link and purges the chat identifiers. Returns false when nothing was linked. */
 export function revokeLink(actor = 'owner'): boolean {
-  const l = activeLink();
-  if (!l) return false;
-  tx(() => {
-    run("UPDATE telegram_links SET status='REVOKED', telegram_user_id=NULL, telegram_chat_id=NULL, revoked_at=? WHERE id=?", Date.now(), l.id);
+  return tx(() => {
+    const l = activeLink();
+    if (!l) return false;
+    const now = Date.now();
+    run("UPDATE telegram_links SET status='REVOKED', telegram_user_id=NULL, telegram_chat_id=NULL, revoked_at=? WHERE id=?", now, l.id);
+    run("UPDATE telegram_outbox SET status='FAILED', text='', last_error='Telegram link revoked', updated_at=? WHERE status='QUEUED' AND link_id=?", now, l.id);
     audit(actor, 'telegram.link.revoked', { linkId: l.id });
+    return true;
   });
-  return true;
 }
 
 export function cancelLinkCode(): boolean {

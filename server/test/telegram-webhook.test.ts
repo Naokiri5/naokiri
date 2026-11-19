@@ -1,7 +1,10 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
-import { closeDb, openDb, all, run } from '../src/db/db.js';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { closeDb, openDb, all, get, run } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
+import { config } from '../src/config.js';
 import { createLinkCode, isLinkedIdentity, linkStatus, redeemLinkCode } from '../src/integrations/telegram/link.js';
+import { drainOutbox } from '../src/integrations/telegram/webhook.js';
+import { ownerSetupPayload } from './helpers.js';
 import { getControl } from '../src/core/mode.js';
 import { parseCommand } from '../src/integrations/telegram/commands.js';
 
@@ -12,7 +15,7 @@ let chatSeq = 7_000;
 const OWNER_USER = 111;
 
 type Out = { status: string; text: string };
-const outbox = (): Out[] => all<Out>('SELECT status, text FROM telegram_outbox ORDER BY created_at');
+const outbox = (): Out[] => all<Out>('SELECT status, text FROM telegram_outbox ORDER BY created_at, rowid');
 const hook = (body: unknown, secret: string = SECRET) => app.inject({
   method: 'POST', url: '/api/integrations/telegram/webhook',
   headers: { 'x-telegram-bot-api-secret-token': secret }, payload: body as object,
@@ -27,7 +30,7 @@ describe('Telegram webhook (MIA-TG-01)', () => {
     process.env.TELEGRAM_WEBHOOK_SECRET = SECRET;
     closeDb(); openDb(':memory:'); app = await buildApp();
   });
-  afterAll(() => { delete process.env.TELEGRAM_WEBHOOK_SECRET; closeDb(); });
+  afterEach(async () => { await app.close(); delete process.env.TELEGRAM_WEBHOOK_SECRET; closeDb(); });
 
   it('is disabled (404) when no valid secret is configured', async () => {
     process.env.TELEGRAM_WEBHOOK_SECRET = '';
@@ -129,7 +132,7 @@ describe('Telegram webhook (MIA-TG-01)', () => {
 
   it('requires owner session and CSRF to cancel a pending code, and preserves an active link', async () => {
     const password = 'telegram test passphrase';
-    const session = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password } });
+    const session = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload(password) });
     expect(session.statusCode).toBe(200);
     const cookie = session.cookies.find(({ name }) => name === 'mia_session');
     expect(cookie).toBeDefined();
@@ -151,6 +154,75 @@ describe('Telegram webhook (MIA-TG-01)', () => {
     expect(redeemLinkCode(createLinkCode().code, OWNER_USER, chat).ok).toBe(true);
     expect((await cancel(ownerHeaders)).json()).toEqual({ ok: true, canceled: false });
     expect(isLinkedIdentity(OWNER_USER, chat)).toBe(true);
+  });
+
+  it('clears queued account replies on unlink and still sends public replies', async () => {
+    const chat = chatSeq++;
+    const { code } = createLinkCode();
+    redeemLinkCode(code, OWNER_USER, chat);
+    await hook(msg('/risk', OWNER_USER, chat));
+    await hook(msg('/help', OWNER_USER, chat));
+    await hook(msg('/unlink', OWNER_USER, chat));
+
+    expect(outbox()[0]).toEqual({ status: 'FAILED', text: '' });
+    const send = vi.fn(async () => {});
+    expect(await drainOutbox(send)).toBe(2);
+    expect(send.mock.calls).toEqual(expect.arrayContaining([
+      [chat, expect.stringMatching(/^MIA paper-trading bot/)],
+      [chat, expect.stringMatching(/^Unlinked/)],
+    ]));
+  });
+
+  it('revalidates the original active link before delivering an account reply', async () => {
+    const chat = chatSeq++;
+    const { code } = createLinkCode();
+    redeemLinkCode(code, OWNER_USER, chat);
+    await hook(msg('/positions', OWNER_USER, chat));
+    run("UPDATE telegram_links SET status='REVOKED'"); // Simulate a stale queued row after an administrative change.
+    const replacement = createLinkCode();
+    redeemLinkCode(replacement.code, OWNER_USER, chat);
+
+    const send = vi.fn(async () => {});
+    await drainOutbox(send);
+    expect(send).not.toHaveBeenCalled();
+    expect(outbox()).toEqual([{ status: 'FAILED', text: '' }]);
+  });
+
+  it('runs one drain at a time and retries a due reply without a new command', async () => {
+    await hook(msg('/help', OWNER_USER, chatSeq++));
+    let failDelivery!: (err: Error) => void;
+    const inflight = new Promise<void>((_, reject) => { failDelivery = reject; });
+    const first = drainOutbox(() => inflight);
+    const send = vi.fn(async () => {});
+    expect(await drainOutbox(send)).toBe(0);
+    expect(send).not.toHaveBeenCalled();
+    failDelivery(new Error('fixture'));
+    expect(await first).toBe(1);
+
+    const retryAt = get<{ next_attempt_at: number }>('SELECT next_attempt_at FROM telegram_outbox')!.next_attempt_at;
+    expect(await drainOutbox(send, retryAt - 1)).toBe(0);
+    expect(await drainOutbox(send, retryAt)).toBe(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(outbox()[0].status).toBe('PROVIDER_ACCEPTED');
+  });
+
+  it('never starts Telegram delivery in offline mode even with a configured token', async () => {
+    const originalToken = config.telegramBotToken;
+    const fetchStub = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', fetchStub);
+    config.telegramBotToken = 'test-token';
+    try {
+      await app.close();
+      app = await buildApp();
+      await hook(msg('/help', OWNER_USER, chatSeq++));
+      await app.listen({ host: '127.0.0.1', port: 0 });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(fetchStub).not.toHaveBeenCalled();
+      expect(outbox()[0].status).toBe('QUEUED');
+    } finally {
+      config.telegramBotToken = originalToken;
+      vi.unstubAllGlobals();
+    }
   });
 
   it('parses commands with an optional @bot suffix and rejects plain text', () => {

@@ -1,3 +1,4 @@
+import { ownerSetupPayload } from './helpers.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { config } from '../src/config.js';
 import { closeDb, openDb } from '../src/db/db.js';
@@ -29,7 +30,7 @@ const callback = (state: string, cookie: string) => app.inject({
 });
 
 async function setupOwner() {
-  const response = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password } });
+  const response = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload(password) });
   expect(response.statusCode).toBe(200);
   return `mia_session=${response.cookies.find(c => c.name === 'mia_session')!.value}`;
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased: Tailscale Funnel guide (2026-11-18)
+- **New guide:** `docs/operations/TAILSCALE_FUNNEL.md` gives MIA a free HTTPS address with Tailscale Funnel (for your phone, or Privy's Allowed origins).
+- **Safety:** requests relayed by Tailscale Serve or Funnel are treated as remote even though they arrive from this computer, so the setup code and normal lockout still apply.
+
+## Unreleased: Privy sign-in (2026-11-18)
+- **New: sign in with Privy** (email, phone, Google, Apple, passkey, wallet, as enabled in your Privy dashboard). Link your Privy account once in Security Center, with your passphrase; after that the login screen offers "Sign in with Privy".
+- **Safety:** the server checks every Privy token, and only your linked account can sign in. Your passphrase is still needed for sensitive actions. Wallets are view-only; creating embedded wallets and signing, sending, funding or exporting are LOCKED.
+- **Off by default:** nothing changes, and the browser security policy stays strict, unless `MIA_PRIVY_APP_ID` is set.
+- **Known issue:** Privy's wallet libraries trigger a high-severity `npm audit` warning (old `zod`), so the CI audit job fails until Privy updates.
+- **Docs:** `docs/operations/PRIVY_SIGN_IN.md`.
+
+## Unreleased: Vike research provider and Paper/Live contract (2026-11-18)
+- **New: Vike on-chain research** (Discover → Vike research tab): token screener and search from data.vike.io, read-only. It is labelled research only and can never place, approve or size a trade.
+- **Key safety:** the key is read only from the server setting `MIA_VIKE_API_KEY`. Without it MIA shows PENDING_CREDENTIALS and sends nothing. Presigned archive links never leave the server.
+- **Paper/Live:** Live trading stays locked. Every Live command is refused (`LIVE_LOCKED`), and `/api/trading/environments` shows it truthfully.
+- **Docs:** `docs/research/VIKE_INTEGRATION.md`.
+
 ## Unreleased: Master repair audit (2026-11-18)
 - **A broken saved risk setting can no longer stop a stop-loss.** Exits use the last valid fee rate, and new entries stay blocked until the owner fixes the setting. The release gate shows a broken setting as FAIL.
 - **Worker votes:** a required area (for example liquidity) now needs its own evidence. A worker from another area can no longer count for it.

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { freshDb } from './helpers.js';
+import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { getControl } from '../src/core/mode.js';
 import { failureGate } from '../src/core/ratelimit.js';
@@ -11,7 +11,7 @@ describe('strategy disable/enable operations', () => {
     const app = await buildApp();
     try {
       const PW = 'strategy toggle owner';
-      const s = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: PW } });
+      const s = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload(PW) });
       const headers = { cookie: String(s.headers['set-cookie']).split(';')[0], 'x-mia-csrf': '1', 'content-type': 'application/json' };
       const post = (payload: object) => app.inject({ method: 'POST', url: '/api/control', headers, payload });
       expect((await post({ disableStrategy: 'trend_pullback' })).statusCode).toBe(200);

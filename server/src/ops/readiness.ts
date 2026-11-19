@@ -53,7 +53,8 @@ export function readiness(e: EngineView, nowTs = Date.now()) {
   }
   const ps = providers().filter((p) => p.status !== 'DISABLED');
   checks.push({ name: 'providers', status: 'info', detail: `${ps.filter((p) => p.status === 'LIVE').length}/${ps.length} live` });
-  checks.push({ name: 'risk policy', status: 'info', detail: currentPolicy() ? 'accepted' : 'not accepted (no paper entries until accepted)' });
+  const policy = currentPolicy();
+  checks.push({ name: 'risk policy', status: 'info', detail: policy?.policy ? 'accepted' : policy ? 'invalid (paper entries blocked)' : 'not accepted (no paper entries until accepted)' });
   return { ready: !checks.some((c) => c.status === 'fail'), at: nowTs, schema: SCHEMA_VERSION, role: config.offline ? 'OFFLINE' : e.role, checks };
 }
 

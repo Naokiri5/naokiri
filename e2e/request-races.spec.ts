@@ -1,6 +1,6 @@
 import { expect, test, type Route, type Page } from '@playwright/test';
 
-const PW = 'e2e owner passphrase';
+import { signInTestOwner } from './owner-fixture';
 const instrument = (base: string) => ({ instrument: { base, symbol: `${base}USDT` }, cross: {}, candles: [], features: null, indicators: [], prints: [] });
 
 async function installFixtureStream(page: Page) {
@@ -20,8 +20,7 @@ async function installFixtureStream(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await page.context().route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
-  const state = await (await page.request.get('/api/auth/state')).json();
-  expect((await page.request.post(state.setup ? '/api/auth/login' : '/api/auth/setup', { data: { password: PW } })).status()).toBe(200);
+  await signInTestOwner(page);
 });
 
 for (const staleStatus of [200, 401]) {

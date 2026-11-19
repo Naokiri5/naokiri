@@ -54,4 +54,12 @@ describe('global lockout cannot block the owner (SEC-14)', () => {
     expect((await app.inject({ method: 'POST', url: '/api/emergency/close-all', remoteAddress: '127.0.0.1', headers: h, payload: { password: PW, confirm: 'CLOSE ALL' } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: '/api/security/sessions/revoke-others', remoteAddress: '127.0.0.1', headers: h, payload: { password: PW } })).statusCode).toBe(200);
   });
+  it('behind a proxy, a stranger locking the shared IP cannot block the owner\'s passphrase change (I-01)', async () => {
+    failureGate.reset();
+    const proxied = { ...json, 'x-forwarded-for': '203.0.113.51' };
+    for (let i = 0; i < 6; i++) await app.inject({ method: 'POST', url: '/api/auth/login', remoteAddress: '127.0.0.1', headers: proxied, payload: { password: 'stranger ' + i } });
+    const h = { cookie, 'x-mia-csrf': '1', ...proxied };
+    const r = await app.inject({ method: 'POST', url: '/api/settings/password', remoteAddress: '127.0.0.1', headers: h, payload: { current: PW, next: 'a-new-owner-passphrase' } });
+    expect(r.statusCode).toBe(200); // was 429
+  });
 });

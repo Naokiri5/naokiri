@@ -136,12 +136,12 @@ export function runOutcomeProblem(outcome: unknown, reportText: string, ctx: { c
   if (!isRecord(outcome)) return 'run outcome missing or unreadable (data/qa/test-run.json); run `npm run qa -w server`';
   if (outcome.exitCode !== 0) return `QA run did not succeed (exit code ${String(outcome.exitCode)}${outcome.signal ? `, signal ${String(outcome.signal)}` : ''})`;
   if (typeof outcome.reportSha256 !== 'string' || outcome.reportSha256 !== createHash('sha256').update(reportText).digest('hex')) return 'run outcome does not belong to this report (sha256 mismatch)';
-  // Bound to the exact code that is running, from a clean tree, and recent (blueprint Q-01).
+  // Require a run from an isolated snapshot of the running commit (blueprint Q-01).
   const current = ctx.currentCommit === undefined ? currentBuildCommit() : ctx.currentCommit;
   if (typeof outcome.commit !== 'string' || !/^[0-9a-f]{40}$/.test(outcome.commit)) return 'run outcome has no commit SHA; re-run `npm run qa -w server` from a git checkout';
   if (!current) return 'running build commit is unknown (set MIA_BUILD_SHA); evidence cannot be bound to this build';
   if (outcome.commit !== current) return `evidence is from commit ${outcome.commit.slice(0, 12)}, but the running build is ${current.slice(0, 12)}`;
-  if (outcome.dirty !== false) return 'QA run had uncommitted changes; evidence must come from a clean checkout';
+  if (outcome.source !== 'git-archive-v1') return 'QA run lacks an isolated Git snapshot; regenerate the evidence';
   const finished = Number(outcome.finishedAt); const now = ctx.nowTs ?? Date.now();
   if (!Number.isFinite(finished) || finished > now + 60_000) return 'run outcome has an invalid finish time';
   if (now - finished > QA_EVIDENCE_MAX_AGE_MS) return `evidence is stale (${Math.floor((now - finished) / 86_400_000)} days old; limit ${QA_EVIDENCE_MAX_AGE_MS / 86_400_000})`;
@@ -179,9 +179,11 @@ export function releaseGates(report?: unknown) {
   const joe = testGate('G04');
   g.push({ id: 'G04', name: 'Trader Joe factuality & authorization tests', ...joe, status: 'PENDING', evidence: `${joe.evidence}; authorization checks do not certify LLM factuality; human review is required` });
   const rec = reconcile();
-  g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile', status: rec.ok ? 'PASS' : 'FAIL', evidence: rec.detail });
+  // J-02 (100-agent audit): with nothing to reconcile there is no evidence, so PENDING rather than PASS.
+  const hasTrades = rec.closedPositions > 0 || (get<{ n: number }>("SELECT COUNT(*) n FROM fills")?.n ?? 0) > 0;
+  g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile', status: !rec.ok ? 'FAIL' : hasTrades ? 'PASS' : 'PENDING', evidence: hasTrades ? rec.detail : 'no paper fills yet: nothing to reconcile' });
   const ac = verifyAuditChain();
-  g.push({ id: 'G06', name: 'Audit log integrity', status: ac.ok ? 'PASS' : 'FAIL', evidence: `${ac.entries} hash-chained entries${ac.ok ? ' verified' : `, broken at ${ac.brokenAt}`}` });
+  g.push({ id: 'G06', name: 'Audit log integrity', status: !ac.ok ? 'FAIL' : ac.entries > 0 ? 'PASS' : 'PENDING', evidence: `${ac.entries} hash-chained entries${ac.ok ? ' verified' : `, broken at ${ac.brokenAt}`}` });
   g.push({ id: 'G07', name: 'Wallet permissions & signing isolation security tests', status: 'NOT_IMPLEMENTED', evidence: 'No signer exists in this build (by design). Requires isolated signer + external security test.' });
   g.push({ id: 'G08', name: 'No unresolved critical/high security findings', status: 'NOT_CERTIFIED', evidence: 'Requires independent security review.' });
   g.push({ id: 'G09', name: 'Emergency shutdown & recovery procedures pass', ...testGate('G09') });

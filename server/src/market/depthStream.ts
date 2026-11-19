@@ -8,7 +8,7 @@
  *   6. quantity 0 removes a level; malformed, crossed or non-finite data is rejected and forces a resync.
  *
  * Paper-only market data: this never places orders. Stream books feed the same `market.deep.book` the REST path does,
- * stamped with LOCAL receive time, so every freshness/depth check (risk gate, OMS, quality) applies unchanged. REST
+ * stamped with local receive time for deltas and request start time for snapshot-only books. REST
  * polling stays the fallback: a symbol whose stream book is not fresh is refreshed by REST as before.
  * Off by default; enable with MIA_STREAMING=1.
  */
@@ -49,6 +49,7 @@ export class BookSync {
   lastAppliedEventAt: number | null = null;
   resyncs = 0;
   private buffer: DepthEvent[] = [];
+  private requiredSnapshotId = 0;
   /** True until the first event after a snapshot: that one only has to OVERLAP the snapshot (U <= L+1 <= u). */
   private first = false;
   private bids = new Map<number, number>();
@@ -68,13 +69,21 @@ export class BookSync {
     // SYNCED while never publishing (CodeRabbit PR #18).
     return this.apply(ev) && this.sane() ? 'APPLIED' : this.gap();
   }
-  /** Feed the REST snapshot while buffering. Returns false when the snapshot is too old for the buffered events. */
+  /** A discarded update can only be recovered from a snapshot covering it. */
+  requireSnapshotThrough(updateId: number): boolean {
+    if (this.state === 'SYNCED' && updateId <= this.lastUpdateId) return false;
+    this.requiredSnapshotId = Math.max(this.requiredSnapshotId, updateId);
+    if (this.state === 'SYNCED') this.gap();
+    return true;
+  }
+  /** Feed the REST snapshot while buffering. */
   onSnapshot(s: Snapshot): 'SYNCED' | 'SNAPSHOT_TOO_OLD' | 'WAITING' {
     const L = s.lastUpdateId;
+    if (L < this.requiredSnapshotId) return 'SNAPSHOT_TOO_OLD';
     const pending = this.buffer.filter((e) => e.u > L);
     if (!pending.length) {
       // Nothing newer buffered yet: start from the snapshot; the next event only has to overlap it.
-      this.load(s); this.state = 'SYNCED'; this.buffer = []; return 'SYNCED';
+      this.load(s); this.state = 'SYNCED'; this.buffer = []; this.requiredSnapshotId = 0; return 'SYNCED';
     }
     if (pending[0].U > L + 1) return 'SNAPSHOT_TOO_OLD'; // events are missing between the snapshot and the buffer
     this.load(s); this.state = 'SYNCED'; this.buffer = [];
@@ -83,6 +92,7 @@ export class BookSync {
       if (!this.continues(ev) || !this.apply(ev)) { this.gap(); return 'WAITING'; }
     }
     if (!this.sane()) { this.gap(); return 'WAITING'; }
+    this.requiredSnapshotId = 0;
     return 'SYNCED';
   }
   book(ts: number): StreamBook | null {
@@ -137,7 +147,7 @@ export class BookSync {
 // ── transport ─────────────────────────────────────────────────────────────────────────────────────────────────────
 export interface StreamDeps {
   url: (symbols: string[]) => string;
-  snapshot: (symbol: string) => Promise<Snapshot>;
+  snapshot: (symbol: string) => Promise<Snapshot & { ts: number }>;
   publish: (symbol: string, book: StreamBook) => void;
   /** Called when a symbol's published book can no longer be extended (gap, disconnect): REST should take over now. */
   invalidate?: (symbol: string) => void;
@@ -188,7 +198,9 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
             invalidate(sym);
             return;
           }
-          const book = sync.book(at);
+          const ts = eventAt === null ? snap.ts : at;
+          if (!Number.isFinite(ts) || ts <= 0 || ts > at) { invalidate(sym); return; }
+          const book = sync.book(ts);
           if (book) deps.publish(sym, book);
           return;
         }
@@ -203,15 +215,27 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
     generation++; inFlight.clear();
     for (const s of syncs.values()) s.state = 'BUFFERING';
     const sock: WebSocket = new WS(deps.url(symbols)); ws = sock;
-    sock.onopen = () => { status.connected = true; status.lastMessageAt = now(); for (const s of symbols) void snapshot(s); };
+    sock.onopen = () => {
+      if (stopped || ws !== sock) return;
+      status.connected = true; status.lastMessageAt = now();
+      for (const s of symbols) void snapshot(s);
+    };
     sock.onmessage = (m: MessageEvent) => {
+      if (stopped || ws !== sock) return;
       const received = now(); status.lastMessageAt = received;
       let msg: any; try { msg = JSON.parse(String(m.data)); } catch { return; }
       const ev = parseDepthEvent(msg?.data ?? msg); if (!ev) return;
       attempt = 0; // reconnect backoff resets only after a VALID event, not on open (a server that accepts then closes must not cause a storm)
       const sync = syncs.get(ev.s); if (!sync) return;
       const lag = received - ev.E;
-      if (lag < 0) { invalidate(ev.s); return; }
+      if (lag < 0) {
+        if (sync.requireSnapshotThrough(ev.u)) {
+          status.resyncs++;
+          invalidate(ev.s);
+          void snapshot(ev.s);
+        }
+        return;
+      }
       record('stream.binance.eventLagMs', lag); // provider event time → local receipt
       const r = sync.onEvent(ev);
       if (r === 'SNAPSHOT_NEEDED') { status.resyncs++; invalidate(ev.s); void snapshot(ev.s); }
@@ -222,6 +246,8 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
       else if (r === 'BUFFERED' && sync.state === 'BUFFERING') void snapshot(ev.s);
     };
     sock.onclose = () => {
+      if (ws !== sock) return;
+      generation++;
       status.connected = false; ws = null; for (const s of symbols) invalidate(s);
       if (stopped) return;
       status.reconnects++; const delay = Math.min(60_000, 1_000 * 2 ** attempt++) * (0.5 + rand() / 2);
