@@ -14,6 +14,9 @@ export interface Candidate {
 export interface WorkerContext {
   /** Immutable evidence captured before asynchronous QCI review. */
   memorySnapshotId?: string;
+  /** Evaluation clock (ms). Set when the context is built; a replay sets it to the recorded time so time-dependent
+   *  checks (e.g. data age) give the same answer as at decision time. Workers must never read the wall clock. */
+  asOf?: number;
   frameQuality?: Record<string, DataQuality>;
   candidate: Candidate;
   f: Partial<Record<Interval, FeatureSnapshot | null>>;

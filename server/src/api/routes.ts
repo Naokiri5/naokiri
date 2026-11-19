@@ -3,6 +3,7 @@ import { knowledgeRoutes } from '../knowledge/routes.js';
 import { VikeNotConfiguredError } from '../providers/vike.js';
 import * as privy from '../security/privy.js';
 import { buildCertificate } from '../decision/certificate.js';
+import { replayDecision, ReplayError } from '../ditas/replay.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -251,6 +252,10 @@ export async function routes(app: FastifyInstance) {
     const r = get<{ report: string; consensus_id: string }>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found');
     const c = get<{ record: string }>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id);
     return buildCertificate(r.report, c?.record ?? null);
+  });
+  /** THINK evidence replay from the frozen DITAS snapshot (read-only; no side effects). */
+  app.get('/api/decisions/:id/replay', async (req, reply) => {
+    try { return replayDecision(idOf(req)); } catch (e) { if (e instanceof ReplayError) return bad(reply, 404, e.message); throw e; }
   });
   app.get('/api/decisions/:id', async (req, reply) => { const r = get<any>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found'); const c = get<any>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id); return { report: P(r.report), consensus: c ? P(c.record) : null }; });
   app.post('/api/analyze', async (req) => { const { symbol, strategyId } = z.object({ symbol: z.string().min(1).max(20), strategyId: z.string().max(60).optional() }).parse(req.body); const i = market.bySymbol(symbol); if (!i) throw httpError(404, 'unknown symbol'); limit(req, 'analyze', 'analysis'); return analyzeInstrument(i.id, strategyId); });

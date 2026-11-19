@@ -100,10 +100,10 @@ add('regime', 'Higher-timeframe regime 4h', 'regime.4h', K('4h'), (c) => { const
 // Breadth over ≥30 liquid pairs from a ticker snapshot no older than 5 minutes; otherwise abstain (never guessed).
 add('regime', 'Market breadth', 'breadth', ['binance.ticker24h'], (c) => {
   const b = c.breadth; if (!b || b.universe < 30) return ABSTAIN('breadth unavailable (fewer than 30 liquid pairs)');
-  const age = b.asOf == null ? NaN : Date.now() - b.asOf;
+  const age = b.asOf == null ? NaN : (c.asOf ?? Date.now()) - b.asOf; // evaluation clock, so replays are deterministic
   if (!Number.isFinite(age) || age < 0 || age > 300_000) return ABSTAIN('breadth snapshot stale, future-dated or missing');
   return tri(b.advancers / b.universe, (v) => v >= 0.55, (v) => v <= 0.35, 'advancerShare', (v) => `${(v * 100).toFixed(0)}%`);
-}, { version: '1.1.0' });
+}, { version: '1.2.0' });
 // ── NEWS (8) ──────────────────────────────────────────────────
 add('news', 'Asset headline sentiment', 'googlenews', ['googlenews'], (c) => { const n = c.news; if (!n || n.relevant === 0) return ABSTAIN('no recent asset headlines'); return tri(n.positive - n.negative, (v) => v > 0, (v) => v < 0, 'netSentimentCount', (v) => v.toFixed(0)); });
 add('news', 'Negative-event screen', 'googlenews', ['googlenews'], (c) => { const n = c.news; if (!n) return ABSTAIN('news feed unavailable'); return n.negative >= 2 ? { stance: 'OPPOSE', features: { negative: n.negative }, reasons: ['multiple negative headlines (hack/exploit/delisting/lawsuit)'] } : { stance: 'ABSTAIN', features: { negative: n.negative }, reasons: ['no material negative headlines'] }; });

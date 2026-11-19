@@ -46,6 +46,8 @@ export function validatePacket(raw: unknown, candidateId: string): EvidencePacke
  *  - COVERAGE: a domain's support/oppose/abstain are its OWN data-driven packets, wherever the group's vote went. A required
  *    domain is covered only by its own non-abstaining evidence; another domain's worker can never satisfy it.
  */
+/** Evidence domains that apply to a candidate (on-chain evidence only for DEX instruments). Shared with ditas/replay. */
+export function applicableDomains(candidate: { market: string }) { return new Set<string>(DOMAINS.filter((d) => d !== 'onchain' || candidate.market === 'crypto-dex')); }
 export function aggregate(packets: EvidencePacket[], applicableDomains: Set<string>) {
   const evidence = packets.filter((p) => isEvidence(p) && applicableDomains.has(p.evidence_domain));
   const primary = new Map<string, string>();
@@ -113,7 +115,7 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     if (packets.some((p) => p.worker_id === v.worker_id)) { rejected++; continue; } // one packet per worker (D-03)
     packets.push(v);
   }
-  const applicable = new Set(DOMAINS.filter((d) => d !== 'onchain' || ctx.candidate.market === 'crypto-dex'));
+  const applicable = applicableDomains(ctx.candidate);
   const agg = aggregate(packets, applicable);
   const challenge = challengePanel(ctx, packets);
   const responding = packets.filter((p) => p.stance !== 'ABSTAIN').length;
