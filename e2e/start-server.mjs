@@ -10,7 +10,7 @@ const b = spawnSync(process.execPath, [resolve(root, 'server/scripts/ensure-buil
 if (b.status) process.exit(b.status);
 const serverBuild = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build', '-w', 'server'], { cwd: root, stdio: 'inherit', shell: process.platform === 'win32' });
 if (serverBuild.status !== 0) process.exit(serverBuild.status ?? 1);
-const env = { ...process.env, MIA_OFFLINE: '1', MIA_PORT: process.env.MIA_E2E_PORT ?? '8799', MIA_HOST: '127.0.0.1', MIA_DATA_DIR: dataDir, MIA_LOG: 'warn' };
+const env = { ...process.env, MIA_OFFLINE: '1', MIA_AUTH_MODE: process.env.MIA_AUTH_MODE ?? 'passphrase', MIA_PORT: process.env.MIA_E2E_PORT ?? '8799', MIA_HOST: '127.0.0.1', MIA_DATA_DIR: dataDir, MIA_LOG: 'warn' };
 const seed = spawnSync(process.execPath, ['--import', 'tsx', resolve(root, 'e2e/seed-backtest.ts')], { cwd: root, stdio: 'inherit', env });
 if (seed.status !== 0) process.exit(seed.status ?? 1);
 env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ''} --import=${pathToFileURL(resolve(root, 'e2e/quarantine-worker.mjs')).href}`;

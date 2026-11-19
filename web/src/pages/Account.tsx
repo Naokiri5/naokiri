@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { api, fmt, useApi } from '../api';
+import { Link } from 'react-router-dom';
+import { api, authInfo, fmt, useApi, stepUpBody } from '../api';
 import { Action, Badge, Card, Empty, ErrorLine, Page, Tabs } from '../ui';
 import { StepUp } from './Trading';
 
@@ -19,7 +20,7 @@ export function Wallet() {
         <div className="row"><Action label="Validate" run={async () => setCheck(await api('/api/wallet/validate', { body: { network: form.network, address: form.address } }))} />
           <Action className="primary" label="Add (24h cooling-off)" run={async () => { const r = await api('/api/wallet/address', { body: form }); setCheck({ valid: true, warnings: r.warnings }); setForm({ ...form, address: '', label: '' }); reload(); }} /></div>
         {check && <div className={check.valid ? 'ok' : 'err'}>{check.valid ? `Valid${check.normalized ? `: ${check.normalized}` : ''}` : check.error}{check.warnings?.map((w: string) => <div key={w} className="hint warn">{w}</div>)}</div>}
-        <table><tbody>{(data?.addresses ?? []).map((a: any) => <tr key={a.id}><td><b>{a.label}</b><div className="mono hint">{a.address}</div></td><td>{a.network}</td><td>{a.verified_at ? <Badge v="VERIFIED" tone="b-good" /> : <Action className="sm" label="Verify (step-up)" run={async () => { await api(`/api/wallet/address/${a.id}/verify`, { body: { password: pw } }); reload(); }} />}{a.cooldown_until > Date.now() && <div className="hint">cooling-off until {fmt.time(a.cooldown_until)}</div>}</td><td><Action className="sm ghost" label="Remove" confirm="Remove this address?" run={async () => { await api(`/api/wallet/address/${a.id}`, { method: 'DELETE' }); reload(); }} /></td></tr>)}</tbody></table>
+        <table><tbody>{(data?.addresses ?? []).map((a: any) => <tr key={a.id}><td><b>{a.label}</b><div className="mono hint">{a.address}</div></td><td>{a.network}</td><td>{a.verified_at ? <Badge v="VERIFIED" tone="b-good" /> : <Action className="sm" label="Verify (step-up)" run={async () => { await api(`/api/wallet/address/${a.id}/verify`, { body: { ...stepUpBody(pw) } }); reload(); }} />}{a.cooldown_until > Date.now() && <div className="hint">cooling-off until {fmt.time(a.cooldown_until)}</div>}</td><td><Action className="sm ghost" label="Remove" confirm="Remove this address?" run={async () => { await api(`/api/wallet/address/${a.id}`, { method: 'DELETE' }); reload(); }} /></td></tr>)}</tbody></table>
         {!data?.addresses.length && <Empty>No saved addresses.</Empty>}
       </div></Card>
       <Card title="Withdrawal (guided preview, Part 24.2)"><div className="col">
@@ -28,9 +29,9 @@ export function Wallet() {
           <input type="number" placeholder="Amount" value={wd.amount} onChange={(e) => setWd({ ...wd, amount: e.target.value })} style={{ width: 110 }} /></div>
         {net && !net.assets.includes(wd.asset) && <div className="err">⚠ {wd.asset} is not supported on {net.name}. Never infer a network from a ticker.</div>}
         <select value={wd.addressId} onChange={(e) => setWd({ ...wd, addressId: e.target.value })} aria-label="Destination"><option value="">Select verified destination…</option>{(data?.addresses ?? []).map((a: any) => <option key={a.id} value={a.id}>{a.label} · {a.network} · {a.address.slice(0, 10)}…</option>)}</select>
-        <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="primary" label="Preview" run={async () => { setPreview(await api('/api/wallet/withdraw/preview', { body: { ...wd, amount: Number(wd.amount), password: pw } })); reload(); }} /></div>
+        <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="primary" label="Preview" run={async () => { setPreview(await api('/api/wallet/withdraw/preview', { body: { ...wd, amount: Number(wd.amount), ...stepUpBody(pw) } })); reload(); }} /></div>
         {preview && <div className="card"><div className="bd col"><div className="row"><Badge v={preview.status} /></div><div className="kv"><span>Network</span><span>{preview.preview.network}</span><span>Asset / amount</span><span>{preview.preview.amount} {preview.preview.asset}</span><span>Destination</span><span className="mono">{preview.preview.destination}</span><span>Fee / net</span><span>unavailable (no custody provider)</span></div><ul style={{ margin: 0, paddingLeft: 18 }}>{preview.reasons.map((r: string) => <li key={r} className="hint">{r}</li>)}</ul></div></div>}
-        <div className="row">Emergency withdrawal freeze: <Badge v={data?.frozen ? 'FROZEN' : 'OFF'} tone={data?.frozen ? 'b-bad' : 'b-neutral'} /><Action className="sm" label={data?.frozen ? 'Lift (step-up)' : 'Freeze'} run={async () => { await api('/api/wallet/freeze', { body: { on: !data?.frozen, password: pw } }); reload(); }} /></div>
+        <div className="row">Emergency withdrawal freeze: <Badge v={data?.frozen ? 'FROZEN' : 'OFF'} tone={data?.frozen ? 'b-bad' : 'b-neutral'} /><Action className="sm" label={data?.frozen ? 'Lift (step-up)' : 'Freeze'} run={async () => { await api('/api/wallet/freeze', { body: { on: !data?.frozen, ...stepUpBody(pw) } }); reload(); }} /></div>
       </div></Card>
     </div>
     <div style={{ height: 14 }} />
@@ -85,8 +86,8 @@ export function Settings() {
   return <Page title="Settings" sub="Security, notifications, display and assistant configuration. Risk limits live in the Risk Center; execution mode in Bot Account.">
     <ErrorLine e={error} />
     <div className="grid g2">
-      <Card title="Security"><div className="col"><input type="password" placeholder="Current passphrase" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" /><input type="password" placeholder="New passphrase (≥10 chars)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" />
-        <Action className="primary" label="Change passphrase (signs out all sessions)" run={async () => { await api('/api/settings/password', { body: pw }); window.location.reload(); }} />
+      <Card title="Security"><div className="col">{authInfo.mode === 'privy' ? <div className="hint">You sign in with Privy, so there is no MIA passphrase to change. Manage sign-in methods and the authenticator app in <Link to="/security">Security Center</Link>.</div> : <><input type="password" placeholder="Current passphrase" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" /><input type="password" placeholder="New passphrase (≥10 chars)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" />
+        <Action className="primary" label="Change passphrase (signs out all sessions)" run={async () => { await api('/api/settings/password', { body: pw }); window.location.reload(); }} /></>}
         <div className="hint">MIA never requests seed phrases or private keys. Secrets (API keys, bot tokens) are configured server-side via environment variables and never reach the browser.</div></div></Card>
       <Card title="Notifications"><div className="col">{p && <>
         <label className="row">Telegram minimum severity <select value={p.telegramMinSeverity} onChange={(e) => setPrefs({ ...p, telegramMinSeverity: e.target.value })}><option>INFO</option><option>WARNING</option><option>CRITICAL</option></select></label>

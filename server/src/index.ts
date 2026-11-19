@@ -8,7 +8,8 @@ import './providers/binance.js'; import './providers/coinbase.js'; import './pro
 import './providers/dexscreener.js'; import './providers/frankfurter.js'; import './providers/googlenews.js'; import './providers/pending.js';
 import './providers/vike.js'; // one credentialed, read-only research provider; no trading authority
 import { routes } from './api/routes.js';
-import { contentSecurityPolicy, privyConfigProblem } from './security/privy.js';
+import { contentSecurityPolicy, privyConfigProblem, privyEnabled, privyOwnerConfigProblem } from './security/privy.js';
+import { authMode } from './security/stepUp.js';
 import { seedStrategies } from './lab/lab.js';
 import { seedCatalog, resumeIngestion } from './knowledge/store.js';
 import { seedConcepts } from './knowledge/concepts.js';
@@ -32,6 +33,8 @@ export async function buildApp() {
     return reply.code(code).send({ error: String(err?.message ?? 'request failed') });
   });
   const privyProblem = privyConfigProblem(); if (privyProblem) app.log.warn(privyProblem);
+  const ownerProblem = privyOwnerConfigProblem(); if (ownerProblem) app.log.warn(ownerProblem);
+  if (authMode() === 'privy' && !privyEnabled()) app.log.warn('Sign-in uses Privy (MIA_AUTH_MODE is not "passphrase") but MIA_PRIVY_APP_ID is not set: nobody can sign in until it is. See docs/operations/PRIVY_SIGN_IN.md');
   await app.register(routes);
   if (existsSync(config.webDist)) {
     await app.register(fastifyStatic, { root: config.webDist });

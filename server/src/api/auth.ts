@@ -78,6 +78,8 @@ export function validSession(token?: string) {
   return !!r && r.expires_at > Date.now();
 }
 export function logout(token?: string) { if (token) run('DELETE FROM sessions WHERE token_hash=?', sha256(token)); }
+/** Ends every session (owner identity changed or was re-bound): nobody keeps access granted to the previous identity. */
+export function revokeAllSessions() { run('DELETE FROM sessions'); }
 export function changePassword(oldP: string, newP: string, client = 'local', opts: { exemptFromGlobalLockout?: boolean } = {}) {
   verifyPassphrase(oldP, client, 'password.change', opts);
   if (newP.length < 10) throw new Error('passphrase must be at least 10 characters');

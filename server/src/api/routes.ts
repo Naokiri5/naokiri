@@ -2,6 +2,9 @@ import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { VikeNotConfiguredError } from '../providers/vike.js';
 import * as privy from '../security/privy.js';
+import * as totp from '../security/totp.js';
+import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
+import { createBackup } from '../ops/backup.js';
 import { ccxtRoutes } from '../research/ccxtRoutes.js';
 import { defiRoutes } from '../research/defiRoutes.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
@@ -68,12 +71,18 @@ const bad = (reply: FastifyReply, code: number, msg: string) => reply.code(code)
  * the owner's step-up too (MA-07). A session's own failures still lock that session (5 misses → exponential backoff).
  */
 const stepUpClient = (req: FastifyRequest) => `session:${sha256(tokenOf(req) ?? '')}`;
-/** Step-up shares the login brute-force limits (per session + global), so it can no longer be guessed freely. */
-const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, stepUpClient(req), 'step-up', { exemptFromGlobalLockout: isDirectLocal(req) });
+/** Step-up (authenticator code, or the legacy passphrase until one is enrolled) shares the login brute-force limits
+ *  (per session + global), so it cannot be guessed freely. See security/stepUp.ts. */
+const stepUp = (req: FastifyRequest, body: any) => verifyStepUp(body, stepUpClient(req), { exemptFromGlobalLockout: isDirectLocal(req) });
 /** Step-up for actions that only REDUCE risk or exposure (close all, revoke other sessions): never blocked by the
  *  server-wide failure budget that unauthenticated strangers can exhaust (SEC-14), nor by another client's failures. */
-const stepUpRiskReducing = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, stepUpClient(req), 'step-up', { exemptFromGlobalLockout: true });
+const stepUpRiskReducing = (req: FastifyRequest, body: any) => verifyStepUp(body, stepUpClient(req), { exemptFromGlobalLockout: true });
 const PW = z.string().min(1).max(1024);
+/** Step-up proof fields accepted by every protected action: an authenticator code, or the legacy passphrase. */
+const OTP = z.string().trim().regex(/^\d{6}$/, 'authenticator code must be 6 digits');
+const SU = { password: PW.optional(), otp: OTP.optional() };
+/** Passphrase routes exist only when the administrator explicitly chose MIA_AUTH_MODE=passphrase. */
+const requirePassphraseMode = () => { if (!passphraseSignInAllowed()) throw httpError(403, 'passphrase sign-in is turned off on this server: sign in with Privy (an administrator can set MIA_AUTH_MODE=passphrase for offline recovery)'); };
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
 const ID = z.string().min(1).max(150);
@@ -145,13 +154,21 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
   app.get('/api/auth/state', async (req) => {
     const codeRequired = !auth.isSetup() && setupAccess(req) === 'code';
-    if (codeRequired) auth.ensureSetupCode(); // created (and printed once) on the first remote visit
-    return { setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: codeRequired };
+    if (codeRequired && passphraseSignInAllowed()) auth.ensureSetupCode(); // created (and printed once) on the first remote visit
+    const authenticated = auth.validSession(tokenOf(req));
+    const mode = authMode();
+    return {
+      mode, setup: auth.isSetup(), authenticated, setupCodeRequired: mode === 'passphrase' && codeRequired,
+      privy: privy.privyPublicConfig(),
+      // How sensitive actions are confirmed; only told to the signed-in owner.
+      ...(authenticated ? { stepUp: stepUpMethod() } : {}),
+    };
   });
   app.post('/api/auth/setup', async (req, reply) => {
     // SEC-SETUP: first-run setup is open only to a direct loopback connection (no proxy headers) or when the owner
     // explicitly sets MIA_ALLOW_REMOTE_SETUP=1. Everyone else — including forwarded ports and containers, which used to
     // be allowed by location alone — must enter the one-time code printed in the server console.
+    requirePassphraseMode();
     const { password, setupCode } = z.object({ password: PW, setupCode: z.string().max(64).optional() }).strict().parse(req.body);
     if (!auth.isSetup() && setupAccess(req) === 'code') {
       auth.ensureSetupCode();
@@ -159,28 +176,39 @@ export async function routes(app: FastifyInstance) {
     }
     auth.setupOwner(password); auth.clearSetupCode(); return issue(reply, auth.login(password, req.ip));
   });
-  app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
+  app.post('/api/auth/login', async (req, reply) => { requirePassphraseMode(); const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
   // Privy sign-in (optional). Login requires a Privy identity the owner already linked; link/unlink need a session + step-up.
   app.get('/api/auth/privy/config', async () => privy.privyPublicConfig());
   app.post('/api/auth/privy/login', async (req, reply) => {
     const { accessToken } = z.object({ accessToken: z.string().min(20).max(4096) }).strict().parse(req.body);
-    return issue(reply, await privy.loginWithPrivy(accessToken, req.ip, { directLocal: isDirectLocal(req) }));
+    return issue(reply, await privy.loginWithPrivy(accessToken, req.ip, { directLocal: isDirectLocal(req), backup: () => { createBackup(); } }));
   });
   app.post('/api/security/privy/link', async (req) => {
-    const b = z.object({ accessToken: z.string().min(20).max(4096), password: PW.optional() }).strict().parse(req.body);
-    return privy.linkPrivy(b.accessToken, b.password, stepUpClient(req), isDirectLocal(req));
+    const b = z.object({ accessToken: z.string().min(20).max(4096), ...SU }).strict().parse(req.body);
+    stepUp(req, b); return privy.linkPrivy(b.accessToken);
   });
   app.post('/api/security/privy/embedded-wallet-intent', async (req) => {
-    const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
-    return privy.embeddedWalletIntent(b.password, stepUpClient(req), isDirectLocal(req));
+    const b = z.object({ ...SU }).strict().parse(req.body ?? {});
+    if (!privy.embeddedWalletsAllowed()) return privy.embeddedWalletIntent(); // 403 before asking for a code
+    stepUp(req, b); return privy.embeddedWalletIntent();
   });
   app.post('/api/security/privy/unlink', async (req) => {
-    const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
-    return privy.unlinkPrivy(b.password, stepUpClient(req), isDirectLocal(req));
+    const b = z.object({ ...SU }).strict().parse(req.body ?? {});
+    stepUp(req, b); return privy.unlinkPrivy(authMode() === 'privy');
   });
   app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; ${cookieFlags}; Max-Age=0`); return { ok: true }; });
-  app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, stepUpClient(req), { exemptFromGlobalLockout: true }); /* I-01: keyed by the authenticated session, like step-up */ return { ok: true }; });
+  app.post('/api/settings/password', async (req) => { requirePassphraseMode(); const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, stepUpClient(req), { exemptFromGlobalLockout: true }); /* I-01: keyed by the authenticated session, like step-up */ return { ok: true }; });
+  // Owner two-factor (authenticator app) for step-up. Session required (gate above); enrolling needs independent proof.
+  app.get('/api/security/2fa', async () => totp.twoFactorStatus());
+  app.post('/api/security/2fa/begin', async (req) => {
+    const b = z.object({ ...SU, consoleCode: z.string().max(64).optional() }).strict().parse(req.body ?? {});
+    return totp.beginEnrollment(b, stepUpClient(req), { directLocal: isDirectLocal(req), log: (m) => req.log.warn(m) });
+  });
+  app.post('/api/security/2fa/confirm', async (req) => {
+    const { otp } = z.object({ otp: OTP }).strict().parse(req.body);
+    return totp.confirmEnrollment(otp, stepUpClient(req));
+  });
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }
 
   // ── live stream (SSE) ──
@@ -268,7 +296,7 @@ export async function routes(app: FastifyInstance) {
   });
   app.get('/api/consensus/:id', async (req, reply) => { const r = get<any>('SELECT record FROM consensus_records WHERE id=?', idOf(req)); return r ? P(r.record) : bad(reply, 404, 'not found'); });
   app.post('/api/workers/:id/release', async (req) => {
-    const id = idOf(req); const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
+    const id = idOf(req); const b = z.object({ ...SU }).strict().parse(req.body ?? {});
     stepUp(req, b); releaseQuarantine('owner', id); audit('owner', 'worker.release', { id }); return { ok: true };
   });
 
@@ -278,11 +306,11 @@ export async function routes(app: FastifyInstance) {
     const corr = pos.map((a) => pos.map((b) => correlation(a.instrument, b.instrument)));
     return { policy: currentPolicy(), defaults: DEFAULT_POLICY, history: policyHistory().slice(0, 20), account: acct, control: getControl(), display: displayMode(), positions: pos, correlation: { instruments: pos.map((p) => p.instrument), matrix: corr }, protection: oms.protectPositions(), incidents: listIncidents(), gates: releaseGates() };
   });
-  app.post('/api/risk/policy', async (req) => { const b = z.object({ policy: z.unknown(), password: PW.optional() }).strict().parse(req.body ?? {}); stepUp(req, b); return acceptPolicy('owner', b.policy); });
+  app.post('/api/risk/policy', async (req) => { const b = z.object({ policy: z.unknown(), ...SU }).strict().parse(req.body ?? {}); stepUp(req, b); return acceptPolicy('owner', b.policy); });
   app.post('/api/control', async (req) => {
     const b = z.object({ mode: z.enum(['OBSERVE', 'PAPER', 'APPROVAL', 'BOUNDED_LIVE']).optional(), pausedNewOrders: z.boolean().optional(), emergency: z.boolean().optional(), disabledStrategies: z.array(z.string().max(60)).max(50).optional(),
-      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), password: PW.optional() }).strict().parse(req.body); // H-08: unknown keys are errors on the control endpoint
-    const { password, disableStrategy, enableStrategy, ...patch } = b;
+      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), ...SU }).strict().parse(req.body); // H-08: unknown keys are errors on the control endpoint
+    const { password, otp, disableStrategy, enableStrategy, ...patch } = b;
     // MIA-WEB-010: single-strategy operations computed from the server's CURRENT list. A client that sent a whole list
     // from a stale copy could re-enable a strategy the owner (or the health monitor) had just disabled.
     if (disableStrategy || enableStrategy) {
@@ -299,7 +327,7 @@ export async function routes(app: FastifyInstance) {
     return updateControl('owner', patch, modeGate);
   });
   app.post('/api/emergency/:action', async (req) => {
-    const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), password: PW.optional() }).strict().parse(req.body ?? {});
+    const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), ...SU }).strict().parse(req.body ?? {});
     if (a === 'pause') return oms.pauseNewOrders('owner');
     if (a === 'cancel-pending') return oms.cancelPendingEntries('owner');
     if (a === 'protect') return oms.protectPositions(true);
@@ -336,7 +364,7 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/lab/backtest', async (req) => { const b = z.object({ strategyId: z.string().max(60), symbol: z.string().min(1).max(20).regex(/^[A-Za-z0-9]+$/), bars: z.number().int().min(500).max(8000).optional() }).parse(req.body); limit(req, 'backtest', 'backtests'); return lab.runBacktest('owner', b.strategyId, b.symbol.toUpperCase(), b.bars); });
   app.post('/api/lab/strategy/:id/status', async (req) => {
     const id = idOf(req);
-    const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional(), password: PW.optional() }).strict().parse(req.body);
+    const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional(), ...SU }).strict().parse(req.body);
     const current = get<{ status: lab.StrategyStatus }>('SELECT status FROM strategies WHERE id=?', id);
     // Step-up for anything that increases risk (CodeRabbit PR #13): promotion to PAPER/LIVE_CANDIDATE, and ANY transition
     // that lifts a suspension — moving a suspended strategy to RESEARCH or BACKTESTED also removes it from the list.
@@ -358,10 +386,10 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/wallet/address/:id/verify', async (req) => { stepUp(req, req.body); wallet.verifyAddress('owner', idOf(req)); return { ok: true }; });
   app.delete('/api/wallet/address/:id', async (req) => { wallet.removeAddress('owner', idOf(req)); return { ok: true }; });
   app.post('/api/wallet/withdraw/preview', async (req) => {
-    const { password, ...input } = z.object({ network: z.string().max(40), asset: z.string().max(20), amount: z.number().finite(), addressId: z.string().max(64), password: PW }).parse(req.body);
-    stepUp(req, { password }); return wallet.previewWithdrawal('owner', input); // the passphrase never reaches the audit log
+    const { password, otp, ...input } = z.object({ network: z.string().max(40), asset: z.string().max(20), amount: z.number().finite(), addressId: z.string().max(64), ...SU }).parse(req.body);
+    stepUp(req, { password, otp }); return wallet.previewWithdrawal('owner', input); // the step-up secret never reaches the audit log
   });
-  app.post('/api/wallet/freeze', async (req) => { const b = z.object({ on: z.boolean(), password: PW.optional() }).parse(req.body); if (!b.on) stepUp(req, b); wallet.setWithdrawalFreeze('owner', b.on); return { frozen: b.on }; });
+  app.post('/api/wallet/freeze', async (req) => { const b = z.object({ on: z.boolean(), ...SU }).parse(req.body); if (!b.on) stepUp(req, b); wallet.setWithdrawalFreeze('owner', b.on); return { frozen: b.on }; });
 
   // ── connections / notifications / settings / QA ──
   app.get('/api/connections', async () => ({ providers: providers(), latency: latencyReport() }));

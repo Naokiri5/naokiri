@@ -35,7 +35,7 @@ describe('Privy sign-in', () => {
 
   it('public config exposes only the app id and state; wallet actions are LOCKED', async () => {
     const r = (await app.inject({ url: '/api/auth/privy/config' })).json();
-    expect(r).toEqual({ enabled: true, appId: APP, linked: false, embeddedWallets: false, walletActions: 'LOCKED' });
+    expect(r).toEqual({ enabled: true, appId: APP, linked: false, ownerConfigured: false, embeddedWallets: false, walletActions: 'LOCKED' });
   });
   it('embedded-wallet intent needs the flag, a session and a passphrase step-up', async () => {
     const url = '/api/security/privy/embedded-wallet-intent';
@@ -57,7 +57,8 @@ describe('Privy sign-in', () => {
   });
   it('refuses Privy login before the owner links an identity', async () => {
     const r = await post('/api/auth/privy/login', { accessToken: await token() });
-    expect(r.statusCode).toBe(401); expect(r.json().error).toMatch(/not linked/); expect(r.headers['set-cookie']).toBeUndefined();
+    // Verified identity, but no owner bound and no MIA_PRIVY_OWNER_ID: refused, with the id the administrator would configure.
+    expect(r.statusCode).toBe(401); expect(r.json().error).toMatch(/no MIA owner has been set up yet.*MIA_PRIVY_OWNER_ID=did:privy:owner0000000001/); expect(r.headers['set-cookie']).toBeUndefined();
   });
   it('linking needs a MIA session and a passphrase step-up', async () => {
     expect((await post('/api/security/privy/link', { accessToken: await token(), password: PW })).statusCode).toBe(401); // no session

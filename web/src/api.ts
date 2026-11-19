@@ -112,3 +112,26 @@ export const fmt = {
   ago: (t: number | string | null | undefined) => { if (!t) return '—'; const ms = Date.now() - (typeof t === 'string' ? Date.parse(t) : t); const s = Math.round(ms / 1000); return s < 0 ? 'in future' : s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`; },
   time: (t: number | string | null | undefined) => (t ? new Date(t).toLocaleString() : '—'),
 };
+
+// ---- sign-in / step-up state shared by the shell and the step-up inputs ------------------------------------------
+export type AuthMode = 'privy' | 'passphrase';
+export type StepUpMethod = 'totp' | 'passphrase' | 'unavailable';
+export interface AuthState {
+  mode: AuthMode; setup: boolean; authenticated: boolean; setupCodeRequired?: boolean;
+  privy: { enabled: boolean; appId: string | null; linked: boolean; ownerConfigured: boolean; embeddedWallets: boolean; walletActions: 'LOCKED' };
+  stepUp?: StepUpMethod;
+}
+/** Set by App after /api/auth/state; read by StepUp inputs and sign-out. The server stays authoritative. */
+export const authInfo: { mode: AuthMode; stepUp: StepUpMethod } = { mode: 'privy', stepUp: 'unavailable' };
+/** Marks that the Privy browser session must also be ended the next time the sign-in screen mounts. */
+export const PRIVY_LOGOUT_FLAG = 'mia:privy-logout';
+/**
+ * Step-up proof for a protected request. A 6-digit value is an authenticator code; anything else is the legacy
+ * passphrase (passphrases are at least 10 characters, so the two can never be confused). Empty sends nothing and the
+ * server refuses the action.
+ */
+export function stepUpBody(value: string): { otp?: string; password?: string } {
+  const v = value.trim();
+  if (!v) return {};
+  return /^\d{6}$/.test(v) ? { otp: v } : { password: value };
+}
