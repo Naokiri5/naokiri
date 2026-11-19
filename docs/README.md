@@ -13,6 +13,7 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | [`research/PYTHON_RESEARCH_LABS.md`](research/PYTHON_RESEARCH_LABS.md) | set up the isolated NautilusTrader and Freqtrade research labs (dry-run/simulated only) |
 | [`research/DEFI_RESEARCH.md`](research/DEFI_RESEARCH.md) | read DefiLlama yields/TVL and Aave V3 flash-loan facts (read-only, never executable) |
 | [`research/CCXT_RESEARCH.md`](research/CCXT_RESEARCH.md) | use CCXT for read-only exchange research (keyless, GET-only, optional sandbox) |
+| [`research/PREDICTION_MARKETS.md`](research/PREDICTION_MARKETS.md) | Polymarket/Kalshi research: books, arbitrage checks, reward estimates, replay; what was reused from the uploaded bots and what was not |
 | [`research/VIKE_INTEGRATION.md`](research/VIKE_INTEGRATION.md) | turn on Vike on-chain research (research only) and see how Live stays locked |
 | [`engineering/MIA_FINAL_ENGINEERING_ASSESSMENT.md`](engineering/MIA_FINAL_ENGINEERING_ASSESSMENT.md) | see the **current** engineering verdict, final test evidence and blockers (100-agent audit, 2026-11-18); details in `MIA_ERROR_REGISTER.md` and `MIA_MASTER_REPAIR_TRACKER.md` |
 | [`engineering/DEBUG_AUDIT_2026-11-17.md`](engineering/DEBUG_AUDIT_2026-11-17.md) | see the **current** bug register, test results, performance baseline and go/no-go |

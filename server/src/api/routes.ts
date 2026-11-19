@@ -7,6 +7,7 @@ import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '.
 import { createBackup } from '../ops/backup.js';
 import { ccxtRoutes } from '../research/ccxtRoutes.js';
 import { defiRoutes } from '../research/defiRoutes.js';
+import { predictionRoutes } from '../prediction/routes.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -138,6 +139,7 @@ export async function routes(app: FastifyInstance) {
   await vikeRoutes(app); // read-only Vike research (owner session required by the gate below)
   await ccxtRoutes(app); // read-only CCXT exchange research (GET-only transport, keyless)
   await defiRoutes(app); // read-only DefiLlama yields/TVL and Aave V3 flash-loan research (no transactions)
+  await predictionRoutes(app); // read-only Polymarket/Kalshi research, analytics and book replay (no order path)
   /** Paper/Live environments for the shared UI layout. Read-only; Live is reported as LOCKED, never as available. */
   app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
   // ── protection incidents (persistent; owner acknowledgement) ──
