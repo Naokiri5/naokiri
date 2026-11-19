@@ -1,4 +1,4 @@
-import { seedInstrument, seedBacktestFixture } from './helpers.js';
+import { seedInstrument, seedBacktestFixture, ownerSetupPayload } from './helpers.js';
 import { describe, it, expect, beforeAll, afterAll , vi } from 'vitest';
 import { all, closeDb, openDb } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
@@ -22,7 +22,7 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect((await app.inject({ method: 'POST', url: '/api/auth/login', headers: { 'content-type': 'application/octet-stream' }, payload: Buffer.alloc(1024) })).statusCode).toBe(415);
     expect((await app.inject({ method: 'POST', url: '/api/academy/documents', headers: { 'content-type': 'application/octet-stream', 'x-mia-csrf': '1' }, payload: Buffer.from('x') })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'short' } })).statusCode).toBe(400);
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'correct horse battery' } });
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('correct horse battery') });
     expect(r.statusCode).toBe(200); cookie = String(r.headers['set-cookie']).split(';')[0];
     expect(String(r.headers['set-cookie'])).toMatch(/HttpOnly; SameSite=Strict/);
     expect((await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'another passphrase' } })).statusCode).toBe(400);
@@ -176,7 +176,7 @@ describe('HTTP hardening (auth gate, validation, error classes, step-up limits)'
   const H = () => ({ cookie, 'x-mia-csrf': '1' });
   beforeAll(async () => {
     closeDb(); openDb(':memory:'); failureGate.reset(); app = await buildApp();
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: PW } }); cookie = String(r.headers['set-cookie']).split(';')[0];
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload(PW) }); cookie = String(r.headers['set-cookie']).split(';')[0];
   });
   it('a percent-encoded path cannot skip the session check', async () => {
     for (const url of ['/%61pi/shell', '/%61pi/audit', '/%2561pi/audit', '/api/%61udit']) {
@@ -225,7 +225,7 @@ describe('shell status payload (independent setup)', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
   beforeAll(async () => {
     closeDb(); openDb(':memory:'); failureGate.reset(); app = await buildApp();
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'correct horse battery' } });
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('correct horse battery') });
     cookie = String(r.headers['set-cookie']).split(';')[0];
     expect((await app.inject({ method: 'POST', url: '/api/risk/policy', headers: { cookie, 'x-mia-csrf': '1' }, payload: { policy: DEFAULT_POLICY, password: 'correct horse battery' } })).statusCode).toBe(200);
   });

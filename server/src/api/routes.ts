@@ -1,5 +1,9 @@
 import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
+import { VikeNotConfiguredError } from '../providers/vike.js';
+import * as privy from '../security/privy.js';
+import { vikeRoutes } from '../research/vikeRoutes.js';
+import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -40,7 +44,7 @@ import { recentAudit, verifyAuditChain } from '../core/audit.js';
 import { botStatus, botStatusView } from '../bot/bot.js';
 import { readiness } from '../ops/readiness.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
-import { all, get, P } from '../db/db.js';
+import { all, get, P, tx } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { config } from '../config.js';
@@ -95,6 +99,7 @@ export async function routes(app: FastifyInstance) {
       req.log.warn({ provider: err.providerId, status: err.status }, 'upstream provider failure');
       return reply.code(err.status === 404 ? 404 : err.status === 429 ? 503 : 502).send({ error: `upstream market-data provider unavailable (${err.providerId})` });
     }
+    if (err instanceof VikeNotConfiguredError) return reply.code(503).send({ error: `${err.message}. Research data is unavailable until the owner configures it.` });
     if (err instanceof oms.OmsError) return reply.code(409).send({ error: err.message });
     if (err instanceof IncidentError) return reply.code(err.statusCode).send({ error: err.message });
     if (Number.isInteger(err?.statusCode) && err.statusCode >= 400 && err.statusCode < 500) return reply.code(err.statusCode).send({ error: String(err.message ?? err) });
@@ -119,6 +124,9 @@ export async function routes(app: FastifyInstance) {
 
   await ditasRoutes(app);
   await knowledgeRoutes(app);
+  await vikeRoutes(app); // read-only Vike research (owner session required by the gate below)
+  /** Paper/Live environments for the shared UI layout. Read-only; Live is reported as LOCKED, never as available. */
+  app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
   app.post('/api/risk/incidents/:id/ack', async (req) => {
@@ -132,25 +140,47 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/ready', async (_req, reply) => { const r = readiness(botStatus); return reply.code(r.ready ? 200 : 503).send(r); });
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
   app.get('/api/auth/state', async (req) => {
-    const codeRequired = !auth.isSetup() && setupAccess(req) === 'code';
-    if (codeRequired) auth.ensureSetupCode(); // created (and printed once) on the first remote visit
-    return { setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: codeRequired };
+    const setup = auth.isSetup();
+    if (!setup) auth.ensureSetupCode();
+    return { setup, authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: !setup };
   });
   app.post('/api/auth/setup', async (req, reply) => {
-    // SEC-SETUP: first-run setup is open only to a direct loopback connection (no proxy headers) or when the owner
-    // explicitly sets MIA_ALLOW_REMOTE_SETUP=1. Everyone else — including forwarded ports and containers, which used to
-    // be allowed by location alone — must enter the one-time code printed in the server console.
-    const { password, setupCode } = z.object({ password: PW, setupCode: z.string().max(64).optional() }).strict().parse(req.body);
-    if (!auth.isSetup() && setupAccess(req) === 'code') {
-      auth.ensureSetupCode();
-      if (!auth.checkSetupCode(setupCode)) { audit('anonymous', 'auth.setup.code_rejected', { ip: req.ip }); throw httpError(403, 'first-time setup from another device needs the one-time setup code printed in the MIA server console (terminal or service log)'); }
+    // A connection to loopback can come from a forwarder. Only the console code authorizes first-owner setup.
+    const { password, setupCode } = z.object({
+      password: PW.min(10, 'passphrase must be at least 10 characters'),
+      setupCode: z.string().max(64).optional(),
+    }).strict().parse(req.body);
+    if (auth.isSetup()) throw httpError(400, 'owner already configured');
+    auth.ensureSetupCode();
+    if (!auth.checkSetupCode(setupCode)) {
+      audit('anonymous', 'auth.setup.code_rejected', { ip: req.ip });
+      throw httpError(403, 'first-time setup needs the one-time setup code printed in the MIA server console (terminal or service log)');
     }
-    auth.setupOwner(password); auth.clearSetupCode(); return issue(reply, auth.login(password, req.ip));
+    const token = tx(() => {
+      auth.setupOwner(password);
+      auth.clearSetupCode();
+      return auth.createSession(req.ip, 'passphrase');
+    });
+    return issue(reply, token);
   });
   app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
+  // Privy sign-in (optional). Login requires a Privy identity the owner already linked; link/unlink need a session + step-up.
+  app.get('/api/auth/privy/config', async () => privy.privyPublicConfig());
+  app.post('/api/auth/privy/login', async (req, reply) => {
+    const { accessToken } = z.object({ accessToken: z.string().min(20).max(4096) }).strict().parse(req.body);
+    return issue(reply, await privy.loginWithPrivy(accessToken, req.ip, { directLocal: isDirectLocal(req) }));
+  });
+  app.post('/api/security/privy/link', async (req) => {
+    const b = z.object({ accessToken: z.string().min(20).max(4096), password: PW.optional() }).strict().parse(req.body);
+    return privy.linkPrivy(b.accessToken, b.password, stepUpClient(req), isDirectLocal(req));
+  });
+  app.post('/api/security/privy/unlink', async (req) => {
+    const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
+    return privy.unlinkPrivy(b.password, stepUpClient(req), isDirectLocal(req));
+  });
   app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; ${cookieFlags}; Max-Age=0`); return { ok: true }; });
-  app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, req.ip); return { ok: true }; });
+  app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, stepUpClient(req), { exemptFromGlobalLockout: true }); /* I-01: keyed by the authenticated session, like step-up */ return { ok: true }; });
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }
 
   // ── live stream (SSE) ──
@@ -251,7 +281,7 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/risk/policy', async (req) => { const b = z.object({ policy: z.unknown(), password: PW.optional() }).strict().parse(req.body ?? {}); stepUp(req, b); return acceptPolicy('owner', b.policy); });
   app.post('/api/control', async (req) => {
     const b = z.object({ mode: z.enum(['OBSERVE', 'PAPER', 'APPROVAL', 'BOUNDED_LIVE']).optional(), pausedNewOrders: z.boolean().optional(), emergency: z.boolean().optional(), disabledStrategies: z.array(z.string().max(60)).max(50).optional(),
-      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), password: PW.optional() }).parse(req.body);
+      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), password: PW.optional() }).strict().parse(req.body); // H-08: unknown keys are errors on the control endpoint
     const { password, disableStrategy, enableStrategy, ...patch } = b;
     // MIA-WEB-010: single-strategy operations computed from the server's CURRENT list. A client that sent a whole list
     // from a stale copy could re-enable a strategy the owner (or the health monitor) had just disabled.
@@ -380,8 +410,7 @@ export async function routes(app: FastifyInstance) {
 const slim = (r: any) => ({ id: r.id, asset: r.asset, instrumentId: r.instrumentId, strategy: r.strategy, regime: r.regime, decision: r.decision, finalDecision: r.finalDecision, score: r.opportunity.score, consensus: r.consensus, createdAt: r.createdAt, entryCondition: r.entryCondition, invalidation: r.invalidation, stopLoss: r.stopLoss, takeProfit: r.takeProfit, risk: r.risk ? { decision: r.risk.decision, reasonCodes: r.risk.reasonCodes } : null, missing: r.missingInformation });
 const isLoopback = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
 /** A loopback socket carrying proxy headers is a forwarded remote visitor (port forwarder, reverse proxy), not a local one. */
-const PROXY_HEADERS = ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip'];
+/** Any of these means the loopback socket belongs to a proxy relaying someone else (reverse proxy, port forwarder,
+ *  Tailscale Serve/Funnel), so the request is NOT the owner sitting at the machine. */
+const PROXY_HEADERS = ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip', 'tailscale-funnel-request', 'tailscale-user-login'];
 const isDirectLocal = (req: FastifyRequest) => isLoopback(req.ip) && !PROXY_HEADERS.some((h) => req.headers[h] !== undefined);
-function setupAccess(req: FastifyRequest): 'open' | 'code' {
-  return isDirectLocal(req) || process.env.MIA_ALLOW_REMOTE_SETUP === '1' ? 'open' : 'code';
-}

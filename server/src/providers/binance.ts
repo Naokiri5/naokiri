@@ -1,4 +1,4 @@
-import { fetchProvider, registerProvider, setRateLimit } from './http.js';
+import { fetchProvider, registerProvider, setRateLimit, ProviderError } from './http.js';
 import type { Candle } from '../market/types.js';
 
 /** Binance public market-data mirror (data-api.binance.vision). Read-only, no key. */
@@ -46,8 +46,12 @@ export interface Book { bids: [number, number][]; asks: [number, number][]; ts: 
 export async function depth(symbol: string, limit = 100): Promise<Book> {
   const ts = Date.now();
   const raw = await fetchProvider('binance', `${BASE}/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
-  const side = (xs: string[][]) => xs.map((x) => [+x[0], +x[1]] as [number, number]).filter(([p, q]) => Number.isFinite(p) && Number.isFinite(q) && p > 0 && q > 0);
-  return { bids: side(raw.bids ?? []), asks: side(raw.asks ?? []), ts, lastUpdateId: Number.isFinite(+raw.lastUpdateId) ? +raw.lastUpdateId : undefined };
+  const side = (xs: string[][]) => (Array.isArray(xs) ? xs : []).map((x) => [+x[0], +x[1]] as [number, number]).filter(([p, q]) => Number.isFinite(p) && Number.isFinite(q) && p > 0 && q > 0);
+  // Normalize at the adapter boundary: best levels first, and never hand out a crossed book (its top of book would
+  // otherwise be used for marks and sizing even though execution checks reject it).
+  const bids = side(raw.bids).sort((a, b) => b[0] - a[0]), asks = side(raw.asks).sort((a, b) => a[0] - b[0]);
+  if (bids.length && asks.length && bids[0][0] >= asks[0][0]) throw new ProviderError('binance', `crossed order book for ${symbol}`);
+  return { bids, asks, ts, lastUpdateId: Number.isFinite(+raw.lastUpdateId) ? +raw.lastUpdateId : undefined };
 }
 export interface AggTrade { id: number; price: number; qty: number; ts: number; buyerIsMaker: boolean }
 export async function aggTrades(symbol: string, limit = 500): Promise<AggTrade[]> {

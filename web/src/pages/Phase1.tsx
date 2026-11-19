@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Page, Stat, Tabs , rowProps} from '../ui';
 import { StepUp } from './Trading';
+import { VikeResearchPanel } from './VikeResearch';
+import { PrivyAccountCard, type PrivyClientConfig } from '../privy/lazy';
 
 /** Asset Discovery — ranked lists from live feeds only. */
 export function Discover() {
@@ -13,8 +15,8 @@ export function Discover() {
   return <Page title="Asset Discovery" sub={<>Find assets worth a closer look. Every list is computed from live exchange data. {data?.note}</>}
     right={<><Freshness at={data?.asOf} /><select value={minVol} onChange={(e) => setMinVol(Number(e.target.value))} aria-label="Minimum 24h volume"><option value={1e6}>≥ $1M vol</option><option value={1e7}>≥ $10M</option><option value={1e8}>≥ $100M</option></select></>}>
     <ErrorLine e={error} />
-    <Tabs tabs={[...Object.keys(lists), 'New DEX tokens']} value={tab} onChange={setTab} />
-    {tab !== 'New DEX tokens' ? <Card flush title={`${rows.length} of ${data?.universe ?? 0} liquid pairs`}><div className="tablewrap"><table><thead><tr><th>Asset</th><th className="num">Price</th><th className="num">24h</th><th className="num">Volume</th><th className="num">Mkt cap</th><th className="num">Rel. vol 1h</th><th>Regime</th><th>Safety</th><th /></tr></thead>
+    <Tabs tabs={[...Object.keys(lists), 'New DEX tokens', 'Vike research']} value={tab} onChange={setTab} />
+    {tab === 'Vike research' ? <VikeResearchPanel /> : tab !== 'New DEX tokens' ? <Card flush title={`${rows.length} of ${data?.universe ?? 0} liquid pairs`}><div className="tablewrap"><table><thead><tr><th>Asset</th><th className="num">Price</th><th className="num">24h</th><th className="num">Volume</th><th className="num">Mkt cap</th><th className="num">Rel. vol 1h</th><th>Regime</th><th>Safety</th><th /></tr></thead>
       <tbody>{rows.map((r) => <tr key={r.instrumentId} {...rowProps(() => nav(`/terminal/${r.symbol}`), `Open ${r.symbol} in the terminal`)}><td><b>{r.base}</b> <span className="faint">{r.name ?? ''}</span>{r.rank && <span className="faint"> #{r.rank}</span>}</td><td className="num">{fmt.px(r.price)}</td><td className="num"><Chg v={r.changePct} /></td><td className="num">{fmt.big(r.quoteVolume)}</td><td className="num">{fmt.big(r.marketCap)}</td><td className="num">{r.relVol1h == null ? '—' : `${fmt.num(r.relVol1h, 2)}×`}</td><td>{r.regime ? <Badge v={r.regime} /> : <span className="faint">not deep-scanned</span>}</td><td>{r.safety ? <Badge v={r.safety} /> : ''}</td><td><Action className="sm" label="Analyze" run={async () => { nav(`/terminal/${r.symbol}`); }} /></td></tr>)}</tbody></table>
       {!rows.length && <Empty>{tab === 'Unusual volume' ? 'Relative volume is available for deep-tier instruments once their candles load.' : 'Waiting for market data…'}</Empty>}</div></Card>
       : <Card flush title="Newest DEX token profiles" right={<Freshness at={data?.dexAsOf} />}><div className="banner info" style={{ margin: 12 }}>DEX tokens are never eligible for automated trading: contract-level honeypot checks need an on-chain provider. Names are untrusted external content.</div>
@@ -55,11 +57,13 @@ export function SecurityCenter() {
   const { data, error, reload } = useApi('/api/security'); const [pw, setPw] = useState(''); const [area, setArea] = useState('All');
   const areas = ['All', ...new Set<string>((data?.checks ?? []).map((c: any) => c.area))];
   const checks = (data?.checks ?? []).filter((c: any) => area === 'All' || c.area === area);
+  const privy = useApi<PrivyClientConfig>('/api/auth/privy/config');
   return <Page title="Security Center" sub="Live security checks, sessions and sign-in activity. Secrets are reported as configured or not, never shown.">
     <ErrorLine e={error} />
     <div className="grid g3" style={{ marginBottom: 14 }}><Stat k="Passing" v={data?.summary.pass ?? '—'} tone="up" /><Stat k="Warnings" v={data?.summary.warn ?? '—'} tone={data?.summary.warn ? 'warn' : undefined} /><Stat k="Failing" v={data?.summary.fail ?? '—'} tone={data?.summary.fail ? 'down' : undefined} /></div>
     <Card title="Security checks" flush right={<select value={area} onChange={(e) => setArea(e.target.value)} aria-label="Area">{areas.map((a) => <option key={a}>{a}</option>)}</select>}>
       <table><tbody>{checks.map((c: any) => <tr key={c.id}><td className="mono faint">{c.id}</td><td>{c.area}</td><td><b>{c.name}</b><div className="hint">{c.detail}</div></td><td><Badge v={c.status} tone={c.status === 'PASS' ? 'b-good' : c.status === 'FAIL' ? 'b-bad' : c.status === 'WARN' ? 'b-warn' : 'b-neutral'} /></td></tr>)}</tbody></table></Card>
+    {privy.data?.enabled && <div style={{ marginTop: 14 }}><Suspense fallback={<Card title="Privy account"><Empty>Loading Privy…</Empty></Card>}><PrivyAccountCard config={privy.data} onChange={privy.reload} /></Suspense></div>}
     <div className="grid g2" style={{ marginTop: 14 }}>
       <Card title={`Active sessions (${data?.sessions.length ?? 0})`}><div className="col">
         <table><tbody>{(data?.sessions ?? []).map((s: any) => <tr key={s.id}><td className="mono faint">{s.id}…</td><td>signed in {fmt.ago(s.createdAt)}</td><td className="faint">expires {fmt.time(s.expiresAt)}</td><td>{s.current && <Badge v="THIS DEVICE" tone="b-info" />}</td></tr>)}</tbody></table>

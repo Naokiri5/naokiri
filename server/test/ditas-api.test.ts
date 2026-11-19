@@ -6,7 +6,7 @@ import { market } from '../src/market/store.js';
 import { recordOpportunity, memoryDetail } from '../src/ditas/memory.js';
 import type { Candidate } from '../src/workers/types.js';
 import type { Candle } from '../src/market/types.js';
-import { freshDb, seedInstrument } from './helpers.js';
+import { freshDb, seedInstrument, ownerSetupPayload } from './helpers.js';
 
 const HOUR = 3_600_000, T = Date.UTC(2026, 10, 10, 0, 0, 1);
 const opening = Math.ceil(T / HOUR) * HOUR;
@@ -28,7 +28,7 @@ describe('DITAS authenticated API and persisted service integration', () => {
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(T);
     market.reset(); freshDb(false); app = await buildApp();
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'ditas integration owner' } });
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('ditas integration owner') });
     expect(r.statusCode).toBe(200); cookie = String(r.headers['set-cookie']).split(';')[0];
   });
   afterEach(async () => { await app.close(); closeDb(); market.reset(); vi.useRealTimers(); });

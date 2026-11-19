@@ -103,7 +103,12 @@ export const fmt = {
   num: (x: number | null | undefined, dp = 2) => (x == null || !Number.isFinite(x) ? '—' : x.toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp })),
   px: (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? '—' : x >= 1000 ? x.toLocaleString(undefined, { maximumFractionDigits: 2 }) : x >= 1 ? x.toFixed(4) : x.toPrecision(4)),
   pct: (x: number | null | undefined, dp = 2) => (x == null || !Number.isFinite(x) ? '—' : `${x > 0 ? '+' : ''}${x.toFixed(dp)}%`),
-  big: (x: number | null | undefined) => (x == null || !Number.isFinite(x) ? '—' : x >= 1e9 ? `${(x / 1e9).toFixed(2)}B` : x >= 1e6 ? `${(x / 1e6).toFixed(2)}M` : x >= 1e3 ? `${(x / 1e3).toFixed(1)}K` : x.toFixed(0)),
+  /** Compact magnitude (1.23B, 4.56M, 7.8K). Negative values keep their sign (e.g. net outflows: -137.6K). */
+  big: (x: number | null | undefined): string => {
+    if (x == null || !Number.isFinite(x)) return '—';
+    const a = Math.abs(x); const sign = x < 0 ? '-' : '';
+    return sign + (a >= 1e9 ? `${(a / 1e9).toFixed(2)}B` : a >= 1e6 ? `${(a / 1e6).toFixed(2)}M` : a >= 1e3 ? `${(a / 1e3).toFixed(1)}K` : a.toFixed(0));
+  },
   ago: (t: number | string | null | undefined) => { if (!t) return '—'; const ms = Date.now() - (typeof t === 'string' ? Date.parse(t) : t); const s = Math.round(ms / 1000); return s < 0 ? 'in future' : s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)}m ago` : s < 86400 ? `${Math.round(s / 3600)}h ago` : `${Math.round(s / 86400)}d ago`; },
   time: (t: number | string | null | undefined) => (t ? new Date(t).toLocaleString() : '—'),
 };

@@ -3,9 +3,9 @@ import { freshDb } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import * as auth from '../src/api/auth.js';
 import { getSetting } from '../src/core/settings.js';
-import { all } from '../src/db/db.js';
+import { all, getDb } from '../src/db/db.js';
 
-/** SEC-SETUP regression: network location alone must not let a remote visitor claim the first owner. */
+/** SEC-SETUP regression: every first-owner request requires the console code. */
 const json = { 'content-type': 'application/json' };
 const setup = (app: Awaited<ReturnType<typeof buildApp>>, remoteAddress: string, payload: object, headers: Record<string, string> = {}) =>
   app.inject({ method: 'POST', url: '/api/auth/setup', remoteAddress, headers: { ...json, ...headers }, payload });
@@ -33,7 +33,7 @@ describe('first-owner setup (SEC-SETUP)', () => {
     expect(auth.isSetup()).toBe(false);
   });
   it('treats a loopback socket with proxy headers as remote (port forwarders, reverse proxies)', async () => {
-    for (const h of ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip']) {
+    for (const h of ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip', 'tailscale-funnel-request', 'tailscale-user-login']) {
       expect((await setup(app, '127.0.0.1', { password: 'attacker-owned-passphrase' }, { [h]: '203.0.113.9' })).statusCode).toBe(403);
     }
     expect(auth.isSetup()).toBe(false);
@@ -49,15 +49,31 @@ describe('first-owner setup (SEC-SETUP)', () => {
     expect(codeOf()).toBeNull(); // single use
     expect((await setup(app, '203.0.113.9', { password: 'second claim attempt', setupCode: typed })).statusCode).toBe(400);
   });
-  it('keeps direct local setup working without a code (desktop install)', async () => {
+  it('requires the console code for direct loopback and completes setup with it', async () => {
     const state = await app.inject({ method: 'GET', url: '/api/auth/state', remoteAddress: '127.0.0.1' });
-    expect(state.json().setupCodeRequired).toBe(false);
-    expect((await setup(app, '127.0.0.1', { password: 'local owner passphrase' })).statusCode).toBe(200);
+    expect(state.json()).toEqual({ setup: false, authenticated: false, setupCodeRequired: true });
+    const password = 'local owner passphrase';
+    expect((await setup(app, '127.0.0.1', { password })).statusCode).toBe(403);
+    expect(auth.isSetup()).toBe(false);
+    expect((await setup(app, '127.0.0.1', { password, setupCode: codeOf() })).statusCode).toBe(200);
     expect(codeOf()).toBeNull();
+    expect((await app.inject({ method: 'GET', url: '/api/auth/state' })).json().setupCodeRequired).toBe(false);
   });
-  it('keeps the explicit owner opt-in MIA_ALLOW_REMOTE_SETUP=1', async () => {
+  it('requires the console code even when the retired environment override is still present', async () => {
     process.env.MIA_ALLOW_REMOTE_SETUP = '1';
-    expect((await setup(app, '203.0.113.9', { password: 'opted-in owner passphrase' })).statusCode).toBe(200);
+    expect((await setup(app, '203.0.113.9', { password: 'example owner passphrase' })).statusCode).toBe(403);
+    expect(auth.isSetup()).toBe(false);
+  });
+  it('preserves the code for retry when the first session could not be written', async () => {
+    const setupCode = auth.ensureSetupCode(false, () => {});
+    const credentials = { password: 'local owner passphrase', setupCode };
+    getDb().exec(`CREATE TRIGGER block_session_fixture BEFORE INSERT ON sessions
+      BEGIN SELECT RAISE(ABORT, 'fixture session write failed'); END;`);
+    expect((await setup(app, '127.0.0.1', credentials)).statusCode).toBe(500);
+    expect(auth.isSetup()).toBe(false);
+    expect(auth.ensureSetupCode(false, () => {})).toBe(setupCode);
+    getDb().exec('DROP TRIGGER block_session_fixture');
+    expect((await setup(app, '127.0.0.1', credentials)).statusCode).toBe(200);
   });
   it('prints the code once when created and again only on explicit announce, never on every page load', () => {
     const lines: string[] = []; const log = (m: string) => lines.push(m);

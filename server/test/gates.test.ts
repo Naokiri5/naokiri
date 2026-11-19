@@ -255,7 +255,7 @@ describe('stored QA report loading', () => {
     if (outcome) writeFileSync(join(dir, 'qa', 'test-run.json'), JSON.stringify(outcome));
   };
   const sha = (t: string) => createHash('sha256').update(t).digest('hex');
-  const good = (text: string) => ({ exitCode: 0, reportSha256: sha(text), commit: gates.currentBuildCommit(), dirty: false, finishedAt: Date.now() });
+  const good = (text: string) => ({ exitCode: 0, reportSha256: sha(text), commit: gates.currentBuildCommit(), source: 'git-archive-v1', finishedAt: Date.now() });
   it('loads a valid saved report without depending on the launch directory', () => {
     const text = JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01)); saveRun(text, good(text));
     expect(gates.releaseGates().gates.find(g => g.id === 'G09')?.status).toBe('PASS');
@@ -267,15 +267,14 @@ describe('stored QA report loading', () => {
     saveRun(text, { ...good(text), exitCode: 1 }); expect(g09()).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('exit code 1') });
     saveRun(text, { ...good(text), reportSha256: sha('another report') }); expect(g09()).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('sha256 mismatch') });
   });
-  it('evidence must come from the running commit, a clean tree and the last 7 days (blueprint Q-01)', () => {
+  it('evidence must come from an isolated snapshot of the running commit and the last 7 days (blueprint Q-01)', () => {
     const text = JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01)); const ok = good(text);
     const p = (o: object, ctx: object = {}) => gates.runOutcomeProblem(o, text, { currentCommit: 'a'.repeat(40), nowTs: ok.finishedAt, ...ctx });
     expect(p({ ...ok, commit: 'a'.repeat(40) })).toBeNull();
     expect(p({ ...ok, commit: 'b'.repeat(40) })).toMatch(/evidence is from commit bbbbbbbbbbbb, but the running build is aaaaaaaaaaaa/);
     expect(p({ ...ok, commit: undefined })).toMatch(/no commit SHA/);
     expect(p({ ...ok, commit: 'a'.repeat(40) }, { currentCommit: null })).toMatch(/running build commit is unknown/);
-    expect(p({ ...ok, commit: 'a'.repeat(40), dirty: true })).toMatch(/uncommitted changes/);
-    expect(p({ ...ok, commit: 'a'.repeat(40), dirty: undefined })).toMatch(/uncommitted changes/);
+    expect(p({ ...ok, commit: 'a'.repeat(40), source: undefined, dirty: false })).toMatch(/lacks an isolated Git snapshot/);
     expect(p({ ...ok, commit: 'a'.repeat(40) }, { nowTs: ok.finishedAt + 8 * 86_400_000 })).toMatch(/stale \(8 days old/);
     expect(p({ ...ok, commit: 'a'.repeat(40), finishedAt: ok.finishedAt + 3_600_000 })).toMatch(/invalid finish time/);
   });

@@ -1,5 +1,5 @@
 import { all, get, run, tx, J, P } from '../db/db.js';
-import { uid, iso } from '../core/util.js';
+import { uid, iso, floorToStep, expiredAt } from '../core/util.js';
 import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
 import { evaluateRisk } from '../risk/gate.js';
@@ -44,7 +44,7 @@ function insertOrder(o: { clientOrderId: string; instrument: string; side: 'BUY'
 
 export interface SimFill { price: number; impactBps: number; spreadBps: number | null; bookAgeMs: number | null; quoteAgeMs: number; basis: 'BOOK' | 'BOOK_PARTIAL' | 'QUOTE_BUFFERED' }
 type Deferred = (() => void)[];
-const floorStep = (q: number, step: number) => (step > 0 ? Number((Math.floor(q / step + 1e-9) * step).toFixed(12)) : q);
+const floorStep = floorToStep; // canonical helper (core/util.ts)
 
 /** A quote is usable only when its age is finite, non-negative (not future-dated) and within the execution limit. */
 export { quoteAgeOk } from '../market/quality.js'; // moved so the ledger can share it without an import cycle
@@ -117,7 +117,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   const ctl = getControl();
   if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
   if (actor === 'bot' && ctl.mode !== 'PAPER') return { ok: false, reason: `mode ${ctl.mode} does not permit automatic paper entries` };
-  if (Date.parse(report.consensus.expiresAt) <= nowTs) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data');
+  if (expiredAt(report.consensus?.expiresAt, nowTs)) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data (missing or past expiry)');
   // Last-moment revalidation: fresh risk evaluation on current data
   const fresh = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId }, nowTs);
   const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');
@@ -127,11 +127,13 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   if (!sim.fill) return reject(sim.reason!);
   const fill = sim.fill;
   const pv = currentPolicy();
-  if (!pv || pv.invalid) return reject('POLICY_INVALID: entries need a valid owner-accepted risk policy');
+  if (!pv?.policy) return reject('POLICY_INVALID: entries need a valid owner-accepted risk policy');
   const pol = pv.policy;
   if (fill.impactBps > pol.maxSlippageBps) return reject(`SLIPPAGE ${fill.impactBps.toFixed(1)}bps at submission`);
   if (fill.price <= s.stopLoss) return reject('PRICE_THROUGH_STOP');
   if (s.takeProfit.some((t) => t.price <= fill.price)) return reject('PRICE_THROUGH_TARGET: fill would be at or above a take-profit level');
+  // E-03: take-profit fractions must be finite, positive and sum to at most the whole position.
+  if (s.takeProfit.some((t) => !Number.isFinite(t.fraction) || t.fraction <= 0) || s.takeProfit.reduce((x, t) => x + t.fraction, 0) > 1 + 1e-9) return reject('INVALID_TARGET_FRACTIONS: each fraction must be > 0 and together at most 1');
   const fee = fill.price * qty * pol.feeRate;
   const cash = cashBalance(PAPER_ACCOUNT);
   if (fill.price * qty + fee > cash + 1e-9) return reject(`INSUFFICIENT_CASH: need ${(fill.price * qty + fee).toFixed(2)}, have ${cash.toFixed(2)}`);
@@ -221,8 +223,10 @@ export function decideApproval(orderId: string, approve: boolean) {
 }
 export function expireApprovals() {
   for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.status='PENDING_APPROVAL'")) {
-    const r = P<DecisionReport>(o.report);
-    if (Date.parse(r.consensus.expiresAt) <= Date.now()) tx(() => { assertWriteFence(); run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), o.id); });
+    // J-04: an unreadable report or a missing/garbage expiry expires the approval (fail closed), and one bad row can no
+    // longer stop the rest of the loop.
+    let r: DecisionReport | null = null; try { r = P<DecisionReport>(o.report); } catch { r = null; }
+    if (expiredAt(r?.consensus?.expiresAt)) tx(() => { assertWriteFence(); run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed or unreadable', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), o.id); });
   }
 }
 
@@ -272,7 +276,8 @@ export function monitorPositions(nowTs = Date.now()) {
         // zero sold nothing, so it is reopened here and stays eligible on later passes.
         const newlyDone = st.targets.map((t, i) => (t.done && !doneBefore[i] ? i : -1)).filter((i) => i >= 0); let k = 0; let reopened = false;
         for (const f of fills) {
-          const r = applyExit(p.id, f.qty, f.reason, pol.feeRate, nowTs, after, consumed); if (!r) throw new ExitUnavailable(); consumed += r.qty;
+          // E-02: a TIME or STOP exit closes whatever is still open (re-read inside applyExit), never an unrounded estimate.
+          const r = applyExit(p.id, f.reason === 'TIME' || f.reason === 'STOP' ? Infinity : f.qty, f.reason, pol.feeRate, nowTs, after, consumed); if (!r) throw new ExitUnavailable(); consumed += r.qty;
           if (f.reason === 'TARGET') { const idx = newlyDone[k++]; if (r.qty === 0 && idx != null) { meta.targets[idx].done = false; reopened = true; } }
           // MIA-OMS-003: a fill that closes the position (e.g. a sub-lot remainder snapped into it) ends this pass. The next
           // fill would find the position closed, return null and roll everything back — forever, on every pass.

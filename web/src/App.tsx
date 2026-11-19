@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { PrivySignIn, type PrivyClientConfig } from './privy/lazy';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, connectStream, disconnectStream, useApi, fmt } from './api';
 import { ErrorLine, PageErrorBoundary } from './ui';
@@ -24,6 +25,8 @@ export default function App() {
 
 function Login({ setup, codeRequired, onDone }: { setup: boolean; codeRequired: boolean; onDone: () => void }) {
   const [p, setP] = useState(''); const [p2, setP2] = useState(''); const [code, setCode] = useState(''); const [err, setErr] = useState<string | null>(null);
+  const [privy, setPrivy] = useState<PrivyClientConfig | null>(null);
+  useEffect(() => { if (setup) api<PrivyClientConfig>('/api/auth/privy/config').then(setPrivy).catch(() => setPrivy(null)); }, [setup]);
   const submit = async (e: React.FormEvent) => { e.preventDefault(); setErr(null); if (!setup && p !== p2) return setErr('passphrases do not match'); try { await api(setup ? '/api/auth/login' : '/api/auth/setup', { body: setup || !codeRequired ? { password: p } : { password: p, setupCode: code } }); onDone(); } catch (x: any) { setErr(x.message); } };
   return <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 16 }}>
     <form onSubmit={submit} className="card" style={{ width: 'min(400px, 100%)' }}>
@@ -33,8 +36,9 @@ function Login({ setup, codeRequired, onDone }: { setup: boolean; codeRequired: 
         <label className="col" style={{ gap: 4 }}>Passphrase<input type="password" autoFocus value={p} onChange={(e) => setP(e.target.value)} autoComplete={setup ? 'current-password' : 'new-password'} /></label>
         {!setup && <label className="col" style={{ gap: 4 }}>Confirm<input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" /></label>}
         {!setup && codeRequired && <label className="col" style={{ gap: 4 }}>Setup code<input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" spellCheck={false} placeholder="XXXXX-XXXXX-XXXXX-XXXXX" />
-          <span className="hint">You are not on the machine running MIA, so creating the owner needs the one-time code printed in the MIA server console (the terminal running <code>npm start</code>, or the service log).</span></label>}
+          <span className="hint">Enter the one-time code printed in the MIA server console (the terminal running <code>npm start</code>, or the service log).</span></label>}
         <ErrorLine e={err} /><button className="primary" type="submit">{setup ? 'Sign in' : 'Create owner'}</button>
+        {setup && privy?.enabled && privy.linked && <><div className="hint" style={{ textAlign: 'center' }}>or</div><Suspense fallback={<div className="hint">Loading Privy…</div>}><PrivySignIn config={privy} onDone={onDone} /></Suspense></>}
       </div>
     </form>
   </div>;

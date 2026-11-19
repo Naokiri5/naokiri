@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { all, get, run, J, P } from '../db/db.js';
+import { all, get, run, tx, J } from '../db/db.js';
 import { audit } from '../core/audit.js';
 
 /**
@@ -38,7 +38,12 @@ export const DEFAULT_POLICY: RiskPolicy = {
   maxCorrelatedPositions: 2, correlationThreshold: 0.8, leverage: 1, minOpportunityScore: 60, approvedMarkets: ['crypto'], approvedVenues: ['binance-paper'],
 };
 
-export interface PolicyVersion { version: number; policy: RiskPolicy; created_at: number; accepted_by: string; /** set when the stored policy fails validation */ invalid?: string }
+interface PolicyVersionMeta { version: number; created_at: number; accepted_by: string }
+type ValidPolicy = { policy: RiskPolicy; invalid?: never; rawPolicy?: never };
+type InvalidPolicy = { policy?: never; invalid: string; rawPolicy?: unknown };
+type DecodedPolicy = ValidPolicy | InvalidPolicy;
+export type PolicyVersion = PolicyVersionMeta & DecodedPolicy;
+type PolicyRow = PolicyVersionMeta & { policy: string };
 /** Schema + relational rules. The ONE validator for accepted and stored policies (MA-16). Throws on the first problem. */
 export function validatePolicy(input: unknown): RiskPolicy {
   const policy = RiskPolicy.parse(input);
@@ -50,30 +55,28 @@ export function validatePolicy(input: unknown): RiskPolicy {
 const problem = (e: unknown) => e instanceof z.ZodError
   ? e.issues.slice(0, 3).map((i) => `${i.path.join('.') || 'policy'}: ${i.message}`).join('; ')
   : String((e as Error)?.message ?? e);
-function check(raw: unknown): { policy: RiskPolicy } | { invalid: string } {
-  try { return { policy: validatePolicy(raw) }; } catch (e) { return { invalid: problem(e) }; }
-}
-function readStoredPolicy(raw: string): Pick<PolicyVersion, 'policy' | 'invalid'> {
+function readStoredPolicy(raw: string): DecodedPolicy {
   let decoded: unknown;
-  try { decoded = P(raw); }
+  try { decoded = JSON.parse(raw); }
   catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
-    return { policy: DEFAULT_POLICY, invalid: 'stored policy is not valid JSON' };
+    return { invalid: 'stored policy is not valid JSON' };
   }
-  const result = check(decoded);
-  return 'policy' in result ? result : { policy: decoded as RiskPolicy, invalid: result.invalid };
+  try { return { policy: validatePolicy(decoded) }; }
+  catch (error) { return { invalid: problem(error), rawPolicy: decoded }; }
 }
+
+const versionFromRow = ({ policy, ...meta }: PolicyRow): PolicyVersion => ({ ...meta, ...readStoredPolicy(policy) });
 
 /**
  * MIA-RISK-006: the stored policy is re-validated on every read. A row missing a field (written by an older schema) or
  * holding NaN-turned-null would make comparisons like `costR > pol.maxCostR` false, i.e. the check silently passes.
  * An invalid stored policy is reported as `invalid` and the gate denies (POLICY_INVALID) until the owner re-accepts.
- * `policy` is then the raw row for DISPLAY ONLY: execution code must use exitPolicy() (MA-01).
+ * Invalid rows have no typed `policy`. Consumers may display `rawPolicy`; existing positions use exitPolicy() (MA-01).
  */
 export function currentPolicy(): PolicyVersion | null {
-  const r = get<any>('SELECT * FROM risk_policy_versions ORDER BY version DESC LIMIT 1');
-  if (!r) return null;
-  return { version: r.version, created_at: r.created_at, accepted_by: r.accepted_by, ...readStoredPolicy(r.policy) };
+  const r = get<PolicyRow>('SELECT version, created_at, accepted_by, policy FROM risk_policy_versions ORDER BY version DESC LIMIT 1');
+  return r ? versionFromRow(r) : null;
 }
 /**
  * The policy used to MANAGE EXISTING positions (exit fees, stop-fill buffer, open-risk accounting). Always validated:
@@ -81,19 +84,23 @@ export function currentPolicy(): PolicyVersion | null {
  * deny new entries (gate) but must never block or corrupt a risk-reducing exit (MA-01/MA-02).
  */
 export function exitPolicy(): RiskPolicy {
-  for (const r of all<any>('SELECT policy FROM risk_policy_versions ORDER BY version DESC LIMIT 50')) {
-    const policy = readStoredPolicy(r.policy);
-    if (!policy.invalid) return policy.policy;
+  for (const r of all<Pick<PolicyRow, 'policy'>>('SELECT policy FROM risk_policy_versions ORDER BY version DESC LIMIT 50')) {
+    const decoded = readStoredPolicy(r.policy);
+    if (decoded.policy) return decoded.policy;
   }
   return DEFAULT_POLICY;
 }
 /** Only the authenticated owner may accept/change limits (Part 17.1). Changes are versioned + audited. */
-export function acceptPolicy(actor: string, input: unknown): PolicyVersion {
+export function acceptPolicy(actor: string, input: unknown): PolicyVersionMeta & ValidPolicy {
   if (actor !== 'owner') throw new Error('only the authenticated owner may change risk limits');
   const policy = validatePolicy(input);
-  const cur = currentPolicy(); const version = (cur?.version ?? 0) + 1;
-  run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (?,?,?,?)', version, J(policy), Date.now(), actor);
-  audit(actor, 'risk.policy.accept', { version, policy, previous: cur?.version ?? null });
-  return currentPolicy()!;
+  return tx(() => {
+    const previous = get<Pick<PolicyRow, 'version'>>('SELECT version FROM risk_policy_versions ORDER BY version DESC LIMIT 1')?.version ?? null;
+    const version = (previous ?? 0) + 1;
+    const created_at = Date.now();
+    run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (?,?,?,?)', version, J(policy), created_at, actor);
+    audit(actor, 'risk.policy.accept', { version, policy, previous });
+    return { version, policy, created_at, accepted_by: actor };
+  });
 }
-export const policyHistory = () => all<any>('SELECT version, created_at, accepted_by, policy FROM risk_policy_versions ORDER BY version DESC').map((r) => ({ ...r, ...readStoredPolicy(r.policy) }));
+export const policyHistory = () => all<PolicyRow>('SELECT version, created_at, accepted_by, policy FROM risk_policy_versions ORDER BY version DESC').map(versionFromRow);

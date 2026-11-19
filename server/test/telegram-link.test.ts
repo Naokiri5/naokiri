@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { closeDb, openDb, all } from '../src/db/db.js';
 import {
-  createLinkCode, redeemLinkCode, isLinkedIdentity, revokeLink, linkStatus,
+  createLinkCode, redeemLinkCode, linkForIdentity, revokeLink, linkStatus,
   MAX_CODE_ATTEMPTS, CODE_TTL_MS, LinkError,
 } from '../src/integrations/telegram/link.js';
 
@@ -13,9 +13,9 @@ describe('Telegram one-time owner link (MIA-TG-01)', () => {
   it('binds exactly one Telegram user and private chat, and the code is single-use', () => {
     const { code } = createLinkCode();
     expect(redeemLinkCode(code, USER, CHAT)).toEqual({ ok: true });
-    expect(isLinkedIdentity(USER, CHAT)).toBe(true);
-    expect(isLinkedIdentity(USER, 999)).toBe(false);
-    expect(isLinkedIdentity(999, CHAT)).toBe(false);
+    expect(linkForIdentity(USER, CHAT)).toBeDefined();
+    expect(linkForIdentity(USER, 999)).toBeUndefined();
+    expect(linkForIdentity(999, CHAT)).toBeUndefined();
     expect(redeemLinkCode(code, 333, 444).ok).toBe(false);
   });
 
@@ -38,7 +38,7 @@ describe('Telegram one-time owner link (MIA-TG-01)', () => {
     const t0 = 1_000_000;
     const { code } = createLinkCode(t0);
     expect(redeemLinkCode(code, USER, CHAT, t0 + CODE_TTL_MS)).toEqual({ ok: false, reason: 'invalid or expired code' });
-    expect(isLinkedIdentity(USER, CHAT)).toBe(false);
+    expect(linkForIdentity(USER, CHAT)).toBeUndefined();
   });
 
   it('does not count malformed input as an attempt', () => {
@@ -52,7 +52,7 @@ describe('Telegram one-time owner link (MIA-TG-01)', () => {
     redeemLinkCode(code, USER, CHAT);
     expect(() => createLinkCode()).toThrow(LinkError);
     expect(revokeLink()).toBe(true);
-    expect(isLinkedIdentity(USER, CHAT)).toBe(false);
+    expect(linkForIdentity(USER, CHAT)).toBeUndefined();
     expect(all<{ telegram_user_id: number | null; telegram_chat_id: number | null }>(
       "SELECT telegram_user_id, telegram_chat_id FROM telegram_links WHERE status='REVOKED'")[0])
       .toEqual({ telegram_user_id: null, telegram_chat_id: null });

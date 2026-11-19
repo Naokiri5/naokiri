@@ -78,14 +78,15 @@ export function Freshness({ at, label = 'as of' }: { at: number | string | null 
  * emergency-stop and stale-data banners. Now only the page area shows the error; navigation and banners stay up.
  * Pass key={pathname} so moving to another page starts fresh.
  */
-export class PageErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+/** Contains a render crash. `label` names a smaller section (e.g. one card) when the boundary does not wrap a whole page. */
+export class PageErrorBoundary extends Component<{ children: ReactNode; label?: string }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
   static getDerivedStateFromError(error: Error) { return { error }; }
   componentDidCatch(error: Error) { console.error('page render error:', error.message); }
   render() {
     if (!this.state.error) return this.props.children;
     return <div className="card" role="alert" style={{ margin: 16 }}><div className="bd col">
-      <b>This page could not be displayed.</b>
+      <b>{this.props.label ?? 'This page'} could not be displayed.</b>
       <span className="hint">{this.state.error.message}. The rest of MIA is still running; other pages, alerts and the risk controls are unaffected.</span>
       <div className="row"><button className="sm" onClick={() => this.setState({ error: null })}>Try again</button></div>
     </div></div>;

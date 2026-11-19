@@ -4,7 +4,7 @@ import { DOMAINS, REQUIRED_DOMAINS, WORKERS } from '../workers/registry.js';
 import { dispatch, flushWorkerStats } from '../workers/runtime.js';
 import { challengePanel } from './challenge.js';
 import type { WorkerContext } from '../workers/types.js';
-import { uid, iso } from '../core/util.js';
+import { uid, iso, expiredAt } from '../core/util.js';
 import { record } from '../core/latency.js';
 import { run, J } from '../db/db.js';
 
@@ -74,8 +74,22 @@ export function aggregate(packets: EvidencePacket[], applicableDomains: Set<stri
       const voting = ps.filter((p) => p.stance !== 'ABSTAIN');
       if (voting.length) groupScores.push(voting.reduce((acc, p) => acc + (p.stance === 'SUPPORT' ? 1 : -1), 0) / voting.length);
     }
-    const score = groupScores.length ? groupScores.reduce((x, y) => x + y, 0) / groupScores.length : null;
+    let score = groupScores.length ? groupScores.reduce((x, y) => x + y, 0) / groupScores.length : null;
     if (score != null) { ws += weight * Math.max(0, score); wo += weight * Math.max(0, -score); }
+    // D-01 (100-agent audit): this domain's own packets in groups whose single vote went to ANOTHER domain must not
+    // disappear. Their ADVERSE balance still counts as this domain's opposition (support is never double-counted).
+    const shadowVoting = own.filter((p) => p.stance !== 'ABSTAIN' && primary.get(p.dependency_group) !== dom);
+    if (shadowVoting.length) {
+      const shadow = shadowVoting.reduce((acc, p) => acc + (p.stance === 'SUPPORT' ? 1 : -1), 0) / shadowVoting.length;
+      // R-02 (independent review): count this domain's adverse evidence ONCE (max of its own vote and its shadow readings)
+      // and keep the domain's support + opposition within its weight, so weighted opposition stays in [0, 1].
+      if (shadow < 0) {
+        const counted = score != null ? Math.max(0, -score) : 0;
+        const room = Math.max(0, 1 - Math.max(0, score ?? 0) - counted);
+        wo += weight * Math.min(room, Math.max(0, -shadow - counted));
+        if (score == null) score = shadow;
+      }
+    }
     domains.push({ domain: dom, groups: gm.size, support: s, oppose: o, abstain: a, score, weight, required: REQUIRED_DOMAINS.includes(dom as any), sharedGroups, constantRule });
   }
   return { domains, weightedSupport: wTotal ? ws / wTotal : 0, weightedOpposition: wTotal ? wo / wTotal : 0, groups };
@@ -84,7 +98,8 @@ export function aggregate(packets: EvidencePacket[], applicableDomains: Set<stri
 /** Share of active DATA-DRIVEN workers that returned a valid packet (ABSTAIN counts as an answer; failures do not). */
 export function responseRatio(activeIds: string[], packets: EvidencePacket[]) {
   const dataDrivenActive = activeIds.filter((id) => (CAPABILITY.get(id) ?? 'DATA_DRIVEN') === 'DATA_DRIVEN').length;
-  return dataDrivenActive ? packets.filter(isEvidence).length / dataDrivenActive : 0;
+  const answered = new Set(packets.filter(isEvidence).map((p) => p.worker_id)).size; // distinct workers (D-03)
+  return dataDrivenActive ? Math.min(1, answered / dataDrivenActive) : 0;
 }
 
 export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord> {
@@ -95,6 +110,7 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     if ('failed' in r) { failed++; continue; }
     const v = validatePacket(r, ctx.candidate.id);
     if (typeof v === 'string') { rejected++; continue; }
+    if (packets.some((p) => p.worker_id === v.worker_id)) { rejected++; continue; } // one packet per worker (D-03)
     packets.push(v);
   }
   const applicable = new Set(DOMAINS.filter((d) => d !== 'onchain' || ctx.candidate.market === 'crypto-dex'));
@@ -104,6 +120,9 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
   const abstaining = packets.length - responding;
   const vetoes = packets.filter((p) => p.veto).map((p) => ({ worker_id: p.worker_id, reasons: p.reason_codes }));
   const missingRequired = agg.domains.filter((d) => d.required && (d.support + d.oppose) === 0).map((d) => d.domain);
+  // C-01 (100-agent audit): `mandatory` workers (spread, impact, cost, safety, data quality, regime fit) must each give a
+  // non-abstaining answer; an abstaining, failed or quarantined mandatory check means no quorum.
+  const missingMandatory = WORKERS.filter((w) => w.mandatory && applicable.has(w.domain) && !packets.some((p) => p.worker_id === w.id && p.stance !== 'ABSTAIN')).map((w) => `${w.id} ${w.name}`);
   const missing = [...missingRequired.map((d) => `required domain without evidence: ${d}`), ...agg.domains.filter((d) => !d.required && d.score == null).map((d) => `no evidence: ${d.domain}`)];
   const reasons: string[] = [];
   let state: ConsensusState;
@@ -115,8 +134,9 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     state = 'VETOED';
     vetoes.forEach((v) => reasons.push(`VETO ${v.worker_id}: ${v.reasons.join('; ')}`));
     criticalChallenges.forEach((c) => reasons.push(`CRITICAL ${c.reviewer}: ${c.findings.join('; ')}`));
-  } else if (respRatio < QCI_POLICY.minResponseRatio || missingRequired.length) {
+  } else if (respRatio < QCI_POLICY.minResponseRatio || missingRequired.length || missingMandatory.length) {
     state = 'NO_QUORUM';
+    missingMandatory.forEach((w) => reasons.push(`mandatory check ${w} gave no answer`));
     if (respRatio < QCI_POLICY.minResponseRatio) reasons.push(`data-driven response ratio ${(respRatio * 100).toFixed(0)}% < ${QCI_POLICY.minResponseRatio * 100}%`);
     missingRequired.forEach((d) => reasons.push(`required domain ${d} has no non-abstaining evidence`));
   } else if (agg.weightedSupport >= QCI_POLICY.supportThreshold && agg.weightedOpposition <= QCI_POLICY.maxOpposition) {
@@ -137,8 +157,14 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     domains: agg.domains, dependency_groups: agg.groups, weighted_support: round3(agg.weightedSupport), weighted_opposition: round3(agg.weightedOpposition),
     vetoes, challenge, missing_inputs: missing, coordinator_version: COORDINATOR_VERSION, trace_id: ctx.candidate.traceId,
   };
-  try { run('INSERT INTO consensus_records(id,candidate_id,instrument,state,created_at,expires_at,record) VALUES (?,?,?,?,?,?,?)', rec.consensus_id, rec.candidate_id, rec.instrument_id, rec.state, created, created + QCI_POLICY.validityMs, J({ ...rec, packets })); } catch { /* persistence failure doesn't create approval */ }
+  try { run('INSERT INTO consensus_records(id,candidate_id,instrument,state,created_at,expires_at,record) VALUES (?,?,?,?,?,?,?)', rec.consensus_id, rec.candidate_id, rec.instrument_id, rec.state, created, created + QCI_POLICY.validityMs, J({ ...rec, packets })); }
+  catch (e: any) {
+    // D-06: a decision must never reference a consensus record that was not stored (it could not be reproduced).
+    // Fail closed: the record no longer permits a trade.
+    rec.state = 'NO_QUORUM';
+    rec.reason_codes = [...rec.reason_codes, `CONSENSUS_NOT_PERSISTED: ${String(e?.message ?? e).slice(0, 120)}`];
+  }
   return rec;
 }
-export const isExpired = (r: ConsensusRecord, nowTs = Date.now()) => Date.parse(r.expires_at) <= nowTs;
+export const isExpired = (r: ConsensusRecord, nowTs = Date.now()) => expiredAt(r.expires_at, nowTs); // J-04: missing/garbage = expired
 const round3 = (x: number) => Math.round(x * 1000) / 1000;
