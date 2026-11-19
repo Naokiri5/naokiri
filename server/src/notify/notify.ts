@@ -27,7 +27,8 @@ async function sendTelegram(id: string, text: string) {
   let status = 'FAILED';
   try {
     if (provider('telegram')) {
-      const url = `https://api.telegram.org/bot${config.telegramBotToken}/sendMessage?chat_id=${encodeURIComponent(config.telegramChatId)}&text=${encodeURIComponent(text.slice(0, 3500))}`;
+      // No link previews: a message must never render a preview card for a URL it happens to contain.
+      const url = `https://api.telegram.org/bot${config.telegramBotToken}/sendMessage?chat_id=${encodeURIComponent(config.telegramChatId)}&text=${encodeURIComponent(text.slice(0, 3500))}&link_preview_options=${encodeURIComponent('{"is_disabled":true}')}`;
       await fetchProvider('telegram', url); status = 'DELIVERED';
     }
   } catch { status = 'FAILED'; }
@@ -55,7 +56,7 @@ export function markRead(id?: string) {
 export const CENTER_WINDOW_MS = 14 * 86_400_000;
 export const CENTER_GROUP_LIMIT = 100;
 /** Root-cause pages by notification source. 'backup' is the source main's bot.ts emits today; 'backups' is the planned name. */
-export const ROOT_CAUSE: Record<string, string> = { risk: '/risk', oms: '/bot', 'strategy-health': '/lab', backups: '/security', backup: '/security' };
+export const ROOT_CAUSE: Record<string, string> = { risk: '/risk', oms: '/bot', 'strategy-health': '/lab', backups: '/security', backup: '/security', 'solana-watchlist': '/discover' };
 export interface NotificationGroup {
   source: string; title: string; severity: Severity; count: number; unread: number; firstTs: number; lastTs: number;
   lastBody: string; ackThroughId: string; href: string | null; sticky: boolean;

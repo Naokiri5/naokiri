@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { freshDb, ownerSetupPayload } from './helpers.js';
 import { config } from '../src/config.js';
-import { all } from '../src/db/db.js';
+import { all, run } from '../src/db/db.js';
 import { setSetting } from '../src/core/settings.js';
 import { notify } from '../src/notify/notify.js';
 import { market } from '../src/market/store.js';
@@ -12,7 +12,7 @@ import { failureGate } from '../src/core/ratelimit.js';
 import { buildApp } from '../src/index.js';
 import { _resetMintChecks } from '../src/solana/mintChecks.js';
 import { TOKEN_PROGRAM } from '../src/solana/mint-audit.js';
-import { alertNewWatchRows, watchAlertText, WATCH_ALERT_SOURCE, WATCH_ALERT_REPEAT_MS, WATCH_ALERTS_PER_HOUR, type AlertRow } from '../src/solana/watchAlerts.js';
+import { alertNewWatchRows, watchAlertText, watchAlertStatus, _resetWatchAlerts, WATCH_ALERT_SOURCE, WATCH_ALERT_REPEAT_MS, WATCH_ALERTS_PER_HOUR, type AlertRow } from '../src/solana/watchAlerts.js';
 
 /** Omega PR-07: opt-in, read-only Solana watchlist alerts. fetch is stubbed; nothing reaches Telegram or Solana. */
 const NOW = Date.UTC(2026, 10, 19, 12);
@@ -26,17 +26,18 @@ const alerts = () => all<{ title: string; body: string; delivery: string }>('SEL
 
 const realFetch = globalThis.fetch;
 let telegramTexts: string[] = [];
+let telegramUrls: URL[] = [];
 const saved = { offline: config.offline, token: config.telegramBotToken, chat: config.telegramChatId };
 beforeEach(() => {
-  freshDb(); _resetProviderBlocks(); _resetMintChecks(); telegramTexts = [];
+  freshDb(); _resetProviderBlocks(); _resetMintChecks(); _resetWatchAlerts(); telegramTexts = []; telegramUrls = [];
   Object.assign(config, { offline: false, telegramBotToken: 'TEST-BOT-TOKEN', telegramChatId: '12345' });
   globalThis.fetch = (async (u: any) => {
     const url = new URL(String(u));
-    if (url.hostname === 'api.telegram.org') telegramTexts.push(url.searchParams.get('text') ?? '');
+    if (url.hostname === 'api.telegram.org') { telegramTexts.push(url.searchParams.get('text') ?? ''); telegramUrls.push(url); }
     return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } });
   }) as typeof fetch;
 });
-afterEach(() => { globalThis.fetch = realFetch; Object.assign(config, { offline: saved.offline, telegramBotToken: saved.token, telegramChatId: saved.chat }); });
+afterEach(() => { vi.useRealTimers(); globalThis.fetch = realFetch; Object.assign(config, { offline: saved.offline, telegramBotToken: saved.token, telegramChatId: saved.chat }); });
 const enable = (on = true) => setSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null, solanaWatchlistTelegram: on });
 
 describe('Solana watchlist alerts', () => {
@@ -68,29 +69,52 @@ describe('Solana watchlist alerts', () => {
     expect(text).toContain('Not a trade signal');
     expect(text).toContain('slot 471406626');
     expect(text).not.toMatch(/https?:|t\.me|bonk|axiom|photon|buy now/i);
+    expect(telegramUrls[0].searchParams.get('link_preview_options')).toBe('{"is_disabled":true}'); // no preview cards, ever
+  });
+  it('a ticker that Telegram would turn into a link, mention or command is withheld (review fix)', async () => {
+    enable();
+    const evil = ['jup.ag/swap', '@BonkBot', '/start', 'pump.fun/x', 'U\u0405DC', 'TOOLONGTICKERNAME12'];
+    alertNewWatchRows(evil.map((symbol, i) => row(mintN(i + 30), { symbol })), NOW);
+    await vi.waitFor(() => expect(telegramTexts).toHaveLength(5)); // hourly cap: 5 of 6
+    for (const t of telegramTexts) {
+      expect(t).toMatch(/^\[MIA INFO\] Solana watchlist: ticker withheld\n/);
+      expect(t).not.toMatch(/jup\.ag|@|\/start|pump\.fun/);
+      expect(t).toContain('identify the token by its mint address');
+    }
+    expect(watchAlertText(row(MINT_A)).title).toBe('Solana watchlist: TEST');
+  });
+  it('records the last run, and a storage failure becomes a visible status instead of disappearing (review fix)', () => {
+    enable();
+    alertNewWatchRows([row(MINT_A)], NOW);
+    expect(watchAlertStatus()).toMatchObject({ enabled: true, lastRunAt: NOW, lastError: null });
+    run('DROP TABLE notifications');
+    expect(alertNewWatchRows([row(MINT_B)], NOW + 1)).toEqual([]);
+    expect(watchAlertStatus().lastError).toMatch(/no such table/);
   });
   it('without the opt-in flag an INFO notification still stays out of Telegram (no change to existing behavior)', async () => {
     notify('INFO', 'Paper entry: X', 'body', 'oms');
     await new Promise((r) => setTimeout(r, 20));
     expect(telegramTexts).toHaveLength(0);
   });
-  it('alerts a mint once per 24 hours', () => {
+  // One clock for the code under test and for notify(), which stamps rows with Date.now() (review fix).
+  it('alerts a mint once per 24 hours, matching the mint exactly', () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW);
     enable();
     expect(alertNewWatchRows([row(MINT_A)], NOW)).toEqual([MINT_A]);
-    // A later run in the same day: the stored notification (written at real time) blocks a repeat.
-    expect(alertNewWatchRows([row(MINT_A)], Date.now() + 60_000)).toEqual([]);
-    expect(alertNewWatchRows([row(MINT_A)], Date.now() + WATCH_ALERT_REPEAT_MS + 60_000)).toEqual([MINT_A]);
+    vi.setSystemTime(NOW + 60_000);
+    expect(alertNewWatchRows([row(MINT_A)], NOW + 60_000)).toEqual([]);
+    vi.setSystemTime(NOW + WATCH_ALERT_REPEAT_MS + 60_000);
+    expect(alertNewWatchRows([row(MINT_A)], NOW + WATCH_ALERT_REPEAT_MS + 60_000)).toEqual([MINT_A]);
   });
   it('sends at most 5 per hour', () => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(NOW);
     enable();
     const rows = Array.from({ length: 8 }, (_, i) => row(mintN(i + 10)));
-    expect(alertNewWatchRows(rows, Date.now())).toHaveLength(WATCH_ALERTS_PER_HOUR);
-    expect(alertNewWatchRows(rows, Date.now() + 1000)).toHaveLength(0);
-    expect(alertNewWatchRows(rows, Date.now() + 3600_000 + 1000)).toHaveLength(3);
-  });
-  it('flags a non-ASCII ticker so the owner compares the mint', () => {
-    expect(watchAlertText(row(MINT_A, { symbol: 'UЅDC' })).body).toMatch(/non-ASCII characters: compare the mint address/);
-    expect(watchAlertText(row(MINT_A)).body).not.toMatch(/non-ASCII/);
+    expect(alertNewWatchRows(rows, NOW)).toHaveLength(WATCH_ALERTS_PER_HOUR);
+    vi.setSystemTime(NOW + 1000);
+    expect(alertNewWatchRows(rows, NOW + 1000)).toHaveLength(0);
+    vi.setSystemTime(NOW + 3600_000 + 1000);
+    expect(alertNewWatchRows(rows, NOW + 3600_000 + 1000)).toHaveLength(3);
   });
 });
 

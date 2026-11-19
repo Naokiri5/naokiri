@@ -43,7 +43,9 @@ Full-suite results for this branch are recorded in the PR description.
 | Opt-in | Off by default; nothing stored or sent | `server/test/solana-watch-alerts.test.ts` | pass; fails without the opt-in check |
 | Qualification | Only WATCH plus a passed on-chain mint check; rejected, inconclusive, not checked or invalid rows never alert | same | pass; fails without the mint-check requirement |
 | Delivery | Reaches Telegram on opt-in below the minimum severity; text has the mint, slot and "Not a trade signal"; no links or trading-bot names; other INFO notifications unchanged | same | pass; fails if the opt-in flag is ignored |
-| Limits | Once per mint per 24 h; at most 5 per hour | same | pass; fails without dedupe or the hourly cap |
+| Limits | Once per mint per 24 h, matched exactly; at most 5 per hour (controlled clock) | same | pass; fails without dedupe or the hourly cap |
+| Link safety (review fix) | A ticker like `jup.ag/swap`, `@BonkBot`, `/start` or look-alike letters is withheld; Telegram link previews off | same | pass; fails without the ticker filter or with previews on |
+| Status (review fix) | Last run recorded; a storage failure becomes a visible error | same | pass; fails if the error is not recorded |
 | Settings and wiring | Defaults off, can be enabled, an older payload turns it off; the background refresh sends one alert after a DEX refresh and a passing mint check | same | pass; fails without the fabric hook |
 | UI | Settings checkbox off by default, saved when ticked | `e2e/solana.spec.ts` | pass |
 

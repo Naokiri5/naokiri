@@ -11,6 +11,8 @@ export interface SolanaHunterView {
   skippedUntrustedQuote?: number;
   /** Omega PR-06: read-only on-chain mint checks. Absent on older servers. Never contains the RPC address. */
   mintChecks?: { configured: boolean; lastRunAt: number | null; lastError: string | null; checked: number };
+  /** Omega 06a: opt-in Telegram alerts (Settings → Notifications). Absent on older servers. */
+  alerts?: { enabled: boolean; lastRunAt: number | null; lastError: string | null };
   candidates: Array<{
     mint: string; symbol: string; pairAddress: string; dex: string; ageMinutes: number | null; liquidityUsd: number;
     volume1hUsd: number; observedBuys1h: number; observedSells1h: number; momentum1hPct: number; rankScore: number;
@@ -87,6 +89,9 @@ export function SolanaWatchlist({ view, loaded }: { view: SolanaHunterView | und
     {!rows.length && <Empty>{emptyText(view, loaded)}</Empty>}</div>
     {!!view?.skippedUntrustedQuote && <div className="hint" style={{ padding: '8px 12px 0' }}>
       {view.skippedUntrustedQuote} Solana pool{view.skippedUntrustedQuote === 1 ? '' : 's'} left out: priced against a token other than SOL, USDC or USDT, so the liquidity figure cannot be trusted.
+    </div>}
+    {view?.alerts && <div className="hint" style={{ padding: '8px 12px 0' }}>
+      Telegram alerts: {view.alerts.enabled ? 'on' : 'off'} (Settings → Notifications){view.alerts.lastError ? ` · last run failed: ${view.alerts.lastError}` : ''}
     </div>}
     {view?.note && <div className="hint" style={{ padding: '8px 12px' }}>{view.note}</div>}
   </Card>;

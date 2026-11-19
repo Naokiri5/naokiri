@@ -72,7 +72,8 @@ describe('discover() Solana watchlist integration', () => {
 
   it('is stale with no candidates, and asOf null (not 0), before the DEX cache has ever loaded', () => {
     expect(discover(1e6, NOW).solanaHunter).toEqual({ asOf: null, stale: true, rankerFailed: false, skippedUntrustedQuote: 0, candidates: [], executionReady: false, note: expect.any(String),
-      mintChecks: { configured: false, lastRunAt: null, lastError: null, checked: 0 } }); // PR-06: no RPC configured in tests
+      mintChecks: { configured: false, lastRunAt: null, lastError: null, checked: 0 }, // PR-06: no RPC configured in tests
+      alerts: { enabled: false, lastRunAt: null, lastError: null } }); // 06a: Telegram alerts off by default
   });
   it('lists fresh Solana candidates, read-only, and leaves the existing lists unchanged', () => {
     market.dex = [dex(), dex({ chainId: 'ethereum', baseAddress: '0x' + 'a'.repeat(40) })];
