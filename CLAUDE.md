@@ -22,7 +22,7 @@ Read `docs/ARCHITECTURE.md`, `docs/SECURITY.md` and the relevant domain document
 
 ## Commands
 
-Use Node.js >= 22.13 and npm workspaces.
+Use Node.js 22.16+ in the 22 LTS line or Node.js 24+, with npm workspaces.
 - Install: `npm ci`
 - Develop: `npm run dev`
 - Typecheck: `npm run typecheck`
