@@ -50,7 +50,7 @@ function reachable(from: string): Set<string> {
   return seen;
 }
 
-const EVIDENCE_ROOTS = ['workers/', 'qci/', 'providers/', 'research/', 'knowledge/', 'chart/', 'features/', 'regime/', 'safety/', 'news/', 'whales/', 'lab/', 'journal/', 'notify/', 'decision/certificate.ts', 'decision/profitLab.ts'];
+const EVIDENCE_ROOTS = ['workers/', 'qci/', 'providers/', 'research/', 'knowledge/', 'chart/', 'features/', 'regime/', 'safety/', 'news/', 'whales/', 'lab/', 'journal/', 'notify/', 'decision/certificate.ts', 'decision/profitLab.ts', 'ditas/replay.ts'];
 const FORBIDDEN_FOR_EVIDENCE = ['exec/', 'wallet/', 'portfolio/'];
 
 /** Functions that change orders, positions, mode, policy or wallet state. */

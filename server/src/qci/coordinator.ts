@@ -22,7 +22,7 @@ import { run, J } from '../db/db.js';
  */
 export const QCI_POLICY = { supportThreshold: 0.5, maxOpposition: 0.25, minResponseRatio: 0.6, validityMs: 5 * 60_000 };
 export const DOMAIN_WEIGHTS: Record<string, number> = { trend: 0.16, momentum: 0.1, volatility: 0.08, flow: 0.1, liquidity: 0.12, structure: 0.1, regime: 0.1, news: 0.06, onchain: 0.04, risk: 0.08, execution: 0.06 };
-const COORDINATOR_VERSION = 'qci-coordinator@1.2.0';
+const COORDINATOR_VERSION = 'qci-coordinator@1.3.0'; // 1.3.0: CONTRARIAN horizon-conflict veto (MIA-THINK-037)
 const CAPABILITY = new Map(WORKERS.map((w) => [w.id, w.capability]));
 /** Authenticated packets from an unknown worker id (test fixtures) are treated as data-driven. */
 const isEvidence = (p: EvidencePacket) => (CAPABILITY.get(p.worker_id) ?? 'DATA_DRIVEN') === 'DATA_DRIVEN';
