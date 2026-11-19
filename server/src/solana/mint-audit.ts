@@ -1,6 +1,9 @@
 /** Read-only, fail-closed Solana mint parser and optional JSON-RPC inspector. No wallet/signing. */
 export const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-export const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPF4g7q5gghRXAgn4G5';
+// MIA review (Omega PR-06, found by the live test): the starter's value 'TokenzQdBNbLqP5VEhdkAS6EPF4g7q5gghRXAgn4G5' is not
+// a valid 32-byte key (the node answers "WrongSize"), so every Token-2022 mint was blocked as BLOCK_NOT_TOKEN_PROGRAM and
+// its extensions were never checked. This is the Token-2022 program id from spl.solana.com, verified on chain (executable).
+export const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 const B58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 export type MintAuditStatus = 'PASS_MINT_CHECKS_ONLY' | 'BLOCK' | 'UNKNOWN';
 export interface MintAudit {

@@ -12,7 +12,7 @@ const P = (id: string, name: string, sourceClass: any, markets: string[], licens
 P('equities', 'Equities market data (e.g. Alpaca / Polygon / IEX)', 'broker', ['stocks'], 'Requires exchange-licensed data subscription.', 'No key-free licensed equities feed. Configure a broker/data API key.');
 P('commodities', 'Commodities/futures data (e.g. CME via vendor)', 'broker', ['commodities'], 'Requires CME/ICE market-data license via vendor.', 'Not configured.');
 P('evm_rpc', 'EVM RPC + explorer (contract analysis, holders)', 'onchain', ['crypto-dex'], 'Provider ToS (Alchemy/Infura/Etherscan).', 'Needed for honeypot sell-simulation, holder maps, whale wallets.');
-P('solana_rpc', 'Solana RPC (mint/freeze authority checks)', 'onchain', ['crypto-dex'], 'Provider ToS (Helius/QuickNode).', 'Needed for Part 2.2 Solana checks.');
+// solana_rpc is registered by providers/solanaRpc.ts (Omega PR-06): read-only, enabled by MIA_SOLANA_RPC_URL.
 P('x_api', 'X (Twitter) API', 'social', ['all'], 'X Developer Agreement; paid tier for read access.', 'OAuth 2.0 PKCE linking not configured.');
 registerProvider({
   id: 'telegram', name: 'Telegram Bot API', sourceClass: 'messaging', markets: ['notifications'],

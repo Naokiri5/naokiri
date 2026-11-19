@@ -15,7 +15,7 @@
 | 03 | Hot-path scheduler + sustained ≥10k-event p50/p95/p99 trace | Codex | Not started | Representative load harness |
 | 04 | Durable order/fill events in the NEXUS outbox (beyond DITAS outcomes) | Claude design, Codex | Not started | Trading-risk review; migration v11+ |
 | 05 | GMGN typed read-only client via `providers/http.ts` (rate limit, backoff, redirect guard), normalizers | Codex | Client inert in PR-01 | **Owner `GMGN_API_KEY` + ToS review** |
-| 06 | Solana RPC mint audit wired: `mint-audit.ts` + slot provenance | Codex | Parser in PR-01 | **Owner RPC URL (HTTPS, allowlisted)** |
+| 06 | Solana RPC mint audit wired: `mint-audit.ts` + slot provenance | Claude (owner's choice, 2026-11-19), Codex review | **Draft PR** (stacked on PR-01); live test passed | Codex review |
 | 07 | Pump.fun / PumpSwap launch and migration stream | Codex | Not started | Verified program IDs/IDL, licensed stream |
 | 08 | Raydium / Orca / Jupiter quotes and sell-viability | Codex | Not started | **License decision (GPL-3.0 / Orca)** |
 | 09–12 | Research/replay, unified OMS adapter, testnet parity, Trader Joe UI | Mixed | Not started | Testnet venue keys for 11 |
@@ -30,7 +30,7 @@
 
 ## Owner decisions needed (nothing is assumed)
 1. **GMGN:** provide a `GMGN_API_KEY` through the server environment only (never in chat), and confirm GMGN's terms allow this use. Needed for PR-05.
-2. **Solana RPC:** which provider (Helius, QuickNode, other) and its HTTPS URL, through the server environment only. Needed for PR-06.
+2. **Solana RPC:** decided 2026-11-19. The owner chose the public `https://api.mainnet.solana.com`, set as `MIA_SOLANA_RPC_URL` in the server environment. It is rate-limited and not meant for production; a paid provider can replace it later without code changes.
 3. **Licenses:** whether a GPL-3.0 dependency (Raydium SDK) is acceptable, and whether to obtain the Orca license review. Needed for PR-08.
 4. **Cloudflare:** the exact hostname (for example `app.<your-domain>`), the Linux host, and when to deploy. Needed for PR-13. MIA stays in OBSERVE or PAPER on first deploy.
 5. **Merge order:** #45 first, then this PR.

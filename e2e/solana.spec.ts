@@ -64,3 +64,24 @@ test('a server without the watchlist block says so instead of claiming there are
   await expect(page.getByText('This server does not report a Solana watchlist.')).toBeVisible();
   await expect(page.getByText('Watchlist only. Not a trade signal.')).toBeVisible();
 });
+
+test('on-chain mint checks show per row, a block is explained, and a failed check is reported', async ({ page }) => {
+  const blocked = { ...candidate, mint: 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', symbol: 'BLK', status: 'REJECT', blockers: ['BLOCK_ACTIVE_MINT_AUTHORITY'],
+    mintCheck: { status: 'BLOCK', reasons: ['BLOCK_ACTIVE_MINT_AUTHORITY'], tokenProgram: 'SPL_TOKEN', slot: 999, checkedAt: Date.now() } };
+  const passed = { ...candidate, mintCheck: { status: 'PASS_MINT_CHECKS_ONLY', reasons: [], tokenProgram: 'SPL_TOKEN', slot: 998, checkedAt: Date.now() } };
+  await page.route('**/api/discover**', async (route) => {
+    const real = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...real, solanaHunter: { asOf: Date.now(), stale: false, executionReady: false, note: 'DEX Screener watchlist only.',
+      mintChecks: { configured: true, lastRunAt: Date.now(), lastError: 'HTTP_429', checked: 2 }, candidates: [passed, blocked] } } });
+  });
+  await page.goto('/discover');
+  await page.getByRole('tab', { name: 'Solana watchlist' }).click();
+  await expect(page.getByRole('columnheader', { name: 'Mint check' })).toBeVisible();
+  await expect(page.getByText('authorities revoked')).toBeVisible();
+  await expect(page.getByText('blocked', { exact: true })).toBeVisible();
+  await expect(page.getByText('BLOCK_ACTIVE_MINT_AUTHORITY')).toBeVisible();
+  await expect(page.getByText(/last on-chain mint check failed \(HTTP_429\)/)).toBeVisible();
+  await expect(page.getByText(/Mint and freeze authority are read on-chain/)).toBeVisible();
+  const card = page.locator('.card', { hasText: 'Watchlist only. Not a trade signal.' });
+  await expect(card.getByRole('button')).toHaveCount(0);
+});

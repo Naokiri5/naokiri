@@ -119,6 +119,11 @@ export function rankSolanaPairs(pairs: readonly SolanaHuntPair[], opts: SolanaHu
       status: fatal ? 'REJECT' : blockers.length ? 'INSUFFICIENT_DATA' : 'WATCH',
       blockers, notes, tradingEligible: false, source: 'dexscreener' });
   }
-  const order: Record<SolanaScreenStatus, number> = { WATCH: 0, INSUFFICIENT_DATA: 1, REJECT: 2 };
-  return results.sort((a,b) => order[a.status] - order[b.status] || b.rankScore - a.rankScore || a.mint.localeCompare(b.mint)).slice(0, limit);
+  return results.sort(compareSolanaRows).slice(0, limit);
 }
+
+const STATUS_ORDER: Record<SolanaScreenStatus, number> = { WATCH: 0, INSUFFICIENT_DATA: 1, REJECT: 2 };
+type Sortable = Pick<SolanaHuntResult, 'status' | 'rankScore' | 'mint'>;
+/** MIA review (Omega PR-06): the ranker's order, exported so rows joined with mint checks are sorted identically. */
+export const compareSolanaRows = (a: Sortable, b: Sortable) =>
+  STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || b.rankScore - a.rankScore || a.mint.localeCompare(b.mint);

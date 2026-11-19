@@ -65,12 +65,45 @@ export function setRateLimit(id: string, perMin: number) { buckets.set(id, new B
 
 export class ProviderError extends Error { constructor(public providerId: string, msg: string, public status?: number) { super(`${providerId}: ${msg}`); } }
 
+/** Read at most `max` bytes of a response body; larger bodies are refused (Content-Length first, then while streaming). */
+async function readLimited(id: string, res: Response, max: number): Promise<Uint8Array> {
+  const tooLarge = () => new ProviderError(id, `response exceeds ${max} bytes`);
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > max) { await res.body?.cancel().catch(() => {}); throw tooLarge(); }
+  if (!res.body) return new Uint8Array(0);
+  const reader = res.body.getReader(); const chunks: Uint8Array[] = []; let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) { await reader.cancel().catch(() => {}); throw tooLarge(); }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total); let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+  return out;
+}
+/** Never let a parser error quote the untrusted body (V8 SyntaxErrors include a snippet) into provider status. */
+function decodeLimited(id: string, bytes: Uint8Array, as: 'json' | 'text' | undefined): unknown {
+  const text = new TextDecoder().decode(bytes);
+  if (as === 'text') return text;
+  try { return JSON.parse(text); } catch { throw new ProviderError(id, 'invalid JSON body'); }
+}
+/** Defence in depth: a configured URL can carry a key in its path (for example /v2/<key>); never store it in a message. */
+function redactUrl(msg: string, url: string): string {
+  let out = msg.split(url).join('[url]');
+  try { const u = new URL(url); const tail = u.pathname + u.search; if (tail.length > 1) out = out.split(tail).join('[url]'); } catch { /* not a URL */ }
+  return out;
+}
+
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
 /**
  * `redirectMode`/`redirect: 'error'` is for credentialed providers: a redirect must never carry an API key to another host
  * (fetch keeps custom headers across redirects). Default stays 'follow' for the public, keyless providers.
  * `jsonBody` sends a JSON POST (used only for read-only JSON-RPC such as eth_call); everything else is a GET.
  * `decode` (Codex four-layer) validates the raw payload into a typed result inside the provider boundary.
+ * `maxBytes` (opt-in) refuses a body larger than this many bytes, by Content-Length and while streaming, so an
+ * untrusted endpoint cannot make MIA buffer an unbounded response.
  */
 export async function fetchProvider<T = any>(id: string, url: string, opts: {
   timeoutMs?: number;
@@ -80,6 +113,7 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
   redirectMode?: 'error' | 'follow';
   jsonBody?: unknown;
   decode?: (raw: unknown) => T;
+  maxBytes?: number;
 } = {}): Promise<T> {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
@@ -102,7 +136,9 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
       if (res.status === 429 || res.status === 418 || res.status === 503) { const ms = retryAfterMs(res, res.status); if (ms != null) blockedUntil.set(id, Date.now() + ms); }
       throw new ProviderError(id, `HTTP ${res.status}`, res.status);
     }
-    const raw: unknown = opts.as === 'text' ? await res.text() : await res.json();
+    const raw: unknown = opts.maxBytes
+      ? decodeLimited(id, await readLimited(id, res, opts.maxBytes), opts.as)
+      : opts.as === 'text' ? await res.text() : await res.json();
     const body = opts.decode ? opts.decode(raw) : raw as T;
     const ms = performance.now() - t0;
     record(`provider.${id}`, ms);
@@ -112,7 +148,7 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
     return body;
   } catch (e: any) {
     if (e?.resourceMiss) throw e;
-    const msg = e?.name === 'AbortError' ? 'timeout' : String(e?.message ?? e).replace(/(key|token)=[^&\s]+/gi, '$1=***');
+    const msg = e?.name === 'AbortError' ? 'timeout' : redactUrl(String(e?.message ?? e), url).replace(/(key|token)=[^&\s]+/gi, '$1=***');
     info.errorCount++; info.lastErrorAt = Date.now(); info.lastError = msg;
     const recentOk = info.lastOkAt && Date.now() - info.lastOkAt < 120_000;
     const prev = info.status;

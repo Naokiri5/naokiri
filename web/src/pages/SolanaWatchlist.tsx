@@ -9,11 +9,27 @@ export interface SolanaHunterView {
   rankerFailed?: boolean;
   /** Solana pools left out because they are not quoted in SOL, USDC or USDT (their liquidity figure is not trusted). */
   skippedUntrustedQuote?: number;
+  /** Omega PR-06: read-only on-chain mint checks. Absent on older servers. Never contains the RPC address. */
+  mintChecks?: { configured: boolean; lastRunAt: number | null; lastError: string | null; checked: number };
   candidates: Array<{
     mint: string; symbol: string; pairAddress: string; dex: string; ageMinutes: number | null; liquidityUsd: number;
     volume1hUsd: number; observedBuys1h: number; observedSells1h: number; momentum1hPct: number; rankScore: number;
     status: 'WATCH' | 'REJECT' | 'INSUFFICIENT_DATA'; blockers: string[]; notes: string[]; tradingEligible: false;
+    mintCheck?: MintCheckView;
   }>;
+}
+export interface MintCheckView {
+  status: 'PASS_MINT_CHECKS_ONLY' | 'BLOCK' | 'UNKNOWN' | 'NOT_CHECKED';
+  reasons: string[]; tokenProgram: string; slot: number | null; checkedAt: number | null;
+}
+
+/** One badge per row: what the on-chain mint check found. A pass is only "authorities revoked", never "safe". */
+function MintCheckBadge({ c }: { c: MintCheckView | undefined }) {
+  if (!c || c.status === 'NOT_CHECKED') return <Badge v="not checked" tone="b-neutral" title={c?.reasons.includes('STALE_CHECK') ? 'The last check is too old to count.' : undefined} />;
+  const at = c.slot == null ? '' : ` at slot ${c.slot}`;
+  if (c.status === 'BLOCK') return <Badge v="blocked" tone="b-bad" title={`${c.reasons.join(', ')}${at}`} />;
+  if (c.status === 'UNKNOWN') return <Badge v="inconclusive" tone="b-warn" title={`${c.reasons.join(', ')}${at}`} />;
+  return <Badge v="authorities revoked" tone="b-good" title={`Mint and freeze authority are revoked${at}. Mint-level checks only: not a safety verdict.`} />;
 }
 
 /** Why the table is empty, in plain words; never claims "no pairs" when the server did not say so. */
@@ -35,10 +51,14 @@ export function SolanaWatchlist({ view, loaded }: { view: SolanaHunterView | und
   return <Card flush title={`Solana watchlist · ${rows.length} candidate${rows.length === 1 ? '' : 's'}`} right={<Freshness at={view?.asOf ?? null} />}>
     <div className="banner info" style={{ margin: 12 }} role="note">
       <b>Watchlist only. Not a trade signal.</b> MIA cannot buy these tokens: no Solana signer exists and every row is
-      marked not trading-eligible. Mint authority, holder distribution, pool custody and an executable sell route are
-      <b> not verified</b> yet. The score only orders the list; it is <b>not</b> a probability of profit. Tickers can be
-      faked: compare the mint address.
+      marked not trading-eligible. {view?.mintChecks?.configured
+        ? <>Mint and freeze authority are read on-chain (read-only); holder distribution, pool custody and an executable sell route are <b>not verified</b>.</>
+        : <>Mint authority, holder distribution, pool custody and an executable sell route are <b>not verified</b> yet.</>}
+      {' '}The score only orders the list; it is <b>not</b> a probability of profit. Tickers can be faked: compare the mint address.
     </div>
+    {view?.mintChecks?.configured && view.mintChecks.lastError && <div className="banner stale" style={{ margin: '0 12px 12px' }} role="status">
+      The last on-chain mint check failed ({view.mintChecks.lastError}). Rows without a current check show "not checked".
+    </div>}
     {view?.stale && <div className="banner stale" style={{ margin: '0 12px 12px' }} role="status">
       DEX Screener data is stale, missing or future-dated, so no candidates are shown.
     </div>}
@@ -47,7 +67,7 @@ export function SolanaWatchlist({ view, loaded }: { view: SolanaHunterView | und
     </div>}
     <div className="tablewrap"><table><thead><tr>
       <th>Token · mint</th><th>DEX</th><th className="num">Age</th><th className="num">Liquidity</th><th className="num">Vol 1h</th>
-      <th className="num">Buys / sells 1h</th><th className="num">1h</th><th className="num" title="Orders the watchlist only; not a probability">Watch order</th><th>Status</th><th>Why</th>
+      <th className="num">Buys / sells 1h</th><th className="num">1h</th><th className="num" title="Orders the watchlist only; not a probability">Watch order</th><th>Status</th><th>Mint check</th><th>Why</th>
     </tr></thead><tbody>
       {rows.map((r) => <tr key={r.mint}>
         <td><b>{r.symbol}</b><div className="faint mono" style={{ fontSize: 11, wordBreak: 'break-all', userSelect: 'all' }}>{r.mint}</div></td>
@@ -59,6 +79,7 @@ export function SolanaWatchlist({ view, loaded }: { view: SolanaHunterView | und
         <td className="num">{fmt.pct(r.momentum1hPct, 1)}</td>
         <td className="num">{fmt.num(r.rankScore, 0)}</td>
         <td><Badge v={r.status} /></td>
+        <td><MintCheckBadge c={r.mintCheck} /></td>
         {/* notes[0] is the ranker's fixed "not verified" disclaimer, already in the banner; later notes are row-specific. */}
         <td className="hint">{[...r.blockers, ...r.notes.slice(1)].join(', ') || 'checks above not yet verified'}</td>
       </tr>)}
