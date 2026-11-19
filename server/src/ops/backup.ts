@@ -1,7 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { Worker } from 'node:worker_threads';
 import { getDb } from '../db/db.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { verifyAuditChain } from '../core/audit.js';
@@ -28,6 +29,15 @@ export const backupKeep = () => { const n = Number(process.env.MIA_BACKUP_KEEP ?
 /** Hours between automatic backups by the engine leader; 0 disables. */
 export const backupIntervalMs = () => { const h = Number(process.env.MIA_BACKUP_INTERVAL_H ?? 24); return Number.isFinite(h) && h >= 0 && h <= 24 * 30 ? h * 3_600_000 : 24 * 3_600_000; };
 
+/**
+ * The live database a manual backup must read. Refuses (throws) when it does not exist: opening it would CREATE a new,
+ * empty database whose backup verifies fine — e.g. a shell without MIA_DATA_DIR=/var/lib/mia (MA-09).
+ */
+export function liveDatabasePath(dataDir = config.dataDir): string {
+  const file = join(dataDir, 'mia.db');
+  if (!existsSync(file)) throw new Error(`no MIA database at ${file}. Set MIA_DATA_DIR to the server's data directory (the systemd unit uses /var/lib/mia) and run as the service user`);
+  return file;
+}
 /** Parse MIA_BACKUP_KEY. Unset → null (plaintext backups). Set but not exactly 32 bytes → throw (fail closed). */
 export function backupKey(value = process.env.MIA_BACKUP_KEY): Buffer | null {
   if (value === undefined || value.trim() === '') return null;
@@ -61,6 +71,7 @@ export function createBackup(opts: { dir?: string; key?: Buffer | null; nowTs?: 
   try {
     rmSync(raw, { force: true });
     getDb().prepare('VACUUM INTO ?').run(raw);
+    chmodSync(raw, 0o600); // I-03: VACUUM INTO creates the file with the process umask; a backup holds credentials and the ledger
     if (key) { writeFileSync(`${raw}.enc`, encrypt(readFileSync(raw), key), { mode: 0o600 }); rmSync(raw); renameSync(`${raw}.enc`, final); }
     else renameSync(raw, final);
   } finally { rmSync(raw, { force: true }); rmSync(`${raw}.enc`, { force: true }); }
@@ -110,12 +121,40 @@ export function verifyBackup(file: string, key: Buffer | null = backupKey()): Ve
       add('schema', v === m.schema && v <= SCHEMA_VERSION, `v${v} (manifest v${m.schema}, code v${SCHEMA_VERSION})`);
       const a = verifyAuditChain(snap.prepare('SELECT * FROM audit_log ORDER BY id').all());
       add('audit chain', a.ok, a.ok ? `${a.entries} entries` : `broken at entry ${a.brokenAt}`);
-      const d = verifyMemory(snap.prepare('SELECT * FROM ditas_events ORDER BY seq').all(), snap.prepare('SELECT * FROM ditas_snapshots').all());
+      const blobs = (() => { try { return snap.prepare('SELECT * FROM ditas_blobs').all(); } catch { return []; } })(); // absent before schema v6
+      const twins = (() => { try { return snap.prepare('SELECT * FROM ditas_twin_runs').all(); } catch { return []; } })();
+      const d = verifyMemory(snap.prepare('SELECT * FROM ditas_events ORDER BY seq').all(), snap.prepare('SELECT * FROM ditas_snapshots').all(), blobs, twins);
       add('decision memory chain', d.ok, d.ok ? `${d.entries} events` : `broken at ${d.brokenAt}`);
     } catch (e: any) { add('open', false, `cannot read snapshot: ${String(e?.message ?? e).slice(0, 200)}`); }
     finally { snap?.close(); }
   } finally { rmSync(tmp, { force: true }); }
   return done();
+}
+
+/**
+ * verifyBackup in a worker thread, so a large restore check never blocks the engine's event loop (MA-14). Falls back
+ * to the in-thread check if the worker cannot start, so a backup is never left unverified. Times out after `timeoutMs`
+ * (reported as a failed check, never as a pass).
+ */
+export function verifyBackupInWorker(file: string, key: Buffer | null = backupKey(), timeoutMs = 10 * 60_000): Promise<VerifyResult> {
+  const isTs = import.meta.url.endsWith('.ts');
+  const entry = new URL(isTs ? './verify-worker.ts' : './verify-worker.js', import.meta.url);
+  // Inherit the parent's runtime flags, minus ones that only apply to how the parent was launched (--eval/--print/
+  // --input-type) and would make the worker fail to start.
+  const inherited = process.execArgv.filter((a) => !/^(--input-type|--eval|-e|--print|-p)(=|$)/.test(a));
+  const execArgv = isTs && !inherited.some((a) => a.includes('tsx')) ? [...inherited, '--import', 'tsx'] : inherited;
+  return new Promise((resolve) => {
+    let worker: Worker;
+    try { worker = new Worker(entry, { workerData: { file, keyHex: key ? key.toString('hex') : null }, execArgv }); }
+    catch { resolve(verifyBackup(file, key)); return; }
+    let settled = false;
+    const finish = (r: VerifyResult) => { if (settled) return; settled = true; clearTimeout(timer); void worker.terminate(); resolve(r); };
+    const failed = (detail: string): VerifyResult => ({ ok: false, file: basename(file), checks: [{ name: 'worker', ok: false, detail }] });
+    const timer = setTimeout(() => finish(failed(`restore check timed out after ${timeoutMs} ms`)), timeoutMs);
+    worker.once('message', (m: { ok: boolean; result?: VerifyResult; error?: string }) => finish(m.ok && m.result ? m.result : failed(m.error ?? 'worker failed')));
+    worker.once('error', (e: Error) => finish(failed(`restore check worker error: ${String(e?.message ?? e).slice(0, 200)}`)));
+    worker.once('exit', (code) => { if (!settled) finish(failed(`restore check worker exited (${code}) without a result`)); });
+  });
 }
 
 /** Scheduled run (engine leader only): back up when the newest backup is older than the interval, then prune. */

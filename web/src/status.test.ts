@@ -47,6 +47,22 @@ describe('status ribbon model', () => {
     }
   });
 
+  it('negative or fractional counts are malformed: never DATA LIVE, never hide degraded providers (CodeRabbit PR #9)', () => {
+    for (const dataHealth of [{ live: -1, degraded: 0 }, { live: 7, degraded: -2 }, { live: 1.5, degraded: 0 }]) {
+      const m = deriveStatus({ ...base, shell: shell({ dataHealth: { ...shell().dataHealth, ...dataHealth } }) });
+      expect(seg(m.segments, 'data').tone).not.toBe('ok');
+      expect(m.segments.some((x) => x.id !== 'live' && x.tone === 'ok')).toBe(false);
+    }
+  });
+  it('engine completion times in the future are CLOCK? (UNKNOWN), not SCANNING (CodeRabbit PR #9)', () => {
+    const hourAhead = NOW + 3_600_000;
+    for (const bot of [{ lastScanAt: hourAhead }, { lastTickerAt: hourAhead }]) {
+      const m = deriveStatus({ ...base, shell: shell({ bot: { ...shell().bot, ...bot } }) });
+      expect(seg(m.segments, 'engine')).toMatchObject({ value: 'CLOCK?', tone: 'unknown' });
+    }
+    // within the 5 s tolerance it is still healthy
+    expect(seg(deriveStatus({ ...base, shell: shell({ bot: { ...shell().bot, lastScanAt: NOW + 2_000 } }) }).segments, 'engine').tone).toBe('ok');
+  });
   it('ticker age keeps advancing between responses and expires on its own', () => {
     const s = shell({ dataHealth: { stale: false, tickersAt: NOW - 59_000, scanAt: 0, live: 7, degraded: 0 } });
     expect(seg(deriveStatus({ ...base, shell: s }).segments, 'data').tone).toBe('ok');

@@ -9,7 +9,7 @@ import { botStatus } from '../bot/bot.js';
 /**
  * Part 33.18 latency budgets. Budgets cover stages MIA controls (internal hot path). Provider round trips are
  * reported but not budgeted: they depend on the network and the venue. Budgets were set from the measured
- * baseline in docs/QHEF_LATENCY_BASELINE.md with headroom; they are engineering targets, not guarantees.
+ * baseline in docs/operations/QHEF_LATENCY_BASELINE.md with headroom; they are engineering targets, not guarantees.
  */
 export interface Budget { stage: string; lane: 'hot' | 'background' | 'provider'; metric: 'p95' | 'p99'; budgetMs: number | null; description: string }
 export const BUDGETS: Budget[] = [

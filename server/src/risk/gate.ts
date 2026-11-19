@@ -6,7 +6,7 @@ import { assessQuality, bookImpact, bookAge, QUALITY_LIMITS } from '../market/qu
 import { assessCexAsset } from '../safety/safety.js';
 import { correlation } from '../portfolio/correlation.js';
 import { all, get } from '../db/db.js';
-import { iso } from '../core/util.js';
+import { iso, floorToStep } from '../core/util.js';
 import { getSetting } from '../core/settings.js';
 import { openIncidentFor } from '../exec/incidents.js';
 
@@ -22,12 +22,13 @@ export function evaluateRisk(p: RiskProposal, nowTs = Date.now()): RiskDecision 
 }
 const currentPolicySafe = () => { try { return currentPolicy()?.version ?? null; } catch { return null; } };
 
-function floorStep(q: number, step: number) { if (!step) return q; const n = Math.floor(q / step + 1e-9); return Number((n * step).toFixed(12)); }
+const floorStep = floorToStep; // canonical helper (core/util.ts)
 
 function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const deny: string[] = []; const review: string[] = []; const ev: RiskDecision['evaluated'] = {};
   const pv = currentPolicy();
   if (!pv) return { decision: 'DENY', reasonCodes: ['POLICY_NOT_ACCEPTED: owner must review and accept a risk policy'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
+  if (pv.invalid) return { decision: 'DENY', reasonCodes: [`POLICY_INVALID: stored policy v${pv.version} failed validation (${pv.invalid}); the owner must review and re-accept it`], evaluated: {}, sizing: null, policyVersion: pv.version, ts: iso(nowTs), traceId: p.traceId };
   const pol: RiskPolicy = pv.policy; const account = p.account ?? PAPER_ACCOUNT;
   const ctl = getControl();
   ev.mode = ctl.mode;
@@ -48,7 +49,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const incident = openIncidentFor(p.instrumentId);
   if (incident) deny.push(`PROTECTION_INCIDENT_OPEN:${incident.id}`);
   if (!pol.approvedMarkets.includes(inst.market as any)) deny.push(`MARKET_NOT_APPROVED:${inst.market}`);
-  const safety = assessCexAsset(p.instrumentId); ev.safety = safety.status;
+  const safety = assessCexAsset(p.instrumentId, nowTs); ev.safety = safety.status;
   if (!safety.eligibleForAutomation) deny.push(`ASSET_INELIGIBLE:${safety.status}`);
   const q = assessQuality(p.instrumentId, '1h', nowTs); ev.dataQuality = q.status;
   if (q.status === 'FAIL') deny.push(`DATA_QUALITY_FAIL:${q.issues.join('|')}`);

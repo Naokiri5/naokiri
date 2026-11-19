@@ -1,5 +1,9 @@
 # Known Limitations
 
+> **Historical document.** It lists limitations as of 2026-11-16; several, such as backups, readiness and the single-runner lock, have since been addressed. It was not re-verified against current code. For the current state see
+> `docs/engineering/DEBUG_AUDIT_2026-11-17.md` (bug register and tested results), `docs/engineering/AUTOPILOT_100_INVENTORY.md`
+> (feature status) and `docs/SECURITY.md`. DOC-DRIFT note added 2026-11-17.
+
 Updated 2026-11-16 (end of Phase 1). Each item says whether it is **fixable now** or **blocked** on something external.
 
 ## Trading & strategies

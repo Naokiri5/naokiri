@@ -6,7 +6,7 @@
  * Encryption key (optional): MIA_BACKUP_KEY in the environment — never on the command line, where it would be logged.
  */
 import { join } from 'node:path';
-import { backupDir, createBackup, listBackups, pruneBackups, verifyBackup } from './backup.js';
+import { backupDir, backupKey, createBackup, listBackups, liveDatabasePath, pruneBackups, verifyBackup } from './backup.js';
 import { closeDb } from '../db/db.js';
 
 const [cmd, arg] = process.argv.slice(2);
@@ -16,6 +16,8 @@ function print(v: ReturnType<typeof verifyBackup>) {
 }
 try {
   if (cmd === 'create') {
+    console.log(`Database: ${liveDatabasePath()}`); // throws before anything opens (and creates) a wrong, empty database
+    if (!backupKey()) console.warn('⚠ MIA_BACKUP_KEY is not set in this shell: this backup will be PLAINTEXT. The service reads it from /etc/mia/mia.env.');
     const m = createBackup(); const v = verifyBackup(join(backupDir(), m.file)); print(v);
     const removed = pruneBackups(); if (removed.length) console.log(`Pruned ${removed.length} old backup(s).`);
     process.exitCode = v.ok ? 0 : 1;

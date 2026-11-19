@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
-import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter } from '../ui';
+import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter , rowProps} from '../ui';
 
 export const StepUp = ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
   <input type="password" placeholder="Owner passphrase (step-up)" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="current-password" aria-label="Owner passphrase for step-up authentication" />;
@@ -28,7 +28,7 @@ export function Bot() {
     <div className="grid g2">
       <Card title="Automation mode (Part 26.2)"><div className="col">
         {MODES.map(([m, l, d]) => <label key={m} className="row" style={{ alignItems: 'flex-start', opacity: m === 'BOUNDED_LIVE' ? 0.6 : 1 }}><input type="radio" name="mode" checked={s?.mode === m} readOnly style={{ marginTop: 3 }} /><div style={{ flex: 1 }}><b>{l}</b> <span className="muted">— {d}</span></div>
-          {s?.mode !== m && <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}</label>)}
+          {s?.mode !== m && (m === 'BOUNDED_LIVE' ? <Badge v="LOCKED" /> : <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />)}</label>)}
         <StepUp value={pw} onChange={setPw} />
         {!s?.policyAccepted && <div className="hint warn">Accept a risk policy in the <Link to="/risk">Risk Center</Link> before paper execution.</div>}
         <div className="row"><Action className="danger" label="Pause new orders" run={async () => { await api('/api/emergency/pause', { body: {} }); reload(); }} />
@@ -54,8 +54,9 @@ export function Bot() {
 }
 /** Revoking reduces risk and needs no passphrase; re-enabling increases it and uses the step-up passphrase entered above. */
 function StrategyToggle({ id, pw, clearPassphrase, onChange }: { id: string; pw: string; clearPassphrase: () => void; onChange: () => void }) {
-  const shell = useApi('/api/shell'); const dis: string[] = shell.data?.control.disabledStrategies ?? []; const off = dis.includes(id);
-  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { try { await api('/api/control', { body: off ? { disabledStrategies: dis.filter((x) => x !== id), password: pw || undefined } : { disabledStrategies: [...dis, id] } }); shell.reload(); onChange(); } finally { if (off) clearPassphrase(); } }} />;
+  // MIA-WEB-010: send one operation for THIS strategy; the server applies it to its current list (never a stale copy).
+  const shell = useApi('/api/shell', { topics: ['mode'] }); const dis: string[] = shell.data?.control.disabledStrategies ?? []; const off = dis.includes(id);
+  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { try { await api('/api/control', { body: off ? { enableStrategy: id, password: pw || undefined } : { disableStrategy: id } }); shell.reload(); onChange(); } finally { if (off) clearPassphrase(); } }} />;
 }
 export function PositionsTable({ rows, onChange }: { rows: any[]; onChange: () => void }) {
   return <Card title={`Open positions (${rows.length})`} flush>{rows.length ? <div className="tablewrap"><table><thead><tr><th>Instrument</th><th>Strategy</th><th className="num">Qty</th><th className="num">Entry</th><th className="num">Mark</th><th className="num">Stop</th><th>Targets</th><th className="num">Unrealized</th><th>Opened</th><th /></tr></thead>
@@ -204,6 +205,6 @@ export function Lab() {
         <td className="mono">{s.live ? `${s.live.trades} · ${s.live.expectancyR.toFixed(2)}R` : '—'}</td>
         <td className="row">{s.status !== 'PAPER' && <Action className="sm" label="Promote to paper" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'PAPER', password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}{s.status !== 'SUSPENDED' && <Action className="sm" label="Suspend" run={async () => { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'SUSPENDED' } }); reload(); }} />}<Action className="sm" label="Live candidate" title="Blocked until release gates pass" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'LIVE_CANDIDATE', password: pw || undefined } }); } finally { setPw(''); } }} /></td></tr>)}</tbody></table></Card>
     <div style={{ height: 14 }} />
-    <Card title="Backtest history" flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Strategy</th><th>Instrument</th><th>Out-of-sample</th></tr></thead><tbody>{(data?.backtests ?? []).map((b: any) => <tr key={b.id} className="click" onClick={() => setRes(b)}><td className="faint">{fmt.ago(b.created_at)}</td><td>{b.strategyId}</td><td>{b.instrument.split(':')[2]}</td><td className="mono" style={{ fontSize: 12 }}>{S(b.outOfSample)} <Chg v={null} /></td></tr>)}</tbody></table>{!data?.backtests.length && <Empty>No backtests yet.</Empty>}</div></Card>
+    <Card title="Backtest history" flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Strategy</th><th>Instrument</th><th>Out-of-sample</th></tr></thead><tbody>{(data?.backtests ?? []).map((b: any) => <tr key={b.id} {...rowProps(() => setRes(b), `Open backtest ${b.id}`)}><td className="faint">{fmt.ago(b.created_at)}</td><td>{b.strategyId}</td><td>{b.instrument.split(':')[2]}</td><td className="mono" style={{ fontSize: 12 }}>{S(b.outOfSample)} <Chg v={null} /></td></tr>)}</tbody></table>{!data?.backtests.length && <Empty>No backtests yet.</Empty>}</div></Card>
   </Page>;
 }

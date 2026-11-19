@@ -1,8 +1,11 @@
 import { readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { join, posix } from 'node:path';
 import { config, REPO_ROOT } from '../config.js';
 import { all, get } from '../db/db.js';
 import { currentPolicy } from '../risk/policy.js';
+import type { Mode } from '../core/mode.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { WORKERS } from '../workers/registry.js';
 import { reconcile } from '../portfolio/calendar.js';
@@ -112,6 +115,39 @@ export function evaluateTestEvidence(report: unknown, refs: readonly TestRef[]):
   return { status: 'PASS', evidence: `${counts.numPassedTests}/${counts.numTotalTests} automated tests passed, ${counts.numPendingTests + counts.numTodoTests} skipped/pending/todo (${new Date(report.startTime).toISOString()}); ${evidence.map(item => item.detail).join('; ')}` };
 }
 
+/**
+ * Run-level outcome written by scripts/qa.mjs next to the report (CodeRabbit PR #13). The Vitest JSON report does not
+ * record failures outside assertions (e.g. an unhandled rejection), so a report is accepted only when the run that
+ * produced it exited 0 and the recorded sha256 matches the report text on disk. Returns a reason, or null when valid.
+ */
+/** Test evidence older than this never certifies (blueprint Q-01: no stale evidence). */
+export const QA_EVIDENCE_MAX_AGE_MS = 7 * 86_400_000;
+/** Commit of the code that is running: MIA_BUILD_SHA if the deployment stamps it, else `git rev-parse HEAD`; null if unknown. */
+let commitCache: string | null | undefined;
+export function currentBuildCommit(): string | null {
+  if (commitCache !== undefined) return commitCache;
+  const env = process.env.MIA_BUILD_SHA?.trim();
+  if (env) return (commitCache = /^[0-9a-f]{40}$/.test(env) ? env : null);
+  try { commitCache = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || null; }
+  catch { commitCache = null; }
+  return commitCache;
+}
+export function runOutcomeProblem(outcome: unknown, reportText: string, ctx: { currentCommit?: string | null; nowTs?: number } = {}): string | null {
+  if (!isRecord(outcome)) return 'run outcome missing or unreadable (data/qa/test-run.json); run `npm run qa -w server`';
+  if (outcome.exitCode !== 0) return `QA run did not succeed (exit code ${String(outcome.exitCode)}${outcome.signal ? `, signal ${String(outcome.signal)}` : ''})`;
+  if (typeof outcome.reportSha256 !== 'string' || outcome.reportSha256 !== createHash('sha256').update(reportText).digest('hex')) return 'run outcome does not belong to this report (sha256 mismatch)';
+  // Bound to the exact code that is running, from a clean tree, and recent (blueprint Q-01).
+  const current = ctx.currentCommit === undefined ? currentBuildCommit() : ctx.currentCommit;
+  if (typeof outcome.commit !== 'string' || !/^[0-9a-f]{40}$/.test(outcome.commit)) return 'run outcome has no commit SHA; re-run `npm run qa -w server` from a git checkout';
+  if (!current) return 'running build commit is unknown (set MIA_BUILD_SHA); evidence cannot be bound to this build';
+  if (outcome.commit !== current) return `evidence is from commit ${outcome.commit.slice(0, 12)}, but the running build is ${current.slice(0, 12)}`;
+  if (outcome.dirty !== false) return 'QA run had uncommitted changes; evidence must come from a clean checkout';
+  const finished = Number(outcome.finishedAt); const now = ctx.nowTs ?? Date.now();
+  if (!Number.isFinite(finished) || finished > now + 60_000) return 'run outcome has an invalid finish time';
+  if (now - finished > QA_EVIDENCE_MAX_AGE_MS) return `evidence is stale (${Math.floor((now - finished) / 86_400_000)} days old; limit ${QA_EVIDENCE_MAX_AGE_MS / 86_400_000})`;
+  return null;
+}
+
 export function releaseGates(report?: unknown) {
   const g: Gate[] = [];
   const resPath = join(config.dataDir, 'qa', 'test-results.json');
@@ -123,6 +159,12 @@ export function releaseGates(report?: unknown) {
     if (json !== undefined) {
       try { report = JSON.parse(json) as unknown; }
       catch { loadError = `report malformed JSON: ${resPath}`; }
+      if (!loadError) {
+        let outcome: unknown = null;
+        try { outcome = JSON.parse(readFileSync(join(config.dataDir, 'qa', 'test-run.json'), 'utf8')); } catch { /* missing → reported below */ }
+        const problem = runOutcomeProblem(outcome, json);
+        if (problem) loadError = problem;
+      }
     }
   }
   const testGate = (id: keyof typeof TEST_GATE_REQUIREMENTS): Pick<Gate, 'status' | 'evidence'> => {
@@ -137,16 +179,19 @@ export function releaseGates(report?: unknown) {
   const joe = testGate('G04');
   g.push({ id: 'G04', name: 'Trader Joe factuality & authorization tests', ...joe, status: 'PENDING', evidence: `${joe.evidence}; authorization checks do not certify LLM factuality; human review is required` });
   const rec = reconcile();
-  g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile', status: rec.ok ? 'PASS' : 'FAIL', evidence: rec.detail });
+  // J-02 (100-agent audit): with nothing to reconcile there is no evidence, so PENDING rather than PASS.
+  const hasTrades = rec.closedPositions > 0 || (get<{ n: number }>("SELECT COUNT(*) n FROM fills")?.n ?? 0) > 0;
+  g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile', status: !rec.ok ? 'FAIL' : hasTrades ? 'PASS' : 'PENDING', evidence: hasTrades ? rec.detail : 'no paper fills yet: nothing to reconcile' });
   const ac = verifyAuditChain();
-  g.push({ id: 'G06', name: 'Audit log integrity', status: ac.ok ? 'PASS' : 'FAIL', evidence: `${ac.entries} hash-chained entries${ac.ok ? ' verified' : `, broken at ${ac.brokenAt}`}` });
+  g.push({ id: 'G06', name: 'Audit log integrity', status: !ac.ok ? 'FAIL' : ac.entries > 0 ? 'PASS' : 'PENDING', evidence: `${ac.entries} hash-chained entries${ac.ok ? ' verified' : `, broken at ${ac.brokenAt}`}` });
   g.push({ id: 'G07', name: 'Wallet permissions & signing isolation security tests', status: 'NOT_IMPLEMENTED', evidence: 'No signer exists in this build (by design). Requires isolated signer + external security test.' });
   g.push({ id: 'G08', name: 'No unresolved critical/high security findings', status: 'NOT_CERTIFIED', evidence: 'Requires independent security review.' });
   g.push({ id: 'G09', name: 'Emergency shutdown & recovery procedures pass', ...testGate('G09') });
   const first = get<{ t: number }>("SELECT MIN(opened_at) t FROM positions")?.t;
   const days = first ? (Date.now() - first) / 86400_000 : 0; const closed = get<{ n: number }>("SELECT COUNT(*) n FROM positions WHERE status='CLOSED'")!.n;
   g.push({ id: 'G10', name: '30-day paper-trading evaluation', status: days >= 30 && closed >= 50 ? 'PASS' : 'PENDING', evidence: `${days.toFixed(1)} days since first paper trade, ${closed} closed trades (needs ≥30 days, ≥50 trades)` });
-  g.push({ id: 'G11', name: 'Risk policy reviewed and accepted by owner', status: currentPolicy() ? 'PASS' : 'PENDING', evidence: currentPolicy() ? `policy v${currentPolicy()!.version}` : 'not accepted' });
+  const pv = currentPolicy(); // MA-16: an invalid stored policy is a FAIL, never a pass
+  g.push({ id: 'G11', name: 'Risk policy reviewed and accepted by owner', status: !pv ? 'PENDING' : pv.invalid ? 'FAIL' : 'PASS', evidence: !pv ? 'not accepted' : pv.invalid ? `policy v${pv.version} invalid: ${pv.invalid}` : `policy v${pv.version}` });
   g.push({ id: 'G12', name: 'Live venue adapter + transaction firewall implemented', status: 'NOT_IMPLEMENTED', evidence: 'Deliberately absent until gates G07–G10 pass.' });
   g.push({ id: 'G13', name: 'Independent Release Auditor go/no-go', status: 'NOT_CERTIFIED', evidence: 'Human sign-off required.' });
   g.push({ id: 'G14', name: 'Owner explicit authorization for live execution', status: 'PENDING', evidence: 'Can only be recorded after all other gates pass.' });
@@ -154,3 +199,14 @@ export function releaseGates(report?: unknown) {
   return { gates: g, liveAllowed, summary: `${g.filter((x) => x.status === 'PASS').length}/${g.length} gates passed — live execution ${liveAllowed ? 'ELIGIBLE' : 'LOCKED'}` };
 }
 export const openDefects = () => all('SELECT * FROM journal WHERE kind=? ORDER BY ts DESC LIMIT 50', 'RISK');
+
+/**
+ * The release-gate check for an execution-mode transition (SAFE-01). The ONE gate used by the HTTP route and every
+ * other caller of updateControl: BOUNDED_LIVE needs every live gate (and is locked in this build regardless, in
+ * core/mode.ts); PAPER/APPROVAL need a valid owner-accepted risk policy; OBSERVE (read-only) is always allowed.
+ */
+export function modeGate(m: Mode): { ok: boolean; reason?: string } {
+  if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
+  if ((m === 'PAPER' || m === 'APPROVAL') && (!currentPolicy() || currentPolicy()!.invalid)) return { ok: false, reason: 'accept a valid risk policy before enabling paper execution' };
+  return { ok: true };
+}
