@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useApi, fmt } from '../api';
+import { CockpitPrivacyToggle, useCockpitPrivacy } from '../privacy';
 import { Badge, Empty } from '../ui';
 import { CandleChart } from '../pages/Markets';
 import { monitorState, sourceState, type CockpitSnapshot } from '../cockpit';
@@ -13,6 +14,7 @@ interface Notice { id: string; severity: string; title: string; body?: string; t
 
 /** One monitor controller: one content tree inline OR in a PiP portal, one existing SSE connection. */
 export function MiniCockpit({ snapshot, error, receivedAt }: Props) {
+  const { hidden, conceal } = useCockpitPrivacy();
   const [visible, setVisible] = useState(false), [child, setChild] = useState<Window | null>(null);
   const [opening, setOpening] = useState(false), [notice, setNotice] = useState('');
   const [symbol, setSymbol] = useState('BTCUSDT'), [now, setNow] = useState(Date.now());
@@ -73,20 +75,22 @@ export function MiniCockpit({ snapshot, error, receivedAt }: Props) {
   const chartState = sourceState(chart?.ticker?.receivedAt, now, 60_000);
   const contents = <section className="mini-cockpit" aria-label="Read-only paper monitor">
     <div className="row between"><h2>MIA monitor</h2><button type="button" onClick={closeMonitor} aria-label="Close monitor">✕</button></div>
+    <CockpitPrivacyToggle />
+    {hidden && <p className="hint">Cockpit amounts hidden. Public market prices remain visible. Other workspaces and exports may show account details.</p>}
     <div className="row"><Badge v="PAPER ACCOUNT" tone="b-warn" /><Badge v={state.mode} /><Badge v="READ ONLY" /></div>
     <p className={snapshot?.control?.emergency ? 'down' : 'warn'} role={snapshot?.control?.emergency ? 'alert' : 'status'}>{state.message}</p>
-    <div className="kv"><span>Paper equity{state.lastKnown ? ' (last known)' : ''}</span><strong>{fmt.usd(snapshot?.account?.equity)}</strong>
-      <span>Daily paper P&amp;L</span><span>{fmt.pct(snapshot?.account?.dailyPnlPct)}</span>
+    <div className="kv"><span>Paper equity{state.lastKnown ? ' (last known)' : ''}</span><strong>{conceal(fmt.usd(snapshot?.account?.equity))}</strong>
+      <span>Daily paper P&amp;L</span><span>{conceal(fmt.pct(snapshot?.account?.dailyPnlPct))}</span>
       <span>Market data</span><span>{state.market} · {fmt.time(snapshot?.dataHealth?.tickersAt)}</span>
       <span>Scanner</span><span>{state.scanner} · {fmt.time(snapshot?.dataHealth?.scanAt)}</span>
       <span>Account response received</span><span>{fmt.time(receivedAt)}</span></div>
     <label>Chart asset <select aria-label="Monitor asset" value={symbol} onChange={e => setSymbol(e.target.value)}>
       <option>BTCUSDT</option><option>ETHUSDT</option><option>SOLUSDT</option></select></label>
     <p className="hint">{symbol} · {chartState}{instrument.error ? ' · last known / request failed' : ''}</p>
-    {instrument.error && <p role="alert" className="err">Chart unavailable: {instrument.error}</p>}
-    {chart?.unavailable ? <Empty>{chart.reason ?? 'Instrument unavailable.'}</Empty> : chart?.quality?.status !== 'FAIL' && chart?.instrument?.symbol === symbol && Array.isArray(chart.candles) && chart.candles.length ? <CandleChart candles={chart.candles} features={chart.features} /> : <Empty>{instrument.loading ? 'Loading observed candles…' : 'No observed chart data.'}</Empty>}
+    {instrument.error && <p role="alert" className="err">Chart unavailable: {conceal(instrument.error, 'details hidden')}</p>}
+    {chart?.unavailable ? <Empty>{conceal(chart.reason ?? 'Instrument unavailable.', 'Instrument unavailable — details hidden.')}</Empty> : chart?.quality?.status !== 'FAIL' && chart?.instrument?.symbol === symbol && Array.isArray(chart.candles) && chart.candles.length ? <CandleChart candles={chart.candles} features={chart.features} /> : <Empty>{instrument.loading ? 'Loading observed candles…' : 'No observed chart data.'}</Empty>}
     <button type="button" onClick={() => { nav(`/terminal/${symbol}`); window.focus(); }}>Open full terminal</button>
-    {critical?.map(a => <div key={a.id} className="alertbar bad" role="alert"><b>{a.title}</b><div>{a.body}</div><span className="hint">{fmt.time(a.ts)}</span></div>)}
+    {critical?.map(a => <div key={a.id} className="alertbar bad" role="alert"><b>{conceal(a.title, `${a.severity} alert — details hidden`)}</b><div>{conceal(a.body)}</div><span className="hint">{fmt.time(a.ts)}</span></div>)}
     {!!relevant?.length && <p className="hint">Showing {critical?.length} of {relevant.length} critical/warning notices returned by the server. <button type="button" className="sm" onClick={() => { nav('/risk'); window.focus(); }}>Review protection incidents</button></p>}
     {alerts.error ? <p role="alert">Critical alerts unavailable — check the main dashboard.</p> : !notices ? <p className="hint">Checking alerts…</p> : !critical?.length && <p className="hint">No critical or warning notifications in the current response.</p>}
     <p className="hint">Simulated paper values are not withdrawable funds. This viewer cannot place orders or change risk limits. A floating window closes with its originating tab.</p>

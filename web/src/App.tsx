@@ -9,6 +9,7 @@ import { CommandPalette } from './palette';
 import { StaleBanner, StatusRibbon } from './StatusRibbon';
 import type { ShellDto } from './status';
 import { PresentationProvider, PresentationSelector } from './presentation';
+import { CockpitPrivacyProvider, CockpitPrivacyToggle, useCockpitPrivacy } from './privacy';
 import { MiniCockpit } from './components/MiniCockpit';
 import { ALL_PAGES } from './nav';
 import { SideNav, GroupTabs, MobileNav } from './Navigation';
@@ -20,7 +21,7 @@ export default function App() {
   useEffect(() => { if (auth?.authenticated) connectStream(); else disconnectStream(); }, [auth?.authenticated]);
   if (!auth) return null;
   if (!auth.authenticated) return <Login setup={auth.setup} codeRequired={!!auth.setupCodeRequired} onDone={() => setAuth({ setup: true, authenticated: true })} />;
-  return <PresentationProvider><Shell onLogout={() => setAuth({ setup: true, authenticated: false })} /></PresentationProvider>;
+  return <PresentationProvider><CockpitPrivacyProvider><Shell onLogout={() => setAuth({ setup: true, authenticated: false })} /></CockpitPrivacyProvider></PresentationProvider>;
 }
 
 function Login({ setup, codeRequired, onDone }: { setup: boolean; codeRequired: boolean; onDone: () => void }) {
@@ -45,6 +46,7 @@ function Login({ setup, codeRequired, onDone }: { setup: boolean; codeRequired: 
 }
 
 function Shell({ onLogout }: { onLogout: () => void }) {
+  const { hidden, conceal } = useCockpitPrivacy();
   // Sign out only after the server confirms the session is gone. A failed request used to show the sign-in screen while
   // the HttpOnly session cookie stayed valid, so a reload silently signed the user back in (MIA-WEB-001).
   const [signOutErr, setSignOutErr] = useState<string | null>(null);
@@ -69,6 +71,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       <StatusRibbon shell={shell} />
       <Search />
       <PresentationSelector />
+      <CockpitPrivacyToggle />
       <MiniCockpit snapshot={shell.data} error={shell.error} receivedAt={shell.updatedAt} />
       <button className="pill" onClick={() => nav('/notifications')} aria-label="Notifications">🔔 {s?.unread ?? 0}</button>
       <button className="ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
@@ -76,12 +79,13 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     </header>
     <main>
       <StaleBanner shell={shell} />
-      {signOutErr && <div className="banner stale" role="alert">Sign-out failed ({signOutErr}). You are still signed in on the server — try again before leaving this device.</div>}
+      {hidden && <div className="banner info" role="status">Cockpit amounts hidden. Other workspaces and exports may still show account details.</div>}
+      {signOutErr && <div className="banner stale" role="alert">Sign-out failed ({conceal(signOutErr, 'details hidden')}). You are still signed in on the server — try again before leaving this device.</div>}
       {s?.control?.emergency === true && <div className="banner stale">⛔ EMERGENCY STOP active — new orders blocked. Existing positions are still monitored. Resolve in the Risk Center.</div>}
       {s?.dataHealth?.stale === true && <div className="banner stale">⚠ Market data is stale or disconnected (last update {fmt.ago(s.dataHealth?.tickersAt)}). New entries are blocked by the data-quality gate.</div>}
       {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}
       {s && !s.policyAccepted && loc.pathname !== '/risk' && <div className="banner info">Risk policy not yet accepted — paper execution stays disabled until you review it in the <a href="/risk" onClick={(e) => { e.preventDefault(); nav('/risk'); }}>Risk Center</a>.</div>}
-      <ErrorLine e={shell.error} />
+      <ErrorLine e={hidden && shell.error ? 'Status request failed — details hidden.' : shell.error} />
       <GroupTabs />
       <PageErrorBoundary key={loc.pathname}><Routes>
         <Route path="/" element={<P.Overview />} />
@@ -108,7 +112,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       { id: 'act:joe', label: 'Ask Trader Joe', group: 'Action', run: () => setJoe(true) },
       { id: 'act:theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`, group: 'Action', run: () => setTheme(theme === 'dark' ? 'light' : 'dark') },
     ]} />}
-    {loc.pathname !== '/joe' && (joe ? <JoeDrawer context={loc.pathname} onClose={() => setJoe(false)} /> : <button className="fab" onClick={() => setJoe(true)}>☺ Ask Trader Joe</button>)}
+    {loc.pathname !== '/joe' && (joe ? <>{conceal(<JoeDrawer context={loc.pathname} onClose={() => setJoe(false)} />, <div className="privacy-joe card" role="dialog" aria-label="Trader Joe"><p>Trader Joe responses hidden while cockpit amounts are hidden.</p><button type="button" onClick={() => setJoe(false)}>Close Trader Joe</button></div>)}</> : <button className="fab" onClick={() => setJoe(true)}>☺ Ask Trader Joe</button>)}
   </div>;
 }
 

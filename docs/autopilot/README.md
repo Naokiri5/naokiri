@@ -11,3 +11,7 @@ For implementation/review read `MILESTONE_CONTRACT.md`, `MILESTONE_REVIEW.md`, `
 Continue with one accepted, testable increment at a time. Use existing `.claude/agents` and project rules where available; agents/tools here did not directly message or run a separate Claude model. Collaboration is through preserved source inputs, actual Claude-authored branch ancestry and this handoff. No external AI credentials are needed for this UI slice.
 
 Integration update: before publication this increment was rebased onto Claude commit `1f1aa5f5a1c39f3b3981c3c75415d316dfac9432`. Preserve its StatusRibbon, monotonic request-start freshness, setup-code authentication, honest sign-out and supervisor/backup work. The inventories above remain a historical assessment of `b624b52`; they are not a current inventory of the later integrated branch. Consult `docs/engineering/AUTOPILOT_100_INVENTORY.md` and the newer audit/soak reports alongside them. The duplicate History implementation was dropped in favor of Claude’s fix; this branch retains its regression test.
+
+## Follow-up: cockpit privacy (ticket007, partial)
+
+[Privacy milestone and remaining surfaces](PRIVACY_MILESTONE.md) adds a shared local masking preference to Overview and the existing inline/PiP monitor. It preserves safety state and labels its limited scope. Other workspaces and exports may still show account details; the original baseline assessment remains frozen.
