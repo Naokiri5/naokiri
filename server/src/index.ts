@@ -16,7 +16,7 @@ import { seedConcepts } from './knowledge/concepts.js';
 
 export async function buildApp() {
   openDb(); seedStrategies(); seedCatalog(); seedConcepts(); resumeIngestion();
-  const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.body.password', 'req.body.current', 'req.body.next'] }, bodyLimit: 256 * 1024 });
+  const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'req.body.password', 'req.body.current', 'req.body.next', 'req.body.otp', 'req.body.accessToken', 'req.body.consoleCode', 'req.body.setupCode'] }, bodyLimit: 256 * 1024 });
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('x-request-id', req.id);
     reply.header('x-content-type-options', 'nosniff'); reply.header('x-frame-options', 'DENY'); reply.header('referrer-policy', 'no-referrer');

@@ -33,6 +33,7 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | Document | Contents |
 |---|---|
 | [`SECURITY.md`](SECURITY.md) | security register (SEC-01 … SEC-14) and controls |
+| [`security/GUARDIAN_SHIELD.md`](security/GUARDIAN_SHIELD.md) | Guardian Shield: seven-layer posture, security events, opt-in pause, 100-ticket gap matrix and incident runbooks |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | design, trust boundaries, technology choices |
 
 ## Features

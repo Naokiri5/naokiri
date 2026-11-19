@@ -5,6 +5,8 @@ import * as privy from '../security/privy.js';
 import * as totp from '../security/totp.js';
 import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
 import { createBackup } from '../ops/backup.js';
+import { assessAll, autoContain, autoPauseEnabled, startGuardian } from '../security/guardian/response.js';
+import { posture, recentGuardianActions } from '../security/guardian/posture.js';
 import { ccxtRoutes } from '../research/ccxtRoutes.js';
 import { defiRoutes } from '../research/defiRoutes.js';
 import { predictionRoutes } from '../prediction/routes.js';
@@ -399,6 +401,16 @@ export async function routes(app: FastifyInstance) {
   // ── Phase 1 workspaces ──
   app.get('/api/qhef', async () => qhefReport());
   app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
+  // Guardian Shield (read-only telemetry; its only possible action is the opt-in risk-reducing pause).
+  startGuardian();
+  app.get('/api/security/guardian', async () => {
+    const items = assessAll();
+    const containment = autoContain(items);
+    const counts = { P0: 0, P1: 0, P2: 0, P3: 0 };
+    for (const i of items) counts[i.assessment.severity]++;
+    return { generatedAt: Date.now(), counts, events: items.slice(0, 100), containment, autoPause: autoPauseEnabled(), layers: posture(), actions: recentGuardianActions(),
+      authority: { canAuthorizeTrading: false, canSignTransactions: false, canWithdraw: false, canResume: false } };
+  });
   app.post('/api/security/sessions/revoke-others', async (req) => { stepUpRiskReducing(req, req.body); return revokeOtherSessions(tokenOf(req)); });
   app.get('/api/discover', async (req) => discover(z.object({ minVolume: z.coerce.number().min(0).default(1e6) }).parse(req.query ?? {}).minVolume));
   const histFilter = (q: any): HistoryFilter => z.object({ from: z.coerce.number().int().positive().optional(), to: z.coerce.number().int().positive().optional(),
