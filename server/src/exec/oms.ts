@@ -202,6 +202,14 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     if (!Number.isFinite(cap) || !Number.isFinite(planned) || planned > cap + 1e-9) {
       return { rejected: persistRejection(`POSITION_NOTIONAL_LIMIT: ${planned.toFixed(2)} exceeds ${capPct}% of current equity (${cap.toFixed(2)})`) };
     }
+    // Trading-risk review: every gate limit (concurrent positions, aggregate open risk, correlation, loss breakers, ...)
+    // is re-evaluated on the state inside this write lock, so a second process that committed in between cannot push the
+    // account past a limit the pre-lock evaluation accepted. evaluateRisk is read-only; a smaller size than planned fails.
+    const locked = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId }, nowTs);
+    const lockedAllowed = locked.decision === 'ALLOW' || (locked.decision === 'NEEDS_REVIEW' && actor === 'owner');
+    if (!lockedAllowed || !locked.sizing || locked.sizing.qty + 1e-12 < qty) {
+      return { rejected: persistRejection(`LOCKED_RISK_${locked.decision}: ${locked.reasonCodes.join('; ') || 'allowed size shrank under the write lock'}`) };
+    }
     const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
     run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);
     crashpoint('entry.order');
@@ -286,7 +294,7 @@ export function decideApproval(orderId: string, approve: boolean) {
 export function expireApprovals() {
   // Codex four-layer: only this paper account's ENTRY approvals. J-04: an unreadable report or a missing/garbage expiry
   // expires the approval (fail closed), and one bad row can no longer stop the rest of the loop.
-  for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.account=? AND o.venue=? AND o.purpose='ENTRY' AND o.status='PENDING_APPROVAL'", PAPER_ACCOUNT, VENUE)) {
+  for (const o of all<any>("SELECT o.id, d.report FROM orders o LEFT JOIN decisions d ON d.id=o.decision_id WHERE o.account=? AND o.venue=? AND o.purpose='ENTRY' AND o.status='PENDING_APPROVAL'", PAPER_ACCOUNT, VENUE)) {
     let r: DecisionReport | null = null; try { r = P<DecisionReport>(o.report); } catch { r = null; }
     if (expiredAt(r?.consensus?.expiresAt)) tx(() => { assertWriteFence(); run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed or unreadable', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), o.id); });
   }

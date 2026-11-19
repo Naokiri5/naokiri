@@ -5,7 +5,7 @@ import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, type ControlState } from '../src/core/mode.js';
 import { cashBalance, ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js';
-import { submitEntry, monitorPositions, queueForApproval } from '../src/exec/oms.js';
+import { submitEntry, monitorPositions, queueForApproval, expireApprovals } from '../src/exec/oms.js';
 import { evaluateRisk } from '../src/risk/gate.js';
 import { listIncidents } from '../src/exec/incidents.js';
 import { bus } from '../src/core/bus.js';
@@ -111,6 +111,35 @@ describe('paper entry rechecks mutable state under its write lock', () => {
       return result;
     } finally { setCrashHook(null); }
   }
+
+  it('re-runs every risk-gate limit under the lock: positions opened by another process meanwhile block the entry', () => {
+    const others = ['SOLUSDT', 'ADAUSDT', 'XRPUSDT', 'DOTUSDT'].map((sym, i) => seedInstrument(sym, { seed: 10 + i }) as any);
+    const proposed = report(id, last, Date.now() + 60_000);
+    setCrashHook(point => {
+      if (point !== 'entry.preTx') return;
+      setCrashHook(null);
+      // Another process commits four small open positions between sizing and this lock (maxConcurrentPositions = 4).
+      for (const [i, o] of others.entries()) {
+        run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,planned_risk) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+          `other-${i}`, PAPER_ACCOUNT, o.inst.id, 'crypto', 'LONG', 'trend_pullback', 0.0001, o.last, o.last * 0.97, o.last * 0.97, '{}', 'OPEN', Date.now(), 0, 0, 0.01);
+      }
+    });
+    try {
+      const result = submitEntry(proposed, 'bot');
+      expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('LOCKED_RISK_DENY') });
+      expect(result.reason).toContain('MAX_CONCURRENT_POSITIONS');
+    } finally { setCrashHook(null); }
+    expect(get('SELECT id FROM fills')).toBeUndefined();
+    expect(cashBalance()).toBe(10_000);
+  });
+
+  it('expires a pending approval whose decision record is missing (no orphan pending order)', () => {
+    const proposed = report(id, last, Date.now() + 60_000);
+    proposed.decision = 'APPROVED_FOR_USER_CONFIRMATION';
+    const orderId = queueForApproval(proposed)!; // no decisions row was ever written for it
+    expireApprovals();
+    expect(get<{ status: string }>('SELECT status FROM orders WHERE id=?', orderId)).toMatchObject({ status: 'EXPIRED' });
+  });
 
   it('re-derives the position-size cap from current equity under the lock (CodeRabbit #23)', () => {
     const proposed = report(id, last, Date.now() + 60_000);

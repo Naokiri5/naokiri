@@ -14,7 +14,7 @@ export const ackGroup = (g: { source: string; title: string; severity: string; a
  */
 export function CriticalStrip() {
   const { data, error, reload } = useApi<CriticalSummary>('/api/notifications/critical', { topics: ['notification', 'risk'], every: 15_000 });
-  const top = data?.top[0];
+  const top = data?.top?.[0];
   // A failed refresh never leaves an older "no criticals" answer standing: without a confirmed summary the status is unknown.
   if (!data || !top) return error ? <div className="alertbar warn crit-strip" role="status">Critical notification status unknown ({error}). <Link to="/notifications">Open notifications</Link></div> : null;
   return <div className="alertbar bad crit-strip" role="alert" aria-label="Unacknowledged critical notifications">

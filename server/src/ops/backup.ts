@@ -28,9 +28,9 @@ import { getSetting, setSetting } from '../core/settings.js';
 const MAGIC = Buffer.from('MIAB1');
 const PREFIX = 'mia-';
 export interface BackupManifest { file: string; createdAt: number; schema: number; bytes: number; sha256: string; encrypted: boolean; format: 'sqlite' | 'MIAB1-aes-256-gcm' }
-export interface VerifyResult { ok: boolean; file: string; createdAt: number | null; checks: { name: string; ok: boolean; detail: string }[] }
+export interface VerifyResult { ok: boolean; file: string; createdAt: number | null; checks: { name: string; ok: boolean; detail: string }[]; sha256?: string }
 /** A recorded verification, bound to the exact bytes that were verified (CodeRabbit #14: a PASS must not survive a changed file). */
-export interface RecordedVerification extends VerifyResult { at: number; sha256: string | null; bytes: number | null; mtimeMs: number | null; recordError?: string }
+export interface RecordedVerification extends Omit<VerifyResult, 'sha256'> { at: number; sha256: string | null; bytes: number | null; mtimeMs: number | null; recordError?: string }
 const restoreWorkspace = () => mkdtempSync(join(tmpdir(), 'mia-verify-'));
 
 export const backupDir = () => process.env.MIA_BACKUP_DIR || join(config.dataDir, 'backups');
@@ -117,12 +117,13 @@ export function pruneBackups(dir = backupDir(), keep = backupKeep()): string[] {
 export function verifyBackup(file: string, key: Buffer | null = backupKey(), workerWorkspace?: string): VerifyResult {
   const checks: VerifyResult['checks'] = []; const add = (name: string, ok: boolean, detail: string) => { checks.push({ name, ok, detail }); return ok; };
   let createdAt: number | null = null;
-  const done = () => ({ ok: checks.every((c) => c.ok), file: basename(file), createdAt, checks });
+  let verifiedSha: string | undefined;
+  const done = () => ({ ok: checks.every((c) => c.ok), file: basename(file), createdAt, checks, ...(verifiedSha ? { sha256: verifiedSha } : {}) });
   let m: BackupManifest;
   try { m = JSON.parse(readFileSync(`${file}.json`, 'utf8')); } catch { add('manifest', false, 'manifest missing or unreadable'); return done(); }
   if (!add('manifest', m.file === basename(file), m.file === basename(file) ? 'present' : 'manifest names a different file')) return done();
   createdAt = Number.isFinite(m.createdAt) ? m.createdAt : null;
-  try { if (!add('checksum', sha256File(file) === m.sha256, 'sha256 of stored file')) return done(); }
+  try { const h = sha256File(file); if (!add('checksum', h === m.sha256, 'sha256 of stored file')) return done(); verifiedSha = h; }
   catch { add('checksum', false, 'backup file missing or unreadable'); return done(); }
   let plainPath = file;
   let workspace = workerWorkspace;
@@ -224,7 +225,8 @@ export async function maybeScheduledBackup(nowTs = Date.now()): Promise<(BackupM
  */
 export function recordVerification(file: string, result: VerifyResult, nowTs = Date.now()): RecordedVerification {
   let sha256: string | null = null; let bytes: number | null = null; let mtimeMs: number | null = null;
-  if (result.ok) { try { const st = statSync(file); sha256 = sha256File(file); bytes = st.size; mtimeMs = st.mtimeMs; } catch { /* unreadable now: no binding, so status cannot PASS */ } }
+  // Bind to the checksum the verification itself computed (no second read after the check), plus size and mtime.
+  if (result.ok && result.sha256) { try { const st = statSync(file); sha256 = result.sha256; bytes = st.size; mtimeMs = st.mtimeMs; } catch { /* unreadable now: no binding, so status cannot PASS */ } }
   const lastVerify: RecordedVerification = { ...result, at: nowTs, sha256, bytes, mtimeMs, checks: result.checks.map((c) => c.name === 'open' ? { ...c, detail: 'cannot read snapshot' } : c) };
   try {
     setSetting('backup.lastVerify', lastVerify);

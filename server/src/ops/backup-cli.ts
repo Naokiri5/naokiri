@@ -10,7 +10,7 @@ import { backupDir, backupKey, createBackup, listBackups, liveDatabasePath, prun
 import { closeDb } from '../db/db.js';
 
 const [cmd, arg] = process.argv.slice(2);
-function print(v: VerifyResult) {
+function print(v: Omit<VerifyResult, 'sha256'>) {
   for (const c of v.checks) console.log(`  ${c.ok ? '✓' : '✗'} ${c.name}: ${c.detail}`);
   console.log(v.ok ? `Restore check passed: ${v.file}` : `Restore check FAILED: ${v.file}`);
 }

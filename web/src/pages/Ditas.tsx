@@ -109,20 +109,34 @@ export function Ditas() {
 }
 
 /** Read-only paper execution quality (actual paper OMS orders and fills only; never hypothetical Twin results). */
+type ExecutionQualityData = {
+  label: 'PAPER';
+  orders: Array<{
+    orderId: string; instrumentId: string; strategyId: string | null; side: string; purpose: string;
+    status: string; rejectReason: string | null; filledQty: number; requestedQty: number;
+    averageFillPrice: number | null; expectedPrice: number | null; adverseSlippageBps: number | null;
+    fees: number; fillCount: number; firstFillDelayMs: number | null; lastRecordedFillDelayMs: number | null;
+  }>;
+  limitations: string[];
+};
+
+/** Read-only paper execution quality (actual paper OMS orders and fills only; never hypothetical Twin results). */
 function ExecutionQuality({ refreshKey }: { refreshKey: number }) {
-  const { data, error, loading, reload } = useApi<any>('/api/ditas/execution?limit=100', { topics: ['order', 'position'] });
+  const { data, error, loading, reload } = useApi<ExecutionQualityData>('/api/ditas/execution?limit=100', { topics: ['order', 'position'] });
   useEffect(() => { if (refreshKey) reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the page Refresh button also reloads this panel
-  const rows: any[] = data?.orders ?? [];
+  const rows = data?.orders ?? [];
   return <Card title="Paper execution quality" right={<Badge v={data?.label ?? 'PAPER'} tone="b-violet" />} flush>
     <ErrorLine e={error} />
+    {error && data && <div className="hint warn">Refresh failed; the previous records are shown.</div>}
     {!data && loading && <div role="status" aria-live="polite"><Empty>Loading paper execution records…</Empty></div>}
-    <div className="tablewrap"><table><thead><tr><th>Order</th><th>Purpose</th><th>Status</th><th>Filled</th><th>Avg fill</th><th>Expected</th><th>Adverse slippage</th><th>Fees</th><th>First fill</th></tr></thead><tbody>
-      {rows.map((o) => <tr key={o.orderId}><td><b>{o.instrumentId.split(':').pop()}</b> <Badge v={o.side} /><div className="hint mono">{o.orderId}</div></td><td>{o.purpose}</td><td><Badge v={o.status} /></td>
-        <td className="mono">{fmt.num(o.filledQty, 6)} / {fmt.num(o.requestedQty, 6)}</td><td className="mono">{fmt.px(o.averageFillPrice)}</td><td className="mono">{fmt.px(o.expectedPrice)}</td>
+    <div className="tablewrap"><table><thead><tr><th>Order</th><th>Strategy</th><th>Purpose</th><th>Status</th><th>Filled</th><th>Avg fill</th><th>Expected</th><th>Adverse slippage</th><th>Fees</th><th>First fill delay</th><th>Last recorded fill delay</th></tr></thead><tbody>
+      {rows.map((o) => <tr key={o.orderId}><td><b>{o.instrumentId.split(':').pop()}</b> <Badge v={o.side} /><div className="hint mono">{o.orderId}</div></td><td>{o.strategyId || 'Strategy unavailable'}</td><td>{o.purpose}</td><td><Badge v={o.status} />{o.rejectReason && <div className="hint">{o.rejectReason}</div>}</td>
+        <td className="mono">{fmt.num(o.filledQty, 6)} / {fmt.num(o.requestedQty, 6)}<div className="hint">{o.fillCount} {o.fillCount === 1 ? 'fill' : 'fills'}</div></td><td className="mono">{fmt.px(o.averageFillPrice)}</td><td className="mono">{fmt.px(o.expectedPrice)}</td>
         <td className="mono">{o.adverseSlippageBps == null ? <span className="hint">n/a</span> : `${fmt.num(o.adverseSlippageBps, 1)} bps`}</td><td className="mono">{fmt.usd(o.fees, 4)}</td>
-        <td className="mono">{o.firstFillDelayMs == null ? '—' : `${o.firstFillDelayMs} ms`}</td></tr>)}
+        <td className="mono">{o.firstFillDelayMs == null ? '—' : `${o.firstFillDelayMs} ms`}</td><td className="mono">{o.lastRecordedFillDelayMs == null ? '—' : `${o.lastRecordedFillDelayMs} ms`}</td></tr>)}
     </tbody></table></div>
     {data && !rows.length && <Empty>No paper orders yet.</Empty>}
+    {data && <div className="hint" style={{ padding: '8px 28px' }}>Fill delays are local recording delays, not exchange acknowledgement times. The last recorded fill does not imply order completion.</div>}
     {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
   </Card>;
 }

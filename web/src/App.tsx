@@ -16,6 +16,21 @@ import { CriticalStrip } from './CriticalStrip';
 import { SideNav, GroupTabs, MobileNav } from './Navigation';
 
 
+/**
+ * A partial or older-shape auth response must never blank the app (Codex CodeRabbit PR #9 principle). Missing fields
+ * fail closed: not authenticated, Privy off, passphrase form. The server stays authoritative for every action.
+ */
+const PRIVY_OFF: AuthState['privy'] = { enabled: false, appId: null, linked: false, ownerConfigured: false, embeddedWallets: false, walletActions: 'LOCKED' };
+function normalizeAuthState(raw: Partial<AuthState> | null | undefined): AuthState {
+  const r = raw ?? {};
+  return {
+    ...r,
+    mode: r.mode === 'privy' ? 'privy' : 'passphrase',
+    setup: r.setup === true,
+    authenticated: r.authenticated === true,
+    privy: r.privy && typeof r.privy === 'object' ? { ...PRIVY_OFF, ...r.privy } : PRIVY_OFF,
+  };
+}
 type Boot = { s: 'loading' } | { s: 'error'; network: boolean; detail: string } | { s: 'ready'; auth: AuthState };
 
 export default function App() {
@@ -23,7 +38,8 @@ export default function App() {
   // Asks the server who is signed in. A failure is shown as a server problem with a retry: it is never treated as
   // "signed out" (which hid real outages) and never opens the dashboard.
   const load = useCallback(() => {
-    api<AuthState>('/api/auth/state').then((a) => {
+    api<Partial<AuthState>>('/api/auth/state').then((raw) => {
+      const a = normalizeAuthState(raw);
       authInfo.mode = a.mode; authInfo.stepUp = a.stepUp ?? 'unavailable';
       setBoot({ s: 'ready', auth: a });
     }).catch((e) => setBoot({ s: 'error', network: !(e instanceof ApiError), detail: e?.message ?? 'unknown error' }));
@@ -73,7 +89,7 @@ function Login({ setup, codeRequired, privy, googleSignIn, onDone }: { setup: bo
         {!setup && codeRequired && <label className="col" style={{ gap: 4 }}>Setup code<input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" spellCheck={false} placeholder="XXXXX-XXXXX-XXXXX-XXXXX" />
           <span className="hint">Creating the owner needs the one-time code printed in the MIA server console (the terminal running <code>npm start</code>, or the service log).</span></label>}
         <ErrorLine e={err} /><button className="primary" type="submit">{setup ? 'Sign in' : 'Create owner'}</button>
-        {setup && googleSignIn && <button type="button" onClick={signInWithGoogle} disabled={googleBusy}>{googleBusy ? 'Opening Google…' : 'Sign in with Google'}</button>}
+        {setup && googleSignIn && <button type="button" onClick={signInWithGoogle} disabled={googleBusy}>{googleBusy ? 'Opening Google…' : 'Continue with Google'}</button>}
         {setup && privy.enabled && privy.linked && <>
           <div className="hint" style={{ textAlign: 'center' }}>or</div>
           {/* Codex: a Privy load failure stays inside this card and never breaks passphrase sign-in. */}

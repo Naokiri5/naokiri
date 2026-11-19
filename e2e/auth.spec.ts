@@ -32,8 +32,9 @@ test('existing owner sign-in has no setup-code field', async ({ page }) => {
 
 test('the passphrase form stays available if the optional Privy bundle fails', async ({ page }) => {
   await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
-  await page.route('**/api/auth/state', route => route.fulfill({ json: { setup: true, authenticated: false } }));
-  await page.route('**/api/auth/privy/config', route => route.fulfill({ json: { enabled: true, linked: true, appId: 'fixture', walletActions: 'LOCKED' } }));
+  // Unified build: Privy settings arrive in /api/auth/state (passphrase mode shows Privy as an optional card).
+  await page.route('**/api/auth/state', route => route.fulfill({ json: { mode: 'passphrase', setup: true, authenticated: false,
+    privy: { enabled: true, linked: true, appId: 'fixture', ownerConfigured: true, embeddedWallets: false, walletActions: 'LOCKED' } } }));
   await page.route('**/assets/PrivyPanels-*.js', route => route.abort());
   await page.route('**/api/auth/login', route => route.fulfill({ status: 403, json: { error: 'passphrase submitted' } }));
 
