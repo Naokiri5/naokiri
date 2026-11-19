@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { generateKeyPair, exportJWK, SignJWT } from 'jose';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { generateKeyPair, exportJWK, exportSPKI, SignJWT, type JSONWebKeySet } from 'jose';
 import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { failureGate } from '../src/core/ratelimit.js';
-import { _setPrivyKeyForTests, contentSecurityPolicy } from '../src/security/privy.js';
+import { _setPrivyKeyForTests, contentSecurityPolicy, verifyPrivyAccessToken } from '../src/security/privy.js';
 
 /**
  * Privy sign-in, offline: tokens are signed with a locally generated ES256 key served through a local JWKS, exactly
@@ -12,15 +12,18 @@ import { _setPrivyKeyForTests, contentSecurityPolicy } from '../src/security/pri
 const APP = 'cmtestprivyapp00000000001'; // 25 chars, like a real Privy app id
 const OWNER = 'did:privy:owner0000000001';
 const PW = 'privy route owner';
+const NOW_SECONDS = Date.parse('2026-11-10T00:00:00Z') / 1000;
 const json = { 'content-type': 'application/json', 'x-mia-csrf': '1' };
 let priv: CryptoKey; let otherPriv: CryptoKey;
 const token = (o: { sub?: string; aud?: string; iss?: string; exp?: number; key?: CryptoKey } = {}) =>
   new SignJWT({ sid: 'sess_1' }).setProtectedHeader({ alg: 'ES256', kid: 'k1' }).setSubject(o.sub ?? OWNER)
-    .setIssuer(o.iss ?? 'privy.io').setAudience(o.aud ?? APP).setIssuedAt().setExpirationTime(o.exp ?? Math.floor(Date.now() / 1000) + 3600)
+    .setIssuer(o.iss ?? 'privy.io').setAudience(o.aud ?? APP).setIssuedAt(NOW_SECONDS).setExpirationTime(o.exp ?? NOW_SECONDS + 3600)
     .sign(o.key ?? priv);
 
 describe('Privy sign-in', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
+  let jwks: JSONWebKeySet;
+  let verificationKey: string;
   const post = (url: string, payload: unknown, withCookie = false) => app.inject({ method: 'POST', url, headers: withCookie ? { ...json, cookie } : json, payload: payload as any });
   const linkOwner = async () => {
     const result = await post('/api/security/privy/link', { accessToken: await token(), password: PW }, true);
@@ -30,15 +33,22 @@ describe('Privy sign-in', () => {
     process.env.MIA_PRIVY_APP_ID = APP;
     const k = await generateKeyPair('ES256'); priv = k.privateKey as CryptoKey;
     otherPriv = (await generateKeyPair('ES256')).privateKey as CryptoKey;
-    _setPrivyKeyForTests({ keys: [{ ...(await exportJWK(k.publicKey)), kid: 'k1', alg: 'ES256', use: 'sig' }] });
+    jwks = { keys: [{ ...(await exportJWK(k.publicKey)), kid: 'k1', alg: 'ES256', use: 'sig' }] };
+    verificationKey = await exportSPKI(k.publicKey);
+    _setPrivyKeyForTests(jwks);
   });
   beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW_SECONDS * 1000);
     freshDb(); failureGate.reset(); app = await buildApp();
     const setup = await post('/api/auth/setup', ownerSetupPayload(PW));
     expect(setup.statusCode).toBe(200);
     cookie = String(setup.headers['set-cookie']).split(';')[0];
   });
-  afterEach(async () => { await app.close(); });
+  afterEach(async () => {
+    vi.useRealTimers();
+    await app.close();
+  });
   afterAll(() => { delete process.env.MIA_PRIVY_APP_ID; _setPrivyKeyForTests(null); });
 
   it('public config exposes only the app id and state; wallet actions are LOCKED', async () => {
@@ -64,11 +74,21 @@ describe('Privy sign-in', () => {
     const s = await app.inject({ url: '/api/auth/state', headers: { cookie: c.split(';')[0] } });
     expect(s.json().authenticated).toBe(true);
   });
+  it('verifies a token with the configured PEM public key', async () => {
+    vi.stubEnv('MIA_PRIVY_VERIFICATION_KEY', verificationKey);
+    _setPrivyKeyForTests(null);
+    try {
+      expect(await verifyPrivyAccessToken(await token())).toBe(OWNER);
+    } finally {
+      _setPrivyKeyForTests(jwks);
+      vi.unstubAllEnvs();
+    }
+  });
   it.each([
     ['another Privy user', () => token({ sub: 'did:privy:someoneelse0001' })],
     ['a token for another app', () => token({ aud: 'cmanotherprivyapp00000001' })],
     ['a token from another issuer', () => token({ iss: 'evil.example' })],
-    ['an expired token', () => token({ exp: Math.floor(Date.now() / 1000) - 60 })],
+    ['an expired token', () => token({ exp: NOW_SECONDS - 60 })],
     ['a token signed with a different key', () => token({ key: otherPriv })],
     ['a non-Privy subject', () => token({ sub: 'owner' })],
   ])('refuses %s', async (_name, make) => {
