@@ -179,9 +179,11 @@ export function releaseGates(report?: unknown) {
   const joe = testGate('G04');
   g.push({ id: 'G04', name: 'Trader Joe factuality & authorization tests', ...joe, status: 'PENDING', evidence: `${joe.evidence}; authorization checks do not certify LLM factuality; human review is required` });
   const rec = reconcile();
-  g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile', status: rec.ok ? 'PASS' : 'FAIL', evidence: rec.detail });
+  // J-02 (100-agent audit): with nothing to reconcile there is no evidence, so PENDING rather than PASS.
+  const hasTrades = rec.closedPositions > 0 || (get<{ n: number }>("SELECT COUNT(*) n FROM fills")?.n ?? 0) > 0;
+  g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile', status: !rec.ok ? 'FAIL' : hasTrades ? 'PASS' : 'PENDING', evidence: hasTrades ? rec.detail : 'no paper fills yet: nothing to reconcile' });
   const ac = verifyAuditChain();
-  g.push({ id: 'G06', name: 'Audit log integrity', status: ac.ok ? 'PASS' : 'FAIL', evidence: `${ac.entries} hash-chained entries${ac.ok ? ' verified' : `, broken at ${ac.brokenAt}`}` });
+  g.push({ id: 'G06', name: 'Audit log integrity', status: !ac.ok ? 'FAIL' : ac.entries > 0 ? 'PASS' : 'PENDING', evidence: `${ac.entries} hash-chained entries${ac.ok ? ' verified' : `, broken at ${ac.brokenAt}`}` });
   g.push({ id: 'G07', name: 'Wallet permissions & signing isolation security tests', status: 'NOT_IMPLEMENTED', evidence: 'No signer exists in this build (by design). Requires isolated signer + external security test.' });
   g.push({ id: 'G08', name: 'No unresolved critical/high security findings', status: 'NOT_CERTIFIED', evidence: 'Requires independent security review.' });
   g.push({ id: 'G09', name: 'Emergency shutdown & recovery procedures pass', ...testGate('G09') });

@@ -8,8 +8,16 @@ import { dirname, join } from 'node:path';
  * Output is a list of page-tagged text units in a light markdown form ("# Heading", "$$ formula $$", "| table |").
  */
 export const EXTRACTOR_VERSION = 'kb-extract@1.0.0';
+/** A-01: a malformed value (e.g. an inline comment copied from .env.example) used to give NaN and a cryptic Fastify
+ *  registration error at startup. Validate and name the setting instead. */
+function uploadMb() {
+  const raw = process.env.MIA_KB_MAX_UPLOAD_MB; if (raw == null || raw === '') return 60;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 1024) throw new Error(`MIA_KB_MAX_UPLOAD_MB must be an integer between 1 and 1024 (got "${raw}")`);
+  return n;
+}
 export const LIMITS = {
-  maxUploadBytes: Number(process.env.MIA_KB_MAX_UPLOAD_MB ?? 60) * 1024 * 1024,
+  maxUploadBytes: uploadMb() * 1024 * 1024,
   maxZipEntries: 5_000, maxZipTotalBytes: 300 * 1024 * 1024, maxZipEntryBytes: 80 * 1024 * 1024,
   maxPdfPages: 3_000, maxTextChars: 40_000_000,
 };

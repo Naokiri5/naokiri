@@ -67,6 +67,16 @@ describe('QCI (Part 29)', () => {
     expect(rec.method.id).toBe('domain-capped-weighted-v3');
     expect(['NO_QUORUM', 'VETOED']).toContain(rec.state);
   });
+  it('D-06: a consensus that cannot be stored never permits a trade', async () => {
+    const { run } = await import('../src/db/db.js');
+    const { inst, last } = seedInstrument('LINKUSDT', { seed: 7 });
+    run("CREATE TRIGGER block_consensus BEFORE INSERT ON consensus_records BEGIN SELECT RAISE(ABORT, 'disk full (test)'); END");
+    try {
+      const rec = await runConsensus(buildContext(candidate(inst.id, last)));
+      expect(rec.state).toBe('NO_QUORUM');
+      expect(rec.reason_codes.join()).toMatch(/CONSENSUS_NOT_PERSISTED/);
+    } finally { run('DROP TRIGGER block_consensus'); }
+  });
   it('stale data fails closed', async () => {
     const { inst, last } = seedInstrument('ADAUSDT', { seed: 4 });
     market.tickers.get(inst.id)!.receivedAt = Date.now() - 10 * 60_000;

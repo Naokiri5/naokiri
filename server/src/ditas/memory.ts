@@ -74,7 +74,7 @@ export function blobRefs(payloadText: string): string[] {
 }
 
 function eventRow(r: any): MemoryEvent { return { id: r.id, kind: r.kind, instrumentId: r.instrument, strategyId: r.strategy, decisionId: r.decision_id, createdAt: r.created_at, snapshotId: r.snapshot_id, parentEventId: r.parent_event_id, payload: P(r.payload), hash: r.hash }; }
-function hashEvent(r: any) {
+export function hashEvent(r: any) {
   return sha256(J([r.id, r.dedupe_key, r.created_at, r.kind, r.instrument, r.strategy, r.decision_id, r.snapshot_id, r.parent_event_id, r.payload, r.prev_hash]));
 }
 
@@ -116,9 +116,14 @@ export function memoryDetail(id: string) {
 }
 /** Verifies the event chain and snapshot hashes; rows may come from a backup snapshot instead of the live database. */
 export function verifyMemory(events: any[] = all<any>('SELECT * FROM ditas_events ORDER BY seq'), snapshots: any[] = all<any>('SELECT * FROM ditas_snapshots'),
-  blobs: any[] = all<any>('SELECT * FROM ditas_blobs')) {
+  blobs: any[] = all<any>('SELECT * FROM ditas_blobs'), twinRuns: any[] = all<any>('SELECT * FROM ditas_twin_runs')) {
   let prev = 'GENESIS';
   for (const r of events) { if (r.prev_hash !== prev || r.hash !== hashEvent(r)) return { ok: false, brokenAt: r.id }; prev = r.hash; }
+  // G-02 / G-03 (100-agent audit): a twin run's stored hash must match its result, and every snapshot an event
+  // references must be present (a backup with the snapshots removed used to verify).
+  for (const t of twinRuns) if (t.hash !== sha256(t.result)) return { ok: false, brokenAt: `twin:${t.id}` };
+  const snapIds = new Set(snapshots.map((s) => s.id));
+  for (const r of events) if (r.snapshot_id && !snapIds.has(r.snapshot_id)) return { ok: false, brokenAt: `${r.id} (missing snapshot ${r.snapshot_id})` };
   const blobHashes = new Set<string>();
   for (const b of blobs) { if (sha256(b.payload) !== b.hash) return { ok: false, brokenAt: `blob:${b.hash}` }; blobHashes.add(b.hash); }
   for (const r of snapshots) {

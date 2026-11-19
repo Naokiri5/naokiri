@@ -64,10 +64,14 @@ export function verifyPassphrase(pass: unknown, client: string, purpose: string,
 export function login(pass: string, ip: string, opts: { directLocal?: boolean } = {}) {
   const client = opts.directLocal ? `direct-local:${ip}` : ip;
   verifyPassphrase(pass, client, 'login', { exemptFromGlobalLockout: opts.directLocal });
+  return createSession(ip, 'passphrase');
+}
+/** Opens an owner session. Callers must have authenticated the owner first (passphrase, or a linked Privy identity). */
+export function createSession(ip: string, method: 'passphrase' | 'privy') {
   run('DELETE FROM sessions WHERE expires_at <= ?', Date.now()); // expired sessions are otherwise kept forever
   const token = randomBytes(32).toString('hex');
   run('INSERT INTO sessions(token_hash, created_at, expires_at) VALUES (?,?,?)', sha256(token), Date.now(), Date.now() + SESSION_MS);
-  audit('owner', 'auth.login', { ip }); return token;
+  audit('owner', 'auth.login', method === 'passphrase' ? { ip } : { ip, method }); return token;
 }
 export function validSession(token?: string) {
   if (!token) return false;
@@ -75,8 +79,8 @@ export function validSession(token?: string) {
   return !!r && r.expires_at > Date.now();
 }
 export function logout(token?: string) { if (token) run('DELETE FROM sessions WHERE token_hash=?', sha256(token)); }
-export function changePassword(oldP: string, newP: string, client = 'local') {
-  verifyPassphrase(oldP, client, 'password.change');
+export function changePassword(oldP: string, newP: string, client = 'local', opts: { exemptFromGlobalLockout?: boolean } = {}) {
+  verifyPassphrase(oldP, client, 'password.change', opts);
   if (newP.length < 10) throw new Error('passphrase must be at least 10 characters');
   const salt = randomBytes(16).toString('hex'); setSetting('owner', { salt, hash: scryptSync(newP, salt, 64).toString('hex'), createdAt: Date.now() });
   run('DELETE FROM sessions'); audit('owner', 'auth.password.change');

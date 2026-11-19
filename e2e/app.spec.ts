@@ -39,6 +39,14 @@ test('owner setup and sign-in', async () => {
   await expect(page.getByText('Market data is stale or disconnected')).toBeVisible(); // offline ⇒ honest stale banner
 });
 
+test('Discover: Vike research tab is research-only and shows PENDING_CREDENTIALS without a server key', async () => {
+  await page.goto('/discover');
+  await page.getByRole('tab', { name: 'Vike research' }).click();
+  await expect(page.getByText(/research only/i).first()).toBeVisible();
+  await expect(page.getByText('PENDING CREDENTIALS')).toBeVisible(); // Badge renders underscores as spaces
+  await expect(page.getByText(/MIA_VIKE_API_KEY/)).toBeVisible();
+});
+
 test('status ribbon tells the truth about an offline server', async () => {
   const ribbon = page.getByRole('group', { name: 'Autopilot status' });
   await expect(ribbon.locator('[data-seg=live]')).toHaveText(/LOCKED/);
