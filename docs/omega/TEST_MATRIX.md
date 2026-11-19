@@ -18,6 +18,8 @@
 | Second review 9 | Hangul fillers, stacked marks and separators stripped; NFC kept; code-point truncation; non-ASCII ticker note | same | pass; fail without the fix |
 | Second review 10 | Fractional or huge trade counts are malformed (REJECT) and shown as 0 | same | pass; fails without the fix |
 | Second review 11 | `solana/` imports no npm packages (signer SDKs blocked) | `server/test/import-boundaries.test.ts` | pass |
+| Follow-up 13 | Only SOL/USDC/USDT-quoted pools are ranked (by mint, not symbol); others are skipped and counted | `server/test/solana-hunter-review.test.ts` | pass; fails without the fix |
+| Follow-up 14 | DEX Screener symbols, names and `dexId` are cleaned at ingestion; quote address kept only if well-formed | `server/test/untrusted-provider-text.test.ts` | pass; fails without the fix |
 
 Full-suite results for this branch are recorded in the PR description.
 

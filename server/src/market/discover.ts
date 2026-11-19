@@ -3,6 +3,7 @@ import { isEligibleSpot } from './fabric.js';
 import { assessCexAsset, assessDexPair } from '../safety/safety.js';
 import { classifyRegime } from '../regime/regime.js';
 import { rankSolanaPairs } from '../solana/hunting.js';
+import { isTrustedSolanaQuote } from '../solana/quotes.js';
 
 /** Solana watchlist freshness: DEX Screener cache older than this, missing, or future-dated (clock jump) is stale. */
 const SOLANA_HUNTER_MAX_AGE_MS = 5 * 60_000;
@@ -12,6 +13,8 @@ const SOLANA_HUNTER_NOTE = 'DEX Screener watchlist only. Mint checks, holder dat
  * Explicitly fresh, read-only Solana watchlist: never an order-authorizing signal (Omega PR-01).
  * One clock reading; a future-dated fetch is stale too (fail closed). The ranker runs on untrusted provider rows, so a
  * failure there empties only this block (`rankerFailed`) instead of turning the whole Discover response into a 500.
+ * Only pools quoted against SOL, USDC or USDT are ranked: another quote token makes `liquidityUsd` untrustworthy, so
+ * those pools are skipped and counted (`skippedUntrustedQuote`), never shown as WATCH.
  */
 export function solanaWatchlist(nowMs: number) {
   const asOf = market.dexFetchedAt || null;
@@ -19,10 +22,16 @@ export function solanaWatchlist(nowMs: number) {
   const fresh = age !== null && age >= 0 && age <= SOLANA_HUNTER_MAX_AGE_MS;
   let candidates: ReturnType<typeof rankSolanaPairs> = [];
   let rankerFailed = false;
+  let skippedUntrustedQuote = 0;
   if (fresh) {
-    try { candidates = rankSolanaPairs(market.dex, { nowMs }); } catch { rankerFailed = true; }
+    try {
+      const solana = market.dex.filter((p) => typeof p.chainId === 'string' && p.chainId.toLowerCase() === 'solana');
+      const trusted = solana.filter((p) => isTrustedSolanaQuote(p.quoteAddress));
+      skippedUntrustedQuote = solana.length - trusted.length;
+      candidates = rankSolanaPairs(trusted, { nowMs });
+    } catch { rankerFailed = true; candidates = []; }
   }
-  return { asOf, stale: !fresh, rankerFailed, candidates, executionReady: false as const, note: SOLANA_HUNTER_NOTE };
+  return { asOf, stale: !fresh, rankerFailed, skippedUntrustedQuote, candidates, executionReady: false as const, note: SOLANA_HUNTER_NOTE };
 }
 
 /** Asset Discovery (Part 10 "Discover"): ranked lists drawn only from live feeds. */

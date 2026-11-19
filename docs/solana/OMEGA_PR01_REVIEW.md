@@ -39,10 +39,16 @@ No CRITICAL, HIGH or MEDIUM findings. The LOW findings below were confirmed agai
 
 Kept as is, with reasons:
 - **Duplication.** No real duplication. `clamp` in `hunting.ts` is an exact copy of `core/util.ts` `clamp`, kept so the owner's starter stays close to its original bytes. The 5-minute DEX limit in `discover.ts` and `hunt/ranker.ts` stays separate: the hunt ranker checks per-observation timestamps with 2 s future skew, the watchlist checks the cache age with no future skew, and `market/` should not import from `hunt/`.
-- **Pre-existing, outside this PR:** the older "New DEX tokens" tab shows raw `baseSymbol`/`baseName` (React escapes them, but bidi spoofing is possible). Sanitizing once in `providers/dexscreener.ts` `mapPair` is the right fix and belongs in its own PR.
+
+## Follow-ups closed in the same PR (fourth commit)
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| 13 | Quote-token liquidity (security review; the risk was unconfirmed but cheap to close). `liquidityUsd` depends on how DEX Screener values the pool's quote token, and the quote token was never checked, so a pool quoted against an attacker-minted token could carry a meaningless liquidity figure. | `mapPair` now records `quoteAddress` (only a well-formed address, otherwise empty). `solanaWatchlist()` ranks only Solana pools quoted in wrapped SOL, USDC or USDT (`server/src/solana/quotes.ts`, by mint address, never by symbol). Other pools are skipped and counted in `skippedUntrustedQuote`, and the tab says how many. A missing quote counts as untrusted. | `solana-hunter-review.test.ts` (a "USDC"-labelled pool with an unknown mint and huge liquidity is skipped) |
+| 14 | The older "New DEX tokens" tab rendered raw `baseSymbol`/`baseName` (bidi spoofing possible; React already escaped HTML). | Token text is cleaned once, where it enters MIA: `mapPair` applies `displayText` (now in `core/util.ts`, the single implementation; the ranker imports it) to symbols, names and `dexId`. | `untrusted-provider-text.test.ts` (stubbed DEX Screener response through `search()`) |
+
+Known limit, fail closed: `latestTokenPairs` still keeps the most liquid pool per token before anything else sees it. If that pool has an untrusted quote, the token is left out of the watchlist (counted as skipped) even when a SOL or USDC pool also exists. Preferring trusted-quote pools at ingestion would change the shared "New DEX tokens" data, so it is left for a separate, reviewed change.
 
 ## Noted for later PRs (not changed now)
-- **Quote-token liquidity (security review, unconfirmed).** The ranker keeps the pair with the most `liquidityUsd` per mint and never checks the quote token; `DexPair` has no quote address. If DEX Screener values a pool against an attacker-minted quote token, that pool could win. Fix when the provider is next touched: map `quoteToken.address`, count liquidity only against wSOL/USDC/USDT mints, otherwise `INSUFFICIENT_DATA`.
 - **Response size caps.** `http.ts` reads whole provider bodies (10 s timeout, no size cap); add a cap before wiring GMGN or RPC.
 - `gmgn-read.ts` uses `fetch` directly. When it is wired (PR-05), route it through `providers/http.ts`: shared rate limits, backoff, credential-safe redirects and `ProviderError`. Add typed normalizers. Fractional fields mean `0.1783 = 17.83%`.
 - `mint-audit.ts` reads the whole JSON-RPC response. When it is wired (PR-06), cap the response size, and test against real Token-2022 mints (for example ones with `mintCloseAuthority` or `interestBearingConfig`, which correctly stay UNKNOWN today).

@@ -19,7 +19,8 @@ const base: SolanaHuntPair = {
   priceUsd: 0.01, liquidityUsd: 100_000, fdv: 100_000, marketCap: 100_000, volume24h: 90_000, volume1h: 30_000,
   buys1h: 35, sells1h: 15, change1h: 4, pairCreatedAt: NOW - 60_000,
 };
-const dex = (over: Partial<DexPair> = {}): DexPair => ({ ...base, url: '', quoteSymbol: 'SOL', buys24h: 100, sells24h: 50, change24h: 5, hasSocials: false, hasWebsite: false, ...over });
+const USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+const dex = (over: Partial<DexPair> = {}): DexPair => ({ ...base, url: '', quoteSymbol: 'USDC', quoteAddress: USDC, buys24h: 100, sells24h: 50, change24h: 5, hasSocials: false, hasWebsite: false, ...over });
 
 describe('ranker review fixes', () => {
   it('skips (never throws on) provider rows whose chainId or addresses are not strings', () => {
@@ -70,7 +71,7 @@ describe('discover() Solana watchlist integration', () => {
   beforeEach(() => { freshDb(); market.reset(); market.dexFetchedAt = 0; });
 
   it('is stale with no candidates, and asOf null (not 0), before the DEX cache has ever loaded', () => {
-    expect(discover(1e6, NOW).solanaHunter).toEqual({ asOf: null, stale: true, rankerFailed: false, candidates: [], executionReady: false, note: expect.any(String) });
+    expect(discover(1e6, NOW).solanaHunter).toEqual({ asOf: null, stale: true, rankerFailed: false, skippedUntrustedQuote: 0, candidates: [], executionReady: false, note: expect.any(String) });
   });
   it('lists fresh Solana candidates, read-only, and leaves the existing lists unchanged', () => {
     market.dex = [dex(), dex({ chainId: 'ethereum', baseAddress: '0x' + 'a'.repeat(40) })];
@@ -83,6 +84,18 @@ describe('discover() Solana watchlist integration', () => {
     // No regression: the general DEX list still carries both chains and its safety verdict never allows automation.
     expect(d.dexLaunches).toHaveLength(2);
     expect(d.dexLaunches.every((p) => p.safety.eligibleForAutomation === false)).toBe(true);
+  });
+  it('ranks only pools quoted in SOL/USDC/USDT; others are skipped and counted, never WATCH (3rd review)', () => {
+    const other = 'Bad1111111111111111111111111111111111111111'.slice(0, 43); // a well-formed but unknown quote mint
+    market.dex = [
+      dex(), // trusted USDC quote
+      dex({ baseAddress: PAIR, pairAddress: MINT, quoteAddress: other, quoteSymbol: 'USDC', liquidityUsd: 9e9 }), // spoofed "USDC"
+      dex({ baseAddress: 'J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn', quoteAddress: undefined }), // quote unknown
+    ];
+    market.dexFetchedAt = NOW - 30_000;
+    const s = discover(1e6, NOW).solanaHunter;
+    expect(s.candidates.map((c) => c.mint)).toEqual([MINT]);
+    expect(s.skippedUntrustedQuote).toBe(2);
   });
   it('treats an old cache as stale', () => {
     market.dex = [dex()];
@@ -104,7 +117,7 @@ describe('/api/discover route', () => {
       expect((await app.inject({ url: '/api/discover' })).statusCode).toBe(401);
       const cookie = String((await app.inject({ method: 'POST', url: '/api/auth/setup', headers: { 'content-type': 'application/json' }, payload: ownerSetupPayload('solana hunter owner') })).headers['set-cookie']).split(';')[0];
       const body = (await app.inject({ url: '/api/discover', headers: { cookie } })).json();
-      expect(body.solanaHunter).toMatchObject({ asOf: null, stale: true, rankerFailed: false, candidates: [], executionReady: false });
+      expect(body.solanaHunter).toMatchObject({ asOf: null, stale: true, rankerFailed: false, skippedUntrustedQuote: 0, candidates: [], executionReady: false });
     } finally { await app.close(); }
   });
 });

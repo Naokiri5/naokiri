@@ -7,6 +7,8 @@ export interface SolanaHunterView {
   asOf: number | null; stale: boolean; executionReady: false; note: string;
   /** True when the ranker could not process the current sample; older servers omit it. */
   rankerFailed?: boolean;
+  /** Solana pools left out because they are not quoted in SOL, USDC or USDT (their liquidity figure is not trusted). */
+  skippedUntrustedQuote?: number;
   candidates: Array<{
     mint: string; symbol: string; pairAddress: string; dex: string; ageMinutes: number | null; liquidityUsd: number;
     volume1hUsd: number; observedBuys1h: number; observedSells1h: number; momentum1hPct: number; rankScore: number;
@@ -62,6 +64,9 @@ export function SolanaWatchlist({ view, loaded }: { view: SolanaHunterView | und
       </tr>)}
     </tbody></table>
     {!rows.length && <Empty>{emptyText(view, loaded)}</Empty>}</div>
+    {!!view?.skippedUntrustedQuote && <div className="hint" style={{ padding: '8px 12px 0' }}>
+      {view.skippedUntrustedQuote} Solana pool{view.skippedUntrustedQuote === 1 ? '' : 's'} left out: priced against a token other than SOL, USDC or USDT, so the liquidity figure cannot be trusted.
+    </div>}
     {view?.note && <div className="hint" style={{ padding: '8px 12px' }}>{view.note}</div>}
   </Card>;
 }

@@ -16,11 +16,12 @@ test.beforeEach(async ({ page }) => {
 test('the Solana watchlist shows candidates read-only with no trade action', async ({ page }) => {
   await page.route('**/api/discover**', async (route) => {
     const real = await (await route.fetch()).json();
-    await route.fulfill({ json: { ...real, solanaHunter: { asOf: Date.now(), stale: false, executionReady: false, note: 'DEX Screener watchlist only.', candidates: [candidate] } } });
+    await route.fulfill({ json: { ...real, solanaHunter: { asOf: Date.now(), stale: false, skippedUntrustedQuote: 2, executionReady: false, note: 'DEX Screener watchlist only.', candidates: [candidate] } } });
   });
   await page.goto('/discover');
   await page.getByRole('tab', { name: 'Solana watchlist' }).click();
   await expect(page.getByText('Watchlist only. Not a trade signal.')).toBeVisible();
+  await expect(page.getByText(/2 Solana pools left out: priced against a token other than SOL, USDC or USDT/)).toBeVisible();
   await expect(page.getByRole('cell', { name: /TEST/ })).toBeVisible();
   await expect(page.getByText(candidate.mint, { exact: true })).toBeVisible(); // full mint, because tickers can be faked
   await expect(page.getByText('not a probability of profit', { exact: false })).toBeVisible();

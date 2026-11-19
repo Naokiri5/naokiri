@@ -3,6 +3,9 @@
  * Important: this is an opportunity-monitoring score, NEVER a win probability
  * or an authorization to execute a swap. No network I/O or credentials.
  */
+// MIA review (Omega PR-01): provider strings are attacker-controlled; the one display sanitizer lives in core/util.
+import { displayText } from '../core/util.js';
+
 export interface SolanaHuntPair {
   chainId: string;
   dexId: string;
@@ -54,17 +57,6 @@ const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const validNum = (n: number) => Number.isFinite(n) && n >= 0;
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 const rounded = (x: number) => Math.round(x * 100) / 100;
-/**
- * MIA review (Omega PR-01): provider strings are attacker-controlled. Strip control and format characters (including
- * bidi overrides that can make one ticker render as another), line/paragraph separators, combining marks left after
- * NFC (stacked "zalgo" marks) and the invisible Hangul filler letters before they reach the UI. Truncation counts code
- * points, so a surrogate pair is never cut in half. React still escapes the rest; look-alike letters are flagged below.
- */
-const INVISIBLE_OR_SPOOFING = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{M}\u115F\u1160\u3164\uFFA0]/gu;
-const displayText = (x: unknown, fallback: string) => {
-  const s = typeof x === 'string' ? x.normalize('NFC').replace(INVISIBLE_OR_SPOOFING, '').trim() : '';
-  return Array.from(s || fallback).slice(0, 40).join('');
-};
 /** MIA review: counts of trades must be whole, non-negative and safely representable. */
 const validCount = (n: number) => Number.isSafeInteger(n) && n >= 0;
 
