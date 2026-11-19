@@ -67,19 +67,37 @@ export function decrypt(blob: Buffer, key: Buffer): Buffer {
 export function createBackup(opts: { dir?: string; key?: Buffer | null; nowTs?: number } = {}): BackupManifest {
   const dir = opts.dir ?? backupDir(); const key = opts.key === undefined ? backupKey() : opts.key; const t = opts.nowTs ?? Date.now();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const name = `${PREFIX}${stamp(t)}${key ? '.db.enc' : '.db'}`; const final = join(dir, name);
-  if (existsSync(final)) throw new Error(`backup ${name} already exists`);
-  const raw = join(dir, `.${name}.partial`);
+  const name = `${PREFIX}${stamp(t)}${key ? '.db.enc' : '.db'}`;
+  const final = join(dir, name);
+  const finalManifest = `${final}.json`;
+  // Keep staging on the destination filesystem for atomic renames. Exclusive creation also prevents another writer
+  // from publishing a different backup with the same timestamp between the two renames.
+  const staging = join(dir, `.${name}.staging`);
+  try { mkdirSync(staging, { mode: 0o700 }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`backup ${name} is already being created`);
+    throw error;
+  }
   try {
-    rmSync(raw, { force: true });
+    if (existsSync(final) || existsSync(finalManifest)) throw new Error(`backup ${name} already exists`);
+    const raw = join(staging, 'snapshot.db');
+    // SQLite accepts an empty output file and preserves its mode. Restrict it before the first plaintext write.
+    writeFileSync(raw, '', { flag: 'wx', mode: 0o600 });
     getDb().prepare('VACUUM INTO ?').run(raw);
-    chmodSync(raw, 0o600); // I-03: VACUUM INTO creates the file with the process umask; a backup holds credentials and the ledger
-    if (key) { writeFileSync(`${raw}.enc`, encrypt(readFileSync(raw), key), { mode: 0o600 }); rmSync(raw); renameSync(`${raw}.enc`, final); }
-    else renameSync(raw, final);
-  } finally { rmSync(raw, { force: true }); rmSync(`${raw}.enc`, { force: true }); }
-  const m: BackupManifest = { file: name, createdAt: t, schema: SCHEMA_VERSION, bytes: statSync(final).size, sha256: sha256File(final), encrypted: !!key, format: key ? 'MIAB1-aes-256-gcm' : 'sqlite' };
-  writeFileSync(`${final}.json.partial`, JSON.stringify(m, null, 2) + '\n', { mode: 0o600 }); renameSync(`${final}.json.partial`, `${final}.json`);
-  return m;
+    chmodSync(raw, 0o600);
+    const payload = key ? `${raw}.enc` : raw;
+    if (key) {
+      writeFileSync(payload, encrypt(readFileSync(raw), key), { flag: 'wx', mode: 0o600 });
+      rmSync(raw);
+    }
+    const m: BackupManifest = { file: name, createdAt: t, schema: SCHEMA_VERSION, bytes: statSync(payload).size, sha256: sha256File(payload), encrypted: !!key, format: key ? 'MIAB1-aes-256-gcm' : 'sqlite' };
+    const manifest = join(staging, 'manifest.json');
+    writeFileSync(manifest, JSON.stringify(m, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    renameSync(payload, final);
+    try { renameSync(manifest, finalManifest); }
+    catch (error) { rmSync(final, { force: true }); throw error; }
+    return m;
+  } finally { rmSync(staging, { recursive: true, force: true }); }
 }
 
 /** Backups in a directory, newest first (only files that have a manifest count as complete). */
