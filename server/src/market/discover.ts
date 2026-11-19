@@ -2,6 +2,7 @@ import { market } from './store.js';
 import { isEligibleSpot } from './fabric.js';
 import { assessCexAsset, assessDexPair } from '../safety/safety.js';
 import { classifyRegime } from '../regime/regime.js';
+import { rankSolanaPairs } from '../solana/hunting.js';
 
 /** Asset Discovery (Part 10 "Discover"): ranked lists drawn only from live feeds. */
 export function discover(minVolume = 1_000_000) {
@@ -21,6 +22,14 @@ export function discover(minVolume = 1_000_000) {
     unusualVolume: deepRows.filter((r) => r.relVol1h != null).sort((a, b) => (b.relVol1h ?? 0) - (a.relVol1h ?? 0)).slice(0, 25),
     largeCaps: rows.map(row).filter((r) => r.rank != null).sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9)).slice(0, 25),
     dexLaunches: market.dex.map((p) => ({ ...p, safety: assessDexPair(p) })).sort((a, b) => (b.pairCreatedAt ?? 0) - (a.pairCreatedAt ?? 0)).slice(0, 30),
+    // Explicitly fresh, read-only Solana watchlist: never an order-authorizing signal.
+    solanaHunter: {
+      asOf: market.dexFetchedAt,
+      stale: !market.dexFetchedAt || Date.now() - market.dexFetchedAt > 5 * 60_000,
+      candidates: market.dexFetchedAt && Date.now() - market.dexFetchedAt <= 5 * 60_000 ? rankSolanaPairs(market.dex) : [],
+      executionReady: false,
+      note: 'DEX Screener watchlist only. Mint checks, holder data and an executable sell route are not yet verified.',
+    },
     universe: rows.length, asOf: market.tickersFetchedAt, dexAsOf: market.dexFetchedAt,
     note: 'Unusual volume uses the 1h relative-volume feature, available for deep-tier instruments only. Not recommendations.',
   };
