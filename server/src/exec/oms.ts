@@ -4,7 +4,7 @@ import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
 import { entryAuthorityVetoes, evaluateRisk } from '../risk/gate.js';
 import { currentPolicy, exitPolicy } from '../risk/policy.js';
-import { ledger, cashBalance, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
+import { ledger, cashBalance, accountState, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
 import { journal } from '../journal/journal.js';
 import { notify } from '../notify/notify.js';
 import { bus } from '../core/bus.js';
@@ -189,6 +189,18 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     const total = notional + fee;
     if (!Number.isFinite(total) || !Number.isFinite(cash) || total > cash + 1e-9) {
       return { rejected: persistRejection(`INSUFFICIENT_CASH: need ${total.toFixed(2)}, have ${cash.toFixed(2)}`) };
+    }
+    // CodeRabbit #23: the position-size cap was sized from equity read BEFORE this lock. Re-derive it from the equity
+    // inside the transaction, so a withdrawal (or loss) committed in between cannot let the entry exceed
+    // maxPositionNotionalPct of what remains. Missing open-position marks make equity unknown: fail closed.
+    const lockedAcct = accountState(PAPER_ACCOUNT, nowTs);
+    if (lockedAcct.marksMissing.length) return { rejected: persistRejection(`POSITION_MARKS_MISSING:${lockedAcct.marksMissing.join(',')}`) };
+    const capPct = lockedPolicy?.policy?.maxPositionNotionalPct;
+    if (capPct === undefined) return { rejected: persistRejection('POLICY_INVALID: entries need a valid owner-accepted risk policy') };
+    const cap = lockedAcct.equity * (capPct / 100);
+    const planned = fresh.sizing!.notional;
+    if (!Number.isFinite(cap) || !Number.isFinite(planned) || planned > cap + 1e-9) {
+      return { rejected: persistRejection(`POSITION_NOTIONAL_LIMIT: ${planned.toFixed(2)} exceeds ${capPct}% of current equity (${cap.toFixed(2)})`) };
     }
     const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
     run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);

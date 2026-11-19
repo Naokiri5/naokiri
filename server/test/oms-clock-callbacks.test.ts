@@ -6,6 +6,7 @@ import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, type ControlState } from '../src/core/mode.js';
 import { cashBalance, ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js';
 import { submitEntry, monitorPositions, queueForApproval } from '../src/exec/oms.js';
+import { evaluateRisk } from '../src/risk/gate.js';
 import { listIncidents } from '../src/exec/incidents.js';
 import { bus } from '../src/core/bus.js';
 import { get, J, run } from '../src/db/db.js';
@@ -110,6 +111,22 @@ describe('paper entry rechecks mutable state under its write lock', () => {
       return result;
     } finally { setCrashHook(null); }
   }
+
+  it('re-derives the position-size cap from current equity under the lock (CodeRabbit #23)', () => {
+    const proposed = report(id, last, Date.now() + 60_000);
+    const sized = evaluateRisk({ instrumentId: id, strategyId: proposed.strategy.id, side: 'buy', entryPrice: proposed.entryRef, stopPrice: proposed.stopLoss,
+      idempotencyKey: `entry-${proposed.candidateId}`, traceId: 'tr' }).sizing!;
+    // A withdrawal commits before the lock: enough cash remains for the order, but the 25% notional cap of what is left is smaller.
+    const remaining = sized.notional * 2;
+    setCrashHook(point => { if (point === 'entry.preTx') { setCrashHook(null); ledger(PAPER_ACCOUNT, 'WITHDRAW', -(10_000 - remaining)); } });
+    try {
+      const result = submitEntry(proposed, 'bot');
+      expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('POSITION_NOTIONAL_LIMIT') });
+    } finally { setCrashHook(null); }
+    expect(get('SELECT id FROM fills')).toBeUndefined();
+    expect(openPositions()).toHaveLength(0);
+    expect(cashBalance()).toBeCloseTo(remaining, 6);
+  });
 
   it('preserves cash and refuses the fill after a concurrent withdrawal', () => {
     const result = submitAfter(() => ledger(PAPER_ACCOUNT, 'WITHDRAW', -9_999), 'bot');

@@ -179,12 +179,22 @@ On the old code all 6 fail (partly because the new exports are missing; the old 
 | e2e | 76 passed |
 | typecheck and build | ✓ |
 
-**Still required on PR #20** (another branch; this session may push only to PR #18's branch, so it is **not changed here**):
-1. Rebase PR #20 onto `main` after PR #18 merges.
-2. Move its Telegram migration from v6 to the **next free version (v8)** by appending it after v7. Never edit v6 or v7.
-3. Add an upgrade test from v7 that keeps existing data.
+**PR #20 follow-up (updated 2026-11-19 in the unified branch):** steps 1–3 were done by Codex in PR #22.
+- The Telegram tables moved to **v8**, appended after v7.
+- An upgrade test from v7 keeps existing data.
+- PR #20 itself is superseded and closed.
 
-Any database created by the current PR #20 draft build will be refused by this guard. It must not be reused: start fresh, or restore a backup made by a PR #18 build.
+**A database created by the PR #20 draft build (Telegram tables as v6):**
+- **The guard refuses it and changes nothing.** This build refuses to open that database, because v6 has a different checksum. No table is skipped, modified or deleted, so the file stays exactly as it was.
+- **Preserve it. Do not delete it or start over on top of it.**
+  1. Stop MIA.
+  2. Copy `mia.db` together with any `mia.db-wal` / `mia.db-shm` into a dated folder outside the data directory.
+  3. Make the copy read-only.
+- **Reconciliation tool: not built.** A tool that rewrites the draft's v6 records as v8 without losing positions or ledger history is **not built and not tested**, so this document does not claim one exists.
+  - Until it is built and tested against a copy of that database, keep the preserved copy.
+  - Running a current build on the same data directory is not a safe workaround; use a separate `MIA_DATA_DIR`.
+  - No current paper position or ledger row is lost by waiting: the preserved file keeps them.
+- **The record so far.** The PR #20 draft was never released, and no deployment of it is recorded. This section exists so that a local test install is never discarded by mistake.
 
 ## 10. SAFE-03 result (the 23 open CodeRabbit threads on PR #18)
 
