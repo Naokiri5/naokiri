@@ -7,7 +7,8 @@ import { WORKERS } from './registry.js';
  * - productivity is measured from recorded evaluations (worker_stats): a worker is PRODUCTIVE only if it has cast at
  *   least one SUPPORT or OPPOSE vote, ALWAYS_ABSTAINED if it has run but never voted, NOT_YET_EVALUATED otherwise.
  * Constant-rule workers vote by construction and add no market information; they are reported separately so their
- * votes are never mistaken for independent confirmation. Nothing here changes how QCI counts votes.
+ * votes are never mistaken for independent confirmation. Since R-12 (coordinator v1.1.0) the QCI coordinator itself counts
+ * only DATA_DRIVEN workers as evidence and counts each dependency group once across domains.
  */
 export function workerEffectiveness() {
   const stats = new Map(all<{ worker_id: string; support: number; oppose: number; abstain: number; failed: number }>('SELECT * FROM worker_stats').map((s) => [s.worker_id, s]));

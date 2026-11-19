@@ -1,5 +1,5 @@
 import { seedInstrument, seedBacktestFixture } from './helpers.js';
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll , vi } from 'vitest';
 import { all, closeDb, openDb } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -38,20 +38,8 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER' } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER', password: 'correct horse battery' } })).json().mode).toBe('PAPER');
     const live = await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'BOUNDED_LIVE', password: 'correct horse battery' } });
-    expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/BOUNDED_LIVE blocked/);
+    expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/BOUNDED_LIVE is locked/); // SAFE-01: refused in core/mode.ts before any gate
     expect((await app.inject({ url: '/api/qa', headers: { cookie } })).json().liveAllowed).toBe(false);
-  });
-  it('shell carries what the status ribbon needs: server clock, live lock, policy limits, engine cadence', async () => {
-    const before = Date.now();
-    const s = (await app.inject({ url: '/api/shell', headers: { cookie } })).json();
-    expect(s.serverTime).toBeGreaterThanOrEqual(before);
-    expect(s.liveAllowed).toBe(false); expect(s.gates).toMatch(/live execution LOCKED/);
-    const { dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses } = DEFAULT_POLICY;
-    expect(s.riskLimits).toEqual({ dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses });
-    expect(s.account).toMatchObject({ weeklyPnlPct: 0, consecutiveLosses: 0, marksMissing: 0 });
-    expect(s.scanIntervalMs).toBeGreaterThan(0); expect(s.tickerIntervalMs).toBeGreaterThan(0);
-    expect(s.offline).toBe(true); expect(s.bot.running).toBe(false);
-    expect(s.dataHealth.stale).toBe(true); expect(s.dataHealth.tickersAt).toBe(0);
   });
   it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {
     const password = 'correct horse battery'; const id = STRATEGIES[0].id; const worker = WORKERS[0].id;
@@ -85,6 +73,10 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(getControl()).toMatchObject({ emergency: false, pausedNewOrders: false });
 
     expect((await post(statusUrl, { status: 'SUSPENDED' })).statusCode).toBe(200);
+    // Lifting a suspension by demoting it is still risk-increasing (CodeRabbit PR #13): it removes the strategy from the list.
+    failureGate.reset(); // each denied() is two failed passphrase attempts; keep the per-client lockout out of this check
+    await denied(statusUrl, { status: 'RESEARCH' }); await denied(statusUrl, { status: 'BACKTESTED' });
+    failureGate.reset();
     await denied(statusUrl, { status: 'PAPER' });
     const noBacktest = await post(statusUrl, { status: 'PAPER', password });
     expect(noBacktest.statusCode).toBe(400); expect(noBacktest.json().error).toMatch(/backtest/);
@@ -96,10 +88,14 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     await denied(statusUrl, { status: 'PAPER' });
     expect((await post(statusUrl, { status: 'PAPER', password })).statusCode).toBe(200);
     expect(getSetting<string[]>('suspendedStrategies', [])).not.toContain(id);
+    expect((await post(statusUrl, { status: 'BACKTESTED' })).statusCode).toBe(200); // demoting an unsuspended strategy stays password-free
     await denied(statusUrl, { status: 'LIVE_CANDIDATE' });
     const beforeLive = snapshot(); const live = await post(statusUrl, { status: 'LIVE_CANDIDATE', password });
     expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/release-gate/); expect(snapshot()).toEqual(beforeLive);
-    for (const status of ['SUSPENDED', 'RETIRED', 'RESEARCH', 'BACKTESTED']) expect((await post(statusUrl, { status })).statusCode).toBe(200);
+    for (const status of ['SUSPENDED', 'RETIRED']) expect((await post(statusUrl, { status })).statusCode).toBe(200); // risk-reducing: no passphrase
+    failureGate.reset(); await denied(statusUrl, { status: 'RESEARCH' }); failureGate.reset(); // leaving RETIRED lifts the suspension
+    expect((await post(statusUrl, { status: 'RESEARCH', password })).statusCode).toBe(200);
+    expect((await post(statusUrl, { status: 'BACKTESTED' })).statusCode).toBe(200); // no longer suspended: demotion is password-free
 
     quarantined.add(worker);
     try {
@@ -158,7 +154,10 @@ describe('HTTP API (auth, permissions, release gate)', () => {
   it('repeated query keys and bad ids are rejected as validation errors, never leaked as database errors', async () => {
     for (const url of ['/api/decisions?decision=a&decision=b', '/api/journal?kind=a&kind=b', '/api/markets/search?q=a&q=b', `/api/decisions/${'x'.repeat(200)}`]) {
       const r = await app.inject({ url, headers: { cookie } });
-      expect([400, 404], url).toContain(r.statusCode); expect(r.body, url).not.toMatch(/named parameter|SQLITE|sqlite/i); // over-long path ids are 404 at the router
+      // Over-long path ids are rejected by the router: 404 when the web build's static catch-all route exists, 414
+      // (FST_ERR_MAX_PARAM_LENGTH) when it does not (CI server job). Either way: rejected, never a database error.
+      const allowed = url.startsWith('/api/decisions/x') ? [404, 414] : [400, 404];
+      expect(allowed, url).toContain(r.statusCode); expect(r.body, url).not.toMatch(/named parameter|SQLITE|sqlite/i);
     }
     const r = await app.inject({ method: 'POST', url: '/api/emergency/pause', headers: { cookie, 'x-mia-csrf': '1' }, payload: { unexpected: true } });
     expect(r.statusCode).toBe(400);
@@ -219,5 +218,29 @@ describe('HTTP hardening (auth gate, validation, error classes, step-up limits)'
     const r = await app.inject({ url: '/api/shell', headers: { cookie } });
     expect(r.headers['cache-control']).toBe('no-store');
     expect(String(r.headers['content-security-policy'])).toContain("frame-ancestors 'none'");
+  });
+});
+
+describe('shell status payload (independent setup)', () => {
+  let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
+  beforeAll(async () => {
+    closeDb(); openDb(':memory:'); failureGate.reset(); app = await buildApp();
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'correct horse battery' } });
+    cookie = String(r.headers['set-cookie']).split(';')[0];
+    expect((await app.inject({ method: 'POST', url: '/api/risk/policy', headers: { cookie, 'x-mia-csrf': '1' }, payload: { policy: DEFAULT_POLICY, password: 'correct horse battery' } })).statusCode).toBe(200);
+  });
+  afterAll(async () => { await app.close(); });
+  it('shell carries what the status ribbon needs: server clock, live lock, policy limits, engine cadence', async () => {
+    // Fixed clock (CodeRabbit PR #18): a wall clock moving backwards between readings must not fail a valid response.
+    const fixed = Date.now() + 1_000; const clock = vi.spyOn(Date, 'now').mockReturnValue(fixed);
+    let s: any; try { s = (await app.inject({ url: '/api/shell', headers: { cookie } })).json(); } finally { clock.mockRestore(); }
+    expect(s.serverTime).toBe(fixed);
+    expect(s.liveAllowed).toBe(false); expect(s.gates).toMatch(/live execution LOCKED/);
+    const { dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses } = DEFAULT_POLICY;
+    expect(s.riskLimits).toEqual({ dailyLossPct, weeklyLossPct, drawdownWarnPct, drawdownHaltPct, maxOpenRiskPct, maxConsecutiveLosses });
+    expect(s.account).toMatchObject({ weeklyPnlPct: 0, consecutiveLosses: 0, marksMissing: 0 });
+    expect(s.scanIntervalMs).toBeGreaterThan(0); expect(s.tickerIntervalMs).toBeGreaterThan(0);
+    expect(s.offline).toBe(true); expect(s.bot.running).toBe(false);
+    expect(s.dataHealth.stale).toBe(true); expect(s.dataHealth.tickersAt).toBe(0);
   });
 });

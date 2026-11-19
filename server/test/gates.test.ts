@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -249,8 +250,33 @@ describe('stored QA report loading', () => {
     expect(gate.evidence).not.toContain('malformed JSON');
   });
 
+  const saveRun = (reportText: string, outcome: object | null) => {
+    mkdirSync(join(dir, 'qa'), { recursive: true }); writeFileSync(join(dir, 'qa', 'test-results.json'), reportText);
+    if (outcome) writeFileSync(join(dir, 'qa', 'test-run.json'), JSON.stringify(outcome));
+  };
+  const sha = (t: string) => createHash('sha256').update(t).digest('hex');
+  const good = (text: string) => ({ exitCode: 0, reportSha256: sha(text), commit: gates.currentBuildCommit(), dirty: false, finishedAt: Date.now() });
   it('loads a valid saved report without depending on the launch directory', () => {
-    mkdirSync(join(dir, 'qa')); writeFileSync(join(dir, 'qa', 'test-results.json'), JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01)));
+    const text = JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01)); saveRun(text, good(text));
     expect(gates.releaseGates().gates.find(g => g.id === 'G09')?.status).toBe('PASS');
+  });
+  it('a report without a recorded successful run outcome is PENDING (CodeRabbit PR #13)', () => {
+    const text = JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01));
+    const g09 = () => gates.releaseGates().gates.find(g => g.id === 'G09')!;
+    saveRun(text, null); expect(g09()).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('run outcome missing') });
+    saveRun(text, { ...good(text), exitCode: 1 }); expect(g09()).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('exit code 1') });
+    saveRun(text, { ...good(text), reportSha256: sha('another report') }); expect(g09()).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('sha256 mismatch') });
+  });
+  it('evidence must come from the running commit, a clean tree and the last 7 days (blueprint Q-01)', () => {
+    const text = JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01)); const ok = good(text);
+    const p = (o: object, ctx: object = {}) => gates.runOutcomeProblem(o, text, { currentCommit: 'a'.repeat(40), nowTs: ok.finishedAt, ...ctx });
+    expect(p({ ...ok, commit: 'a'.repeat(40) })).toBeNull();
+    expect(p({ ...ok, commit: 'b'.repeat(40) })).toMatch(/evidence is from commit bbbbbbbbbbbb, but the running build is aaaaaaaaaaaa/);
+    expect(p({ ...ok, commit: undefined })).toMatch(/no commit SHA/);
+    expect(p({ ...ok, commit: 'a'.repeat(40) }, { currentCommit: null })).toMatch(/running build commit is unknown/);
+    expect(p({ ...ok, commit: 'a'.repeat(40), dirty: true })).toMatch(/uncommitted changes/);
+    expect(p({ ...ok, commit: 'a'.repeat(40), dirty: undefined })).toMatch(/uncommitted changes/);
+    expect(p({ ...ok, commit: 'a'.repeat(40) }, { nowTs: ok.finishedAt + 8 * 86_400_000 })).toMatch(/stale \(8 days old/);
+    expect(p({ ...ok, commit: 'a'.repeat(40), finishedAt: ok.finishedAt + 3_600_000 })).toMatch(/invalid finish time/);
   });
 });

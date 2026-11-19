@@ -37,7 +37,7 @@ export function loadEvidenceKey(dataDir: string, envValue = env.MIA_EVIDENCE_KEY
     return { key: Buffer.from(v, 'hex'), source: 'file' };
   }
   const k = randomBytes(32);
-  try { mkdirSync(dataDir, { recursive: true }); writeFileSync(file, k.toString('hex') + '\n', { mode: 0o600, flag: 'wx' }); }
+  try { mkdirSync(dataDir, { recursive: true, mode: 0o700 }); writeFileSync(file, k.toString('hex') + '\n', { mode: 0o600, flag: 'wx' }); }
   catch (e: any) { if (e?.code === 'EEXIST') return loadEvidenceKey(dataDir, envValue, persist); return { key: k, source: 'ephemeral' }; }
   return { key: k, source: 'generated' };
 }
@@ -57,12 +57,15 @@ export const config = {
   dataDir: DATA_DIR,
   /** Disable all outbound polling (tests / offline). */
   offline: env.MIA_OFFLINE === '1',
+  /** Streaming order books (Binance diff-depth WebSocket, sequence-checked). Off by default; REST stays the fallback. */
+  streaming: env.MIA_STREAMING === '1',
   /** Number of deep-tier (T2) instruments to analyze with candles + books. */
   deepTierSize: intEnv('MIA_DEEP_TIER', 24, 5, 200),
   scanIntervalMs: intEnv('MIA_SCAN_INTERVAL_MS', 60_000, 10_000, 3_600_000),
   tickerIntervalMs: intEnv('MIA_TICKER_INTERVAL_MS', 15_000, 5_000, 600_000),
   /** Engine lease TTL override for offline tests only (0 = default: three ticker intervals, min 45 s); ignored when online. */
-  engineLeaseTtlMs: intEnv('MIA_ENGINE_LEASE_TTL_MS', 0, 1_000, 3_600_000),
+  // 0 = use the default (3 ticker intervals, ≥ 45 s). An explicit '0' is accepted; nonzero values must be ≥ 1 s (CodeRabbit PR #12).
+  engineLeaseTtlMs: env.MIA_ENGINE_LEASE_TTL_MS?.trim() === '0' ? 0 : intEnv('MIA_ENGINE_LEASE_TTL_MS', 0, 1_000, 3_600_000),
   anthropicApiKey: env.ANTHROPIC_API_KEY ?? '',
   joeModel: env.MIA_JOE_MODEL ?? 'claude-opus-5-5',
   telegramBotToken: env.TELEGRAM_BOT_TOKEN ?? '',
@@ -75,6 +78,8 @@ export const config = {
   webDist: env.MIA_WEB_DIST ? resolve(env.MIA_WEB_DIST) : resolve(REPO_ROOT, 'web', 'dist'),
 };
 
+/** A newly created data directory is private to the server's account (it holds the database, keys and backups).
+ *  An existing directory's permissions are left as the owner set them. */
 export function ensureDataDir() {
-  mkdirSync(config.dataDir, { recursive: true });
+  mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
 }

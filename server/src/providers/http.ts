@@ -48,26 +48,48 @@ class Bucket {
   }
 }
 const buckets = new Map<string, Bucket>();
+/** Provider told us to back off (429/418, or 503 with Retry-After): fail fast without sending until this time. */
+const blockedUntil = new Map<string, number>();
+const MAX_BLOCK_MS = 3_600_000;
+function retryAfterMs(res: Response, status: number): number | null {
+  const h = res.headers.get('retry-after');
+  if (h) {
+    const s = Number(h); if (Number.isFinite(s) && s >= 0) return Math.min(s * 1000, MAX_BLOCK_MS);
+    const d = Date.parse(h); if (Number.isFinite(d)) return Math.min(Math.max(0, d - Date.now()), MAX_BLOCK_MS);
+  }
+  return status === 418 ? 120_000 : status === 429 ? 60_000 : null; // 418 = IP ban escalation: back off longer
+}
+export const providerBlockedUntil = (id: string) => blockedUntil.get(id) ?? 0;
+export function _resetProviderBlocks() { blockedUntil.clear(); }
 export function setRateLimit(id: string, perMin: number) { buckets.set(id, new Bucket(perMin)); }
 
 export class ProviderError extends Error { constructor(public providerId: string, msg: string, public status?: number) { super(`${providerId}: ${msg}`); } }
 
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
-export async function fetchProvider(id: string, url: string, opts: { timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string> } = {}): Promise<any> {
+/**
+ * `redirectMode: 'error'` is for credentialed providers: a redirect must never carry an API key to another host
+ * (fetch keeps custom headers across redirects). Default stays 'follow' for the public, keyless providers.
+ */
+export async function fetchProvider(id: string, url: string, opts: { timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string>; redirectMode?: 'error' | 'follow' } = {}): Promise<any> {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
   if (config.offline) throw new ProviderError(id, 'offline mode');
+  const until = blockedUntil.get(id) ?? 0;
+  if (Date.now() < until) throw new ProviderError(id, `rate limited by provider; retry after ${new Date(until).toISOString()}`, 429);
   await buckets.get(id)?.take();
   const t0 = performance.now();
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
   try {
-    const res = await fetch(url, { signal: ctl.signal, redirect: 'follow', headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } });
+    const res = await fetch(url, { signal: ctl.signal, redirect: opts.redirectMode ?? 'follow', headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } });
     if (res.status === 404) { // resource-level miss (e.g. product not listed) — provider itself is reachable
       Object.assign(info, { lastOkAt: Date.now(), lastLatencyMs: Math.round(performance.now() - t0) });
       throw Object.assign(new ProviderError(id, 'HTTP 404 (resource not found)', 404), { resourceMiss: true });
     }
-    if (!res.ok) throw new ProviderError(id, `HTTP ${res.status}`, res.status);
+    if (!res.ok) {
+      if (res.status === 429 || res.status === 418 || res.status === 503) { const ms = retryAfterMs(res, res.status); if (ms != null) blockedUntil.set(id, Date.now() + ms); }
+      throw new ProviderError(id, `HTTP ${res.status}`, res.status);
+    }
     const body = opts.as === 'text' ? await res.text() : await res.json();
     const ms = performance.now() - t0;
     record(`provider.${id}`, ms);

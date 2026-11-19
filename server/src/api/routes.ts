@@ -1,5 +1,9 @@
 import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
+import { VikeNotConfiguredError } from '../providers/vike.js';
+import * as privy from '../security/privy.js';
+import { vikeRoutes } from '../research/vikeRoutes.js';
+import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -35,7 +39,7 @@ import * as lab from '../lab/lab.js';
 import { STRATEGIES } from '../lab/strategies.js';
 import * as wallet from '../wallet/wallet.js';
 import { listNotifications, markRead, notify } from '../notify/notify.js';
-import { releaseGates } from '../qa/gates.js';
+import { releaseGates, modeGate } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
 import { botStatus, botStatusView } from '../bot/bot.js';
 import { readiness } from '../ops/readiness.js';
@@ -43,7 +47,7 @@ import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.j
 import { all, get, P } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
-import { config, inContainer } from '../config.js';
+import { config } from '../config.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { qhefReport } from '../qhef/qhef.js';
 import { securityOverview, revokeOtherSessions } from '../security/security.js';
@@ -56,8 +60,17 @@ import { sha256 } from '../core/util.js';
 const COOKIE = 'mia_session';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 const bad = (reply: FastifyReply, code: number, msg: string) => reply.code(code).send({ error: msg });
-/** Step-up shares the login brute-force limits (per client + global), so it can no longer be guessed freely. */
-const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, req.ip, 'step-up');
+/**
+ * Step-up runs on an AUTHENTICATED session, so its per-client budget is keyed by that session (hash of the token), not by
+ * IP. Behind a reverse proxy or container gateway every client shares one IP, and a stranger's failed logins used to lock
+ * the owner's step-up too (MA-07). A session's own failures still lock that session (5 misses → exponential backoff).
+ */
+const stepUpClient = (req: FastifyRequest) => `session:${sha256(tokenOf(req) ?? '')}`;
+/** Step-up shares the login brute-force limits (per session + global), so it can no longer be guessed freely. */
+const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, stepUpClient(req), 'step-up', { exemptFromGlobalLockout: isDirectLocal(req) });
+/** Step-up for actions that only REDUCE risk or exposure (close all, revoke other sessions): never blocked by the
+ *  server-wide failure budget that unauthenticated strangers can exhaust (SEC-14), nor by another client's failures. */
+const stepUpRiskReducing = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, stepUpClient(req), 'step-up', { exemptFromGlobalLockout: true });
 const PW = z.string().min(1).max(1024);
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
@@ -86,6 +99,7 @@ export async function routes(app: FastifyInstance) {
       req.log.warn({ provider: err.providerId, status: err.status }, 'upstream provider failure');
       return reply.code(err.status === 404 ? 404 : err.status === 429 ? 503 : 502).send({ error: `upstream market-data provider unavailable (${err.providerId})` });
     }
+    if (err instanceof VikeNotConfiguredError) return reply.code(503).send({ error: `${err.message}. Research data is unavailable until the owner configures it.` });
     if (err instanceof oms.OmsError) return reply.code(409).send({ error: err.message });
     if (err instanceof IncidentError) return reply.code(err.statusCode).send({ error: err.message });
     if (Number.isInteger(err?.statusCode) && err.statusCode >= 400 && err.statusCode < 500) return reply.code(err.statusCode).send({ error: String(err.message ?? err) });
@@ -110,6 +124,9 @@ export async function routes(app: FastifyInstance) {
 
   await ditasRoutes(app);
   await knowledgeRoutes(app);
+  await vikeRoutes(app); // read-only Vike research (owner session required by the gate below)
+  /** Paper/Live environments for the shared UI layout. Read-only; Live is reported as LOCKED, never as available. */
+  app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
   app.post('/api/risk/incidents/:id/ack', async (req) => {
@@ -122,21 +139,48 @@ export async function routes(app: FastifyInstance) {
   // Readiness (unauthenticated, states and ages only): 200 when every check passes, 503 otherwise.
   app.get('/api/ready', async (_req, reply) => { const r = readiness(botStatus); return reply.code(r.ready ? 200 : 503).send(r); });
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
-  app.get('/api/auth/state', async (req) => ({ setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)) }));
-  app.post('/api/auth/setup', async (req, reply) => {
-    // First-run setup is only accepted from this machine: on a 0.0.0.0 bind any visitor could otherwise claim ownership.
-    // Containers/Codespaces reach MIA through a port forwarder (never loopback), so they are allowed too.
-    if (!auth.isSetup() && !isLoopback(req.ip) && !inContainer() && process.env.MIA_ALLOW_REMOTE_SETUP !== '1') throw httpError(403, 'first-time setup must be done from the machine running MIA (open http://localhost:' + config.port + '/), or set MIA_ALLOW_REMOTE_SETUP=1');
-    const { password } = z.object({ password: PW }).parse(req.body); auth.setupOwner(password); return issue(reply, auth.login(password, req.ip));
+  app.get('/api/auth/state', async (req) => {
+    const codeRequired = !auth.isSetup() && setupAccess(req) === 'code';
+    if (codeRequired) auth.ensureSetupCode(); // created (and printed once) on the first remote visit
+    return { setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: codeRequired };
   });
-  app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip)); });
+  app.post('/api/auth/setup', async (req, reply) => {
+    // SEC-SETUP: first-run setup is open only to a direct loopback connection (no proxy headers) or when the owner
+    // explicitly sets MIA_ALLOW_REMOTE_SETUP=1. Everyone else — including forwarded ports and containers, which used to
+    // be allowed by location alone — must enter the one-time code printed in the server console.
+    const { password, setupCode } = z.object({ password: PW, setupCode: z.string().max(64).optional() }).strict().parse(req.body);
+    if (!auth.isSetup() && setupAccess(req) === 'code') {
+      auth.ensureSetupCode();
+      if (!auth.checkSetupCode(setupCode)) { audit('anonymous', 'auth.setup.code_rejected', { ip: req.ip }); throw httpError(403, 'first-time setup from another device needs the one-time setup code printed in the MIA server console (terminal or service log)'); }
+    }
+    auth.setupOwner(password); auth.clearSetupCode(); return issue(reply, auth.login(password, req.ip));
+  });
+  app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
+  // Privy sign-in (optional). Login requires a Privy identity the owner already linked; link/unlink need a session + step-up.
+  app.get('/api/auth/privy/config', async () => privy.privyPublicConfig());
+  app.post('/api/auth/privy/login', async (req, reply) => {
+    const { accessToken } = z.object({ accessToken: z.string().min(20).max(4096) }).strict().parse(req.body);
+    return issue(reply, await privy.loginWithPrivy(accessToken, req.ip, { directLocal: isDirectLocal(req) }));
+  });
+  app.post('/api/security/privy/link', async (req) => {
+    const b = z.object({ accessToken: z.string().min(20).max(4096), password: PW.optional() }).strict().parse(req.body);
+    return privy.linkPrivy(b.accessToken, b.password, stepUpClient(req), isDirectLocal(req));
+  });
+  app.post('/api/security/privy/unlink', async (req) => {
+    const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
+    return privy.unlinkPrivy(b.password, stepUpClient(req), isDirectLocal(req));
+  });
   app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; ${cookieFlags}; Max-Age=0`); return { ok: true }; });
-  app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, req.ip); return { ok: true }; });
+  app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, stepUpClient(req), { exemptFromGlobalLockout: true }); /* I-01: keyed by the authenticated session, like step-up */ return { ok: true }; });
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }
 
   // ── live stream (SSE) ──
   let streams = 0;
+  // MIA-OPS-007: an open live stream kept app.close() waiting, so every graceful stop with a browser tab open hung until
+  // the 30 s hard limit, exited 1 and skipped closing the database. Streams are ended before the server closes.
+  const openStreams = new Set<() => void>();
+  app.addHook('preClose', async () => { for (const end of [...openStreams]) end(); });
   app.get('/api/stream', (req, reply) => {
     if (streams >= 20) return bad(reply, 503, 'too many open live streams');
     const token = tokenOf(req);
@@ -145,7 +189,8 @@ export async function routes(app: FastifyInstance) {
     streams++;
     reply.raw.write(': connected\n\n');
     let closed = false; let backlog = 0;
-    const close = () => { if (closed) return; closed = true; streams--; bus.off('*', send); clearInterval(ka); reply.raw.end(); };
+    const close = () => { if (closed) return; closed = true; streams--; openStreams.delete(close); bus.off('*', send); clearInterval(ka); reply.raw.end(); };
+    openStreams.add(close);
     const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
     const send = (e: { topic: string; payload: unknown }) => write(`event: ${e.topic}\ndata: ${JSON.stringify(e.payload)}\n\n`);
     // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.
@@ -227,18 +272,23 @@ export async function routes(app: FastifyInstance) {
   });
   app.post('/api/risk/policy', async (req) => { const b = z.object({ policy: z.unknown(), password: PW.optional() }).strict().parse(req.body ?? {}); stepUp(req, b); return acceptPolicy('owner', b.policy); });
   app.post('/api/control', async (req) => {
-    const b = z.object({ mode: z.enum(['OBSERVE', 'PAPER', 'APPROVAL', 'BOUNDED_LIVE']).optional(), pausedNewOrders: z.boolean().optional(), emergency: z.boolean().optional(), disabledStrategies: z.array(z.string().max(60)).max(50).optional(), password: PW.optional() }).parse(req.body);
-    const { password, ...patch } = b;
+    const b = z.object({ mode: z.enum(['OBSERVE', 'PAPER', 'APPROVAL', 'BOUNDED_LIVE']).optional(), pausedNewOrders: z.boolean().optional(), emergency: z.boolean().optional(), disabledStrategies: z.array(z.string().max(60)).max(50).optional(),
+      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), password: PW.optional() }).strict().parse(req.body); // H-08: unknown keys are errors on the control endpoint
+    const { password, disableStrategy, enableStrategy, ...patch } = b;
+    // MIA-WEB-010: single-strategy operations computed from the server's CURRENT list. A client that sent a whole list
+    // from a stale copy could re-enable a strategy the owner (or the health monitor) had just disabled.
+    if (disableStrategy || enableStrategy) {
+      if (patch.disabledStrategies) throw httpError(400, 'use either disabledStrategies or disableStrategy/enableStrategy, not both');
+      const list = new Set(getControl().disabledStrategies);
+      if (disableStrategy) list.add(disableStrategy); if (enableStrategy) list.delete(enableStrategy);
+      patch.disabledStrategies = [...list];
+    }
     // Anything that INCREASES risk needs the passphrase: mode changes, clearing an emergency, resuming after a pause,
     // and re-enabling strategies (the last two previously needed only a session).
     const cur = getControl();
     const reEnables = !!patch.disabledStrategies && cur.disabledStrategies.some((s) => !patch.disabledStrategies!.includes(s));
     if (patch.mode || patch.emergency === false || patch.pausedNewOrders === false || reEnables) stepUp(req, b);
-    return updateControl('owner', patch, (m) => {
-      if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
-      if ((m === 'PAPER' || m === 'APPROVAL') && !currentPolicy()) return { ok: false, reason: 'accept a risk policy before enabling paper execution' };
-      return { ok: true };
-    });
+    return updateControl('owner', patch, modeGate);
   });
   app.post('/api/emergency/:action', async (req) => {
     const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), password: PW.optional() }).strict().parse(req.body ?? {});
@@ -246,7 +296,7 @@ export async function routes(app: FastifyInstance) {
     if (a === 'cancel-pending') return oms.cancelPendingEntries('owner');
     if (a === 'protect') return oms.protectPositions(true);
     if (a === 'stop') return oms.emergencyStop('owner');
-    if (a === 'close-all') { stepUp(req, b); return oms.closeAllPositions('owner', b.confirm ?? ''); }
+    if (a === 'close-all') { stepUpRiskReducing(req, b); return oms.closeAllPositions('owner', b.confirm ?? ''); }
     throw httpError(404, 'unknown emergency action');
   });
 
@@ -280,7 +330,11 @@ export async function routes(app: FastifyInstance) {
     const id = idOf(req);
     const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional(), password: PW.optional() }).strict().parse(req.body);
     const current = get<{ status: lab.StrategyStatus }>('SELECT status FROM strategies WHERE id=?', id);
-    if (b.status === 'LIVE_CANDIDATE' || (b.status === 'PAPER' && (current?.status !== 'PAPER' || getSetting<string[]>('suspendedStrategies', []).includes(id)))) stepUp(req, b);
+    // Step-up for anything that increases risk (CodeRabbit PR #13): promotion to PAPER/LIVE_CANDIDATE, and ANY transition
+    // that lifts a suspension — moving a suspended strategy to RESEARCH or BACKTESTED also removes it from the list.
+    const suspended = getSetting<string[]>('suspendedStrategies', []).includes(id) || current?.status === 'SUSPENDED' || current?.status === 'RETIRED';
+    const liftsSuspension = suspended && b.status !== 'SUSPENDED' && b.status !== 'RETIRED';
+    if (b.status === 'LIVE_CANDIDATE' || liftsSuspension || (b.status === 'PAPER' && current?.status !== 'PAPER')) stepUp(req, b);
     lab.setStrategyStatus('owner', id, b.status, b.note); return { ok: true };
   });
 
@@ -307,7 +361,7 @@ export async function routes(app: FastifyInstance) {
   // ── Phase 1 workspaces ──
   app.get('/api/qhef', async () => qhefReport());
   app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
-  app.post('/api/security/sessions/revoke-others', async (req) => { stepUp(req, req.body); return revokeOtherSessions(tokenOf(req)); });
+  app.post('/api/security/sessions/revoke-others', async (req) => { stepUpRiskReducing(req, req.body); return revokeOtherSessions(tokenOf(req)); });
   app.get('/api/discover', async (req) => discover(z.object({ minVolume: z.coerce.number().min(0).default(1e6) }).parse(req.query ?? {}).minVolume));
   const histFilter = (q: any): HistoryFilter => z.object({ from: z.coerce.number().int().positive().optional(), to: z.coerce.number().int().positive().optional(),
     instrument: z.string().max(20).regex(/^[A-Za-z0-9]*$/).optional(), status: z.enum(['NEW', 'FILLED', 'REJECTED', 'CANCELLED', 'EXPIRED', 'ACTIVE', 'PENDING_APPROVAL']).optional(),
@@ -347,3 +401,11 @@ export async function routes(app: FastifyInstance) {
 }
 const slim = (r: any) => ({ id: r.id, asset: r.asset, instrumentId: r.instrumentId, strategy: r.strategy, regime: r.regime, decision: r.decision, finalDecision: r.finalDecision, score: r.opportunity.score, consensus: r.consensus, createdAt: r.createdAt, entryCondition: r.entryCondition, invalidation: r.invalidation, stopLoss: r.stopLoss, takeProfit: r.takeProfit, risk: r.risk ? { decision: r.risk.decision, reasonCodes: r.risk.reasonCodes } : null, missing: r.missingInformation });
 const isLoopback = (ip: string) => ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+/** A loopback socket carrying proxy headers is a forwarded remote visitor (port forwarder, reverse proxy), not a local one. */
+/** Any of these means the loopback socket belongs to a proxy relaying someone else (reverse proxy, port forwarder,
+ *  Tailscale Serve/Funnel), so the request is NOT the owner sitting at the machine. */
+const PROXY_HEADERS = ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip', 'tailscale-funnel-request', 'tailscale-user-login'];
+const isDirectLocal = (req: FastifyRequest) => isLoopback(req.ip) && !PROXY_HEADERS.some((h) => req.headers[h] !== undefined);
+function setupAccess(req: FastifyRequest): 'open' | 'code' {
+  return isDirectLocal(req) || process.env.MIA_ALLOW_REMOTE_SETUP === '1' ? 'open' : 'code';
+}
