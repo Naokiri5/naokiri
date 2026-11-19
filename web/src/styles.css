@@ -168,3 +168,5 @@ pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; margin: 
 .mini-cockpit .kv { font-size: 12px; }
 .pip-monitor-body { margin: 0; overflow: auto; background: var(--panel); }
 @media (max-width: 760px) { .mini-monitor-inline { bottom: 72px; left: 10px; width: calc(100vw - 20px); max-height: calc(100dvh - 150px); } }
+
+.privacy-joe { position: fixed; right: 20px; bottom: 70px; z-index: 45; padding: 16px; width: min(380px, calc(100vw - 40px)); }
