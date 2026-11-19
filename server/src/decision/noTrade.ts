@@ -1,5 +1,7 @@
 import { all, get } from '../db/db.js';
 import { market } from '../market/store.js';
+import { QUALITY_LIMITS } from '../market/quality.js';
+import { isEligibleSpot } from '../market/fabric.js';
 import { accountState, PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import { getControl } from '../core/mode.js';
 import { currentPolicy } from '../risk/policy.js';
@@ -14,7 +16,9 @@ import type { DecisionReport, DecisionState } from './engine.js';
 export const NO_TRADE_TTL_MS = 2 * 3600_000;
 export const NO_TRADE_WINDOW_MS = 24 * 3600_000;
 const HISTORY_LIMIT = 5;
-const TRADE_STATES = new Set<string>(['PAPER_TRADE', 'APPROVED_FOR_USER_CONFIRMATION', 'APPROVED_FOR_BOUNDED_EXECUTION'] satisfies DecisionState[]);
+/** Decisions that are a trade (or bounded execution) and so are left out. Owner confirmation is NOT here: until the owner acts nothing has traded. */
+const TRADE_STATES = new Set<string>(['PAPER_TRADE', 'APPROVED_FOR_BOUNDED_EXECUTION'] satisfies DecisionState[]);
+const OWNER_CONFIRMATION: DecisionState = 'APPROVED_FOR_USER_CONFIRMATION';
 
 export type ReasonGroup = 'data' | 'safety' | 'consensus' | 'risk' | 'mode';
 export interface Reason { group: ReasonGroup; code: string; text: string }
@@ -72,13 +76,23 @@ export function reasonsFromReport(r: StoredReport): Reason[] {
 
 interface DecisionRow { id: string; instrument: string; strategy: string; decision: string; score: number | null; created_at: number }
 function parseReport(id: string): StoredReport | null {
-  try { const v = JSON.parse(get<{ report: string }>('SELECT report FROM decisions WHERE id=?', id)?.report ?? ''); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+  // The read sits outside the try block: a database failure must reach the API error handler. Only missing or malformed content falls back.
+  const stored = get<{ report: string }>('SELECT report FROM decisions WHERE id=?', id)?.report ?? '';
+  try { const v = JSON.parse(stored); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+}
+/** Whether the owner can still act on an approval-required decision: only a PENDING_APPROVAL entry order counts (cancelled and expired do not). */
+function ownerConfirmationReason(decisionId: string): Reason {
+  const o = get<{ status: string }>("SELECT status FROM orders WHERE decision_id=? AND purpose='ENTRY' ORDER BY created_at DESC, rowid DESC LIMIT 1", decisionId);
+  return o?.status === 'PENDING_APPROVAL'
+    ? { group: 'mode', code: 'AWAITING_OWNER_CONFIRMATION', text: 'owner confirmation required: a paper order is queued and has not been approved' }
+    : { group: 'mode', code: 'OWNER_APPROVAL_NOT_PENDING', text: 'approved for owner confirmation, but no order is pending approval (' + (o ? 'order ' + o.status : 'no order queued') + ')' };
 }
 function reasonsOf(report: StoredReport | null): Reason[] {
   return report ? reasonsFromReport(report) : [{ group: 'data', code: 'REPORT_UNREADABLE', text: 'the stored decision report could not be read' }];
 }
 function projectRow(d: DecisionRow, history: NoTradeHistory[], nowTs: number): NoTradeRow {
   const report = parseReport(d.id);
+  const lead = d.decision === OWNER_CONFIRMATION ? [ownerConfirmationReason(d.id)] : [];
   const validTs = Number.isFinite(d.created_at) && d.created_at > 0 && d.created_at <= nowTs;
   const ageMs = validTs ? nowTs - d.created_at : null;
   const evidence: Evidence = !report || ageMs == null ? 'UNKNOWN' : ageMs >= NO_TRADE_TTL_MS ? 'STALE' : 'RECENT';
@@ -86,8 +100,19 @@ function projectRow(d: DecisionRow, history: NoTradeHistory[], nowTs: number): N
   return {
     instrumentId: d.instrument, symbol: typeof report?.asset === 'string' ? report.asset : d.instrument.split(':').pop() ?? d.instrument, decisionId: d.id,
     strategy: d.strategy, decision: d.decision, score: d.score, createdAt: d.created_at, ageMs, expiresAt: validTs ? d.created_at + NO_TRADE_TTL_MS : null,
-    evidence, supersededBy: null, risk, reasons: reasonsOf(report), missing: Array.isArray(report?.missingInformation) ? report.missingInformation.slice(0, 5).map(String) : [], history,
+    evidence, supersededBy: null, risk, reasons: lead.length ? [...lead, ...reasonsOf(report).filter((x) => x.code !== 'UNKNOWN')] : reasonsOf(report), missing: Array.isArray(report?.missingInformation) ? report.missingInformation.slice(0, 5).map(String) : [], history,
   };
+}
+
+/** Same per-quote limits as the quote-quality gate and market breadth: latest batch, provider timestamp neither stale nor future-dated. */
+function hasUsableQuote(batch: number, nowTs: number): boolean {
+  const L = QUALITY_LIMITS;
+  for (const q of market.tickers.values()) {
+    if (q.receivedAt !== batch || !Number.isFinite(q.providerTs) || !Number.isFinite(q.receivedAt) || !isEligibleSpot(q.base, q.quote)) continue;
+    if (q.providerTs > q.receivedAt + L.clockSkewMs || q.receivedAt > nowTs + L.clockSkewMs || nowTs - q.providerTs > L.maxQuoteAgeMs) continue;
+    if ([q.last, q.bid, q.ask].every((x) => Number.isFinite(x) && x > 0) && q.bid <= q.ask) return true;
+  }
+  return false;
 }
 
 /**
@@ -102,12 +127,14 @@ export function globalBlockers(nowTs = Date.now()): GlobalBlocker[] {
   if (!r.policy) out.push({ code: 'NO_POLICY', group: 'mode', text: 'No risk policy accepted: paper execution stays disabled.', href: '/risk' });
   if (r.openIncidents > 0) out.push({ code: 'PROTECTION_INCIDENT_OPEN', group: 'safety', text: r.openIncidents + ' open protection incident(s): new entries on those instruments are blocked.', href: '/risk' });
   const account = accountState(PAPER_ACCOUNT, nowTs, { persistMarks: false });
-  if (!account.marksMissing.length && Number.isFinite(account.equity) && account.equity <= 0) {
+  if (account.marksMissing.length) out.push({ code: 'POSITION_MARKS_MISSING', group: 'data', text: 'Open paper position(s) have no price mark (' + account.marksMissing.join(', ') + '). The risk gate denies new entries on every instrument (POSITION_MARKS_MISSING).', href: '/bot' });
+  else if (Number.isFinite(account.equity) && account.equity <= 0) {
     out.push({ code: 'UNFUNDED', group: 'risk', text: 'Paper equity is zero or negative. The risk gate denies new entries (NO_EQUITY).', href: '/bot' });
   }
   const t = market.tickersFetchedAt;
-  // Same 60 s threshold as the shell's data-health indicator (/api/shell).
-  if (!t || t > nowTs || nowTs - t > 60_000) out.push({ code: 'STALE_DATA', group: 'data', text: t ? 'Market tickers are stale or future-dated (last batch ' + new Date(t).toISOString() + ').' : 'No market ticker batch received (offline or still loading).', href: '/connections' });
+  // Batch receipt time is only a connectivity signal (same 60 s threshold as /api/shell). A fresh batch of old source quotes is still a data blocker.
+  const batchFresh = !!t && t <= nowTs && nowTs - t <= 60_000;
+  if (!batchFresh || !hasUsableQuote(t, nowTs)) out.push({ code: 'STALE_DATA', group: 'data', text: t && batchFresh ? 'The latest ticker batch has no usable quote for an eligible instrument (source timestamps stale, future-dated or invalid).' : t ? 'Market tickers are stale or future-dated (last batch ' + new Date(t).toISOString() + ').' : 'No market ticker batch received (offline or still loading).', href: '/connections' });
   return out;
 }
 
@@ -117,12 +144,18 @@ export function noTradeBoard(nowTs = Date.now()) {
   for (const d of recent) { const list = byInstrument.get(d.instrument); if (list) list.push(d); else byInstrument.set(d.instrument, [d]); }
   const rows: NoTradeRow[] = []; const omittedTrades: { instrumentId: string; decisionId: string; decision: string }[] = [];
   for (const [instrumentId, list] of byInstrument) {
-    const latest = list[0];
+    // A future-dated record (clock correction) can never supersede valid evidence, and is never trusted to omit an instrument.
+    const valid = list.filter((d) => d.created_at <= nowTs);
+    const futureCount = list.length - valid.length;
+    if (!valid.length) { rows.push(projectRow(list[0], [], nowTs)); continue; }
+    const latest = valid[0];
     if (TRADE_STATES.has(latest.decision)) { omittedTrades.push({ instrumentId, decisionId: latest.id, decision: latest.decision }); continue; }
     // Earlier non-trade decisions stay visible, each pointing at the decision that superseded it.
-    const history = list.slice(1).map((d, i) => ({ d, supersededBy: list[i].id })).filter(({ d }) => !TRADE_STATES.has(d.decision)).slice(0, HISTORY_LIMIT)
+    const history = valid.slice(1).map((d, i) => ({ d, supersededBy: valid[i].id })).filter(({ d }) => !TRADE_STATES.has(d.decision)).slice(0, HISTORY_LIMIT)
       .map(({ d, supersededBy }) => ({ decisionId: d.id, decision: d.decision, createdAt: d.created_at, supersededBy, reasons: reasonsOf(parseReport(d.id)) }));
-    rows.push(projectRow(latest, history, nowTs));
+    const row = projectRow(latest, history, nowTs);
+    if (futureCount) row.reasons.push({ group: 'data', code: 'FUTURE_DATED_DECISION', text: futureCount + ' decision record(s) for this instrument are timestamped in the future and were ignored' });
+    rows.push(row);
   }
   rows.sort((a, b) => b.createdAt - a.createdAt);
   return { asOf: nowTs, ttlMs: NO_TRADE_TTL_MS, windowMs: NO_TRADE_WINDOW_MS, global: globalBlockers(nowTs), globalLabel: 'known blockers, not execution clearance', rows, omittedTrades };

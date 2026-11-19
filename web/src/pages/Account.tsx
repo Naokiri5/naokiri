@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, authInfo, fmt, useApi, stepUpBody } from '../api';
 import { Action, Badge, Card, Empty, ErrorLine, Page, Tabs } from '../ui';
@@ -80,12 +80,14 @@ export function Notifications() {
     { title: 'Warning', rows: groups.filter((g) => g.severity === 'WARNING') },
     { title: 'Info', rows: groups.filter((g) => g.severity === 'INFO') },
   ];
-  const reload = () => { center.reload(); raw.reload(); };
+  // Completions (acknowledge, mark read) must refresh the CURRENT filter path, not the one captured when the click started.
+  const reload = () => { latest.current.center(); latest.current.raw(); };
+  const latest = useRef({ center: center.reload, raw: raw.reload }); latest.current = { center: center.reload, raw: raw.reload };
   return <Page title="Notifications" sub="Repeats are grouped by source, title and severity. Unread CRITICAL stays pinned until you acknowledge it; acknowledging never resolves an incident or resumes trading."
     right={<><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={hideInfo} onChange={(e) => toggleInfo(e.target.checked)} />Hide INFO</label>
       <Action label="Mark non-critical read" run={async () => { await api('/api/notifications/read', { body: {} }); reload(); }} /></>}>
     <ErrorLine e={center.error} />
-    {!center.data && center.error && <div className="alertbar warn" role="status">Critical status unknown: the notification center could not be loaded.</div>}
+    {center.error && <div className="alertbar warn" role="status">Critical status unknown: the notification center could not be refreshed.{center.data ? ' The list below is the last successful load and may be stale.' : ''}</div>}
     {hideInfo && <div className="hint" style={{ marginBottom: 10 }}>INFO is hidden. CRITICAL and WARNING are never hidden.</div>}
     <Tabs tabs={['By severity', 'Raw history']} value={tab} onChange={setTab} />
     {tab === 'By severity' && <>
@@ -94,7 +96,7 @@ export function Notifications() {
       {center.data && !groups.length && <Empty>No notifications in the last 14 days.</Empty>}
       {center.data?.hasMore && <div className="hint">Older non-critical groups are not shown (the newest 100 are). Unread CRITICAL groups are always shown.</div>}
     </>}
-    {tab === 'Raw history' && <Card flush><ErrorLine e={raw.error} /><div className="tablewrap" style={{ maxHeight: 700 }}><table><tbody>{(raw.data ?? []).map((n: any) => { const d = JSON.parse(n.delivery); return <tr key={n.id} style={{ opacity: n.read ? 0.65 : 1 }}><td className="faint" style={{ whiteSpace: 'nowrap' }}>{fmt.time(n.ts)}</td><td><Badge v={n.severity} /></td><td><b>{n.title}</b><div className="muted">{n.body}</div></td><td className="hint">{n.source}</td><td className="hint">app: {d.inApp}<br />telegram: {d.telegram}</td><td>{!n.read && n.severity !== 'CRITICAL' && <button className="sm ghost" onClick={async () => { await api('/api/notifications/read', { body: { id: n.id } }); reload(); }}>read</button>}</td></tr>; })}</tbody></table>{raw.data && !raw.data.length && <Empty>No notifications.</Empty>}</div></Card>}
+    {tab === 'Raw history' && <Card flush><ErrorLine e={raw.error} /><div className="tablewrap" style={{ maxHeight: 700 }}><table><tbody>{(raw.data ?? []).map((n: any) => { const d = JSON.parse(n.delivery); return <tr key={n.id} style={{ opacity: n.read ? 0.65 : 1 }}><td className="faint" style={{ whiteSpace: 'nowrap' }}>{fmt.time(n.ts)}</td><td><Badge v={n.severity} /></td><td><b>{n.title}</b><div className="muted">{n.body}</div></td><td className="hint">{n.source}</td><td className="hint">app: {d.inApp}<br />telegram: {d.telegram}</td><td>{!n.read && n.severity !== 'CRITICAL' && <Action className="sm ghost" label="read" run={async () => { await api('/api/notifications/read', { body: { id: n.id } }); reload(); }} />}</td></tr>; })}</tbody></table>{raw.data && !raw.data.length && <Empty>No notifications.</Empty>}</div></Card>}
   </Page>;
 }
 function NotificationGroupRow({ g, onDone }: { g: NotificationGroup; onDone: () => void }) {

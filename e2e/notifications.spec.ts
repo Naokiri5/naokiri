@@ -100,6 +100,26 @@ test('a failed refresh after an empty critical summary shows UNKNOWN, never a si
   await ctx.close();
 });
 
+test('raw-history read failure is shown on the row and retried; a failed refresh is never an all-clear', async () => {
+  withDb((db) => seedNotification(db, 'INFO', 'E2E raw read failure', 'unread info row', 'e2e', Date.now() - 1000));
+  await page.goto('/notifications'); await page.getByRole('tab', { name: 'Raw history' }).click();
+  const rawRow = page.locator('tr', { hasText: 'E2E raw read failure' });
+  await page.route('**/api/notifications/read', (r) => r.fulfill({ status: 500, json: { error: 'internal server error' } }));
+  await rawRow.getByRole('button', { name: 'read' }).click();
+  await expect(rawRow).toContainText('internal server error'); await expect(rawRow.getByRole('button', { name: 'read' })).toBeVisible();
+  await page.unroute('**/api/notifications/read');
+  await rawRow.getByRole('button', { name: 'read' }).click();
+  await expect(rawRow.getByRole('button', { name: 'read' })).toHaveCount(0);
+  // Failed refresh for the new filter path: warn, and do not claim there are no notifications.
+  await page.getByRole('tab', { name: 'By severity' }).click();
+  await page.route(/\/api\/notifications\/center\?hideInfo=1/, (r) => r.fulfill({ status: 500, json: { error: 'internal server error' } }));
+  await page.getByLabel('Hide INFO').check();
+  await expect(page.getByRole('status').filter({ hasText: 'Critical status unknown' })).toBeVisible();
+  await expect(page.getByText('No notifications in the last 14 days.')).toHaveCount(0);
+  await page.unroute(/\/api\/notifications\/center\?hideInfo=1/);
+  await page.getByLabel('Hide INFO').uncheck();
+});
+
 test('why MIA is not trading: grouped reasons, superseded history, unreadable reports, trades omitted', async () => {
   await page.goto('/scanner'); await page.getByRole('tab', { name: 'Why not trading' }).click();
   await expect(page.getByText('known blockers, not execution clearance')).toBeVisible();
@@ -124,6 +144,8 @@ test('board evidence ages on the client and turns STALE at the 2h TTL between po
     await board.getByRole('tab', { name: 'Why not trading' }).click();
     const avax = board.locator('.nt-current > .nt-card', { hasText: 'AVAXUSDT' });
     await expect(avax).toContainText('RECENT');
+    // Hold every later poll: only client-side aging may move AVAX into the stale list.
+    await board.route('**/api/no-trade', () => new Promise<void>(() => { /* never answered */ }));
     await board.clock.fastForward('00:16');
     await expect(board.locator('details.nt-stale summary')).toContainText('2 stale decision(s)');
     await expect(avax).toHaveCount(0);

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { modeGate } from '../src/qa/gates.js';
-import { freshDb } from './helpers.js';
+import { freshDb, seedInstrument } from './helpers.js';
 import { get, getDb, run } from '../src/db/db.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -82,11 +82,62 @@ describe('no-trade board', () => {
   });
 
   it('global blockers follow existing state; emergency stays separate from pause', () => {
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000); market.tickersFetchedAt = T - 5_000;
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000); seedInstrument('BTCUSDT', { nowTs: T - 5_000 }); market.tickersFetchedAt = T - 5_000;
     expect(globalBlockers()).toEqual([]);
     updateControl('owner', { pausedNewOrders: true }); expect(globalBlockers().map((g) => g.code)).toEqual(['PAUSED']);
     updateControl('owner', { pausedNewOrders: false, emergency: true }); expect(globalBlockers().map((g) => g.code)).toEqual(['EMERGENCY']);
     market.tickersFetchedAt = T + 60_000; expect(globalBlockers().map((g) => g.code)).toContain('STALE_DATA');
+  });
+
+  it('a fresh batch of stale source quotes keeps STALE_DATA; receipt time alone does not clear it', () => {
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    seedInstrument('BTCUSDT', { nowTs: T - 5_000 }); market.tickersFetchedAt = T - 5_000;
+    const q = market.tickers.get('crypto:binance:BTCUSDT')!; q.providerTs = T - 10 * MIN;
+    expect(globalBlockers().map((g) => g.code)).toEqual(['STALE_DATA']);
+    q.providerTs = T - 5_000; expect(globalBlockers()).toEqual([]);
+    q.providerTs = T + 10 * MIN; expect(globalBlockers().map((g) => g.code)).toEqual(['STALE_DATA']);
+  });
+
+  it('reports missing position marks as a separate global blocker and keeps the equity guard', () => {
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    seedInstrument('BTCUSDT', { nowTs: T - 5_000 }); market.tickersFetchedAt = T - 5_000;
+    run("INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,planned_risk) VALUES ('pos_nomark',?,'crypto:binance:GONEUSDT','crypto','LONG','trend_pullback',1,100,95,95,'{}','OPEN',?,0,0,5)", PAPER_ACCOUNT, T - 60 * MIN);
+    const g = globalBlockers().find((x) => x.code === 'POSITION_MARKS_MISSING');
+    expect(g).toMatchObject({ group: 'data' }); expect(g!.text).toContain('GONEUSDT');
+    expect(globalBlockers().map((x) => x.code)).not.toContain('UNFUNDED');
+  });
+
+  it('shows a decision awaiting owner confirmation, but not as pending once the order is cancelled or expired', () => {
+    const order = (decisionId: string, status: string, n: number) => run("INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,status,purpose,decision_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      'ord_' + n, 'coid_' + n, PAPER_ACCOUNT, 'paper', 'crypto:binance:LINKUSDT', 'BUY', 'MARKET', 1, status, 'ENTRY', decisionId, T - MIN, T - MIN);
+    const pending = decision('LINKUSDT', 'APPROVED_FOR_USER_CONFIRMATION', 5 * MIN); order(pending, 'PENDING_APPROVAL', 1);
+    const cancelled = decision('MATICUSDT', 'APPROVED_FOR_USER_CONFIRMATION', 5 * MIN); order(cancelled, 'CANCELLED', 2);
+    const expired = decision('DOTUSDT', 'APPROVED_FOR_USER_CONFIRMATION', 5 * MIN); order(expired, 'EXPIRED', 3);
+    decision('ATOMUSDT', 'APPROVED_FOR_USER_CONFIRMATION', 5 * MIN);
+    decision('NEARUSDT', 'PAPER_TRADE', 5 * MIN);
+    expect(row('LINKUSDT')!.reasons[0]).toMatchObject({ code: 'AWAITING_OWNER_CONFIRMATION' });
+    for (const s of ['MATICUSDT', 'DOTUSDT', 'ATOMUSDT']) expect(row(s)!.reasons[0].code).toBe('OWNER_APPROVAL_NOT_PENDING');
+    expect(row('MATICUSDT')!.reasons[0].text).toContain('CANCELLED'); expect(row('DOTUSDT')!.reasons[0].text).toContain('EXPIRED');
+    expect(row('NEARUSDT')).toBeUndefined(); expect(noTradeBoard().omittedTrades.map((o) => o.decision)).toEqual(['PAPER_TRADE']);
+  });
+
+  it('a future-dated trade never hides valid evidence; a valid latest trade still omits; future-only is UNKNOWN', () => {
+    decision('SUIUSDT', 'REJECTED', MIN, { risk: { decision: 'DENY', reasonCodes: ['SPREAD 9bps > 8'], policyVersion: 1, ts: 'x' } });
+    decision('SUIUSDT', 'PAPER_TRADE', -5 * MIN);
+    decision('APTUSDT', 'REJECTED', 20 * MIN); decision('APTUSDT', 'PAPER_TRADE', MIN); decision('APTUSDT', 'REJECTED', -5 * MIN);
+    decision('OPUSDT', 'PAPER_TRADE', -5 * MIN);
+    const sui = row('SUIUSDT')!;
+    expect(sui).toMatchObject({ evidence: 'RECENT', decision: 'REJECTED' });
+    expect(sui.reasons.map((r) => r.code)).toEqual(['SPREAD', 'FUTURE_DATED_DECISION']);
+    expect(row('APTUSDT')).toBeUndefined(); expect(noTradeBoard().omittedTrades.map((o) => o.instrumentId)).toContain('crypto:binance:APTUSDT');
+    expect(row('OPUSDT')).toMatchObject({ evidence: 'UNKNOWN', ageMs: null });
+  });
+
+  it('a database failure while reading a selected report reaches the caller; malformed content still falls back', () => {
+    decision('BADUSDT', 'REJECTED', MIN, '{not json');
+    expect(row('BADUSDT')!.reasons[0].code).toBe('REPORT_UNREADABLE');
+    const db = getDb(); db.exec('ALTER TABLE decisions RENAME COLUMN report TO report_x');
+    try { expect(() => noTradeBoard()).toThrow(); } finally { db.exec('ALTER TABLE decisions RENAME COLUMN report_x TO report'); }
   });
 
   it('reading the board writes nothing, even across a day rollover with a funded account', () => {
