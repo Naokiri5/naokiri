@@ -13,7 +13,7 @@
  */
 import { get, P } from '../db/db.js';
 import { sha256 } from '../core/util.js';
-import { expandSnapshot } from './memory.js';
+import { hashEvent, workerRegistryHash } from './memory.js';
 import { WORKERS } from '../workers/registry.js';
 import { isApplicable } from '../workers/runtime.js';
 import { aggregate, applicableDomains } from '../qci/coordinator.js';
@@ -55,7 +55,7 @@ function contextFromSnapshot(snap: any, candidate: Candidate): { ctx: WorkerCont
 
 /** Replay the evidence behind one stored decision. Read-only. */
 export function replayDecision(decisionId: string): ReplayReport {
-  const ev = get<{ id: string; snapshot_id: string; payload: string; created_at: number }>("SELECT id, snapshot_id, payload, created_at FROM ditas_events WHERE decision_id=? AND kind='DECISION' ORDER BY seq LIMIT 1", decisionId);
+  const ev = get<any>("SELECT * FROM ditas_events WHERE decision_id=? AND kind='DECISION' ORDER BY seq LIMIT 1", decisionId);
   if (!ev) throw new ReplayError('no DITAS decision event for this decision');
   const snapRow = get<{ id: string; payload: string; hash: string }>('SELECT id, payload, hash FROM ditas_snapshots WHERE id=?', ev.snapshot_id);
   if (!snapRow) throw new ReplayError('snapshot missing');
@@ -65,6 +65,8 @@ export function replayDecision(decisionId: string): ReplayReport {
     weighted: { recordedSupport: 0, replayedSupport: 0, recordedOpposition: 0, replayedOpposition: 0 }, vetoes: { recorded: [] as string[], replayed: [] as string[] },
     scope: 'Evidence and consensus replay only. The decision engine and risk gate are not re-run; their inputs (account, policy) are in the stored report.' };
 
+  // The candidate and consensus id come from the EVENT payload: verify its hash too, not only the snapshot's.
+  if (hashEvent(ev) !== ev.hash) return { ...base, snapshotVerified: false, evaluationClock: null, status: 'NOT_REPLAYABLE', reasons: ['decision event hash does not match: stored event was altered, replay refused'] };
   const verified = sha256(snapRow.payload) === snapRow.hash && snapRow.id === `snap_${snapRow.hash}`;
   if (!verified) return { ...base, snapshotVerified: false, evaluationClock: null, status: 'NOT_REPLAYABLE', reasons: ['snapshot hash does not match: stored evidence was altered, replay refused'] };
   const consensusText = report?.consensus?.id ? get<{ record: string }>('SELECT record FROM consensus_records WHERE id=?', report.consensus.id)?.record : null;
@@ -72,10 +74,14 @@ export function replayDecision(decisionId: string): ReplayReport {
   const rec = JSON.parse(consensusText) as ConsensusRecord;
 
   let snap: any;
-  try { snap = expandSnapshot(P<any>(snapRow.payload)); } catch (e) { return { ...base, snapshotVerified: true, evaluationClock: null, status: 'NOT_REPLAYABLE', reasons: [String((e as Error).message)] }; }
+  // Workers read only features and context, which are stored inline; candle/book blobs are not needed (no expansion).
+  try { snap = P<any>(snapRow.payload); } catch (e) { return { ...base, snapshotVerified: true, evaluationClock: null, status: 'NOT_REPLAYABLE', reasons: [String((e as Error).message)] }; }
   const { ctx, missing } = contextFromSnapshot(snap, candidate);
   if (!ctx) return { ...base, snapshotVerified: true, evaluationClock: null, status: 'NOT_REPLAYABLE', reasons: missing };
   const reasons = [...missing];
+  const recordedRegistry = snap?.lineage?.workerRegistry;
+  if (recordedRegistry && recordedRegistry !== workerRegistryHash()) reasons.push('worker code versions differ from those at recording time: a difference may come from a code change, not from the data');
+  else if (!recordedRegistry) reasons.push('worker code versions were not recorded (snapshot predates this check)');
   if (rec.workers.quarantined > 0 || rec.workers.failed > 0) reasons.push(`at decision time ${rec.workers.failed} worker(s) failed and ${rec.workers.quarantined} were quarantined; which ones is not recorded, so counts may differ`);
 
   // Evaluate each applicable worker purely (no signing, stats or quarantine side effects).
@@ -99,6 +105,8 @@ export function replayDecision(decisionId: string): ReplayReport {
     const sa = d.score, sb = x?.score ?? null;
     if ((sa === null) !== (sb === null) || (sa !== null && sb !== null && Math.abs(sa - sb) > 1e-6)) differences.push({ domain: d.domain, field: 'score', recorded: sa, replayed: sb });
   }
+  // Two-way: a domain present only in the replay is a difference too.
+  for (const x of agg.domains) if (!rec.domains.some((d) => d.domain === x.domain)) differences.push({ domain: x.domain, field: 'groups', recorded: null, replayed: x.groups });
   const recordedVetoes = rec.vetoes.map((v) => v.worker_id).sort(); const replayedVetoes = [...vetoes].sort();
   const weighted = { recordedSupport: rec.weighted_support, replayedSupport: r3(agg.weightedSupport), recordedOpposition: rec.weighted_opposition, replayedOpposition: r3(agg.weightedOpposition) };
   const weightedSame = Math.abs(weighted.recordedSupport - weighted.replayedSupport) < 1e-6 && Math.abs(weighted.recordedOpposition - weighted.replayedOpposition) < 1e-6;

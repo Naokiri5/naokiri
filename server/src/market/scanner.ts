@@ -53,7 +53,7 @@ export function buildContext(cand: Candidate): WorkerContext {
   const frameQuality = Object.fromEntries((['15m', '1h', '4h'] as const).map(iv => [iv, assessQuality(cand.instrumentId, iv, asOf)]));
   const btcQuality = { '1h': assessQuality('crypto:binance:BTCUSDT', '1h', asOf), '4h': assessQuality('crypto:binance:BTCUSDT', '4h', asOf) };
   return {
-    asOf: Date.now(),
+    asOf, // the same clock used for the frame-quality checks above
     candidate: cand,
     f: Object.fromEntries((['15m', '1h', '4h'] as const).map(iv => [iv, frameQuality[iv].status === 'FAIL' ? null : d.engines[iv].last])),
     frameQuality: { ...frameQuality, btc1h: btcQuality['1h'], btc4h: btcQuality['4h'] },

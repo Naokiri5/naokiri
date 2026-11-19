@@ -15,6 +15,7 @@ import type { DecisionReport } from './engine.js';
 import type { ConsensusRecord } from '../qci/schemas.js';
 import { scenarioTable, expectancy, type ScenarioReport, type ExpectancyReport } from './profitLab.js';
 import { DEFAULT_POLICY } from '../risk/policy.js';
+import { HORIZON_CRITICAL_RE } from '../qci/challenge.js';
 
 export const CERTIFICATE_VERSION = 'think-certificate-v1';
 
@@ -23,7 +24,7 @@ export type NoTradeCode =
   | 'STALE_OR_MISSING_MARKET_DATA' | 'INSUFFICIENT_DATA' | 'ASSET_NOT_ELIGIBLE' | 'INSUFFICIENT_LIQUIDITY'
   | 'QCI_VETO' | 'QCI_NO_QUORUM' | 'QCI_MIXED_EVIDENCE' | 'CONSENSUS_EXPIRED' | 'REQUIRED_DOMAIN_MISSING'
   | 'BELOW_OPPORTUNITY_THRESHOLD' | 'OBSERVE_MODE' | 'RISK_DENIED' | 'NEEDS_OWNER_REVIEW' | 'COSTS_TOO_HIGH'
-  | 'NEGATIVE_OUT_OF_SAMPLE_EXPECTANCY' | 'NO_POSITIVE_EDGE_LOWER_BOUND' | 'HORIZON_CONFLICT';
+  | 'NEGATIVE_OUT_OF_SAMPLE_EXPECTANCY' | 'NO_POSITIVE_EDGE_LOWER_BOUND' | 'HORIZON_CONFLICT' | 'AWAITING_OWNER_APPROVAL';
 
 export interface ThinkCertificate {
   version: typeof CERTIFICATE_VERSION; kind: 'EXPLANATION_ONLY';
@@ -31,7 +32,9 @@ export interface ThinkCertificate {
   asOf: string;
   provenance: { reportSha256: string; consensusId: string; consensusSha256: string | null; traceId: string; coordinatorVersion: string | null;
     scoreVersion: string; dataFreshness: DecisionReport['dataFreshness'] };
-  verdict: { decision: DecisionReport['decision']; finalDecision: DecisionReport['finalDecision']; tradeTaken: boolean; noTradeReasons: NoTradeCode[]; riskReasonCodes: string[] };
+  /** tradeTaken: the engine proposed a PAPER trade to the OMS (the OMS may still refuse it). awaitingOwnerApproval: nothing
+   *  was executed; the owner must approve first (risk NEEDS_REVIEW or APPROVAL mode). */
+  verdict: { decision: DecisionReport['decision']; finalDecision: DecisionReport['finalDecision']; tradeTaken: boolean; awaitingOwnerApproval: boolean; noTradeReasons: NoTradeCode[]; riskReasonCodes: string[] };
   coverage: { workers: ConsensusRecord['workers'] | null; dependencyGroups: number | null; requiredDomainsMissing: string[]; domains: { domain: string; required: boolean; support: number; oppose: number; abstain: number; score: number | null }[] };
   dissent: { weightedSupport: number; weightedOpposition: number; vetoes: { workerId: string; reasons: string[] }[] };
   bullCase: string[]; bearCase: string[]; missingInformation: string[];
@@ -46,7 +49,8 @@ export interface ThinkCertificate {
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 
 function noTradeReasons(r: DecisionReport, c: ConsensusRecord | null, missingRequired: string[], exp: ExpectancyReport): NoTradeCode[] {
-  if (r.finalDecision === 'ENTER') return [];
+  if (r.decision === 'PAPER_TRADE') return [];
+  if (r.decision === 'APPROVED_FOR_USER_CONFIRMATION') return r.risk?.decision === 'NEEDS_REVIEW' ? ['NEEDS_OWNER_REVIEW', 'AWAITING_OWNER_APPROVAL'] : ['AWAITING_OWNER_APPROVAL'];
   const out = new Set<NoTradeCode>();
   const step = (prefix: string) => r.steps.find((s) => s.name.startsWith(prefix));
   if (r.dataFreshness.status === 'FAIL' || step('Market data freshness')?.result === 'FAIL') out.add('STALE_OR_MISSING_MARKET_DATA');
@@ -59,13 +63,19 @@ function noTradeReasons(r: DecisionReport, c: ConsensusRecord | null, missingReq
   if (state === 'MIXED_CONSENSUS') out.add('QCI_MIXED_EVIDENCE');
   if (state === 'EXPIRED') out.add('CONSENSUS_EXPIRED');
   if (missingRequired.length) out.add('REQUIRED_DOMAIN_MISSING');
-  if (r.decision === 'APPROVED_FOR_MONITORING') out.add(step('Execution permission')?.result === 'FAIL' ? 'OBSERVE_MODE' : 'BELOW_OPPORTUNITY_THRESHOLD');
+  if (r.decision === 'APPROVED_FOR_MONITORING') {
+    const scoreStep = step('Opportunity score vs policy minimum');
+    if (scoreStep?.result === 'FAIL') out.add('BELOW_OPPORTUNITY_THRESHOLD');
+    if (step('Execution permission')?.result === 'FAIL') out.add('OBSERVE_MODE');
+    if (!scoreStep && step('Execution permission')?.result !== 'FAIL') out.add('BELOW_OPPORTUNITY_THRESHOLD'); // reports recorded before the score step existed
+  }
   if (r.risk?.decision === 'DENY') out.add('RISK_DENIED');
   if (r.risk?.decision === 'NEEDS_REVIEW') out.add('NEEDS_OWNER_REVIEW');
   if (step('Expected fees')?.result === 'FAIL') out.add('COSTS_TOO_HIGH');
   if (step('Strategy performance')?.result === 'FAIL') out.add('NEGATIVE_OUT_OF_SAMPLE_EXPECTANCY');
   if (exp.verdict === 'NEGATIVE' || exp.verdict === 'UNCERTAIN_EDGE') out.add('NO_POSITIVE_EDGE_LOWER_BOUND');
-  if (c?.reason_codes.some((x) => x.startsWith('CRITICAL CONTRARIAN') && x.includes('horizon conflict'))) out.add('HORIZON_CONFLICT');
+  // The coordinator joins ALL contrarian findings into one CRITICAL line, so match only the critical horizon wording.
+  if (c?.reason_codes.some((x) => x.startsWith('CRITICAL CONTRARIAN') && HORIZON_CRITICAL_RE.test(x))) out.add('HORIZON_CONFLICT');
   return [...out];
 }
 
@@ -81,11 +91,15 @@ export function buildCertificate(reportText: string, consensusText: string | nul
 
   const feeRate = r.risk?.sizing && r.positionSize?.notional ? (r.expectedCosts.feesUsd ?? 0) / (2 * r.positionSize.notional) : DEFAULT_POLICY.feeRate;
   const scenarios = scenarioTable({
-    entry: r.risk?.sizing?.estEntry ?? r.entryRef, stop: r.stopLoss,
+    // Reference (mid-like) entry: spread and impact are charged by the lab, so the ask is not used here (no double count).
+    entry: r.entryRef, stop: r.stopLoss, stopFill: r.risk?.sizing?.conservativeStopFill ?? null,
     targets: r.takeProfit.map((t) => ({ price: t.price, fraction: t.fraction })),
     qty: r.positionSize?.qty ?? null, feeRate: Number.isFinite(feeRate) && feeRate > 0 ? feeRate : DEFAULT_POLICY.feeRate,
     spreadBps: r.expectedCosts.spreadBps, slippageBps: r.expectedCosts.slippageBps,
   });
+  // A book that could not absorb the size has non-finite impact (stored as null): say so instead of implying a modest cost.
+  if (r.risk?.sizing && r.expectedCosts.slippageBps == null) scenarios.caveats.push('Measured impact was unavailable or the book could not absorb the size: real execution cost may be far higher than the default used.');
+  if (r.positionSize?.plannedMaxLoss != null) scenarios.caveats.push(`Risk gate planned max loss for this size: ${r.positionSize.plannedMaxLoss} USD (its own sizing assumptions).`);
   const exp = expectancy(null, 0, 0, 0); // no calibrated cohort is wired yet: honest NO_VALID_FORECAST
 
   const uncertainty = [
@@ -102,7 +116,7 @@ export function buildCertificate(reportText: string, consensusText: string | nul
     decisionId: r.id, asset: r.asset, instrumentId: r.instrumentId, strategy: r.strategy, regime: r.regime, asOf: r.createdAt,
     provenance: { reportSha256: sha(reportText), consensusId: r.consensus.id, consensusSha256: consensusText ? sha(consensusText) : null, traceId: r.traceId,
       coordinatorVersion: c?.coordinator_version ?? null, scoreVersion: r.opportunity.version, dataFreshness: r.dataFreshness },
-    verdict: { decision: r.decision, finalDecision: r.finalDecision, tradeTaken: r.finalDecision === 'ENTER', noTradeReasons: noTradeReasons(r, c, requiredDomainsMissing, exp), riskReasonCodes: r.risk?.reasonCodes ?? [] },
+    verdict: { decision: r.decision, finalDecision: r.finalDecision, tradeTaken: r.decision === 'PAPER_TRADE', awaitingOwnerApproval: r.decision === 'APPROVED_FOR_USER_CONFIRMATION', noTradeReasons: noTradeReasons(r, c, requiredDomainsMissing, exp), riskReasonCodes: r.risk?.reasonCodes ?? [] },
     coverage: { workers: c?.workers ?? null, dependencyGroups: c?.dependency_groups ?? null, requiredDomainsMissing, domains },
     dissent: { weightedSupport: r.consensus.support, weightedOpposition: r.consensus.opposition, vetoes: (c?.vetoes ?? []).map((v) => ({ workerId: v.worker_id, reasons: v.reasons })) },
     bullCase: r.supportingEvidence, bearCase: [...r.opposingEvidence, ...(c?.vetoes ?? []).flatMap((v) => v.reasons.map((x) => `veto ${v.worker_id}: ${x}`))],

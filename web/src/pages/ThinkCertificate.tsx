@@ -15,6 +15,7 @@ const REASON_TEXT: Record<string, string> = {
   RISK_DENIED: 'Independent risk gate denied it', NEEDS_OWNER_REVIEW: 'Risk gate asked for owner review', COSTS_TOO_HIGH: 'Fees and slippage too high for the risk',
   NEGATIVE_OUT_OF_SAMPLE_EXPECTANCY: 'Strategy lost money out of sample', NO_POSITIVE_EDGE_LOWER_BOUND: 'No edge after uncertainty',
   HORIZON_CONFLICT: 'Buying against both the 1h and 4h downtrend',
+  AWAITING_OWNER_APPROVAL: 'Waiting for your approval: nothing was executed',
 };
 
 /** Evidence replay from the frozen DITAS snapshot (server: ditas/replay.ts). Read-only. */
@@ -40,7 +41,7 @@ export function ThinkCertificateView({ decisionId }: { decisionId: string }) {
     <div className="banner info" style={{ marginBottom: 0 }}>{c.disclaimer} This certificate cannot approve or place a trade: the independent risk gate decides and only the paper OMS executes.</div>
     <div className="grid g2">
       <Card title="Verdict" right={<Badge v={c.verdict.finalDecision} />}>
-        {c.verdict.tradeTaken ? <span>MIA proposed a paper trade.</span> : c.verdict.noTradeReasons.length
+        {c.verdict.tradeTaken ? <span>MIA proposed a paper trade (the paper OMS still re-checks it before any fill).</span> : c.verdict.noTradeReasons.length
           ? <ul style={{ margin: 0, paddingLeft: 18 }}>{c.verdict.noTradeReasons.map((r: string) => <li key={r}><b>{REASON_TEXT[r] ?? r}</b> <span className="faint mono">{r}</span></li>)}</ul>
           : <span className="muted">No trade (monitoring only).</span>}
         {c.verdict.riskReasonCodes.length > 0 && <div className="hint" style={{ marginTop: 8 }}>Risk gate: {c.verdict.riskReasonCodes.join('; ')}</div>}

@@ -9,6 +9,11 @@ import type { DecisionReport } from '../decision/engine.js';
 import { classifyRegime } from '../regime/regime.js';
 import { STRATEGIES, strategyById } from '../lab/strategies.js';
 import { fingerprint } from './fingerprint.js';
+import { WORKERS } from '../workers/registry.js';
+
+/** Fingerprint of the worker code versions in force (id@version list). Lets an evidence replay tell a code change apart
+ *  from a data problem. */
+export function workerRegistryHash() { return sha256(J(WORKERS.map((w) => `${w.id}@${w.version}`))); }
 
 export type MemoryKind = 'NO_SIGNAL' | 'REJECTED' | 'PROPOSAL' | 'DECISION' | 'CORRECTION';
 export interface MemoryEvent {
@@ -32,7 +37,7 @@ function capture(instrumentId: string, interval: Interval, asOf: number, ctx?: W
     cross: Object.fromEntries(Object.entries(d?.cross ?? {}).map(([venue, q]) => [venue, pick(q, 'price bid ask ts venue')])), quality: ctx?.quality ?? assessQuality(instrumentId, interval, asOf),
     control: getControl(), fingerprint: ctx ? fingerprint(ctx, asOf) : null,
     context: ctx ? { asOf: ctx.asOf ?? null, breadth: ctx.breadth ?? null, frameQuality: ctx.frameQuality ?? null, btc1h: feature(ctx.btc1h), btc4h: feature(ctx.btc4h), ticker: ctx.ticker ? pick(ctx.ticker, 'last changePct quoteVolume trades high low') : null, safety: ctx.safety, impact: ctx.impact, news: ctx.news, prints: ctx.prints, corrToBtc: ctx.corrToBtc, feeRate: ctx.feeRate, intendedNotional: ctx.intendedNotional, strategyStats: ctx.strategyStats } : null,
-    lineage: { intelligence: 'deterministic-workers', modelVersion: null, promptVersion: null, calibrationId: null, strategyVersions: STRATEGIES.map(s => ({ id: s.id, version: s.version })), note: 'No LLM prediction probability used by deterministic decision path.' },
+    lineage: { intelligence: 'deterministic-workers', workerRegistry: workerRegistryHash(), modelVersion: null, promptVersion: null, calibrationId: null, strategyVersions: STRATEGIES.map(s => ({ id: s.id, version: s.version })), note: 'No LLM prediction probability used by deterministic decision path.' },
   };
 }
 

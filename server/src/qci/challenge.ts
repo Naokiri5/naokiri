@@ -5,6 +5,8 @@ export type HorizonTrend = 'UP' | 'DOWN' | 'FLAT' | 'UNKNOWN';
 /** Strategies that buy WITH the trend; buying against both higher horizons contradicts their own thesis. */
 const TREND_FOLLOWING = new Set(['trend_pullback', 'donchian_breakout']);
 const HORIZONS = ['15m', '1h', '4h'] as const;
+/** Matches ONLY the critical horizon finding (used by the certificate; other horizon findings are non-blocking). */
+export const HORIZON_CRITICAL_RE = /horizon conflict: long \S+ against a 1h AND 4h downtrend/;
 
 /**
  * MIA-THINK-037: explicit 15m / 1h / 4h trend alignment. A horizon is UP when price and EMA20 are both above EMA50, DOWN
