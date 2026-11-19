@@ -1,0 +1,19 @@
+{
+  "source": "docs/operations/QHEF_LATENCY_BASELINE.md (committed 2026-11-18, 5f46095)",
+  "remeasured": false,
+  "note": "Copied unchanged with sample counts. Not a p95 claim for the Omega fast path: several stages have one sample. No event-to-order-send trace exists yet; network and polling dominate.",
+  "environment": "build container, REST polling, deep tier = 24 instruments",
+  "stages_ms": [
+    { "stage": "qci.worker.compute", "samples": 94, "p50": 0.02, "p95": 0.05, "p99": 0.08 },
+    { "stage": "qci.consensus", "samples": 1, "p50": 14.3, "p95": null, "p99": null },
+    { "stage": "decision.engine (incl. risk gate)", "samples": 1, "p50": 13.6, "p95": null, "p99": null },
+    { "stage": "pipeline.candidate_to_decision", "samples": 1, "p50": 37, "p95": null, "p99": null },
+    { "stage": "scan.cycle (24 instruments, no candidate)", "samples": 2, "p50": 46.6, "p95": null, "p99": null },
+    { "stage": "features.incremental", "samples": 72, "p50": 7.3, "p95": 10.5, "p99": 24.5 },
+    { "stage": "oms.submit (paper)", "samples": 1, "p50": 1.6, "p95": null, "p99": null },
+    { "stage": "provider.binance (REST)", "samples": 164, "p50": 229, "p95": 1319, "p99": 2338 },
+    { "stage": "fabric.book (depth fetch)", "samples": 48, "p50": 863, "p95": 1096, "p99": 1404 },
+    { "stage": "fabric.tickers (all 24h tickers)", "samples": 4, "p50": 1716, "p95": 3163, "p99": 3163 }
+  ],
+  "omega_targets": { "internal_event_to_order_send_p95_ms": 200, "stretch_p95_ms": 100, "status": "NOT_MEASURED" }
+}

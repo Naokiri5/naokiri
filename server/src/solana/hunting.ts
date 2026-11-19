@@ -54,6 +54,14 @@ const ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const validNum = (n: number) => Number.isFinite(n) && n >= 0;
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
 const rounded = (x: number) => Math.round(x * 100) / 100;
+/**
+ * MIA review (Omega PR-01): provider strings are attacker-controlled. Strip control and format characters (including
+ * bidi overrides that can make one ticker render as another) before they reach the UI; React still escapes the rest.
+ */
+const displayText = (x: unknown, fallback: string) => {
+  const s = typeof x === 'string' ? x.replace(/[\p{Cc}\p{Cf}]/gu, '').trim() : '';
+  return (s || fallback).slice(0, 40);
+};
 
 /** Scores distinct mint addresses only; never assumes missing on-chain checks passed. */
 export function rankSolanaPairs(pairs: readonly SolanaHuntPair[], opts: SolanaHunterOptions = {}): SolanaHuntResult[] {
@@ -67,7 +75,9 @@ export function rankSolanaPairs(pairs: readonly SolanaHuntPair[], opts: SolanaHu
   }
   const byMint = new Map<string, SolanaHuntPair>();
   for (const p of pairs) {
-    if (p.chainId?.toLowerCase() !== 'solana' || !ADDRESS.test(p.baseAddress ?? '') || !ADDRESS.test(p.pairAddress ?? '')) continue;
+    // MIA review: chainId and addresses come straight from the provider; a non-string must be skipped, never throw.
+    if (typeof p.chainId !== 'string' || p.chainId.toLowerCase() !== 'solana' || typeof p.baseAddress !== 'string' || typeof p.pairAddress !== 'string'
+      || !ADDRESS.test(p.baseAddress) || !ADDRESS.test(p.pairAddress)) continue;
     const old = byMint.get(p.baseAddress);
     if (!old || (validNum(p.liquidityUsd) && p.liquidityUsd > (validNum(old.liquidityUsd) ? old.liquidityUsd : -1))) byMint.set(p.baseAddress, p);
   }
@@ -100,8 +110,8 @@ export function rankSolanaPairs(pairs: readonly SolanaHuntPair[], opts: SolanaHu
     const agePart = ageMinutes == null ? 0 : 20 * (1 - clamp(ageMinutes / (maxAge * 60), 0, 1));
     const rankScore = rounded(clamp(liquidityPart + volumePart + activityPart + agePart, 0, 100));
     const fatal = blockers.some(b => ['MALFORMED_MARKET_METRICS', 'LOW_LIQUIDITY', 'LOW_VOLUME', 'NO_OBSERVED_SELLS', 'ANOMALOUS_VOLUME_TO_LIQUIDITY', 'EXTREME_PRICE_CHANGE'].includes(b));
-    results.push({ chain: 'solana', mint: p.baseAddress, symbol: String(p.baseSymbol ?? '?').slice(0, 40), pairAddress: p.pairAddress,
-      dex: String(p.dexId ?? '?').slice(0, 40), ageMinutes: ageMinutes == null ? null : rounded(ageMinutes),
+    results.push({ chain: 'solana', mint: p.baseAddress, symbol: displayText(p.baseSymbol, '?'), pairAddress: p.pairAddress,
+      dex: displayText(p.dexId, '?'), ageMinutes: ageMinutes == null ? null : rounded(ageMinutes),
       liquidityUsd: validNum(p.liquidityUsd) ? p.liquidityUsd : 0, volume1hUsd: validNum(p.volume1h) ? p.volume1h : 0,
       observedBuys1h: validNum(p.buys1h) ? p.buys1h : 0, observedSells1h: validNum(p.sells1h) ? p.sells1h : 0,
       momentum1hPct: Number.isFinite(p.change1h) ? p.change1h : 0, rankScore,
