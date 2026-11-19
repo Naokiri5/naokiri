@@ -181,7 +181,7 @@ export function botStatusView() {
   const ctl = getControl(); const acct = accountState();
   return {
     ...botStatus, display: displayMode(ctl), mode: ctl.mode, paused: ctl.pausedNewOrders, emergency: ctl.emergency,
-    policyAccepted: !!currentPolicy(), funded: acct.deposits > 0, equity: acct.equity,
+    policyAccepted: !!currentPolicy()?.policy, funded: acct.deposits > 0, equity: acct.equity,
     /** Streaming-book connection health (null when MIA_STREAMING is off: REST polling only). */
     depthStream: depthStreamStatus(),
     state: ctl.emergency ? 'EMERGENCY' : ctl.pausedNewOrders ? 'PAUSED' : ctl.mode === 'OBSERVE' ? 'OBSERVING' : ctl.mode === 'PAPER' ? 'PAPER_TRADING' : ctl.mode === 'APPROVAL' ? 'AWAITING_APPROVAL' : 'BOUNDED_LIVE',

@@ -127,7 +127,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   if (!sim.fill) return reject(sim.reason!);
   const fill = sim.fill;
   const pv = currentPolicy();
-  if (!pv || pv.invalid) return reject('POLICY_INVALID: entries need a valid owner-accepted risk policy');
+  if (!pv?.policy) return reject('POLICY_INVALID: entries need a valid owner-accepted risk policy');
   const pol = pv.policy;
   if (fill.impactBps > pol.maxSlippageBps) return reject(`SLIPPAGE ${fill.impactBps.toFixed(1)}bps at submission`);
   if (fill.price <= s.stopLoss) return reject('PRICE_THROUGH_STOP');
