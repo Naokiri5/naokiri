@@ -17,7 +17,7 @@ export function Discover() {
   const [tab, setTab] = useState('Volume leaders'); const nav = useNavigate();
   const lists: Record<string, any[]> = { 'Volume leaders': data?.volumeLeaders ?? [], Gainers: data?.gainers ?? [], Losers: data?.losers ?? [], 'Unusual volume': data?.unusualVolume ?? [], 'Large caps': data?.largeCaps ?? [] };
   const rows = lists[tab] ?? [];
-  const research = tab === 'Solana watchlist' ? <SolanaWatchlist view={data?.solanaHunter} /> : tab === 'Vike research' ? <VikeResearchPanel /> : tab === 'SEC filings' ? <SecFilings /> : tab === 'Market coverage' ? <MarketCoverage /> : null;
+  const research = tab === 'Solana watchlist' ? <SolanaWatchlist view={data?.solanaHunter} loaded={data !== undefined} /> : tab === 'Vike research' ? <VikeResearchPanel /> : tab === 'SEC filings' ? <SecFilings /> : tab === 'Market coverage' ? <MarketCoverage /> : null;
   return <Page title="Asset Discovery" sub={<>Find assets worth a closer look. Every list is computed from live exchange data. {data?.note}</>}
     right={<><Freshness at={data?.asOf} /><select value={minVol} onChange={(e) => setMinVol(Number(e.target.value))} aria-label="Minimum 24h volume"><option value={1e6}>≥ $1M vol</option><option value={1e7}>≥ $10M</option><option value={1e8}>≥ $100M</option></select></>}>
     <ErrorLine e={error} />

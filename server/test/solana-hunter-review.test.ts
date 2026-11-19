@@ -28,11 +28,35 @@ describe('ranker review fixes', () => {
     expect(rankSolanaPairs([...bad, base], { nowMs: NOW }).map((r) => r.mint)).toEqual([MINT]);
   });
   it('strips control and bidi-override characters from attacker-controlled symbols', () => {
-    const [row] = rankSolanaPairs([{ ...base, baseSymbol: 'US‮DC\u0000​', dexId: 'ray\u0007dium' }], { nowMs: NOW });
+    const [row] = rankSolanaPairs([{ ...base, baseSymbol: 'US\u202EDC\u0000\u200B', dexId: 'ray\u0007dium' }], { nowMs: NOW });
     expect(row.symbol).toBe('USDC'); // a right-to-left override can no longer make one ticker render as another
     expect(row.dex).toBe('raydium');
-    const [empty] = rankSolanaPairs([{ ...base, baseSymbol: '‮​' }], { nowMs: NOW });
+    const [empty] = rankSolanaPairs([{ ...base, baseSymbol: '\u202E\u200B' }], { nowMs: NOW });
     expect(empty.symbol).toBe('?');
+  });
+  it('strips invisible filler letters, stacked combining marks and line separators; keeps composed letters (2nd review)', () => {
+    const [row] = rankSolanaPairs([{ ...base, baseSymbol: 'US\u0336\u0336\u0336DC\u3164\u2028\u115F' }], { nowMs: NOW });
+    expect(row.symbol).toBe('USDC');
+    expect(row.notes.some((n) => n.includes('non-ASCII'))).toBe(false);
+    const [accented] = rankSolanaPairs([{ ...base, baseSymbol: 'CAFE\u0301' }], { nowMs: NOW });
+    expect(accented.symbol).toBe('CAF\u00C9'); // NFC composes the accent instead of dropping it
+  });
+  it('flags a look-alike (non-ASCII) ticker so the owner compares the mint instead (2nd review)', () => {
+    const [row] = rankSolanaPairs([{ ...base, baseSymbol: 'U\u0405DC' }], { nowMs: NOW }); // Cyrillic DZE looks like S
+    expect(row.notes).toContain('Symbol contains non-ASCII characters; compare the mint address, not the ticker');
+  });
+  it('truncates by code point, never leaving half a surrogate pair (2nd review)', () => {
+    const [row] = rankSolanaPairs([{ ...base, baseSymbol: '\u{1F600}'.repeat(41) }], { nowMs: NOW });
+    expect(Array.from(row.symbol)).toHaveLength(40);
+    expect(row.symbol).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+  });
+  it('fractional or absurdly large trade counts are malformed, rejected and never displayed (2nd review)', () => {
+    for (const bad of [{ buys1h: 0.5 }, { sells1h: 1e300 }, { buys1h: Number.MAX_SAFE_INTEGER + 2 }]) {
+      const [row] = rankSolanaPairs([{ ...base, ...bad }], { nowMs: NOW });
+      expect(row.blockers).toContain('MALFORMED_MARKET_METRICS');
+      expect(row.status).toBe('REJECT');
+      expect(Number.isSafeInteger(row.observedBuys1h) && Number.isSafeInteger(row.observedSells1h)).toBe(true);
+    }
   });
   it('every row stays read-only: tradingEligible is always false, whatever the score', () => {
     const rows = rankSolanaPairs([base, { ...base, baseAddress: PAIR, pairAddress: MINT, liquidityUsd: 5_000_000, volume1h: 2_000_000 }], { nowMs: NOW });
@@ -42,11 +66,11 @@ describe('ranker review fixes', () => {
 });
 
 describe('discover() Solana watchlist integration', () => {
-  beforeEach(() => { freshDb(); market.reset(); });
+  // market.reset() keeps dexFetchedAt, so every test starts from "never loaded" explicitly (no leaked clock state).
+  beforeEach(() => { freshDb(); market.reset(); market.dexFetchedAt = 0; });
 
-  it('is stale with no candidates before the DEX cache has ever loaded', () => {
-    market.dexFetchedAt = 0;
-    expect(discover(1e6, NOW).solanaHunter).toMatchObject({ stale: true, candidates: [], executionReady: false });
+  it('is stale with no candidates, and asOf null (not 0), before the DEX cache has ever loaded', () => {
+    expect(discover(1e6, NOW).solanaHunter).toEqual({ asOf: null, stale: true, rankerFailed: false, candidates: [], executionReady: false, note: expect.any(String) });
   });
   it('lists fresh Solana candidates, read-only, and leaves the existing lists unchanged', () => {
     market.dex = [dex(), dex({ chainId: 'ethereum', baseAddress: '0x' + 'a'.repeat(40) })];
@@ -74,14 +98,13 @@ describe('discover() Solana watchlist integration', () => {
 
 describe('/api/discover route', () => {
   it('requires the owner session and returns the read-only watchlist block', async () => {
-    freshDb(); market.reset(); failureGate.reset();
+    freshDb(); market.reset(); market.dexFetchedAt = 0; failureGate.reset();
     const app = await buildApp();
     try {
       expect((await app.inject({ url: '/api/discover' })).statusCode).toBe(401);
       const cookie = String((await app.inject({ method: 'POST', url: '/api/auth/setup', headers: { 'content-type': 'application/json' }, payload: ownerSetupPayload('solana hunter owner') })).headers['set-cookie']).split(';')[0];
       const body = (await app.inject({ url: '/api/discover', headers: { cookie } })).json();
-      expect(body.solanaHunter).toMatchObject({ executionReady: false });
-      expect(Array.isArray(body.solanaHunter.candidates)).toBe(true);
+      expect(body.solanaHunter).toMatchObject({ asOf: null, stale: true, rankerFailed: false, candidates: [], executionReady: false });
     } finally { await app.close(); }
   });
 });

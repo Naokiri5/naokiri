@@ -15,13 +15,35 @@ All 9 starter files were imported **byte-identical**. Each SHA-256 and byte size
 - **The score:** `rankScore` only orders the list. It is **not** a probability, and the UI says so.
 - **Built but not connected:** `mint-audit.ts` (Solana RPC) and `gmgn-read.ts` (GMGN) exist but are **not wired**. They need owner-configured credentials in later PRs (06 and 05).
 
-## Review findings (fixed in the second commit, each with a test that fails on the starter's original code)
+## Review findings (fixed in the second commit)
+Fixes 1–3 have regression tests that fail without the fix. Fix 3's test calls `discover(minVolume, nowMs)`, a parameter the starter's patch did not have, so it was checked by removing the fix rather than by running the original. Fix 4 is enforced by the existing import-boundary test.
+
 1. **Crash on provider input.** `p.chainId?.toLowerCase()` throws if DEX Screener ever sends a non-string `chainId`. That would turn `/api/discover` into a 500. Non-string chain IDs and addresses are now skipped.
 2. **Spoofable symbols.** Token symbols are attacker-controlled. Control and bidi-override characters (for example U+202E) could make one ticker render as another. They are now stripped, with a `?` fallback.
 3. **Future-dated cache counted as fresh.** The patch's freshness check `Date.now() - dexFetchedAt <= 5 min` treats a future-dated fetch (after a clock jump) as fresh. Freshness now requires `0 ≤ age ≤ 5 min`, using one clock reading (`discover(minVolume, nowMs)`).
 4. **Containment.** `server/src/solana/` was added to THINK's evidence roots in `test/import-boundaries.test.ts`, so it can never import `exec/`, `wallet/` or `portfolio/`.
 
+## Second review: independent integration, security and duplication reviewers (third commit)
+No CRITICAL, HIGH or MEDIUM findings. The LOW findings below were confirmed against the code and fixed. Every new test was checked by removing the source fix and watching it fail (8 of 8 failed, then passed with the fix).
+
+| # | Finding | Fix | Test |
+|---|---|---|---|
+| 5 | A throw inside the ranker would turn the whole `/api/discover` response (all CEX lists too) into a 500. | `discover.ts` `solanaWatchlist()` catches it: only the Solana block empties, with `rankerFailed: true`. No logging, matching the module's convention of reporting state in the response. | `server/test/solana-hunter-isolation.test.ts` (ranker mocked to throw) |
+| 6 | `asOf` was `0` before the first DEX fetch, while the web type says `number \| null`. | Server now sends `null` until the cache has loaded. | `solana-hunter-review.test.ts` |
+| 7 | With no `solanaHunter` block (still loading, or an older server) the page claimed "No Solana pairs in the current DEX Screener sample." | The page now says "Loading…" or "This server does not report a Solana watchlist.", and shows a separate banner when the ranker failed. | `e2e/solana.spec.ts` (2 new tests) |
+| 8 | The route test inherited a leftover `dexFetchedAt` from the previous test and asserted little. | Tests reset `dexFetchedAt` and assert the exact stale block. | `solana-hunter-review.test.ts` |
+| 9 | Symbol cleaning missed invisible Hangul fillers, stacked combining marks and line separators, and `slice(0, 40)` could cut a surrogate pair. | `displayText` normalizes to NFC, strips those classes, and truncates by code point. A non-ASCII ticker gets a note: compare the mint, not the ticker. The UI now shows the full, selectable mint. | `solana-hunter-review.test.ts` |
+| 10 | Fractional or huge trade counts (0.5, 1e300) were shown as-is. | Counts must be safe non-negative integers, otherwise `MALFORMED_MARKET_METRICS` (REJECT) and shown as 0. | `solana-hunter-review.test.ts` |
+| 11 | The import-boundary test follows relative imports only, so a signer package such as `@solana/web3.js` in `solana/` would not be caught. | New guard: `solana/` may import no packages (empty allow-list; extending it needs review). | `import-boundaries.test.ts` |
+| 12 | The project skill listed "Solana swap execution" as a reason to load it and phases F (testnet execution) and G (bounded live) as a plan, which a future agent could read as in scope. | The trigger is removed and a scope lock says F, G, signing and swaps are out of scope without the owner's explicit authorization in the conversation. | Documentation change (`.claude/skills/solana-hunter/SKILL.md`) |
+
+Kept as is, with reasons:
+- **Duplication.** No real duplication. `clamp` in `hunting.ts` is an exact copy of `core/util.ts` `clamp`, kept so the owner's starter stays close to its original bytes. The 5-minute DEX limit in `discover.ts` and `hunt/ranker.ts` stays separate: the hunt ranker checks per-observation timestamps with 2 s future skew, the watchlist checks the cache age with no future skew, and `market/` should not import from `hunt/`.
+- **Pre-existing, outside this PR:** the older "New DEX tokens" tab shows raw `baseSymbol`/`baseName` (React escapes them, but bidi spoofing is possible). Sanitizing once in `providers/dexscreener.ts` `mapPair` is the right fix and belongs in its own PR.
+
 ## Noted for later PRs (not changed now)
+- **Quote-token liquidity (security review, unconfirmed).** The ranker keeps the pair with the most `liquidityUsd` per mint and never checks the quote token; `DexPair` has no quote address. If DEX Screener values a pool against an attacker-minted quote token, that pool could win. Fix when the provider is next touched: map `quoteToken.address`, count liquidity only against wSOL/USDC/USDT mints, otherwise `INSUFFICIENT_DATA`.
+- **Response size caps.** `http.ts` reads whole provider bodies (10 s timeout, no size cap); add a cap before wiring GMGN or RPC.
 - `gmgn-read.ts` uses `fetch` directly. When it is wired (PR-05), route it through `providers/http.ts`: shared rate limits, backoff, credential-safe redirects and `ProviderError`. Add typed normalizers. Fractional fields mean `0.1783 = 17.83%`.
 - `mint-audit.ts` reads the whole JSON-RPC response. When it is wired (PR-06), cap the response size, and test against real Token-2022 mints (for example ones with `mintCloseAuthority` or `interestBearingConfig`, which correctly stay UNKNOWN today).
 - The base58 regex is format-only. Mint ownership is proven only by the RPC owner check (starter SKILL rule 5).

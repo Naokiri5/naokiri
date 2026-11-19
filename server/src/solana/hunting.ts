@@ -56,12 +56,17 @@ const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x
 const rounded = (x: number) => Math.round(x * 100) / 100;
 /**
  * MIA review (Omega PR-01): provider strings are attacker-controlled. Strip control and format characters (including
- * bidi overrides that can make one ticker render as another) before they reach the UI; React still escapes the rest.
+ * bidi overrides that can make one ticker render as another), line/paragraph separators, combining marks left after
+ * NFC (stacked "zalgo" marks) and the invisible Hangul filler letters before they reach the UI. Truncation counts code
+ * points, so a surrogate pair is never cut in half. React still escapes the rest; look-alike letters are flagged below.
  */
+const INVISIBLE_OR_SPOOFING = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{M}\u115F\u1160\u3164\uFFA0]/gu;
 const displayText = (x: unknown, fallback: string) => {
-  const s = typeof x === 'string' ? x.replace(/[\p{Cc}\p{Cf}]/gu, '').trim() : '';
-  return (s || fallback).slice(0, 40);
+  const s = typeof x === 'string' ? x.normalize('NFC').replace(INVISIBLE_OR_SPOOFING, '').trim() : '';
+  return Array.from(s || fallback).slice(0, 40).join('');
 };
+/** MIA review: counts of trades must be whole, non-negative and safely representable. */
+const validCount = (n: number) => Number.isSafeInteger(n) && n >= 0;
 
 /** Scores distinct mint addresses only; never assumes missing on-chain checks passed. */
 export function rankSolanaPairs(pairs: readonly SolanaHuntPair[], opts: SolanaHunterOptions = {}): SolanaHuntResult[] {
@@ -86,7 +91,8 @@ export function rankSolanaPairs(pairs: readonly SolanaHuntPair[], opts: SolanaHu
     const blockers: string[] = [];
     const notes = ['On-chain mint authority, holder distribution, pool custody, route viability and executable sell quote not verified'];
     const metrics = [p.priceUsd, p.liquidityUsd, p.volume1h, p.volume24h, p.buys1h, p.sells1h, p.change1h];
-    if (!metrics.every(Number.isFinite) || !(p.priceUsd > 0) || ![p.liquidityUsd, p.volume1h, p.volume24h, p.buys1h, p.sells1h].every(validNum)) {
+    if (!metrics.every(Number.isFinite) || !(p.priceUsd > 0) || ![p.liquidityUsd, p.volume1h, p.volume24h, p.buys1h, p.sells1h].every(validNum)
+      || !validCount(p.buys1h) || !validCount(p.sells1h)) { // MIA review: 0.5 or 1e300 "trades" are malformed, not activity
       blockers.push('MALFORMED_MARKET_METRICS');
     }
     let ageMinutes: number | null = null;
@@ -105,15 +111,18 @@ export function rankSolanaPairs(pairs: readonly SolanaHuntPair[], opts: SolanaHu
     // Deliberately no safety verdict from this score. Purely useful for watchlist ordering.
     const liquidityPart = validNum(p.liquidityUsd) ? clamp(Math.log10(1 + p.liquidityUsd / minLiq) * 25, 0, 30) : 0;
     const volumePart = validNum(p.volume1h) ? clamp(Math.log10(1 + p.volume1h / minVolume) * 25, 0, 30) : 0;
-    const activity = validNum(p.buys1h) && validNum(p.sells1h) ? p.buys1h + p.sells1h : 0;
+    const activity = validCount(p.buys1h) && validCount(p.sells1h) ? p.buys1h + p.sells1h : 0;
+    const symbol = displayText(p.baseSymbol, '?');
+    // MIA review: a non-ASCII ticker can imitate a well-known one with look-alike letters; say so instead of hiding it.
+    if (/[^\x20-\x7E]/.test(symbol)) notes.push('Symbol contains non-ASCII characters; compare the mint address, not the ticker');
     const activityPart = clamp(Math.log10(1 + activity) * 8, 0, 20);
     const agePart = ageMinutes == null ? 0 : 20 * (1 - clamp(ageMinutes / (maxAge * 60), 0, 1));
     const rankScore = rounded(clamp(liquidityPart + volumePart + activityPart + agePart, 0, 100));
     const fatal = blockers.some(b => ['MALFORMED_MARKET_METRICS', 'LOW_LIQUIDITY', 'LOW_VOLUME', 'NO_OBSERVED_SELLS', 'ANOMALOUS_VOLUME_TO_LIQUIDITY', 'EXTREME_PRICE_CHANGE'].includes(b));
-    results.push({ chain: 'solana', mint: p.baseAddress, symbol: displayText(p.baseSymbol, '?'), pairAddress: p.pairAddress,
+    results.push({ chain: 'solana', mint: p.baseAddress, symbol, pairAddress: p.pairAddress,
       dex: displayText(p.dexId, '?'), ageMinutes: ageMinutes == null ? null : rounded(ageMinutes),
       liquidityUsd: validNum(p.liquidityUsd) ? p.liquidityUsd : 0, volume1hUsd: validNum(p.volume1h) ? p.volume1h : 0,
-      observedBuys1h: validNum(p.buys1h) ? p.buys1h : 0, observedSells1h: validNum(p.sells1h) ? p.sells1h : 0,
+      observedBuys1h: validCount(p.buys1h) ? p.buys1h : 0, observedSells1h: validCount(p.sells1h) ? p.sells1h : 0,
       momentum1hPct: Number.isFinite(p.change1h) ? p.change1h : 0, rankScore,
       status: fatal ? 'REJECT' : blockers.length ? 'INSUFFICIENT_DATA' : 'WATCH',
       blockers, notes, tradingEligible: false, source: 'dexscreener' });
