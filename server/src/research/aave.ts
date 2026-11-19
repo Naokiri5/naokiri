@@ -13,7 +13,7 @@
 import { AaveV3Ethereum } from '@bgd-labs/aave-address-book';
 import { createPublicClient, custom, formatUnits, parseAbi, type Address } from 'viem';
 import { mainnet } from 'viem/chains';
-import { fetchProvider, registerProvider, setRateLimit } from '../providers/http.js';
+import { fetchProvider, registerProvider, setRateLimit, ProviderError } from '../providers/http.js';
 
 export const ETH_RPC = 'eth-rpc-readonly';
 registerProvider({ id: ETH_RPC, name: 'Ethereum JSON-RPC (read-only eth_call)', sourceClass: 'onchain', markets: ['defi-lending'],
@@ -44,7 +44,17 @@ export async function readOnlyRpc(method: string, params: unknown[] = []): Promi
   return r.result;
 }
 
-const client = createPublicClient({ chain: mainnet, transport: custom({ request: ({ method, params }) => readOnlyRpc(method, (params ?? []) as unknown[]) }) });
+// retryCount 0: viem would otherwise wrap MIA's own errors and retry them 3 more times against the provider budget.
+const client = createPublicClient({ chain: mainnet, transport: custom({ request: ({ method, params }) => readOnlyRpc(method, (params ?? []) as unknown[]) }, { retryCount: 0 }) });
+/** Unwrap viem's error wrapper so MIA's ProviderError / AaveResearchError keep their HTTP mapping (502/503/400). */
+function unwrap(e: unknown): unknown {
+  let x: unknown = e;
+  for (let i = 0; i < 6 && x != null; i++) {
+    if (x instanceof ProviderError || x instanceof AaveResearchError) return x;
+    x = (x as { cause?: unknown }).cause;
+  }
+  return e;
+}
 
 const POOL_ABI = parseAbi(['function FLASHLOAN_PREMIUM_TOTAL() view returns (uint128)', 'function FLASHLOAN_PREMIUM_TO_PROTOCOL() view returns (uint128)']);
 const DP_ABI = parseAbi([
@@ -69,14 +79,18 @@ export function _resetAaveForTests() { chainChecked = false; }
 
 /** Flash-loan premium and, per asset, whether flash loans are enabled and how much is available to borrow right now. */
 export async function flashLoanReserves(assets: readonly string[] = DEFAULT_ASSETS) {
-  const keys = [...new Set(assets.map((a) => a.toUpperCase()))].slice(0, 12);
-  for (const k of keys) if (!(k in AaveV3Ethereum.ASSETS)) throw new AaveResearchError(`unknown Aave V3 Ethereum asset ${k}`);
+  // Case-insensitive lookup that keeps the registry's canonical key (e.g. "wsteth" -> "wstETH").
+  const canonical = new Map(Object.keys(AaveV3Ethereum.ASSETS).map((k) => [k.toLowerCase(), k]));
+  const keys = [...new Set(assets.map((a) => { const k = canonical.get(a.toLowerCase()); if (!k) throw new AaveResearchError(`unknown Aave V3 Ethereum asset ${a}`); return k; }))].slice(0, 12);
   await assertMainnet();
   const pool = AaveV3Ethereum.POOL as Address; const dp = AaveV3Ethereum.AAVE_PROTOCOL_DATA_PROVIDER as Address;
-  const [premiumTotal, premiumProtocol] = await Promise.all([
+  let premiumTotal: bigint, premiumProtocol: bigint;
+  try {
+    [premiumTotal, premiumProtocol] = await Promise.all([
     client.readContract({ address: pool, abi: POOL_ABI, functionName: 'FLASHLOAN_PREMIUM_TOTAL' }),
     client.readContract({ address: pool, abi: POOL_ABI, functionName: 'FLASHLOAN_PREMIUM_TO_PROTOCOL' }),
   ]);
+  } catch (e) { throw unwrap(e); }
   const reserves = [];
   for (const k of keys) {
     const a = AaveV3Ethereum.ASSETS[k as AssetKey];

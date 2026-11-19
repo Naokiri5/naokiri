@@ -171,6 +171,10 @@ export async function routes(app: FastifyInstance) {
     const b = z.object({ accessToken: z.string().min(20).max(4096), password: PW.optional() }).strict().parse(req.body);
     return privy.linkPrivy(b.accessToken, b.password, stepUpClient(req), isDirectLocal(req));
   });
+  app.post('/api/security/privy/embedded-wallet-intent', async (req) => {
+    const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
+    return privy.embeddedWalletIntent(b.password, stepUpClient(req), isDirectLocal(req));
+  });
   app.post('/api/security/privy/unlink', async (req) => {
     const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
     return privy.unlinkPrivy(b.password, stepUpClient(req), isDirectLocal(req));

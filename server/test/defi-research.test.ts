@@ -50,13 +50,14 @@ describe('DefiLlama yields', () => {
   });
   it('rejects an unexpected response shape instead of returning an empty "no yields" answer', async () => {
     online(); stub(() => ({ status: 'error' }));
-    await expect(llama.yieldPools()).rejects.toThrow(/unexpected DefiLlama yields response/);
+    // An upstream fault (502), not the caller's mistake (400).
+    await expect(llama.yieldPools()).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/unexpected response shape/) });
   });
   it('protocol TVL: slug validated, number required; top protocols exclude CEX by default', async () => {
     online(); stub((u) => (u.endsWith('/tvl/aave') ? 1.5e10 : u.endsWith('/protocols') ? [{ name: 'Aave', slug: 'aave', category: 'Lending', chains: ['Ethereum'], tvl: 1.5e10 }, { name: 'Binance', slug: 'binance-cex', category: 'CEX', tvl: 1e11 }, { slug: 'broken', tvl: 'x' }] : 'nope'));
     expect((await llama.protocolTvl('aave')).data).toEqual({ slug: 'aave', tvlUsd: 1.5e10 });
     await expect(llama.protocolTvl('../etc/passwd')).rejects.toThrow(/invalid protocol slug/);
-    await expect(llama.protocolTvl('unknown')).rejects.toThrow(/unexpected DefiLlama TVL/);
+    await expect(llama.protocolTvl('unknown')).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/unexpected TVL response/) });
     expect((await llama.topProtocols(10)).data.map((p) => p.slug)).toEqual(['aave']);
     expect((await llama.topProtocols(10, 'cex')).data.map((p) => p.slug)).toEqual(['binance-cex']);
   });
@@ -98,6 +99,16 @@ describe('Aave V3 flash-loan research', () => {
     online(); stub(node('0x1', true));
     const res = (await aave.flashLoanReserves(['WETH'])).data.reserves[0];
     expect(res.availableLiquidity).toBeNull(); expect(res.missing).toEqual(['liquidity']);
+  });
+  it('asset names match without regard to case and keep the canonical key (wstETH)', async () => {
+    online(); stub(node());
+    const r = await aave.flashLoanReserves(['WSTETH', 'wsteth', 'usdc']);
+    expect(r.data.reserves.map((x: { asset: string }) => x.asset)).toEqual(['wstETH', 'USDC']);
+  });
+  it('an RPC outage is surfaced as the provider error once, without viem retries', async () => {
+    online(); stub(() => ({ error: 'down' }), 503);
+    await expect(aave.flashLoanReserves(['USDC'])).rejects.toMatchObject({ status: 503 });
+    expect(sent).toHaveLength(1);
   });
   it('refuses a non-mainnet RPC and unknown assets', async () => {
     online(); stub(node('0x89'));

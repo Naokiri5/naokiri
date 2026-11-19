@@ -51,6 +51,22 @@ describe('CCXT research adapter', () => {
     await expect(ex.fetch('http://api.example-exchange.test/x')).rejects.toThrow(/non-HTTPS/);
     expect(calls).toHaveLength(1); // only loadMarkets' GET went out
   });
+  it('never calls a host outside the exchange\'s own API URLs and refuses redirects', async () => {
+    Object.assign(config, { offline: false }); stubFetch({});
+    let ex!: cx.CcxtLike;
+    cx._setCcxtFactoryForTests(async (id) => (ex = fakeExchange(id)));
+    await cx.ccxtMarkets('binance');
+    await expect(ex.fetch('https://evil.example/steal')).rejects.toThrow(/not this exchange/);
+    expect(calls.map((c) => c.url)).not.toContain('https://evil.example/steal');
+    expect(calls.every((c) => c.init.redirect === 'error' || c.init.redirect === 'manual')).toBe(true);
+  });
+  it('an exchange rejecting the request (4xx) is reported as a 400, a rate limit is not', async () => {
+    Object.assign(config, { offline: false }); stubFetch({ msg: 'bad symbol' }, 400);
+    cx._setCcxtFactoryForTests(async (id) => fakeExchange(id));
+    await expect(cx.ccxtTicker('kraken', 'BTC/USDT')).rejects.toBeInstanceOf(cx.CcxtResearchError);
+    _resetProviderBlocks(); stubFetch({}, 429);
+    await expect(cx.ccxtTicker('kraken', 'BTC/USDT')).rejects.not.toBeInstanceOf(cx.CcxtResearchError);
+  });
   it('refuses an exchange instance that carries any credential', async () => {
     cx._setCcxtFactoryForTests(async (id) => fakeExchange(id, { apiKey: 'k' }));
     await expect(cx.ccxtMarkets('okx')).rejects.toThrow(/credential \(apiKey\)/);

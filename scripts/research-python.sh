@@ -12,7 +12,9 @@ LAB="$ROOT/research/python"
 PY="${MIA_RESEARCH_PYTHON:-3.13}"
 cmd="${1:-}"; target="${2:-all}"
 
-tools() { case "$target" in all) echo nautilus freqtrade ;; nautilus|freqtrade) echo "$target" ;; *) echo "unknown tool: $target" >&2; exit 2 ;; esac; }
+# Validated in the main shell: an `exit` inside $(...) would only leave the subshell and the script would exit 0.
+case "$target" in all|nautilus|freqtrade) ;; *) echo "unknown tool: $target (use nautilus, freqtrade or all)" >&2; exit 2 ;; esac
+tools() { case "$target" in all) echo nautilus freqtrade ;; *) echo "$target" ;; esac; }
 
 setup_one() {
   local dir="$LAB/$1"

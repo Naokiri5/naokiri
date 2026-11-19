@@ -43,3 +43,11 @@ describe('Python research labs cannot reach live trading', () => {
     expect(gi).toContain('research/python/freqtrade/user_data/*');
   });
 });
+
+describe('research-python.sh rejects an unknown tool name', () => {
+  it('exits 2 instead of silently succeeding', async () => {
+    const { spawnSync } = await import('node:child_process');
+    const r = spawnSync('bash', [repo('scripts/research-python.sh').pathname, 'setup', 'notatool'], { encoding: 'utf8', env: { ...process.env, PATH: process.env.PATH } });
+    expect(r.status).toBe(2); expect(r.stderr).toMatch(/unknown tool: notatool/);
+  });
+});
