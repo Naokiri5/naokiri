@@ -13,11 +13,12 @@
  * Verification key: MIA_PRIVY_VERIFICATION_KEY (the PEM public key from the Privy dashboard) is preferred; otherwise
  * the app's public JWKS is fetched from auth.privy.io. Neither is a secret. No Privy app secret is needed or used.
  */
-import { createLocalJWKSet, createRemoteJWKSet, importSPKI, jwtVerify, type JWTVerifyGetKey, type KeyLike } from 'jose';
+import { createLocalJWKSet, createRemoteJWKSet, importSPKI, jwtVerify, type JSONWebKeySet, type JWTVerifyGetKey } from 'jose';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { failureGate } from '../core/ratelimit.js';
 import { AuthError, createSession, verifyPassphrase } from '../api/auth.js';
+import { tx } from '../db/db.js';
 
 /** Privy app ids are exactly 25 characters (the React SDK refuses anything else). */
 const APP_ID_RE = /^[A-Za-z0-9]{25}$/;
@@ -61,16 +62,17 @@ interface PrivyLink { userId: string; linkedAt: number }
 export const getLink = () => getSetting<PrivyLink | null>('privy_link', null);
 
 // ---- token verification -----------------------------------------------------------------------------------------
-let keyCache: { appId: string; source: string; key: KeyLike | JWTVerifyGetKey } | null = null;
+let keyCache: { appId: string; source: string; key: JWTVerifyGetKey } | null = null;
 /** Test hook: inject a key resolver (e.g. a local JWKS) instead of the dashboard key / remote JWKS. */
-export function _setPrivyKeyForTests(jwks: { keys: object[] } | null) {
-  keyCache = jwks ? { appId: privyAppId() ?? '', source: 'test', key: createLocalJWKSet(jwks as any) } : null;
+export function _setPrivyKeyForTests(jwks: JSONWebKeySet | null) {
+  keyCache = jwks ? { appId: privyAppId() ?? '', source: 'test', key: createLocalJWKSet(jwks) } : null;
 }
-async function verificationKey(appId: string): Promise<KeyLike | JWTVerifyGetKey> {
+async function verificationKey(appId: string): Promise<JWTVerifyGetKey> {
   if (keyCache && (keyCache.appId === appId || keyCache.source === 'test')) return keyCache.key;
   const pem = process.env.MIA_PRIVY_VERIFICATION_KEY?.trim().replace(/\\n/g, '\n');
-  const key = pem
-    ? await importSPKI(pem, 'ES256')
+  const publicKey = pem ? await importSPKI(pem, 'ES256') : null;
+  const key: JWTVerifyGetKey = publicKey
+    ? () => publicKey
     : createRemoteJWKSet(new URL(`https://auth.privy.io/api/v1/apps/${encodeURIComponent(appId)}/jwks.json`), { timeoutDuration: 5000, cooldownDuration: 30_000 });
   keyCache = { appId, source: pem ? 'pem' : 'jwks', key };
   return key;
@@ -83,7 +85,7 @@ export async function verifyPrivyAccessToken(token: unknown): Promise<string> {
   if (typeof token !== 'string' || token.length < 20 || token.length > 4096) throw new AuthError('invalid Privy token');
   try {
     const key = await verificationKey(appId);
-    const { payload } = await jwtVerify(token, key as any, { issuer: ISSUER, audience: appId, algorithms: ['ES256'], clockTolerance: 5 });
+    const { payload } = await jwtVerify(token, key, { issuer: ISSUER, audience: appId, algorithms: ['ES256'], clockTolerance: 5 });
     if (typeof payload.sub !== 'string' || !DID_RE.test(payload.sub)) throw new Error('bad subject');
     return payload.sub;
   } catch {
@@ -111,14 +113,19 @@ export function unlinkPrivy(password: unknown, stepUpClient: string, exemptFromG
 /** Sign in with Privy: the verified Privy user must be the linked owner. Shares the brute-force limiter. */
 export async function loginWithPrivy(token: unknown, client: string, opts: { directLocal?: boolean } = {}) {
   failureGate.check(client, Date.now(), { global: !opts.directLocal });
-  const link = getLink();
   let userId: string | null = null;
   try { userId = await verifyPrivyAccessToken(token); } catch (e) { if ((e as AuthError).statusCode === 404) throw e; }
-  if (!link || !userId || userId !== link.userId) {
+  // Verification may wait for the remote key. Read the current link and issue the session in one database transaction.
+  const { link, sessionToken } = tx(() => {
+    const link = getLink();
+    const sessionToken = link && userId && userId === link.userId ? createSession(client, 'privy') : null;
+    return { link, sessionToken };
+  });
+  if (!sessionToken) {
     failureGate.fail(client);
     audit('anonymous', 'auth.login.failed', { ip: client, method: 'privy', reason: !link ? 'not-linked' : !userId ? 'bad-token' : 'not-owner' });
     throw new AuthError(!link ? 'Privy sign-in is not linked to the MIA owner yet: sign in with your passphrase and link it in Security Center' : 'this Privy account is not the MIA owner');
   }
   failureGate.ok(client);
-  return createSession(client, 'privy');
+  return sessionToken;
 }

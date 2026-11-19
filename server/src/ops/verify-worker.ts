@@ -6,6 +6,6 @@
 import { parentPort, workerData } from 'node:worker_threads';
 import { verifyBackup } from './backup.js';
 
-const { file, keyHex } = workerData as { file: string; keyHex: string | null };
-try { parentPort!.postMessage({ ok: true, result: verifyBackup(file, keyHex ? Buffer.from(keyHex, 'hex') : null) }); }
+const { file, keyHex, workspace } = workerData as { file: string; keyHex: string | null; workspace: string };
+try { parentPort!.postMessage({ ok: true, result: verifyBackup(file, keyHex ? Buffer.from(keyHex, 'hex') : null, workspace) }); }
 catch (e: any) { parentPort!.postMessage({ ok: false, error: String(e?.message ?? e) }); }

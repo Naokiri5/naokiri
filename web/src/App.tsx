@@ -52,7 +52,14 @@ function Login({ setup, codeRequired, googleSignIn, onDone }: { setup: boolean; 
         {!setup && codeRequired && <label className="col" style={{ gap: 4 }}>Setup code<input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" spellCheck={false} placeholder="XXXXX-XXXXX-XXXXX-XXXXX" />
           <span className="hint">Enter the one-time code printed in the MIA server console (the terminal running <code>npm start</code>, or the service log).</span></label>}
         <ErrorLine e={err} /><button className="primary" type="submit">{setup ? 'Sign in' : 'Create owner'}</button>
-        {setup && privy?.enabled && privy.linked && <><div className="hint" style={{ textAlign: 'center' }}>or</div><Suspense fallback={<div className="hint">Loading Privy…</div>}><PrivySignIn config={privy} onDone={onDone} /></Suspense></>}
+        {setup && privy?.enabled && privy.linked && <>
+          <div className="hint" style={{ textAlign: 'center' }}>or</div>
+          <PageErrorBoundary fallback={<ErrorLine e="Privy sign-in could not load. Use your passphrase to sign in." />}>
+            <Suspense fallback={<div className="hint">Loading Privy…</div>}>
+              <PrivySignIn config={privy} onDone={onDone} />
+            </Suspense>
+          </PageErrorBoundary>
+        </>}
       </div>
     </form>
   </div>;

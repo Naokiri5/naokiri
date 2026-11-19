@@ -6,7 +6,9 @@ import { createLinkCode, linkForIdentity, linkStatus, redeemLinkCode } from '../
 import { drainOutbox } from '../src/integrations/telegram/webhook.js';
 import { ownerSetupPayload } from './helpers.js';
 import { getControl } from '../src/core/mode.js';
+import { bus } from '../src/core/bus.js';
 import { parseCommand } from '../src/integrations/telegram/commands.js';
+import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 
 const SECRET = 'test-secret_123';
 let app: Awaited<ReturnType<typeof import('../src/index.js').buildApp>>;
@@ -20,7 +22,7 @@ const hook = (body: unknown, secret: string = SECRET) => app.inject({
   method: 'POST', url: '/api/integrations/telegram/webhook',
   headers: { 'x-telegram-bot-api-secret-token': secret }, payload: body as object,
 });
-const msg = (text: string, from: number, chat: number, type = 'private', date = Math.floor(Date.now() / 1000)) => ({
+const msg = (text: string | undefined, from: number, chat: number, type = 'private', date = Math.floor(Date.now() / 1000)) => ({
   update_id: ++updateSeq,
   message: { message_id: updateSeq, date, text, from: { id: from, is_bot: false, first_name: 'o' }, chat: { id: chat, type } },
 });
@@ -65,6 +67,34 @@ describe('Telegram webhook (MIA-TG-01)', () => {
     expect(outbox().at(-1)!.text).toMatch(/Not linked/);
   });
 
+  it('prunes expired update records when the listener has no replies to send', async () => {
+    const update = msg(undefined, OWNER_USER, chatSeq++);
+    expect((await hook(update)).json()).toEqual({ ok: true, ignored: true });
+    expect(outbox()).toHaveLength(0);
+    run('INSERT INTO telegram_update_dedupe(update_id, received_at) VALUES (?, ?)', 1, Date.now() - 8 * 86_400_000);
+
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(all('SELECT update_id FROM telegram_update_dedupe')).toEqual([{ update_id: update.update_id }]);
+  });
+
+  it('reports whether the current Paper risk policy is valid and accepted', async () => {
+    const chat = chatSeq++;
+    const { code } = createLinkCode();
+    redeemLinkCode(code, OWNER_USER, chat);
+    const status = async () => {
+      expect((await hook(msg('/status', OWNER_USER, chat))).statusCode).toBe(200);
+      return outbox().at(-1)?.text;
+    };
+
+    expect(await status()).toContain('Policy accepted: no.');
+    acceptPolicy('owner', DEFAULT_POLICY);
+    expect(await status()).toContain('Policy accepted: yes.');
+    run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (2, ?, 0, ?)', '{}', 'fixture');
+    expect(await status()).toContain('Policy accepted: no.');
+  });
+
   it('ignores a retried update_id (exactly-once side effects)', async () => {
     const chat = chatSeq++;
     const { code } = createLinkCode();
@@ -77,19 +107,34 @@ describe('Telegram webhook (MIA-TG-01)', () => {
     expect(outbox().length).toBe(before);
   });
 
-  it('retries a command whose reply failed to persist, without committing partial command state', async () => {
+  it('retries a rolled-back pause at the rate limit and publishes only the committed mode', async () => {
     const chat = chatSeq++;
     const { code } = createLinkCode();
     redeemLinkCode(code, OWNER_USER, chat);
-    const update = msg('/pause', OWNER_USER, chat);
-    run("CREATE TEMP TRIGGER fail_telegram_reply BEFORE INSERT ON telegram_outbox BEGIN SELECT RAISE(ABORT, 'fixture'); END");
-    expect((await hook(update)).statusCode).toBe(500);
-    expect(getControl().pausedNewOrders).toBe(false);
-    expect(all('SELECT update_id FROM telegram_update_dedupe')).toHaveLength(0);
-    run('DROP TRIGGER fail_telegram_reply');
-    expect((await hook(update)).json()).toEqual({ ok: true });
-    expect(getControl().pausedNewOrders).toBe(true);
-    expect(outbox()).toHaveLength(1);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    const modeEvent = vi.fn();
+    bus.on('mode', modeEvent);
+    try {
+      for (let used = 0; used < 9; used++) {
+        expect((await hook(msg('/help', OWNER_USER, chat))).json()).toEqual({ ok: true });
+      }
+      const update = msg('/pause', OWNER_USER, chat);
+      run("CREATE TEMP TRIGGER fail_telegram_reply BEFORE INSERT ON telegram_outbox BEGIN SELECT RAISE(ABORT, 'fixture'); END");
+      expect((await hook(update)).statusCode).toBe(500);
+      expect(getControl().pausedNewOrders).toBe(false);
+      expect(get('SELECT update_id FROM telegram_update_dedupe WHERE update_id=?', update.update_id)).toBeUndefined();
+      expect(modeEvent).not.toHaveBeenCalled();
+      run('DROP TRIGGER fail_telegram_reply');
+
+      expect((await hook(update)).json()).toEqual({ ok: true });
+      expect(getControl().pausedNewOrders).toBe(true);
+      expect(outbox()).toHaveLength(10);
+      expect(modeEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ pausedNewOrders: true }));
+      expect((await hook(msg('/help', OWNER_USER, chat))).json()).toEqual({ ok: true, ignored: true, reason: 'rate limited' });
+    } finally {
+      bus.off('mode', modeEvent);
+      now.mockRestore();
+    }
   });
   it('ignores group chats and stale messages', async () => {
     const chat = chatSeq++;

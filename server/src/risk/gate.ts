@@ -24,6 +24,23 @@ const currentPolicySafe = () => { try { return currentPolicy()?.version ?? null;
 
 const floorStep = floorToStep; // canonical helper (core/util.ts)
 
+/** Mutable entry permissions shared by the risk evaluation and the locked OMS write. */
+export function entryAuthorityVetoes(strategyId: string, ctl = getControl()): string[] {
+  const deny: string[] = [];
+  if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');
+  if (ctl.pausedNewOrders) deny.push('NEW_ORDERS_PAUSED');
+  if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
+  else if (ctl.mode !== 'PAPER' && ctl.mode !== 'APPROVAL') deny.push('MODE_NOT_PAPER');
+  if (ctl.disabledStrategies.includes(strategyId)) deny.push(`STRATEGY_DISABLED:${strategyId}`);
+  const suspended = getSetting<string[]>('suspendedStrategies', []);
+  if (suspended.includes(strategyId)) deny.push(`STRATEGY_SUSPENDED:${strategyId}`);
+  // Part 18 lifecycle: only strategies the owner promoted (after reviewing a backtest) may trade.
+  const st = get<{ status: string }>('SELECT status FROM strategies WHERE id=?', strategyId);
+  if (!st) deny.push(`STRATEGY_NOT_REGISTERED:${strategyId}`);
+  else if (!['PAPER', 'LIVE_CANDIDATE'].includes(st.status)) deny.push(`STRATEGY_NOT_PROMOTED:${strategyId} is ${st.status} (promote to PAPER in Strategy Lab)`);
+  return deny;
+}
+
 function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const deny: string[] = []; const review: string[] = []; const ev: RiskDecision['evaluated'] = {};
   const pv = currentPolicy();
@@ -32,16 +49,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const pol: RiskPolicy = pv.policy; const account = p.account ?? PAPER_ACCOUNT;
   const ctl = getControl();
   ev.mode = ctl.mode;
-  if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');
-  if (ctl.pausedNewOrders) deny.push('NEW_ORDERS_PAUSED');
-  if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
-  if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
-  const suspended = getSetting<string[]>('suspendedStrategies', []);
-  if (suspended.includes(p.strategyId)) deny.push(`STRATEGY_SUSPENDED:${p.strategyId}`);
-  // Part 18 lifecycle: only strategies the owner promoted (after reviewing a backtest) may trade.
-  const st = get<{ status: string }>('SELECT status FROM strategies WHERE id=?', p.strategyId);
-  if (!st) deny.push(`STRATEGY_NOT_REGISTERED:${p.strategyId}`);
-  else if (!['PAPER', 'LIVE_CANDIDATE'].includes(st.status)) deny.push(`STRATEGY_NOT_PROMOTED:${p.strategyId} is ${st.status} (promote to PAPER in Strategy Lab)`);
+  deny.push(...entryAuthorityVetoes(p.strategyId, ctl));
 
   const inst = market.instruments.get(p.instrumentId);
   if (!inst) { deny.push('INSTRUMENT_UNKNOWN'); return out(); }
