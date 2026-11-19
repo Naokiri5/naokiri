@@ -2,6 +2,8 @@ import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { VikeNotConfiguredError } from '../providers/vike.js';
 import * as privy from '../security/privy.js';
+import { catalogSummary } from '../fabric/catalog.js';
+import { outboxHealth } from '../fabric/relay.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -372,6 +374,9 @@ export async function routes(app: FastifyInstance) {
   // ── Phase 1 workspaces ──
   app.get('/api/qhef', async () => qhefReport());
   app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
+  // MIA NEXUS data fabric (N1): read-only topic catalog — owners, priorities, durability and honest status.
+  app.get('/api/fabric/catalog', async () => catalogSummary());
+  app.get('/api/fabric/outbox', async () => outboxHealth()); // N2: measured delivery health + dead letters (owner session)
   app.post('/api/security/sessions/revoke-others', async (req) => { stepUpRiskReducing(req, req.body); return revokeOtherSessions(tokenOf(req)); });
   app.get('/api/discover', async (req) => discover(z.object({ minVolume: z.coerce.number().min(0).default(1e6) }).parse(req.query ?? {}).minVolume));
   const histFilter = (q: any): HistoryFilter => z.object({ from: z.coerce.number().int().positive().optional(), to: z.coerce.number().int().positive().optional(),
