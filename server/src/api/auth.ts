@@ -64,8 +64,8 @@ export function login(pass: string, ip: string, opts: { directLocal?: boolean } 
   verifyPassphrase(pass, client, 'login', { exemptFromGlobalLockout: opts.directLocal });
   return createSession(ip, 'passphrase');
 }
-/** Opens an owner session. Callers must have authenticated the owner first (passphrase, or a linked Privy identity). */
-export function createSession(ip: string, method: 'passphrase' | 'privy') {
+/** Opens an owner session. Callers must have authenticated the owner first (passphrase or a linked identity). */
+export function createSession(ip: string, method: 'passphrase' | 'privy' | 'google') {
   run('DELETE FROM sessions WHERE expires_at <= ?', Date.now()); // expired sessions are otherwise kept forever
   const token = randomBytes(32).toString('hex');
   run('INSERT INTO sessions(token_hash, created_at, expires_at) VALUES (?,?,?)', sha256(token), Date.now(), Date.now() + SESSION_MS);
@@ -73,7 +73,10 @@ export function createSession(ip: string, method: 'passphrase' | 'privy') {
 }
 export function validSession(token?: string) {
   if (!token) return false;
-  const r = get<{ expires_at: number }>('SELECT expires_at FROM sessions WHERE token_hash=?', sha256(token));
+  return validSessionHash(sha256(token));
+}
+export function validSessionHash(hash: string) {
+  const r = get<{ expires_at: number }>('SELECT expires_at FROM sessions WHERE token_hash=?', hash);
   return !!r && r.expires_at > Date.now();
 }
 export function logout(token?: string) { if (token) run('DELETE FROM sessions WHERE token_hash=?', sha256(token)); }

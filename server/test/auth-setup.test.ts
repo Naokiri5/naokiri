@@ -51,7 +51,7 @@ describe('first-owner setup (SEC-SETUP)', () => {
   });
   it('requires the console code for direct loopback and completes setup with it', async () => {
     const state = await app.inject({ method: 'GET', url: '/api/auth/state', remoteAddress: '127.0.0.1' });
-    expect(state.json()).toEqual({ setup: false, authenticated: false, setupCodeRequired: true });
+    expect(state.json()).toMatchObject({ setup: false, authenticated: false, setupCodeRequired: true, googleSignIn: false });
     const password = 'local owner passphrase';
     expect((await setup(app, '127.0.0.1', { password })).statusCode).toBe(403);
     expect(auth.isSetup()).toBe(false);
