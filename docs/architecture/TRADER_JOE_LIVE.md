@@ -19,7 +19,7 @@ Owner brief: `MIA_TRADER_JOE_LIVE_V4_ENGINEERING_MASTER_PROMPT.md`, from the own
 
 | File | Role |
 |---|---|
-| `server/src/joe/live/events.ts` | Zod contract `JoeTradeEvent` (v1). Defines the 18 emittable kinds. `ORDER_PARTIAL` and `ORDER_UNKNOWN` are **reserved**, because the paper OMS fills all-or-nothing. `mode` is always `PAPER`. |
+| `server/src/joe/live/events.ts` | Zod contract `JoeTradeEvent` (v1). Defines the 19 emittable kinds. `ORDER_PARTIAL` and `ORDER_UNKNOWN` are **reserved**, because the paper OMS fills all-or-nothing. `mode` is always `PAPER`. |
 | `server/src/joe/live/projection.ts` | SELECT-only projection over committed rows; see the source table below. |
 | `server/src/joe/live/narrator.ts` | Versioned fixed templates (`joe-live-templates@1`). No LLM. Provider symbols that are not plain tickers are masked. |
 | `GET /api/joe/events?after=<cursor>&limit=<1..200>` | Without a cursor: the newest events, oldest first. With a cursor: events strictly after it. Returns `nextCursor`. Owner session required. |
@@ -32,23 +32,22 @@ Owner brief: `MIA_TRADER_JOE_LIVE_V4_ENGINEERING_MASTER_PROMPT.md`, from the own
 | Decision recorded / no trade / waiting / risk denied | `decisions` (the decision state and the risk verdict with its reason codes) |
 | Approval pending / rejected / cancelled / expired | `orders` (ENTRY rows) |
 | SIMULATED PAPER entry / exit fill | `fills` + `orders`; cash from `ledger_entries` for that order |
-| Stop monitoring started | `orders` (PROTECTIVE_STOP) + the position's initial stop; always says "not guaranteed" |
-| Protection issue / recovered | `protection_incidents` |
+| Stop monitoring started | `orders` (PROTECTIVE_STOP) + the position's initial stop. It also states whether the stop is still ACTIVE (with its current price) or no longer active, and always says "not guaranteed". |
+| Protection issue / recovered | `protection_incidents`. The issue is keyed on the latest alert (`last_notified_at`), so a problem that comes back after recovery appears as a new, later event. |
 | Position closed | Net P&L = sum of `ledger_entries` for the position's orders. It is cross-checked against `positions.realized_pnl` and flagged `reconciled: false` (with "review needed") if they differ by more than $0.01. |
 | Trade review | `journal` AUTOPSY rows |
-| Paused / emergency stop / resumed | Hash-chained `audit_log` `control.update` rows (other control changes are ignored) |
+| Paused / emergency stop / resumed / other control change | Hash-chained `audit_log` `control.update` rows. Every change to pause or emergency is reported; combinations without their own template (for example, emergency lifted while orders stay paused) are reported as `CONTROLS_CHANGED` with both flags. Mode and strategy toggles are not narrated yet. |
 
 ### Guarantees and limits
 
 **Guarantees:**
 - **Read-only.** A test checks that reading the story leaves every table's row count unchanged. A boundary test checks that the module imports only the DB read helper and zod, and contains no write SQL.
 - **Idempotent.** Event ids are `<facet>:<record id>`, so the same records always give the same events in the same order.
-- **Ordered paging.** Cursor paging returns every event once, oldest first.
+- **Ordered paging.** Cursor paging returns every event once, oldest first. The cursor is applied in SQL on (time, event id), so any number of events can share one millisecond.
 - **Fail closed.** An event that does not pass the contract is dropped, never shown half-formed. Missing numbers read "unknown".
 
 **Limits:**
 - **Current-state projection.** M1 shows state as it is now. A pending approval is shown while pending and then replaced by its fill, rejection or expiry, so a filled order can never show as pending again. It is not yet a permanent per-event history: that comes with the outbox milestone.
-- **Window size.** Each source contributes at most `limit + 50` rows per call. If more than 50 events share one millisecond at a page edge, some could be skipped; this is very unlikely at paper-trading rates.
 - **Not yet built:** the UI, live SSE `joe_trade_event` updates, notification preferences, any LLM elaboration, and the avatar.
 
 ## Tests
@@ -62,7 +61,8 @@ Owner brief: `MIA_TRADER_JOE_LIVE_V4_ENGINEERING_MASTER_PROMPT.md`, from the own
 - pause, emergency stop and resume;
 - the contract, reserved kinds, duplicates, determinism and cursor paging;
 - no writes, cursor validation and symbol masking;
-- the import boundary, and route auth and validation.
+- the import boundary, and route auth and validation;
+- the five trading-risk review findings: a protection problem coming back after recovery, whether the stop is still active, lifting the emergency stop while orders stay paused, paging through 120 events in one millisecond, and a very long rejection reason. Each of these tests fails on the code before the fix.
 
 Mutation checks (each makes a test fail):
 - taking P&L from the position row instead of the ledger;

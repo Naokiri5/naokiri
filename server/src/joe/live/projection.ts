@@ -31,7 +31,7 @@ const SOURCES: Source[] = [
             json_extract(d.report, '$.risk.reasonCodes') AS reasons, (SELECT p.id FROM positions p WHERE p.decision_id = d.id LIMIT 1) AS pos
           FROM decisions d`,
     map: (r) => {
-      const reasons = (parse(r.reasons) as string[] | null)?.slice(0, 3).join('; ') ?? null;
+      const reasons = (parse(r.reasons) as string[] | null)?.slice(0, 3).join('; ').slice(0, 300) ?? null;
       const kind = r.risk_decision === 'DENY' ? 'RISK_DENIED'
         : r.decision === 'REJECTED' || r.decision === 'INSUFFICIENT_DATA' ? 'NO_TRADE'
         : r.decision === 'WAIT_FOR_CONFIRMATION' ? 'WAITING_FOR_CONFIRMATION' : 'DECISION_RECORDED';
@@ -50,7 +50,7 @@ const SOURCES: Source[] = [
       const kind = KINDS[r.status as keyof typeof KINDS];
       if (!kind) return null;
       return { eventId: r.eid, kind, severity: kind === 'APPROVAL_PENDING' ? 'WARNING' : 'INFO', occurredAt: r.ts, source: { service: 'paper OMS', table: 'orders', recordId: r.rid },
-        links: links(r), fields: { status: r.status, qty: num(r.qty), reason: r.reject_reason ?? null } };
+        links: links(r), fields: { status: r.status, qty: num(r.qty), reason: typeof r.reject_reason === 'string' ? r.reject_reason.slice(0, 300) : null } };
     },
   },
   {
@@ -68,20 +68,24 @@ const SOURCES: Source[] = [
   },
   {
     name: 'protective stops',
-    sql: `SELECT 'stop:' || o.id AS eid, o.created_at AS ts, o.id AS rid, o.id AS order_id, o.instrument, o.position_id AS pos, p.decision_id, p.initial_stop
+    sql: `SELECT 'stop:' || o.id AS eid, o.created_at AS ts, o.id AS rid, o.id AS order_id, o.instrument, o.position_id AS pos, o.status, o.stop_price, p.decision_id, p.initial_stop
           FROM orders o LEFT JOIN positions p ON p.id = o.position_id WHERE o.purpose = 'PROTECTIVE_STOP'`,
+    // The event is the START of monitoring; the stop's current state is reported alongside so an old card never reads as live.
     map: (r) => ({ eventId: r.eid, kind: 'STOP_MONITORING_STARTED', severity: 'INFO', occurredAt: r.ts, source: { service: 'paper OMS position monitor', table: 'orders', recordId: r.rid },
-      links: links(r), fields: { stopPrice: num(r.initial_stop), guaranteed: false } }),
+      links: links(r), fields: { stopPrice: num(r.initial_stop), currentStopPrice: num(r.stop_price), stopStatus: r.status, guaranteed: false } }),
   },
   {
-    name: 'protection incidents (opened)',
-    sql: `SELECT 'incident.open:' || i.id AS eid, i.opened_at AS ts, i.id AS rid, i.instrument, i.position_id AS pos, i.reason, i.status, i.occurrences FROM protection_incidents i`,
+    name: 'protection incidents (latest alert)',
+    // Keyed on the latest alert time: an incident that comes back after recovery reuses its row, so keying on
+    // opened_at would hide the relapse behind an older "recovered" event. A new alert yields a new, later event.
+    sql: `SELECT 'incident.alert:' || i.id || ':' || i.last_notified_at AS eid, i.last_notified_at AS ts, i.id AS rid, i.instrument, i.position_id AS pos,
+            i.reason, i.status, i.occurrences, i.opened_at FROM protection_incidents i`,
     map: (r) => ({ eventId: r.eid, kind: 'PROTECTION_ISSUE', severity: 'CRITICAL', occurredAt: r.ts, source: { service: 'protection monitor', table: 'protection_incidents', recordId: r.rid },
-      links: links(r), fields: { reason: r.reason, currentStatus: r.status, occurrences: num(r.occurrences) } }),
+      links: links(r), fields: { reason: r.reason, currentStatus: r.status, occurrences: num(r.occurrences), firstOpenedAt: num(r.opened_at) } }),
   },
   {
     name: 'protection incidents (recovered)',
-    sql: `SELECT 'incident.recovered:' || i.id AS eid, i.recovered_at AS ts, i.id AS rid, i.instrument, i.position_id AS pos FROM protection_incidents i WHERE i.recovered_at IS NOT NULL`,
+    sql: `SELECT 'incident.recovered:' || i.id || ':' || i.recovered_at AS eid, i.recovered_at AS ts, i.id AS rid, i.instrument, i.position_id AS pos FROM protection_incidents i WHERE i.recovered_at IS NOT NULL`,
     map: (r) => ({ eventId: r.eid, kind: 'PROTECTION_RECOVERED', severity: 'INFO', occurredAt: r.ts, source: { service: 'protection monitor', table: 'protection_incidents', recordId: r.rid },
       links: links(r), fields: {} }),
   },
@@ -115,16 +119,16 @@ const SOURCES: Source[] = [
             AND (COALESCE(json_extract(a.detail, '$.from.pausedNewOrders'), 0) <> COALESCE(json_extract(a.detail, '$.to.pausedNewOrders'), 0)
               OR COALESCE(json_extract(a.detail, '$.from.emergency'), 0) <> COALESCE(json_extract(a.detail, '$.to.emergency'), 0))`,
     map: (r) => {
-      const kind = !r.fe && r.te ? 'EMERGENCY_STOP' : !r.fp && r.tp ? 'NEW_ORDERS_PAUSED' : (r.fp || r.fe) && !r.tp && !r.te ? 'TRADING_RESUMED' : null;
-      if (!kind) return null;
+      const paused = !!r.tp, emergency = !!r.te;
+      // Every pause/emergency transition is reported; combinations without a dedicated template state both flags.
+      const kind = !r.fe && emergency ? 'EMERGENCY_STOP' : !r.fp && paused && !emergency ? 'NEW_ORDERS_PAUSED' : !paused && !emergency ? 'TRADING_RESUMED' : 'CONTROLS_CHANGED';
       return { eventId: r.eid, kind, severity: kind === 'TRADING_RESUMED' ? 'INFO' : 'CRITICAL', occurredAt: r.ts,
-        source: { service: 'execution controls (audit log)', table: 'audit_log', recordId: r.rid }, links: {}, fields: { actor: String(r.actor).slice(0, 60) } };
+        source: { service: 'execution controls (audit log)', table: 'audit_log', recordId: r.rid }, links: {}, fields: { actor: String(r.actor).slice(0, 60), paused, emergency } };
     },
   },
 ];
 
 const MAX_LIMIT = 200;
-const TIE_SLACK = 50; // extra rows per source so events sharing a timestamp are not cut at the page boundary
 
 export type Cursor = { ts: number; id: string };
 export const encodeCursor = (e: { occurredAt: number; eventId: string }) => `${e.occurredAt}~${e.eventId}`;
@@ -157,7 +161,8 @@ export function joeEvents(opts: { after?: Cursor | null; limit?: number } = {}) 
   let events: JoeTradeEvent[];
   if (opts.after) {
     const c = opts.after;
-    events = load('AND ts >= ?', 'ASC', [c.ts], limit + TIE_SLACK).filter((e) => e.occurredAt > c.ts || (e.occurredAt === c.ts && e.eventId > c.id)).sort(cmp).slice(0, limit);
+    // The cursor is applied in SQL on (ts, eid), so any number of events sharing one millisecond pages correctly.
+    events = load('AND (ts > ? OR (ts = ? AND eid > ?))', 'ASC', [c.ts, c.ts, c.id], limit).sort(cmp).slice(0, limit);
   } else {
     events = load('', 'DESC', [], limit).sort(cmp).slice(-limit);
   }

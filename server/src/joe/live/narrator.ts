@@ -29,7 +29,10 @@ const TEMPLATES: Record<JoeEventKind, (f: JoeEventDraft['fields'], sym: string) 
   ORDER_EXPIRED: (_f, s) => ({ joeState: 'EXPLAINING', headline: `Approval window expired for ${s}`, text: `The consensus behind the ${s} entry expired before approval, so the paper order lapsed. Nothing was filled.` }),
   PAPER_ENTRY_FILLED: (f, s) => ({ joeState: 'PAPER_FILLED', headline: `SIMULATED PAPER fill: bought ${s}`, text: `SIMULATED PAPER fill recorded: ${num(f.qty)} ${s} at ${usd(f.price)}, fee ${usd(f.fee)} (ledger cash ${usd(f.ledgerCash)}). Not a real exchange execution.` }),
   PAPER_EXIT_FILLED: (f, s) => ({ joeState: 'EXPLAINING', headline: `SIMULATED PAPER exit: sold ${s}`, text: `SIMULATED PAPER exit (${str(f.reason, 'exit')}): ${num(f.qty)} ${s} at ${usd(f.price)}, fee ${usd(f.fee)} (ledger cash ${usd(f.ledgerCash)}).` }),
-  STOP_MONITORING_STARTED: (f, s) => ({ joeState: 'WATCHING', headline: `Stop monitoring for ${s}`, text: `MIA monitors a paper stop at ${usd(f.stopPrice)} for ${s}. A stop is not guaranteed to fill at that exact price.` }),
+  STOP_MONITORING_STARTED: (f, s) => ({
+    joeState: f.stopStatus === 'ACTIVE' ? 'WATCHING' : 'EXPLAINING', headline: `Stop monitoring started for ${s}`,
+    text: `MIA started monitoring a paper stop at ${usd(f.stopPrice)} for ${s}. ${f.stopStatus === 'ACTIVE' ? `It is still active, now at ${usd(f.currentStopPrice)}` : `This stop is no longer active (${str(f.stopStatus, 'status unknown')})`}. A stop is not guaranteed to fill at its exact price.`,
+  }),
   PROTECTION_ISSUE: (f, s) => ({ joeState: 'DEGRADED', headline: `Protection problem on ${s}`, text: `Protection for the ${s} paper position could not be verified: ${str(f.reason)}. MIA keeps checking and you have been notified.` }),
   PROTECTION_RECOVERED: (_f, s) => ({ joeState: 'RECOVERED', headline: `Protection verified again for ${s}`, text: `MIA verified protection for ${s} again. The incident stays in the record for review.` }),
   POSITION_CLOSED: (f, s) => ({
@@ -40,6 +43,7 @@ const TEMPLATES: Record<JoeEventKind, (f: JoeEventDraft['fields'], sym: string) 
   TRADE_REVIEW_RECORDED: (f, s) => ({ joeState: typeof f.r === 'number' && f.r < 0 ? 'LOSS_REVIEW' : 'EXPLAINING', headline: `Trade review saved for ${s}`, text: `MIA saved a post-trade review for ${s} (${num(f.r)}R). A single outcome does not change strategy rules.` }),
   NEW_ORDERS_PAUSED: (f) => ({ joeState: 'HALTED', headline: 'New paper orders paused', text: `New risk-increasing paper orders are paused (by ${str(f.actor)}). Existing positions stay monitored. Only the owner can resume.` }),
   EMERGENCY_STOP: (f) => ({ joeState: 'HALTED', headline: 'Emergency stop active', text: `An emergency stop is active (by ${str(f.actor)}). New entries are blocked.` }),
+  CONTROLS_CHANGED: (f) => ({ joeState: f.paused || f.emergency ? 'HALTED' : 'RECOVERED', headline: 'Execution controls changed', text: `Execution controls changed (by ${str(f.actor)}): new orders paused = ${f.paused ? 'yes' : 'no'}, emergency stop = ${f.emergency ? 'yes' : 'no'}.` }),
   TRADING_RESUMED: (f) => ({ joeState: 'RECOVERED', headline: 'Owner resumed paper trading', text: `The owner (${str(f.actor)}) lifted the pause. The risk gate still checks every new entry.` }),
 };
 

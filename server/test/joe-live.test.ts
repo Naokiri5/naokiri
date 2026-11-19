@@ -30,10 +30,10 @@ function report(over: Partial<DecisionReport> = {}): DecisionReport {
     decision: 'PAPER_TRADE', opportunity: { score: 70, version: 'v', factors: [], missing: [] } as any, ...over } as DecisionReport;
 }
 /** Persist a decision row the way the decision engine does (columns + full report JSON). */
-function saveDecision(r: DecisionReport, decision: string, riskDecision: string | null, reasonCodes: string[] = []) {
+function saveDecision(r: DecisionReport, decision: string, riskDecision: string | null, reasonCodes: string[] = [], createdAt = Date.now()) {
   const full = { ...r, risk: riskDecision ? { decision: riskDecision, reasonCodes } : null };
   run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,risk_decision,consensus_id,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-    r.id, r.candidateId, r.instrumentId, 'crypto', 'LONG', 'trend_pullback', decision, 70, riskDecision, 'q', Date.now(), J(full));
+    r.id, r.candidateId, r.instrumentId, 'crypto', 'LONG', 'trend_pullback', decision, 70, riskDecision, 'q', createdAt, J(full));
   return r;
 }
 const kinds = (evs: Ev[]) => evs.map((e) => e.kind);
@@ -137,6 +137,37 @@ describe('safety events', () => {
     expect(story.find((e) => e.kind === 'PROTECTION_ISSUE')).toMatchObject({ severity: 'CRITICAL', fields: { reason: 'no fresh executable price for exit' }, presentation: { joeState: 'DEGRADED' } });
     expect(story.find((e) => e.kind === 'PROTECTION_RECOVERED')!.presentation.joeState).toBe('RECOVERED');
   });
+  it('a protection problem that comes back after recovery shows up as a NEW, later event (review finding 1)', () => {
+    const r = submitEntry(report(), 'bot'); const t0 = Date.now();
+    reportUnprotected({ id: r.positionId!, instrument: id }, 'stale book', t0);
+    markRecovered(r.positionId!, t0 + 1000);
+    const cursor = decodeCursor(joeEvents({ limit: 200 }).nextCursor!); // a client that has seen "recovered"
+    reportUnprotected({ id: r.positionId!, instrument: id }, 'stale book again', t0 + 5000);
+    const fresh = joeEvents({ after: cursor, limit: 50 }).events;
+    expect(fresh.map((e) => [e.kind, e.occurredAt])).toEqual([['PROTECTION_ISSUE', t0 + 5000]]);
+    expect(fresh[0].fields).toMatchObject({ reason: 'stale book again', currentStatus: 'OPEN', firstOpenedAt: t0 });
+    const story = joeEventsForPosition(r.positionId!).events.filter((e) => e.kind.startsWith('PROTECTION'));
+    expect(story.at(-1)!.kind).toBe('PROTECTION_ISSUE'); // the latest protection state is the relapse, not the old recovery
+  });
+  it('the stop card states whether the stop is still active and where it is now (review finding 2)', () => {
+    const r = submitEntry(report(), 'bot');
+    const live = joeEventsForPosition(r.positionId!).events.find((e) => e.kind === 'STOP_MONITORING_STARTED')!;
+    expect(live.presentation.text).toMatch(/started monitoring a paper stop at .* still active, now at/);
+    const qty = get<{ qty: number }>('SELECT qty FROM positions WHERE id=?', r.positionId!)!.qty;
+    executeExit(r.positionId!, qty, 'MANUAL');
+    const done = joeEventsForPosition(r.positionId!).events.find((e) => e.kind === 'STOP_MONITORING_STARTED')!;
+    expect(done.fields.stopStatus).toBe('CANCELLED');
+    expect(done.presentation.text).toMatch(/no longer active \(CANCELLED\)/);
+    expect(done.presentation.joeState).toBe('EXPLAINING');
+  });
+  it('lifting the emergency stop while orders stay paused is reported, not dropped (review finding 3)', () => {
+    emergencyStop('owner');
+    updateControl('owner', { emergency: false }); // still paused
+    const evs = joeEvents().events.filter((e) => e.source.table === 'audit_log');
+    expect(kinds(evs)).toEqual(['EMERGENCY_STOP', 'CONTROLS_CHANGED']);
+    expect(evs[1]).toMatchObject({ fields: { paused: true, emergency: false }, presentation: { joeState: 'HALTED' } });
+    expect(evs[1].presentation.text).toMatch(/new orders paused = yes, emergency stop = no/);
+  });
   it('pause, emergency stop and owner resume come from the audit log; other control changes are ignored', () => {
     pauseNewOrders('trader-joe');
     updateControl('owner', { pausedNewOrders: false });
@@ -187,6 +218,26 @@ describe('contract, ordering and idempotency', () => {
     const before = rowCounts();
     joeEvents({ limit: 200 }); joeEventsForPosition(r.positionId!);
     expect(rowCounts()).toEqual(before);
+  });
+  it('pages correctly through many events that share one millisecond (review finding 4)', () => {
+    const ts = Date.now() - 10_000;
+    for (let i = 0; i < 120; i++) saveDecision(report(), 'WAIT_FOR_CONFIRMATION', null, [], ts);
+    const seen = new Set<string>(); let cursor = decodeCursor(`0~decision:start`);
+    for (let i = 0; i < 100; i++) {
+      const page = joeEvents({ after: cursor, limit: 7 });
+      if (!page.events.length) break;
+      for (const e of page.events) { expect(seen.has(e.eventId)).toBe(false); seen.add(e.eventId); }
+      cursor = decodeCursor(page.nextCursor!);
+    }
+    expect(seen.size).toBe(120);
+  });
+  it('a very long rejection reason is shortened, not silently dropped (review finding 5)', () => {
+    const rep = saveDecision(report(), 'APPROVED_FOR_USER_CONFIRMATION', 'ALLOW');
+    const oid = queueForApproval(rep)!;
+    run("UPDATE orders SET status='REJECTED', reject_reason=? WHERE id=?", 'RISK_CODE_'.repeat(200), oid);
+    const ev = joeEvents().events.find((e) => e.kind === 'ORDER_REJECTED')!;
+    expect(ev).toBeDefined();
+    expect(String(ev.fields.reason).length).toBe(300);
   });
   it('rejects malformed cursors', () => {
     expect(decodeCursor('abc')).toBeNull();
