@@ -17,8 +17,7 @@ import type { DecisionReport } from '../decision/engine.js';
 import { releaseLease, acquireOrRenewLease, withWriteFence } from '../ops/lease.js';
 import { checkScanStall } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
-import { maybeScheduledBackup, verifyBackupInWorker, backupDir } from '../ops/backup.js';
-import { join } from 'node:path';
+import { maybeScheduledBackup } from '../ops/backup.js';
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
@@ -141,10 +140,17 @@ async function backgroundPass() {
 let lastBackupAlertAt = 0;
 async function backupPass() {
   try {
-    const m = maybeScheduledBackup(); if (!m) return;
-    const v = await verifyBackupInWorker(join(backupDir(), m.file)); // off the event loop (MA-14)
+    const m = await maybeScheduledBackup(); if (!m) return;
+    const v = m.verification;
     journal('SYSTEM', `Backup ${m.file} written (${m.encrypted ? 'encrypted' : 'not encrypted'}); restore check ${v.ok ? 'passed' : 'FAILED'}`);
-    if (!v.ok) throw new Error(`restore check failed: ${v.checks.filter((c) => !c.ok).map((c) => c.name).join(', ')}`);
+    // CodeRabbit #14: decide the restore-check outcome first; retention reporting can never replace or mask it.
+    const failure = !v.ok ? new Error(`restore check failed: ${v.checks.filter((c) => !c.ok).map((c) => c.name).join(', ')}`) : null;
+    if (m.retentionWarning) {
+      try { journal('SYSTEM', `Backup retention warning for ${m.file}: ${m.retentionWarning}`); notify('WARNING', 'Backup retention failed', m.retentionWarning, 'backup'); }
+      catch { /* a reporting failure must not hide the restore-check result below */ }
+    }
+    if (failure) throw failure;
+    if (v.recordError) throw new Error(v.recordError);
   } catch (e: any) {
     botStatus.lastError = `backup: ${e.message}`;
     if (Date.now() - lastBackupAlertAt > 3_600_000) { lastBackupAlertAt = Date.now(); notify('WARNING', 'Backup failed', String(e.message).slice(0, 300), 'backup'); }
