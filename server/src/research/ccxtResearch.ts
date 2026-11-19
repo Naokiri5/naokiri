@@ -12,7 +12,7 @@
  *  - Only allow-listed exchanges and allow-listed PUBLIC methods are callable.
  *  - MIA_CCXT_SANDBOX=1 switches supported exchanges to their official test URLs (still keyless, still GET-only).
  */
-import { fetchProvider, providers, registerProvider, setRateLimit } from '../providers/http.js';
+import { fetchProvider, providers, registerProvider, setRateLimit, ProviderError } from '../providers/http.js';
 
 export const CCXT_EXCHANGES = ['binance', 'coinbaseexchange', 'kraken', 'okx', 'bybit'] as const;
 export type CcxtExchangeId = typeof CCXT_EXCHANGES[number];
@@ -58,6 +58,18 @@ function assertKeyless(ex: CcxtLike) {
   }
 }
 
+/** Hostnames declared by the exchange's own API / sandbox URLs (CCXT templates like {hostname} resolved). */
+function allowedHost(ex: CcxtLike, url: string): boolean {
+  const hosts = new Set<string>();
+  const visit = (v: unknown) => {
+    if (typeof v === 'string') { try { hosts.add(new URL(v.replace(/\{hostname\}/g, String((ex as any).hostname ?? ''))).hostname); } catch { /* not a URL */ } }
+    else if (v && typeof v === 'object') Object.values(v).forEach(visit);
+  };
+  visit(ex.urls.api); visit(ex.urls.test);
+  let host: string; try { host = new URL(url).hostname; } catch { return false; }
+  return hosts.has(host);
+}
+
 /** Route CCXT's HTTP through MIA's provider layer, GET only. */
 function installTransport(ex: CcxtLike, id: CcxtExchangeId) {
   const pid = providerId(id);
@@ -66,7 +78,18 @@ function installTransport(ex: CcxtLike, id: CcxtExchangeId) {
       throw new CcxtResearchError(`blocked ${method} request: CCXT research is read-only (GET only)`);
     }
     if (!/^https:\/\//.test(url)) throw new CcxtResearchError('blocked non-HTTPS request');
-    const json = await fetchProvider(pid, url, { headers: (headers ?? {}) as Record<string, string>, timeoutMs: 10_000 });
+    if (!allowedHost(ex, url)) throw new CcxtResearchError('blocked request to a host that is not this exchange\'s API');
+    let json: unknown;
+    try {
+      // redirectMode 'error': a redirect can never take the request to another host.
+      json = await fetchProvider(pid, url, { headers: (headers ?? {}) as Record<string, string>, timeoutMs: 10_000, redirectMode: 'error' });
+    } catch (e) {
+      // A 4xx (other than rate limits) is the exchange rejecting THIS request (e.g. unknown symbol), not an outage.
+      if (e instanceof ProviderError && e.status && e.status >= 400 && e.status < 500 && e.status !== 429 && e.status !== 418) {
+        throw new CcxtResearchError(`exchange rejected the request (HTTP ${e.status}); check the symbol and parameters`);
+      }
+      throw e;
+    }
     // Let CCXT map exchange-specific error payloads that arrive with HTTP 200 (e.g. Kraken `{ error: [...] }`).
     ex.handleErrors?.(200, 'OK', url, 'GET', {}, JSON.stringify(json), json, headers, undefined);
     return json;

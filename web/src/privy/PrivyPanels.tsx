@@ -20,7 +20,8 @@ export interface PrivyClientConfig { enabled: boolean; appId: string | null; lin
 function PrivyRoot({ appId, children }: { appId: string; children: ReactNode }) {
   return <PrivyProvider appId={appId} config={{
     appearance: { theme: 'dark', accentColor: '#4f8cff', showWalletLoginFirst: false },
-    // Never create custodial/embedded wallets: MIA must not hold or control any key that can move funds.
+    // Never create embedded wallets automatically. Optional owner-initiated creation (MIA_PRIVY_EMBEDDED_WALLETS=1, passphrase
+    // step-up) is handled in AccountInner; MIA never holds, signs with, funds or exports any key.
     embeddedWallets: { ethereum: { createOnLogin: 'off' }, solana: { createOnLogin: 'off' } },
   }}>{children}</PrivyProvider>;
 }
@@ -90,8 +91,12 @@ function AccountInner({ config, onChange }: { config: PrivyClientConfig; onChang
           {add('Email', p.linkEmail)}{add('Phone', p.linkPhone)}{add('Google', p.linkGoogle)}{add('Apple', p.linkApple)}{add('Passkey', p.linkPasskey)}{add('Wallet (identity only)', () => p.linkWallet())}
         </div>
         {config.embeddedWallets && !hasEmbedded && <div className="row" style={{ gap: 8 }}>
-          <Action label="Create a Privy embedded wallet (Ethereum)" run={async () => { await createWallet(); }} />
-          <span className="hint">Optional. Privy secures the key; MIA only shows the address and can never sign, send or fund from it.</span>
+          <Action label="Create a Privy embedded wallet (Ethereum)" run={async () => {
+            // Server-side passphrase step-up + audit first; nothing is created if it fails.
+            await api('/api/security/privy/embedded-wallet-intent', { body: { password: pw } }); setPw('');
+            await createWallet();
+          }} />
+          <span className="hint">Optional; needs your passphrase (field below). Privy secures the key; MIA only shows the address and can never sign, send or fund from it.</span>
         </div>}
         <div className="row" style={{ gap: 8 }}>
           <StepUp value={pw} onChange={setPw} />

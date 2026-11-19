@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased: Python research labs — NautilusTrader and Freqtrade (2026-11-18)
+- **New:** isolated research environments for NautilusTrader 1.231.0 and Freqtrade 2026.10 (`scripts/research-python.sh setup|smoke`). They are not trading bots and not part of MIA's runtime.
+- **Safety:** Nautilus runs a simulated venue only; Freqtrade runs keyless dry-run backtests. A required CI test fails if either is configured to trade, carries keys, or imports live-trading code.
+- **Optional CI:** a separate workflow runs both labs when their files change.
+- **Docs:** `docs/research/PYTHON_RESEARCH_LABS.md`.
+
 ## Unreleased: DeFi research — DefiLlama yields and Aave V3 flash loans (2026-11-18)
 - **New:** read-only DefiLlama yield pools and protocol TVL. Risky yields are flagged: outlier APY, reward-dependent, impermanent loss, low TVL.
 - **New:** Aave V3 flash-loan research: on-chain flash-loan fee, enabled/paused/frozen status and available liquidity, plus a hypothetical cost calculator.

@@ -7,7 +7,7 @@
  * A yield is never a trade signal and never reaches the scanner, QCI, decision engine, risk gate or OMS. Advertised
  * APY is not a forecast: outliers, reward-token dependence and impermanent-loss exposure are flagged, not hidden.
  */
-import { fetchProvider, registerProvider, setRateLimit } from '../providers/http.js';
+import { fetchProvider, registerProvider, setRateLimit, ProviderError } from '../providers/http.js';
 
 export const YIELDS = 'defillama-yields';
 export const LLAMA_API = 'defillama-api';
@@ -52,7 +52,7 @@ async function allPools() {
     try {
       const body = await fetchProvider(YIELDS, 'https://yields.llama.fi/pools', { timeoutMs: 30_000, redirectMode: 'error' });
       const rows = body && typeof body === 'object' && Array.isArray((body as any).data) ? (body as any).data as unknown[] : null;
-      if (!rows) throw new DefiResearchError('unexpected DefiLlama yields response shape');
+      if (!rows) throw new ProviderError(YIELDS, 'unexpected response shape', 502); // upstream fault, not the caller's
       const pools = rows.map(normalisePool).filter((p): p is YieldPool => p !== null);
       poolsCache = { at: Date.now(), pools, dropped: rows.length - pools.length };
       return poolsCache;
@@ -80,7 +80,7 @@ let protocolsCache: { at: number; rows: { name: string; slug: string; category: 
 export async function topProtocols(limit = 25, category?: string) {
   if (!protocolsCache || Date.now() - protocolsCache.at > CACHE_MS) {
     const body = await fetchProvider(LLAMA_API, 'https://api.llama.fi/protocols', { timeoutMs: 30_000, redirectMode: 'error' });
-    if (!Array.isArray(body)) throw new DefiResearchError('unexpected DefiLlama protocols response shape');
+    if (!Array.isArray(body)) throw new ProviderError(LLAMA_API, 'unexpected response shape', 502);
     const rows = (body as unknown[]).flatMap((r) => {
       const o = (r ?? {}) as Record<string, unknown>; const tvl = num(o.tvl); const slug = str(o.slug, 80);
       if (tvl === null || !slug) return [];
@@ -97,6 +97,6 @@ export async function protocolTvl(slug: string) {
   if (!/^[a-z0-9][a-z0-9.-]{0,79}$/.test(slug)) throw new DefiResearchError('invalid protocol slug');
   const v = await fetchProvider(LLAMA_API, `https://api.llama.fi/tvl/${slug}`, { timeoutMs: 15_000, redirectMode: 'error' });
   const tvl = num(v);
-  if (tvl === null) throw new DefiResearchError('unexpected DefiLlama TVL response');
+  if (tvl === null) throw new ProviderError(LLAMA_API, 'unexpected TVL response', 502);
   return { source: 'defillama', fetchedAt: Date.now(), kind: 'RESEARCH_ONLY' as const, tradeEligible: false as const, data: { slug, tvlUsd: tvl } };
 }

@@ -108,6 +108,17 @@ export async function linkPrivy(token: unknown, password: unknown, stepUpClient:
   audit('owner', 'auth.privy.link', { userId, replaced: previous?.userId ?? null });
   return { linked: true, userId };
 }
+/**
+ * Owner intent to create a Privy embedded wallet: requires the feature flag AND a passphrase step-up, and is audited.
+ * Privy's SDK runs in the browser, so the hard on/off control is the Privy dashboard (disable embedded wallets there);
+ * this gate makes MIA's own UI path as strict as every other sensitive action.
+ */
+export function embeddedWalletIntent(password: unknown, stepUpClient: string, exemptFromGlobalLockout: boolean) {
+  if (!embeddedWalletsAllowed()) throw new AuthError('embedded wallets are disabled on this server (MIA_PRIVY_EMBEDDED_WALLETS is not 1)', 403);
+  verifyPassphrase(password, stepUpClient, 'step-up', { exemptFromGlobalLockout });
+  audit('owner', 'auth.privy.embedded_wallet.intent', { userId: getLink()?.userId ?? null });
+  return { ok: true, note: 'Privy secures the key. MIA only displays the address; signing, sending, funding and export stay LOCKED.' };
+}
 export function unlinkPrivy(password: unknown, stepUpClient: string, exemptFromGlobalLockout: boolean) {
   verifyPassphrase(password, stepUpClient, 'step-up', { exemptFromGlobalLockout });
   const previous = getLink();
