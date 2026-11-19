@@ -6,6 +6,7 @@ import { createLinkCode, redeemLinkCode } from '../src/integrations/telegram/lin
 import { drainOutbox } from '../src/integrations/telegram/webhook.js';
 import { getControl } from '../src/core/mode.js';
 import { parseCommand } from '../src/integrations/telegram/commands.js';
+import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 
 const SECRET = 'test-secret_123';
 let app: Awaited<ReturnType<typeof import('../src/index.js').buildApp>>;
@@ -19,7 +20,7 @@ const hook = (body: unknown, secret: string = SECRET) => app.inject({
   method: 'POST', url: '/api/integrations/telegram/webhook',
   headers: { 'x-telegram-bot-api-secret-token': secret }, payload: body as object,
 });
-const msg = (text: string, from: number, chat: number, type = 'private', date = Math.floor(Date.now() / 1000)) => ({
+const msg = (text: string | undefined, from: number, chat: number, type = 'private', date = Math.floor(Date.now() / 1000)) => ({
   update_id: ++updateSeq,
   message: { message_id: updateSeq, date, text, from: { id: from, is_bot: false, first_name: 'o' }, chat: { id: chat, type } },
 });
@@ -62,6 +63,34 @@ describe('Telegram webhook (MIA-TG-01)', () => {
     expect(outbox().at(-1)!.text).toMatch(/Not linked/);
     await hook(msg('/status', OWNER_USER, chatSeq++));
     expect(outbox().at(-1)!.text).toMatch(/Not linked/);
+  });
+
+  it('prunes expired update records when the listener has no replies to send', async () => {
+    const update = msg(undefined, OWNER_USER, chatSeq++);
+    expect((await hook(update)).json()).toEqual({ ok: true, ignored: true });
+    expect(outbox()).toHaveLength(0);
+    run('INSERT INTO telegram_update_dedupe(update_id, received_at) VALUES (?, ?)', 1, Date.now() - 8 * 86_400_000);
+
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(all('SELECT update_id FROM telegram_update_dedupe')).toEqual([{ update_id: update.update_id }]);
+  });
+
+  it('reports whether the current Paper risk policy is valid and accepted', async () => {
+    const chat = chatSeq++;
+    const { code } = createLinkCode();
+    redeemLinkCode(code, OWNER_USER, chat);
+    const status = async () => {
+      expect((await hook(msg('/status', OWNER_USER, chat))).statusCode).toBe(200);
+      return outbox().at(-1)?.text;
+    };
+
+    expect(await status()).toContain('Policy accepted: no.');
+    acceptPolicy('owner', DEFAULT_POLICY);
+    expect(await status()).toContain('Policy accepted: yes.');
+    run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (2, ?, 0, ?)', '{}', 'fixture');
+    expect(await status()).toContain('Policy accepted: no.');
   });
 
   it('ignores a retried update_id (exactly-once side effects)', async () => {

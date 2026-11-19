@@ -1,6 +1,5 @@
 import { getControl, displayMode, updateControl } from '../../core/mode.js';
 import { accountState, openPositions, PAPER_ACCOUNT } from '../../portfolio/ledger.js';
-import { currentPolicy } from '../../risk/policy.js';
 import { recentDecisions } from '../../market/scanner.js';
 import { botStatusView } from '../../bot/bot.js';
 import { linkForIdentity, redeemLinkCode, revokeLink } from './link.js';
@@ -75,7 +74,7 @@ export function handleCommand(rawText: string, sender: TelegramSender, now = Dat
       return linkedReply([
         `Mode: PAPER (simulated, no real orders). Display: ${displayMode(ctl)}.`,
         `Engine: ${view.role}. Last market update: ${ticker}.`,
-        `Policy accepted: ${currentPolicy() ? 'yes' : 'no'}.`,
+        `Policy accepted: ${view.policyAccepted ? 'yes' : 'no'}.`,
       ].join('\n'));
     }
     case 'risk': {

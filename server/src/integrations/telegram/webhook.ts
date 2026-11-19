@@ -20,6 +20,7 @@ import { createLinkCode, linkStatus, LinkError, revokeLink } from './link.js';
 const SECRET_RE = /^[A-Za-z0-9_-]{1,256}$/;
 const STALE_MESSAGE_S = 600;          // Telegram message dates older than 10 minutes are treated as replays
 const DEDUPE_RETENTION_MS = 7 * 86_400_000;
+const DEDUPE_PRUNE_MS = 3_600_000;
 const OUTBOX_MAX_ATTEMPTS = 5;
 const BACKOFF_MS = [5_000, 30_000, 120_000, 600_000];
 const OUTBOX_LEASE = 'telegram-outbox';
@@ -107,7 +108,6 @@ export async function drainOutbox(send: (chatId: number, text: string) => Promis
       status, pending.attempts, retryAt, accepted ? null : 'Telegram delivery failed', finished, id, OUTBOX_LEASE, holder);
       processed++;
     }
-    run('DELETE FROM telegram_update_dedupe WHERE received_at < ?', now - DEDUPE_RETENTION_MS);
   } finally {
     releaseLease(OUTBOX_LEASE, holder);
   }
@@ -126,9 +126,14 @@ function ownerGuard(req: FastifyRequest, reply: FastifyReply, mutating: boolean)
 }
 
 export async function telegramRoutes(app: FastifyInstance) {
-  if (!config.offline && config.telegramBotToken && webhookSecret()) {
-    let timer: ReturnType<typeof setInterval> | undefined;
+  if (webhookSecret()) {
+    let pruneTimer: ReturnType<typeof setInterval> | undefined;
+    let outboxTimer: ReturnType<typeof setInterval> | undefined;
     let activeDrain: Promise<void> | undefined;
+    const pruneDedupe = () => {
+      try { run('DELETE FROM telegram_update_dedupe WHERE received_at < ?', Date.now() - DEDUPE_RETENTION_MS); }
+      catch { app.log.warn('Telegram deduplication cleanup failed'); }
+    };
     const tick = () => {
       if (activeDrain) return;
       // One request per poll keeps graceful shutdown bounded by the Bot API timeout.
@@ -137,12 +142,17 @@ export async function telegramRoutes(app: FastifyInstance) {
         .finally(() => { activeDrain = undefined; });
     };
     app.addHook('onListen', async () => {
-      timer = setInterval(tick, OUTBOX_POLL_MS);
-      timer.unref();
+      pruneDedupe();
+      pruneTimer = setInterval(pruneDedupe, DEDUPE_PRUNE_MS);
+      pruneTimer.unref();
+      if (config.offline || !config.telegramBotToken) return;
+      outboxTimer = setInterval(tick, OUTBOX_POLL_MS);
+      outboxTimer.unref();
       tick();
     });
     app.addHook('onClose', async () => {
-      clearInterval(timer);
+      clearInterval(pruneTimer);
+      clearInterval(outboxTimer);
       await activeDrain;
     });
   }
