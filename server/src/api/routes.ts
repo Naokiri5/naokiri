@@ -568,8 +568,9 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/notifications/critical', async () => criticalSummary());
   app.post('/api/notifications/ack', async (req) => ackNotificationGroup('owner', z.object({ source: z.string().min(1).max(100), title: z.string().min(1).max(200), severity: z.enum(['INFO', 'WARNING', 'CRITICAL']), throughId: z.string().regex(/^\d{1,15}$/) }).strict().parse(req.body)));
   app.post('/api/notifications/test', async () => ({ id: notify('INFO', 'Test notification', 'Delivery check from Settings', 'settings') }));
-  app.get('/api/settings', async () => ({ notifyPrefs: getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null }), calendarTzOffsetMin: tzOffsetMin(), calendarTimeZone: calendarTimeZone(), joe: { model: config.joeModel, llm: !!config.anthropicApiKey, tools: JOE_TOOL_NAMES }, telegram: { configured: !!config.telegramBotToken } }));
-  app.post('/api/settings/notify', async (req) => { const b = z.object({ telegramMinSeverity: z.enum(['INFO', 'WARNING', 'CRITICAL']), quietHoursUtc: z.tuple([z.number().int().min(0).max(23), z.number().int().min(0).max(23)]).nullable() }).parse(req.body); setSetting('notifyPrefs', b); return { ok: true }; });
+  app.get('/api/settings', async () => ({ notifyPrefs: { solanaWatchlistTelegram: false, ...getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null }) }, calendarTzOffsetMin: tzOffsetMin(), calendarTimeZone: calendarTimeZone(), joe: { model: config.joeModel, llm: !!config.anthropicApiKey, tools: JOE_TOOL_NAMES }, telegram: { configured: !!config.telegramBotToken } }));
+  app.post('/api/settings/notify', async (req) => { const b = z.object({ telegramMinSeverity: z.enum(['INFO', 'WARNING', 'CRITICAL']), quietHoursUtc: z.tuple([z.number().int().min(0).max(23), z.number().int().min(0).max(23)]).nullable(),
+    solanaWatchlistTelegram: z.boolean().default(false) }).parse(req.body); setSetting('notifyPrefs', b); return { ok: true }; }); // Omega PR-07: opt-in watchlist alerts
   app.get('/api/qa', async () => ({ ...releaseGates(), audit: verifyAuditChain() }));
   app.get('/api/audit', async () => recentAudit(200));
 

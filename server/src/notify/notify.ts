@@ -8,10 +8,15 @@ import { getSetting } from '../core/settings.js';
 
 /** Part 6.5 / 13.3 notifications: in-app always; Telegram if configured. Never includes secrets. */
 export type Severity = 'INFO' | 'WARNING' | 'CRITICAL';
-export function notify(severity: Severity, title: string, body = '', source = 'system') {
+/**
+ * `telegramOptIn`: the caller has already checked an explicit owner opt-in for this kind of message (for example the
+ * Solana watchlist alerts), so it is sent to Telegram even below the minimum severity. Quiet hours still apply.
+ */
+export function notify(severity: Severity, title: string, body = '', source = 'system', opts: { telegramOptIn?: boolean } = {}) {
   const prefs = getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null as null | [number, number] });
   const id = uid('ntf'); const ts = Date.now();
-  const wantsTg = !!(config.telegramBotToken && config.telegramChatId) && rank(severity) >= rank(prefs.telegramMinSeverity as Severity) && !inQuiet(prefs.quietHoursUtc, severity);
+  const severityOk = opts.telegramOptIn === true || rank(severity) >= rank(prefs.telegramMinSeverity as Severity);
+  const wantsTg = !!(config.telegramBotToken && config.telegramChatId) && severityOk && !inQuiet(prefs.quietHoursUtc, severity);
   const delivery = { inApp: 'DELIVERED', telegram: wantsTg ? 'PENDING' : config.telegramBotToken ? 'SKIPPED' : 'NOT_CONFIGURED' };
   run('INSERT INTO notifications(id,ts,severity,title,body,source,delivery) VALUES (?,?,?,?,?,?,?)', id, ts, severity, title.slice(0, 200), body.slice(0, 1000), source, JSON.stringify(delivery));
   bus.publish('notification', { id, ts, severity, title, body, source });

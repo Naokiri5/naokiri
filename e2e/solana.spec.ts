@@ -85,3 +85,15 @@ test('on-chain mint checks show per row, a block is explained, and a failed chec
   const card = page.locator('.card', { hasText: 'Watchlist only. Not a trade signal.' });
   await expect(card.getByRole('button')).toHaveCount(0);
 });
+
+test('Settings offers opt-in Solana watchlist alerts for Telegram, off by default, and saves the choice', async ({ page }) => {
+  let saved: unknown = null;
+  await page.route('**/api/settings/notify', async (route) => { saved = route.request().postDataJSON(); await route.fulfill({ json: { ok: true } }); });
+  await page.goto('/settings');
+  const box = page.getByRole('checkbox', { name: 'Send Solana watchlist alerts to Telegram' });
+  await expect(box).not.toBeChecked();
+  await expect(page.getByText(/never a buy button or a trading-bot link/)).toBeVisible();
+  await box.check();
+  await page.getByRole('button', { name: 'Save' }).first().click();
+  await expect.poll(() => (saved as { solanaWatchlistTelegram?: boolean } | null)?.solanaWatchlistTelegram).toBe(true);
+});
