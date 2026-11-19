@@ -146,7 +146,10 @@ export async function routes(app: FastifyInstance) {
   });
   app.post('/api/auth/setup', async (req, reply) => {
     // A connection to loopback can come from a forwarder. Only the console code authorizes first-owner setup.
-    const { password, setupCode } = z.object({ password: PW, setupCode: z.string().max(64).optional() }).strict().parse(req.body);
+    const { password, setupCode } = z.object({
+      password: PW.min(10, 'passphrase must be at least 10 characters'),
+      setupCode: z.string().max(64).optional(),
+    }).strict().parse(req.body);
     if (auth.isSetup()) throw httpError(400, 'owner already configured');
     auth.ensureSetupCode();
     if (!auth.checkSetupCode(setupCode)) {
