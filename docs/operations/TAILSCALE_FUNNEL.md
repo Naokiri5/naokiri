@@ -107,7 +107,7 @@ https://my-pc.tail1234.ts.net
 http://localhost:8787
 ```
 
-Use **your** address from step 4 instead of the example. Then follow `PRIVY_SIGN_IN.md` step 5 to link your Privy account.
+Use **your** address from step 4 instead of the example. Then follow `PRIVY_SIGN_IN.md` (Turning it on, steps 4–6) to sign in with Privy and set up your authenticator app.
 
 ## 7. Check it works
 

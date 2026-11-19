@@ -1,6 +1,8 @@
 import { Suspense, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, fmt, useApi } from '../api';
+import { api, authInfo, fmt, useApi, stepUpBody } from '../api';
+import { TwoFactorCard } from '../auth/TwoFactorCard';
+import { GuardianCard } from '../components/GuardianCard';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Page, Stat, Tabs , rowProps} from '../ui';
 import { StepUp } from './Trading';
 import { VikeResearchPanel } from './VikeResearch';
@@ -63,12 +65,14 @@ export function SecurityCenter() {
     <div className="grid g3" style={{ marginBottom: 14 }}><Stat k="Passing" v={data?.summary.pass ?? '—'} tone="up" /><Stat k="Warnings" v={data?.summary.warn ?? '—'} tone={data?.summary.warn ? 'warn' : undefined} /><Stat k="Failing" v={data?.summary.fail ?? '—'} tone={data?.summary.fail ? 'down' : undefined} /></div>
     <Card title="Security checks" flush right={<select value={area} onChange={(e) => setArea(e.target.value)} aria-label="Area">{areas.map((a) => <option key={a}>{a}</option>)}</select>}>
       <table><tbody>{checks.map((c: any) => <tr key={c.id}><td className="mono faint">{c.id}</td><td>{c.area}</td><td><b>{c.name}</b><div className="hint">{c.detail}</div></td><td><Badge v={c.status} tone={c.status === 'PASS' ? 'b-good' : c.status === 'FAIL' ? 'b-bad' : c.status === 'WARN' ? 'b-warn' : 'b-neutral'} /></td></tr>)}</tbody></table></Card>
+    <div style={{ marginTop: 14 }}><GuardianCard /></div>
+    <div style={{ marginTop: 14 }}><TwoFactorCard /></div>
     {privy.data?.enabled && <div style={{ marginTop: 14 }}><Suspense fallback={<Card title="Privy account"><Empty>Loading Privy…</Empty></Card>}><PrivyAccountCard config={privy.data} onChange={privy.reload} /></Suspense></div>}
     <div className="grid g2" style={{ marginTop: 14 }}>
       <Card title={`Active sessions (${data?.sessions.length ?? 0})`}><div className="col">
         <table><tbody>{(data?.sessions ?? []).map((s: any) => <tr key={s.id}><td className="mono faint">{s.id}…</td><td>signed in {fmt.ago(s.createdAt)}</td><td className="faint">expires {fmt.time(s.expiresAt)}</td><td>{s.current && <Badge v="THIS DEVICE" tone="b-info" />}</td></tr>)}</tbody></table>
-        <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="danger" label="Sign out all other sessions" run={async () => { await api('/api/security/sessions/revoke-others', { body: { password: pw } }); setPw(''); reload(); }} /></div>
-        <div className="hint">Change your passphrase in <Link to="/settings">Settings</Link>; that signs out every session.</div></div></Card>
+        <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="danger" label="Sign out all other sessions" run={async () => { await api('/api/security/sessions/revoke-others', { body: { ...stepUpBody(pw) } }); setPw(''); reload(); }} /></div>
+        {authInfo.mode === 'passphrase' && <div className="hint">Change your passphrase in <Link to="/settings">Settings</Link>; that signs out every session.</div>}</div></Card>
       <Card title="Sign-in & security events" flush><div className="tablewrap" style={{ maxHeight: 320 }}><table><tbody>{(data?.authEvents ?? []).map((e: any, i: number) => <tr key={i}><td className="faint" style={{ whiteSpace: 'nowrap' }}>{fmt.time(e.ts)}</td><td><Badge v={e.action} tone={e.action.includes('failed') ? 'b-bad' : 'b-neutral'} /></td><td className="hint">{e.detail?.slice(0, 120)}</td></tr>)}</tbody></table>{!data?.authEvents?.length && <Empty>No events.</Empty>}</div></Card>
     </div>
     <Card title="More" className="" ><div className="row"><Link to="/qa">Release gates & audit log →</Link><Link to="/wallet">Withdrawal freeze →</Link><Link to="/risk">Emergency controls →</Link></div></Card>

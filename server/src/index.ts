@@ -9,14 +9,15 @@ import './providers/dexscreener.js'; import './providers/frankfurter.js'; import
 import './providers/vike.js'; // one credentialed, read-only research provider; no trading authority
 import { routes } from './api/routes.js';
 import { telegramRoutes } from './integrations/telegram/webhook.js';
-import { contentSecurityPolicy, privyConfigProblem } from './security/privy.js';
+import { contentSecurityPolicy, privyConfigProblem, privyEnabled, privyOwnerConfigProblem } from './security/privy.js';
+import { authMode } from './security/stepUp.js';
 import { seedStrategies } from './lab/lab.js';
 import { seedCatalog, resumeIngestion } from './knowledge/store.js';
 import { seedConcepts } from './knowledge/concepts.js';
 
 export async function buildApp() {
   openDb(); seedStrategies(); seedCatalog(); seedConcepts(); resumeIngestion();
-  const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { serializers: { req: (req) => ({ method: req.method, url: req.url?.split('?')[0], remoteAddress: req.ip }) }, level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.body.password', 'req.body.current', 'req.body.next', 'req.body.setupCode', 'req.body.accessToken'] }, bodyLimit: 256 * 1024 });
+  const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { serializers: { req: (req) => ({ method: req.method, url: req.url?.split('?')[0], remoteAddress: req.ip }) }, level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'req.body.password', 'req.body.current', 'req.body.next', 'req.body.otp', 'req.body.setupCode', 'req.body.accessToken', 'req.body.consoleCode'] }, bodyLimit: 256 * 1024 });
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('x-request-id', req.id);
     reply.header('x-content-type-options', 'nosniff'); reply.header('x-frame-options', 'DENY'); reply.header('referrer-policy', 'no-referrer');
@@ -33,6 +34,8 @@ export async function buildApp() {
     return reply.code(code).send({ error: String(err?.message ?? 'request failed') });
   });
   const privyProblem = privyConfigProblem(); if (privyProblem) app.log.warn(privyProblem);
+  const ownerProblem = privyOwnerConfigProblem(); if (ownerProblem) app.log.warn(ownerProblem);
+  if (authMode() === 'privy' && !privyEnabled()) app.log.warn('Sign-in uses Privy (MIA_AUTH_MODE is not "passphrase") but MIA_PRIVY_APP_ID is not set: nobody can sign in until it is. See docs/operations/PRIVY_SIGN_IN.md');
   await app.register(routes);
   // Separate encapsulated plugin: the session guard in routes() does not apply to the Telegram webhook.
   await app.register(telegramRoutes);

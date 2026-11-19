@@ -8,6 +8,7 @@
     "start": "node scripts/run.mjs start",
     "start:supervised": "node scripts/supervise.mjs",
     "backup": "node scripts/run.mjs backup",
+    "owner": "node scripts/run.mjs owner",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run",
@@ -16,11 +17,14 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
+    "@bgd-labs/aave-address-book": "^4.44.22",
     "@fastify/static": "^10.1.11",
+    "ccxt": "^4.5.93",
     "fast-xml-parser": "^5.12.1",
     "fastify": "^5.12.8",
     "jose": "^4.15.9",
     "pdfjs-dist": "^6.5.438",
+    "viem": "^2.58.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

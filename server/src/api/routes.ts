@@ -4,6 +4,14 @@ import { VikeNotConfiguredError } from '../providers/vike.js';
 import * as privy from '../security/privy.js';
 import { catalogSummary } from '../fabric/catalog.js';
 import { outboxHealth } from '../fabric/relay.js';
+import * as totp from '../security/totp.js';
+import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
+import { createBackup } from '../ops/backup.js';
+import { assessAll, autoContain, autoPauseEnabled, startGuardian } from '../security/guardian/response.js';
+import { posture, recentGuardianActions } from '../security/guardian/posture.js';
+import { ccxtRoutes } from '../research/ccxtRoutes.js';
+import { defiRoutes } from '../research/defiRoutes.js';
+import { predictionRoutes } from '../prediction/routes.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -62,6 +70,8 @@ import { sha256 } from '../core/util.js';
 
 import { clearGoogleFlow, GOOGLE_CALLBACK, googleConfig, googleSubject, readGoogleFlow, startGoogleFlow } from './google.js';
 
+/** Codex #25 direct Google sign-in: passphrase mode only. In Privy mode, Google login is a Privy login method instead. */
+const googleAvailable = () => (passphraseSignInAllowed() ? googleConfig() : null);
 const googleIdentity = () => getSetting<{ clientId: string; subject: string } | null>('auth.google.owner', null);
 const COOKIE = 'mia_session';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
@@ -72,12 +82,18 @@ const bad = (reply: FastifyReply, code: number, msg: string) => reply.code(code)
  * the owner's step-up too (MA-07). A session's own failures still lock that session (5 misses → exponential backoff).
  */
 const stepUpClient = (req: FastifyRequest) => `session:${sha256(tokenOf(req) ?? '')}`;
-/** Step-up shares the login brute-force limits (per session + global), so it can no longer be guessed freely. */
-const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, stepUpClient(req), 'step-up', { exemptFromGlobalLockout: isDirectLocal(req) });
+/** Step-up (authenticator code, or the legacy passphrase until one is enrolled) shares the login brute-force limits
+ *  (per session + global), so it cannot be guessed freely. See security/stepUp.ts. */
+const stepUp = (req: FastifyRequest, body: any) => verifyStepUp(body, stepUpClient(req), { exemptFromGlobalLockout: isDirectLocal(req) });
 /** Step-up for actions that only REDUCE risk or exposure (close all, revoke other sessions): never blocked by the
  *  server-wide failure budget that unauthenticated strangers can exhaust (SEC-14), nor by another client's failures. */
-const stepUpRiskReducing = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, stepUpClient(req), 'step-up', { exemptFromGlobalLockout: true });
+const stepUpRiskReducing = (req: FastifyRequest, body: any) => verifyStepUp(body, stepUpClient(req), { exemptFromGlobalLockout: true });
 const PW = z.string().min(1).max(1024);
+/** Step-up proof fields accepted by every protected action: an authenticator code, or the legacy passphrase. */
+const OTP = z.string().trim().regex(/^\d{6}$/, 'authenticator code must be 6 digits');
+const SU = { password: PW.optional(), otp: OTP.optional() };
+/** Passphrase routes exist only when the administrator explicitly chose MIA_AUTH_MODE=passphrase. */
+const requirePassphraseMode = () => { if (!passphraseSignInAllowed()) throw httpError(403, 'passphrase sign-in is turned off on this server: sign in with Privy (an administrator can set MIA_AUTH_MODE=passphrase for offline recovery)'); };
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
 const ID = z.string().min(1).max(150);
@@ -131,6 +147,9 @@ export async function routes(app: FastifyInstance) {
   await ditasRoutes(app);
   await knowledgeRoutes(app);
   await vikeRoutes(app); // read-only Vike research (owner session required by the gate below)
+  await ccxtRoutes(app); // read-only CCXT exchange research (GET-only transport, keyless)
+  await defiRoutes(app); // read-only DefiLlama yields/TVL and Aave V3 flash-loan research (no transactions)
+  await predictionRoutes(app); // read-only Polymarket/Kalshi research, analytics and book replay (no order path)
   /** Paper/Live environments for the shared UI layout. Read-only; Live is reported as LOCKED, never as available. */
   app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
   // ── protection incidents (persistent; owner acknowledgement) ──
@@ -146,14 +165,22 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/ready', async (_req, reply) => { const r = readiness(botStatus); return reply.code(r.ready ? 200 : 503).send(r); });
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
   app.get('/api/auth/state', async (req) => {
+    // Codex hardening: a loopback connection can come from a forwarder, so only the console code authorizes first-owner setup.
+    const mode = authMode();
     const setup = auth.isSetup();
-    if (!setup) auth.ensureSetupCode();
-    const google = googleConfig();
-    return { setup, authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: !setup,
-      googleSignIn: !!google && googleIdentity()?.clientId === google.clientId };
+    if (!setup && passphraseSignInAllowed()) auth.ensureSetupCode(); // created (and printed once) when setup is first needed
+    const authenticated = auth.validSession(tokenOf(req));
+    const google = googleAvailable();
+    return {
+      mode, setup, authenticated, setupCodeRequired: mode === 'passphrase' && !setup,
+      privy: privy.privyPublicConfig(),
+      googleSignIn: !!google && googleIdentity()?.clientId === google.clientId,
+      // How sensitive actions are confirmed; only told to the signed-in owner.
+      ...(authenticated ? { stepUp: stepUpMethod() } : {}),
+    };
   });
   app.post('/api/auth/setup', async (req, reply) => {
-    // A connection to loopback can come from a forwarder. Only the console code authorizes first-owner setup.
+    requirePassphraseMode();
     const { password, setupCode } = z.object({
       password: PW.min(10, 'passphrase must be at least 10 characters'),
       setupCode: z.string().max(64).optional(),
@@ -171,18 +198,18 @@ export async function routes(app: FastifyInstance) {
     });
     return issue(reply, token);
   });
-  app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
+  app.post('/api/auth/login', async (req, reply) => { requirePassphraseMode(); const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
   app.post('/api/auth/google/start', async (req, reply) => {
     if (req.headers['x-mia-csrf'] !== '1') return bad(reply, 403, 'missing CSRF header');
-    const cfg = googleConfig();
+    const cfg = googleAvailable();
     if (!cfg || googleIdentity()?.clientId !== cfg.clientId) return bad(reply, 404, 'Google sign-in is unavailable');
     const flow = startGoogleFlow(cfg);
     return reply.header('set-cookie', flow.cookie).send({ url: flow.url });
   });
-  app.get('/api/settings/google', async () => ({ configured: !!googleConfig(), linked: !!googleIdentity() }));
+  app.get('/api/settings/google', async () => ({ configured: !!googleAvailable(), linked: !!googleIdentity() }));
   app.post('/api/settings/google/link', async (req, reply) => {
-    const cfg = googleConfig();
+    const cfg = googleAvailable();
     if (!cfg) return bad(reply, 404, 'Google is not configured');
     if (googleIdentity()) return bad(reply, 409, 'Unlink your current Google account first');
     stepUp(req, z.object({ password: PW }).strict().parse(req.body));
@@ -201,7 +228,7 @@ export async function routes(app: FastifyInstance) {
     return issue(reply, token);
   });
   app.get(GOOGLE_CALLBACK, async (req, reply) => {
-    const cfg = googleConfig();
+    const cfg = googleAvailable();
     const query = z.object({ state: z.string().length(43), code: z.string().min(1).max(4096).optional() }).safeParse(req.query);
     const flow = cfg && query.success ? readGoogleFlow(cfg, req.headers.cookie ?? '', query.data.state) : null;
     const destination = flow?.sessionHash ? '/settings' : '/';
@@ -233,18 +260,33 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/auth/privy/config', async () => privy.privyPublicConfig());
   app.post('/api/auth/privy/login', async (req, reply) => {
     const { accessToken } = z.object({ accessToken: z.string().min(20).max(4096) }).strict().parse(req.body);
-    return issue(reply, await privy.loginWithPrivy(accessToken, req.ip, { directLocal: isDirectLocal(req) }));
+    return issue(reply, await privy.loginWithPrivy(accessToken, req.ip, { directLocal: isDirectLocal(req), backup: () => { createBackup(); } }));
   });
   app.post('/api/security/privy/link', async (req) => {
-    const b = z.object({ accessToken: z.string().min(20).max(4096), password: PW.optional() }).strict().parse(req.body);
-    return privy.linkPrivy(b.accessToken, b.password, stepUpClient(req), isDirectLocal(req));
+    const b = z.object({ accessToken: z.string().min(20).max(4096), ...SU }).strict().parse(req.body);
+    stepUp(req, b); return privy.linkPrivy(b.accessToken);
+  });
+  app.post('/api/security/privy/embedded-wallet-intent', async (req) => {
+    const b = z.object({ ...SU }).strict().parse(req.body ?? {});
+    if (!privy.embeddedWalletsAllowed()) return privy.embeddedWalletIntent(); // 403 before asking for a code
+    stepUp(req, b); return privy.embeddedWalletIntent();
   });
   app.post('/api/security/privy/unlink', async (req) => {
-    const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
-    return privy.unlinkPrivy(b.password, stepUpClient(req), isDirectLocal(req));
+    const b = z.object({ ...SU }).strict().parse(req.body ?? {});
+    stepUp(req, b); return privy.unlinkPrivy(authMode() === 'privy');
   });
   app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; ${cookieFlags}; Max-Age=0`); return { ok: true }; });
-  app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, stepUpClient(req), { exemptFromGlobalLockout: true }); /* I-01: keyed by the authenticated session, like step-up */ return { ok: true }; });
+  app.post('/api/settings/password', async (req) => { requirePassphraseMode(); const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, stepUpClient(req), { exemptFromGlobalLockout: true }); /* I-01: keyed by the authenticated session, like step-up */ return { ok: true }; });
+  // Owner two-factor (authenticator app) for step-up. Session required (gate above); enrolling needs independent proof.
+  app.get('/api/security/2fa', async () => totp.twoFactorStatus());
+  app.post('/api/security/2fa/begin', async (req) => {
+    const b = z.object({ ...SU, consoleCode: z.string().max(64).optional() }).strict().parse(req.body ?? {});
+    return totp.beginEnrollment(b, stepUpClient(req), { directLocal: isDirectLocal(req), log: (m) => req.log.warn(m) });
+  });
+  app.post('/api/security/2fa/confirm', async (req) => {
+    const { otp } = z.object({ otp: OTP }).strict().parse(req.body);
+    return totp.confirmEnrollment(otp, stepUpClient(req));
+  });
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }
 
   // ── live stream (SSE) ──
@@ -332,7 +374,7 @@ export async function routes(app: FastifyInstance) {
   });
   app.get('/api/consensus/:id', async (req, reply) => { const r = get<any>('SELECT record FROM consensus_records WHERE id=?', idOf(req)); return r ? P(r.record) : bad(reply, 404, 'not found'); });
   app.post('/api/workers/:id/release', async (req) => {
-    const id = idOf(req); const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
+    const id = idOf(req); const b = z.object({ ...SU }).strict().parse(req.body ?? {});
     stepUp(req, b); releaseQuarantine('owner', id); audit('owner', 'worker.release', { id }); return { ok: true };
   });
 
@@ -342,11 +384,11 @@ export async function routes(app: FastifyInstance) {
     const corr = pos.map((a) => pos.map((b) => correlation(a.instrument, b.instrument)));
     return { policy: currentPolicy(), defaults: DEFAULT_POLICY, history: policyHistory().slice(0, 20), account: acct, control: getControl(), display: displayMode(), positions: pos, correlation: { instruments: pos.map((p) => p.instrument), matrix: corr }, protection: oms.protectPositions(), incidents: listIncidents(), gates: releaseGates() };
   });
-  app.post('/api/risk/policy', async (req) => { const b = z.object({ policy: z.unknown(), password: PW.optional() }).strict().parse(req.body ?? {}); stepUp(req, b); return acceptPolicy('owner', b.policy); });
+  app.post('/api/risk/policy', async (req) => { const b = z.object({ policy: z.unknown(), ...SU }).strict().parse(req.body ?? {}); stepUp(req, b); return acceptPolicy('owner', b.policy); });
   app.post('/api/control', async (req) => {
     const b = z.object({ mode: z.enum(['OBSERVE', 'PAPER', 'APPROVAL', 'BOUNDED_LIVE']).optional(), pausedNewOrders: z.boolean().optional(), emergency: z.boolean().optional(), disabledStrategies: z.array(z.string().max(60)).max(50).optional(),
-      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), password: PW.optional() }).strict().parse(req.body); // H-08: unknown keys are errors on the control endpoint
-    const { password, disableStrategy, enableStrategy, ...patch } = b;
+      disableStrategy: z.string().min(1).max(60).optional(), enableStrategy: z.string().min(1).max(60).optional(), ...SU }).strict().parse(req.body); // H-08: unknown keys are errors on the control endpoint
+    const { password, otp, disableStrategy, enableStrategy, ...patch } = b;
     // MIA-WEB-010: single-strategy operations computed from the server's CURRENT list. A client that sent a whole list
     // from a stale copy could re-enable a strategy the owner (or the health monitor) had just disabled.
     if (disableStrategy || enableStrategy) {
@@ -363,7 +405,7 @@ export async function routes(app: FastifyInstance) {
     return updateControl('owner', patch, modeGate);
   });
   app.post('/api/emergency/:action', async (req) => {
-    const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), password: PW.optional() }).strict().parse(req.body ?? {});
+    const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), ...SU }).strict().parse(req.body ?? {});
     if (a === 'pause') return oms.pauseNewOrders('owner');
     if (a === 'cancel-pending') return oms.cancelPendingEntries('owner');
     if (a === 'protect') return oms.protectPositions(true);
@@ -403,7 +445,7 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/lab/backtest', async (req) => { const b = z.object({ strategyId: z.string().max(60), symbol: z.string().min(1).max(20).regex(/^[A-Za-z0-9]+$/), bars: z.number().int().min(500).max(8000).optional() }).parse(req.body); limit(req, 'backtest', 'backtests'); return lab.runBacktest('owner', b.strategyId, b.symbol.toUpperCase(), b.bars); });
   app.post('/api/lab/strategy/:id/status', async (req) => {
     const id = idOf(req);
-    const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional(), password: PW.optional() }).strict().parse(req.body);
+    const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional(), ...SU }).strict().parse(req.body);
     const current = get<{ status: lab.StrategyStatus }>('SELECT status FROM strategies WHERE id=?', id);
     // Step-up for anything that increases risk (CodeRabbit PR #13): promotion to PAPER/LIVE_CANDIDATE, and ANY transition
     // that lifts a suspension — moving a suspended strategy to RESEARCH or BACKTESTED also removes it from the list.
@@ -425,10 +467,10 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/wallet/address/:id/verify', async (req) => { stepUp(req, req.body); wallet.verifyAddress('owner', idOf(req)); return { ok: true }; });
   app.delete('/api/wallet/address/:id', async (req) => { wallet.removeAddress('owner', idOf(req)); return { ok: true }; });
   app.post('/api/wallet/withdraw/preview', async (req) => {
-    const { password, ...input } = z.object({ network: z.string().max(40), asset: z.string().max(20), amount: z.number().finite(), addressId: z.string().max(64), password: PW }).parse(req.body);
-    stepUp(req, { password }); return wallet.previewWithdrawal('owner', input); // the passphrase never reaches the audit log
+    const { password, otp, ...input } = z.object({ network: z.string().max(40), asset: z.string().max(20), amount: z.number().finite(), addressId: z.string().max(64), ...SU }).parse(req.body);
+    stepUp(req, { password, otp }); return wallet.previewWithdrawal('owner', input); // the step-up secret never reaches the audit log
   });
-  app.post('/api/wallet/freeze', async (req) => { const b = z.object({ on: z.boolean(), password: PW.optional() }).parse(req.body); if (!b.on) stepUp(req, b); wallet.setWithdrawalFreeze('owner', b.on); return { frozen: b.on }; });
+  app.post('/api/wallet/freeze', async (req) => { const b = z.object({ on: z.boolean(), ...SU }).parse(req.body); if (!b.on) stepUp(req, b); wallet.setWithdrawalFreeze('owner', b.on); return { frozen: b.on }; });
 
   // ── connections / notifications / settings / QA ──
   app.get('/api/connections', async () => ({ providers: providers(), latency: latencyReport() }));
@@ -439,6 +481,16 @@ export async function routes(app: FastifyInstance) {
   // MIA NEXUS data fabric (N1): read-only topic catalog — owners, priorities, durability and honest status.
   app.get('/api/fabric/catalog', async () => catalogSummary());
   app.get('/api/fabric/outbox', async () => outboxHealth()); // N2: measured delivery health + dead letters (owner session)
+  // Guardian Shield (read-only telemetry; its only possible action is the opt-in risk-reducing pause).
+  startGuardian();
+  app.get('/api/security/guardian', async () => {
+    const items = assessAll();
+    const containment = autoContain(items);
+    const counts = { P0: 0, P1: 0, P2: 0, P3: 0 };
+    for (const i of items) counts[i.assessment.severity]++;
+    return { generatedAt: Date.now(), counts, events: items.slice(0, 100), containment, autoPause: autoPauseEnabled(), layers: posture(), actions: recentGuardianActions(),
+      authority: { canAuthorizeTrading: false, canSignTransactions: false, canWithdraw: false, canResume: false } };
+  });
   app.post('/api/security/sessions/revoke-others', async (req) => { stepUpRiskReducing(req, req.body); return revokeOtherSessions(tokenOf(req)); });
   app.get('/api/discover', async (req) => discover(z.object({ minVolume: z.coerce.number().min(0).default(1e6) }).parse(req.query ?? {}).minVolume));
   const histFilter = (q: any): HistoryFilter => z.object({ from: z.coerce.number().int().positive().optional(), to: z.coerce.number().int().positive().optional(),

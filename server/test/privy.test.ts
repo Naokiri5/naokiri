@@ -53,11 +53,30 @@ describe('Privy sign-in', () => {
 
   it('public config exposes only the app id and state; wallet actions are LOCKED', async () => {
     const r = (await app.inject({ url: '/api/auth/privy/config' })).json();
-    expect(r).toEqual({ enabled: true, appId: APP, linked: false, walletActions: 'LOCKED' });
+    expect(r).toEqual({ enabled: true, appId: APP, linked: false, ownerConfigured: false, embeddedWallets: false, walletActions: 'LOCKED' });
+  });
+  it('embedded-wallet intent needs the flag, a session and a passphrase step-up', async () => {
+    const url = '/api/security/privy/embedded-wallet-intent';
+    expect((await post(url, { password: PW }, true)).statusCode).toBe(403); // flag off
+    process.env.MIA_PRIVY_EMBEDDED_WALLETS = '1';
+    try {
+      expect((await post(url, { password: PW })).statusCode).toBe(401);       // no session
+      expect((await post(url, {}, true)).statusCode).toBe(403);               // no step-up
+      const ok = await post(url, { password: PW }, true);
+      expect(ok.statusCode).toBe(200); expect(ok.json()).toMatchObject({ ok: true });
+    } finally { delete process.env.MIA_PRIVY_EMBEDDED_WALLETS; }
+  });
+  it('embedded wallets are opt-in and never unlock wallet actions', async () => {
+    process.env.MIA_PRIVY_EMBEDDED_WALLETS = '1';
+    expect((await app.inject({ url: '/api/auth/privy/config' })).json()).toMatchObject({ embeddedWallets: true, walletActions: 'LOCKED' });
+    process.env.MIA_PRIVY_EMBEDDED_WALLETS = 'true'; // only the exact value 1 enables it
+    expect((await app.inject({ url: '/api/auth/privy/config' })).json()).toMatchObject({ embeddedWallets: false });
+    delete process.env.MIA_PRIVY_EMBEDDED_WALLETS;
   });
   it('refuses Privy login before the owner links an identity', async () => {
     const r = await post('/api/auth/privy/login', { accessToken: await token() });
-    expect(r.statusCode).toBe(401); expect(r.json().error).toMatch(/not linked/); expect(r.headers['set-cookie']).toBeUndefined();
+    // Verified identity, but no owner bound and no MIA_PRIVY_OWNER_ID: refused, with the id the administrator would configure.
+    expect(r.statusCode).toBe(401); expect(r.json().error).toMatch(/no MIA owner has been set up yet.*MIA_PRIVY_OWNER_ID=did:privy:owner0000000001/); expect(r.headers['set-cookie']).toBeUndefined();
   });
   it('linking needs a MIA session and a passphrase step-up', async () => {
     expect((await post('/api/security/privy/link', { accessToken: await token(), password: PW })).statusCode).toBe(401); // no session
@@ -134,5 +153,28 @@ describe('Privy disabled', () => {
     expect((await app.inject({ url: '/api/auth/privy/config' })).json()).toMatchObject({ enabled: false, appId: null });
     expect((await app.inject({ method: 'POST', url: '/api/auth/privy/login', headers: json, payload: { accessToken: 'x'.repeat(40) } })).statusCode).toBe(404);
     await app.close();
+  });
+});
+
+describe('Privy imports are confined to web/src/privy (static guard)', () => {
+  it('no other web file imports @privy-io directly', async () => {
+    const { readdirSync, readFileSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = new URL('../../web/src/', import.meta.url).pathname;
+    const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : /\.(t|j)sx?$/.test(n) ? [p] : []; });
+    const offenders = walk(root).filter((f) => !f.includes('/privy/') && /from ['"]@privy-io\//.test(readFileSync(f, 'utf8')));
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe('Privy client code cannot move funds (static guard, runs in CI)', () => {
+  it('the web Privy panels use no signing, sending, funding, export or delegation API', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const dir = new URL('../../web/src/privy/', import.meta.url);
+    const src = readdirSync(dir).filter((f) => /\.(t|j)sx?$/.test(f)).map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
+    expect(src.length).toBeGreaterThan(1000);
+    const forbidden = /\b(useSendTransaction|useSignTransaction|useSignMessage|useSignTypedData|useSign7702Authorization|useFundWallet|useExportWallet|useDelegatedActions|useHeadlessDelegatedActions|useSessionSigners|useSigners|useWallets|useSolanaWallets|getEthereumProvider|getProvider|sendTransaction|signTransaction|signMessage|signTypedData|exportWallet|fundWallet|delegateWallet|addSessionSigners|eth_sendTransaction|eth_sign|personal_sign|eth_signTypedData_v4)\b|\.request\(/;
+    expect(src.match(forbidden)?.[0] ?? null).toBeNull();
+    expect(src).toMatch(/createOnLogin: 'off'/);
   });
 });

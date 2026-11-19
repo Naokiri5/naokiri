@@ -9,6 +9,11 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | [`operations/SETUP_GUIDE_BEGINNER.md`](operations/SETUP_GUIDE_BEGINNER.md) | set up MIA step by step |
 | [`operations/TAILSCALE_FUNNEL.md`](operations/TAILSCALE_FUNNEL.md) | give MIA a free HTTPS address (e.g. for your phone or Privy) with Tailscale Funnel |
 | [`operations/PRIVY_SIGN_IN.md`](operations/PRIVY_SIGN_IN.md) | turn on Privy sign-in for the owner (wallet actions stay locked) |
+| [`research/INTEGRATIONS_OVERVIEW.md`](research/INTEGRATIONS_OVERVIEW.md) | see every integration (Privy, CCXT, Vike, DefiLlama, Aave, NautilusTrader, Freqtrade), its status, settings, owner actions and what stays locked |
+| [`research/PYTHON_RESEARCH_LABS.md`](research/PYTHON_RESEARCH_LABS.md) | set up the isolated NautilusTrader and Freqtrade research labs (dry-run/simulated only) |
+| [`research/DEFI_RESEARCH.md`](research/DEFI_RESEARCH.md) | read DefiLlama yields/TVL and Aave V3 flash-loan facts (read-only, never executable) |
+| [`research/CCXT_RESEARCH.md`](research/CCXT_RESEARCH.md) | use CCXT for read-only exchange research (keyless, GET-only, optional sandbox) |
+| [`research/PREDICTION_MARKETS.md`](research/PREDICTION_MARKETS.md) | Polymarket/Kalshi research: books, arbitrage checks, reward estimates, replay; what was reused from the uploaded bots and what was not |
 | [`research/VIKE_INTEGRATION.md`](research/VIKE_INTEGRATION.md) | turn on Vike on-chain research (research only) and see how Live stays locked |
 | [`engineering/MIA_FINAL_ENGINEERING_ASSESSMENT.md`](engineering/MIA_FINAL_ENGINEERING_ASSESSMENT.md) | see the **current** engineering verdict, final test evidence and blockers (100-agent audit, 2026-11-18); details in `MIA_ERROR_REGISTER.md` and `MIA_MASTER_REPAIR_TRACKER.md` |
 | [`engineering/DEBUG_AUDIT_2026-11-17.md`](engineering/DEBUG_AUDIT_2026-11-17.md) | see the **current** bug register, test results, performance baseline and go/no-go |
@@ -32,6 +37,7 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | [`architecture/MIA_NEXUS_EVENT_CATALOG.md`](architecture/MIA_NEXUS_EVENT_CATALOG.md) | MIA NEXUS fabric topics: owners, priority, durability and honest status (generated from code) |
 | [`architecture/MIA_NEXUS_DURABLE_LOG.md`](architecture/MIA_NEXUS_DURABLE_LOG.md) | MIA NEXUS N2: transactional outbox, inbox dedup, relay retry and dead letters (one research topic) |
 | [`architecture/TRADER_JOE_LIVE.md`](architecture/TRADER_JOE_LIVE.md) | Trader Joe Live (V4): read-only trade-lifecycle story feed for Joe; milestones, sources of truth, limits |
+| [`security/GUARDIAN_SHIELD.md`](security/GUARDIAN_SHIELD.md) | Guardian Shield: seven-layer posture, security events, opt-in pause, 100-ticket gap matrix and incident runbooks |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | design, trust boundaries, technology choices |
 
 ## Features

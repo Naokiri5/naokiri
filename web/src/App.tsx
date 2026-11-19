@@ -1,7 +1,8 @@
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { PrivySignIn, type PrivyClientConfig } from './privy/lazy';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { api, connectStream, disconnectStream, useApi, fmt } from './api';
+import { api, ApiError, authInfo, connectStream, disconnectStream, PRIVY_LOGOUT_FLAG, useApi, fmt, type AuthState } from './api';
+import { PrivyLoginScreen, ServerProblem } from './auth/LoginScreen';
 import { ErrorLine, PageErrorBoundary } from './ui';
 import { JoeDrawer } from './pages/Joe';
 import * as P from './pages';
@@ -14,50 +15,69 @@ import { ALL_PAGES } from './nav';
 import { SideNav, GroupTabs, MobileNav } from './Navigation';
 
 
+type Boot = { s: 'loading' } | { s: 'error'; network: boolean; detail: string } | { s: 'ready'; auth: AuthState };
+
 export default function App() {
-  const [auth, setAuth] = useState<{ setup: boolean; authenticated: boolean; setupCodeRequired?: boolean; googleSignIn?: boolean } | null>(null);
-  useEffect(() => { api('/api/auth/state').then(setAuth).catch(() => setAuth({ setup: true, authenticated: false })); const f = () => setAuth((a) => (a ? { ...a, authenticated: false } : a)); window.addEventListener('mia:unauthorized', f); return () => window.removeEventListener('mia:unauthorized', f); }, []);
-  useEffect(() => { if (auth?.authenticated) connectStream(); else disconnectStream(); }, [auth?.authenticated]);
-  if (!auth) return null;
-  if (!auth.authenticated) return <Login setup={auth.setup} codeRequired={!!auth.setupCodeRequired} googleSignIn={!!auth.googleSignIn} onDone={() => setAuth({ ...auth, setup: true, authenticated: true })} />;
-  return <PresentationProvider><Shell onLogout={() => setAuth({ ...auth, authenticated: false })} /></PresentationProvider>;
+  const [boot, setBoot] = useState<Boot>({ s: 'loading' });
+  // Asks the server who is signed in. A failure is shown as a server problem with a retry: it is never treated as
+  // "signed out" (which hid real outages) and never opens the dashboard.
+  const load = useCallback(() => {
+    api<AuthState>('/api/auth/state').then((a) => {
+      authInfo.mode = a.mode; authInfo.stepUp = a.stepUp ?? 'unavailable';
+      setBoot({ s: 'ready', auth: a });
+    }).catch((e) => setBoot({ s: 'error', network: !(e instanceof ApiError), detail: e?.message ?? 'unknown error' }));
+  }, []);
+  useEffect(() => {
+    load();
+    const f = () => setBoot((b) => (b.s === 'ready' ? { s: 'ready', auth: { ...b.auth, authenticated: false } } : b));
+    window.addEventListener('mia:unauthorized', f); return () => window.removeEventListener('mia:unauthorized', f);
+  }, [load]);
+  const authed = boot.s === 'ready' && boot.auth.authenticated;
+  useEffect(() => { if (authed) connectStream(); else disconnectStream(); }, [authed]);
+  if (boot.s === 'loading') return <div className="login-wrap"><div className="hint" role="status">Connecting to MIA…</div></div>;
+  if (boot.s === 'error') return <ServerProblem network={boot.network} detail={boot.detail} onRetry={() => { setBoot({ s: 'loading' }); load(); }} />;
+  const { auth } = boot;
+  if (!auth.authenticated) {
+    return auth.mode === 'privy'
+      ? <PrivyLoginScreen auth={auth} onDone={load} />
+      : <Login setup={auth.setup} codeRequired={!!auth.setupCodeRequired} privy={auth.privy} googleSignIn={!!auth.googleSignIn} onDone={load} />;
+  }
+  return <PresentationProvider><Shell onLogout={() => {
+    // The Privy browser session is ended by the sign-in screen once it mounts (it owns the Privy SDK).
+    if (auth.mode === 'privy') { try { sessionStorage.setItem(PRIVY_LOGOUT_FLAG, '1'); } catch { /* storage blocked */ } }
+    load();
+  }} /></PresentationProvider>;
 }
 
-function Login({ setup, codeRequired, googleSignIn, onDone }: { setup: boolean; codeRequired: boolean; googleSignIn: boolean; onDone: () => void }) {
-  const [p, setP] = useState(''); const [p2, setP2] = useState(''); const [code, setCode] = useState(''); const [err, setErr] = useState<string | null>(() => new URLSearchParams(window.location.search).get('google') === 'failed'
+/** Legacy owner-passphrase sign-in. Only reachable when the administrator set MIA_AUTH_MODE=passphrase. */
+function Login({ setup, codeRequired, privy, googleSignIn, onDone }: { setup: boolean; codeRequired: boolean; privy: PrivyClientConfig; googleSignIn: boolean; onDone: () => void }) {
+  const [p, setP] = useState(''); const [p2, setP2] = useState(''); const [code, setCode] = useState('');
+  const [err, setErr] = useState<string | null>(() => new URLSearchParams(window.location.search).get('google') === 'failed'
     ? 'Google sign-in could not be completed. Try again or use your owner passphrase.' : null);
+  // Codex #25: direct Google sign-in for the existing owner (passphrase mode only; in Privy mode Google is a Privy method).
   const [googleBusy, setGoogleBusy] = useState(false);
   const signInWithGoogle = async () => {
-    setGoogleBusy(true);
-    setErr(null);
-    try {
-      const { url } = await api<{ url: string }>('/api/auth/google/start', { body: {} });
-      window.location.assign(url);
-    } catch (error) {
-      setErr(error instanceof Error ? error.message : 'Google sign-in could not be started');
-      setGoogleBusy(false);
-    }
+    setGoogleBusy(true); setErr(null);
+    try { const { url } = await api<{ url: string }>('/api/auth/google/start', { body: {} }); window.location.assign(url); }
+    catch (error) { setErr(error instanceof Error ? error.message : 'Google sign-in could not be started'); setGoogleBusy(false); }
   };
-  const [privy, setPrivy] = useState<PrivyClientConfig | null>(null);
-  useEffect(() => { if (setup) api<PrivyClientConfig>('/api/auth/privy/config').then(setPrivy).catch(() => setPrivy(null)); }, [setup]);
   const submit = async (e: React.FormEvent) => { e.preventDefault(); setErr(null); if (!setup && p !== p2) return setErr('passphrases do not match'); try { await api(setup ? '/api/auth/login' : '/api/auth/setup', { body: setup || !codeRequired ? { password: p } : { password: p, setupCode: code } }); onDone(); } catch (x: any) { setErr(x.message); } };
   return <div style={{ display: 'grid', placeItems: 'center', minHeight: '100vh', padding: 16 }}>
     <form onSubmit={submit} className="card" style={{ width: 'min(400px, 100%)' }}>
       <div className="hd"><div className="row"><div className="logo">M</div><h2>MIA 4.1 {setup ? 'Sign in' : 'Owner setup'}</h2></div></div>
       <div className="bd col">
-        {setup && googleSignIn && <button type="button" disabled={googleBusy} onClick={signInWithGoogle}>Continue with Google</button>}
         {!setup && <div className="hint">Create the owner passphrase (≥10 characters). It protects mode changes, risk limits and withdrawals. MIA never asks for seed phrases or private keys.</div>}
         <label className="col" style={{ gap: 4 }}>Passphrase<input type="password" autoFocus value={p} onChange={(e) => setP(e.target.value)} autoComplete={setup ? 'current-password' : 'new-password'} /></label>
         {!setup && <label className="col" style={{ gap: 4 }}>Confirm<input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" /></label>}
         {!setup && codeRequired && <label className="col" style={{ gap: 4 }}>Setup code<input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="one-time-code" spellCheck={false} placeholder="XXXXX-XXXXX-XXXXX-XXXXX" />
-          <span className="hint">Enter the one-time code printed in the MIA server console (the terminal running <code>npm start</code>, or the service log).</span></label>}
+          <span className="hint">Creating the owner needs the one-time code printed in the MIA server console (the terminal running <code>npm start</code>, or the service log).</span></label>}
         <ErrorLine e={err} /><button className="primary" type="submit">{setup ? 'Sign in' : 'Create owner'}</button>
-        {setup && privy?.enabled && privy.linked && <>
+        {setup && googleSignIn && <button type="button" onClick={signInWithGoogle} disabled={googleBusy}>{googleBusy ? 'Opening Google…' : 'Sign in with Google'}</button>}
+        {setup && privy.enabled && privy.linked && <>
           <div className="hint" style={{ textAlign: 'center' }}>or</div>
+          {/* Codex: a Privy load failure stays inside this card and never breaks passphrase sign-in. */}
           <PageErrorBoundary fallback={<ErrorLine e="Privy sign-in could not load. Use your passphrase to sign in." />}>
-            <Suspense fallback={<div className="hint">Loading Privy…</div>}>
-              <PrivySignIn config={privy} onDone={onDone} />
-            </Suspense>
+            <Suspense fallback={<div className="hint">Loading Privy…</div>}><PrivySignIn config={privy} onDone={onDone} /></Suspense>
           </PageErrorBoundary>
         </>}
       </div>
@@ -108,6 +128,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
         <Route path="/" element={<P.Overview />} />
         <Route path="/ditas" element={<P.Ditas />} />
         <Route path="/academy" element={<P.Academy />} />
+        <Route path="/prediction" element={<P.Prediction />} />
         <Route path="/terminal" element={<P.Terminal />} /><Route path="/terminal/:symbol" element={<P.Terminal />} />
         <Route path="/scanner" element={<P.Scanner />} /><Route path="/intelligence" element={<P.Intelligence />} />
         <Route path="/joe" element={<P.JoePage />} /><Route path="/bubbles" element={<P.Bubbles />} /><Route path="/whales" element={<P.Whales />} />

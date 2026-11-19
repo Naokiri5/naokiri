@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased: Python research labs — NautilusTrader and Freqtrade (2026-11-18)
+- **New:** isolated research environments for NautilusTrader 1.231.0 and Freqtrade 2026.10 (`scripts/research-python.sh setup|smoke`). They are not trading bots and not part of MIA's runtime.
+- **Safety:** Nautilus runs a simulated venue only; Freqtrade runs keyless dry-run backtests. A required CI test fails if either is configured to trade, carries keys, or imports live-trading code.
+- **Optional CI:** a separate workflow runs both labs when their files change.
+- **Docs:** `docs/research/PYTHON_RESEARCH_LABS.md`.
+
+## Unreleased: DeFi research — DefiLlama yields and Aave V3 flash loans (2026-11-18)
+- **New:** read-only DefiLlama yield pools and protocol TVL. Risky yields are flagged: outlier APY, reward-dependent, impermanent loss, low TVL.
+- **New:** Aave V3 flash-loan research: on-chain flash-loan fee, enabled/paused/frozen status and available liquidity, plus a hypothetical cost calculator.
+- **Safety:** MIA cannot take a flash loan. Only read-only node calls are allowed, contract addresses come from the official registry, and failed reads are shown as missing, never as zero.
+- **Docs:** `docs/research/DEFI_RESEARCH.md`.
+
+## Unreleased: CCXT exchange research (2026-11-18)
+- **New:** read-only exchange research through CCXT (Binance, Coinbase Exchange, Kraken, OKX, Bybit): markets, ticker, order book and candles, labelled research only.
+- **Safety:** CCXT runs without keys and through MIA's own GET-only transport, so it cannot place orders or move funds. It uses MIA's rate limits and health tracking. `MIA_CCXT_SANDBOX=1` switches to official test URLs.
+- **Docs:** `docs/research/CCXT_RESEARCH.md`.
+
+## Unreleased: Privy optional embedded wallets (2026-11-18)
+- **Optional:** with `MIA_PRIVY_EMBEDDED_WALLETS=1`, the owner can create a Privy-secured wallet from Security Center. MIA only shows its address.
+- **Still locked:** signing, sending, delegated signing, funding and key export. A new CI test fails if MIA's Privy code uses any of those Privy APIs.
+
 ## Unreleased: Tailscale Funnel guide (2026-11-18)
 - **New guide:** `docs/operations/TAILSCALE_FUNNEL.md` gives MIA a free HTTPS address with Tailscale Funnel (for your phone, or Privy's Allowed origins).
 - **Safety:** requests relayed by Tailscale Serve or Funnel are treated as remote even though they arrive from this computer, so the setup code and normal lockout still apply.

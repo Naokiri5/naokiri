@@ -1,14 +1,17 @@
 /**
- * Privy sign-in for the single MIA owner (optional; off unless MIA_PRIVY_APP_ID is set).
+ * Privy sign-in for the single MIA owner (MIA_PRIVY_APP_ID; the default sign-in when MIA_AUTH_MODE is not 'passphrase').
  *
- * Model: Privy proves WHO the person is; it never replaces MIA's own authority.
- *  - The owner first signs in with the MIA passphrase and, with a passphrase step-up, LINKS one Privy user id
- *    (`did:privy:...`). Only that linked id can ever open a MIA session through Privy.
+ * Model: Privy proves WHO the person is; MIA decides whether that person is the owner.
+ *  - Exactly one Privy user id (`did:privy:...`) is bound to the owner. It is bound by the server administrator
+ *    (MIA_PRIVY_OWNER_ID, applied on that user's first sign-in after a database backup, or `npm run owner -- bind-privy`),
+ *    or re-linked by the signed-in owner with step-up. Signing in with Privy never creates an owner by itself.
  *  - A Privy access token (ES256 JWT) is verified on the server: signature, issuer `privy.io`, audience = this app id,
- *    expiry. The browser's word is never trusted. Failed attempts share the passphrase brute-force limiter.
- *  - Passphrase step-up stays required for every sensitive action; signing in with Privy does not bypass it.
- *  - Wallets: MIA only DISPLAYS wallets linked to the Privy account. It never creates embedded wallets, never asks a
- *    wallet to sign or send a transaction, never funds or exports a wallet. Live trading stays LOCKED.
+ *    expiry. The browser's word is never trusted. Failed attempts share the brute-force limiter.
+ *  - Sensitive actions still need a fresh step-up (authenticator code; see security/stepUp.ts). A Privy session alone
+ *    never authorizes them.
+ *  - Wallets: MIA only DISPLAYS wallets linked to the Privy account. Embedded wallets are created only on the owner's
+ *    explicit request and only when MIA_PRIVY_EMBEDDED_WALLETS=1. MIA never asks a wallet to sign or send a
+ *    transaction, never funds, exports or delegates a wallet. Live trading stays LOCKED.
  *
  * Verification key: MIA_PRIVY_VERIFICATION_KEY (the PEM public key from the Privy dashboard) is preferred; otherwise
  * the app's public JWKS is fetched from auth.privy.io. Neither is a secret. No Privy app secret is needed or used.
@@ -17,7 +20,7 @@ import { createLocalJWKSet, createRemoteJWKSet, importSPKI, jwtVerify, type JSON
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { failureGate } from '../core/ratelimit.js';
-import { AuthError, createSession, verifyPassphrase } from '../api/auth.js';
+import { AuthError, createSession, revokeAllSessions } from '../api/auth.js';
 import { tx } from '../db/db.js';
 
 /** Privy app ids are exactly 25 characters (the React SDK refuses anything else). */
@@ -55,8 +58,15 @@ export function contentSecurityPolicy(): string {
 /** Public config for the login screen. The app id and the linked state are not secrets. */
 export function privyPublicConfig() {
   const appId = privyAppId();
-  return { enabled: !!appId, appId, linked: !!getLink(), walletActions: 'LOCKED' as const };
+  return { enabled: !!appId, appId, linked: !!getLink(), ownerConfigured: !!getLink() || !!privyOwnerFromEnv(), embeddedWallets: embeddedWalletsAllowed(), walletActions: 'LOCKED' as const };
 }
+
+/**
+ * Optional Privy embedded wallets (MIA_PRIVY_EMBEDDED_WALLETS=1, default OFF). When on, the owner may ASK Privy to
+ * create a wallet that Privy secures; MIA never holds, sees or exports its key, never requests a signature, a
+ * transaction, funding or delegated signing. It only displays the address. Live trading and withdrawals stay locked.
+ */
+export const embeddedWalletsAllowed = () => privyEnabled() && process.env.MIA_PRIVY_EMBEDDED_WALLETS === '1';
 
 interface PrivyLink { userId: string; linkedAt: number }
 export const getLink = () => getSetting<PrivyLink | null>('privy_link', null);
@@ -93,39 +103,100 @@ export async function verifyPrivyAccessToken(token: unknown): Promise<string> {
   }
 }
 
-/** Owner links their Privy identity: requires an existing MIA session (route gate) AND a passphrase step-up. */
-export async function linkPrivy(token: unknown, password: unknown, stepUpClient: string, exemptFromGlobalLockout: boolean) {
-  verifyPassphrase(password, stepUpClient, 'step-up', { exemptFromGlobalLockout });
-  const userId = await verifyPrivyAccessToken(token);
+/** The owner's Privy user id chosen by the server administrator (MIA_PRIVY_OWNER_ID). Invalid values are ignored. */
+export function privyOwnerFromEnv(): string | null {
+  const v = process.env.MIA_PRIVY_OWNER_ID?.trim();
+  return v && DID_RE.test(v) ? v : null;
+}
+export function privyOwnerConfigProblem(): string | null {
+  const v = process.env.MIA_PRIVY_OWNER_ID?.trim();
+  if (v && !DID_RE.test(v)) return 'MIA_PRIVY_OWNER_ID is set but is not a Privy user id (did:privy:...); it is ignored';
+  const link = getLink(); const env = privyOwnerFromEnv();
+  if (link && env && link.userId !== env) return 'MIA_PRIVY_OWNER_ID differs from the owner already bound in the database; the database binding wins. Re-bind with `npm run owner -- bind-privy <id> --replace` on the server';
+  return null;
+}
+/** True once a Privy identity is bound to the MIA owner (database link). */
+export const privyOwnerBound = () => !!getLink();
+
+/**
+ * Binds a Privy user id to the MIA owner. Callers are responsible for authorization (server CLI, administrator env
+ * bootstrap, or an owner session with step-up). Every existing session ends when the identity changes.
+ */
+export function bindOwner(userId: string, via: 'env-bootstrap' | 'server-cli' | 'owner-step-up') {
+  if (!DID_RE.test(userId)) throw new AuthError('not a Privy user id (did:privy:...)', 400);
   const previous = getLink();
   setSetting('privy_link', { userId, linkedAt: Date.now() } satisfies PrivyLink);
-  audit('owner', 'auth.privy.link', { userId, replaced: previous?.userId ?? null });
+  if (previous && previous.userId !== userId) revokeAllSessions(); // a REPLACED identity loses every session
+  audit('owner', previous ? 'auth.privy.link' : 'auth.privy.owner_bound', { userId, replaced: previous?.userId ?? null, via });
   return { linked: true, userId };
 }
-export function unlinkPrivy(password: unknown, stepUpClient: string, exemptFromGlobalLockout: boolean) {
-  verifyPassphrase(password, stepUpClient, 'step-up', { exemptFromGlobalLockout });
+
+/** Owner (re-)links their Privy identity: the route has already required an owner session AND step-up. */
+export async function linkPrivy(token: unknown) {
+  const userId = await verifyPrivyAccessToken(token);
+  return bindOwner(userId, 'owner-step-up');
+}
+/**
+ * Owner intent to create a Privy embedded wallet: requires the feature flag AND step-up (checked by the route), and is
+ * audited. Privy's SDK runs in the browser, so the hard on/off control is the Privy dashboard (disable embedded wallets
+ * there); this gate makes MIA's own UI path as strict as every other sensitive action.
+ */
+export function embeddedWalletIntent() {
+  if (!embeddedWalletsAllowed()) throw new AuthError('embedded wallets are disabled on this server (MIA_PRIVY_EMBEDDED_WALLETS is not 1)', 403);
+  audit('owner', 'auth.privy.embedded_wallet.intent', { userId: getLink()?.userId ?? null });
+  return { ok: true, note: 'Privy secures the key. MIA only displays the address; signing, sending, funding and export stay LOCKED.' };
+}
+/** Unlink (step-up checked by the route). Refused when Privy is the only sign-in: it would lock the owner out. */
+export function unlinkPrivy(privyOnly: boolean) {
+  if (privyOnly) throw new AuthError('Privy is the only sign-in on this server, so unlinking would lock the owner out. To move to another Privy account, re-link it here or run `npm run owner -- bind-privy <id> --replace` on the server', 409);
   const previous = getLink();
-  setSetting('privy_link', null);
+  setSetting('privy_link', null); revokeAllSessions();
   audit('owner', 'auth.privy.unlink', { userId: previous?.userId ?? null });
   return { linked: false };
 }
 
-/** Sign in with Privy: the verified Privy user must be the linked owner. Shares the brute-force limiter. */
-export async function loginWithPrivy(token: unknown, client: string, opts: { directLocal?: boolean } = {}) {
+export class OwnerNotProvisionedError extends AuthError {
+  constructor(public privyUserId: string) {
+    super(`This Privy account is verified, but no MIA owner has been set up yet. Administrator: set MIA_PRIVY_OWNER_ID=${privyUserId} on the server (or run \`npm run owner -- bind-privy ${privyUserId}\` there) and restart, then sign in again.`, 401);
+  }
+}
+
+/**
+ * Sign in with Privy. The token is verified on the server; then the verified Privy user must be:
+ *  - the owner already bound in the database, or
+ *  - when nothing is bound yet, exactly the administrator-configured MIA_PRIVY_OWNER_ID (first sign-in binds it,
+ *    after a database backup). Anyone else is refused; signing in with Privy never creates an owner by itself.
+ * Failures share the passphrase brute-force limiter.
+ */
+export async function loginWithPrivy(token: unknown, client: string, opts: { directLocal?: boolean; backup?: () => void } = {}) {
   failureGate.check(client, Date.now(), { global: !opts.directLocal });
   let userId: string | null = null;
   try { userId = await verifyPrivyAccessToken(token); } catch (e) { if ((e as AuthError).statusCode === 404) throw e; }
-  // Verification may wait for the remote key. Read the current link and issue the session in one database transaction.
-  const { link, sessionToken } = tx(() => {
-    const link = getLink();
-    const sessionToken = link && userId && userId === link.userId ? createSession(client, 'privy') : null;
-    return { link, sessionToken };
-  });
-  if (!sessionToken) {
+  const fail = (reason: string, err: AuthError): never => {
     failureGate.fail(client);
-    audit('anonymous', 'auth.login.failed', { ip: client, method: 'privy', reason: !link ? 'not-linked' : !userId ? 'bad-token' : 'not-owner' });
-    throw new AuthError(!link ? 'Privy sign-in is not linked to the MIA owner yet: sign in with your passphrase and link it in Security Center' : 'this Privy account is not the MIA owner');
+    audit('anonymous', 'auth.login.failed', { ip: client, method: 'privy', reason });
+    throw err;
+  };
+  if (!userId) return fail('bad-token', new AuthError('invalid or expired Privy token — sign in with Privy again'));
+  const verified = userId;
+  // Verification may wait for the remote key, so the owner link is read only now, and the session is issued in the
+  // SAME transaction as that read: a link changed meanwhile can never open a session for the old identity.
+  const issueIfOwner = () => tx(() => {
+    const link = getLink();
+    return { link, session: link && link.userId === verified ? createSession(client, 'privy') : null };
+  });
+  let r = issueIfOwner();
+  if (!r.link) {
+    const envOwner = privyOwnerFromEnv();
+    if (!envOwner || verified !== envOwner) return fail(envOwner ? 'not-owner' : 'not-provisioned', envOwner ? new AuthError('this Privy account is not the MIA owner configured on this server') : new OwnerNotProvisionedError(verified));
+    // First sign-in of the administrator-provisioned owner: back up, then bind. A failed backup aborts (fail closed).
+    try { opts.backup?.(); } catch (e) {
+      audit('owner', 'auth.privy.owner_bind_aborted', { reason: 'backup-failed' });
+      throw Object.assign(new Error(`could not back up the database before binding the owner: ${(e as Error).message}`), { statusCode: 500 });
+    }
+    r = tx(() => { if (!getLink()) bindOwner(verified, 'env-bootstrap'); return issueIfOwner(); });
   }
+  if (!r.session) return fail('not-owner', new AuthError('this Privy account is not the MIA owner. Sign out of Privy and use the owner\'s account'));
   failureGate.ok(client);
-  return sessionToken;
+  return r.session;
 }

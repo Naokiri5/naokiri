@@ -36,6 +36,7 @@ export const NAV_GROUPS: NavGroup[] = [
     { to: '/intelligence', icon: '✦', label: 'AI Intelligence', desc: 'The 100 market workers, evidence coverage and consensus (QCI)', keywords: ['ai bots', 'bots', 'workers', 'qci', 'consensus', 'evidence'] },
     { to: '/ditas', icon: '◫', label: 'DITAS Decision Intelligence', desc: 'Decision records, hypothetical twins, calibration, execution quality', keywords: ['ditas', 'decisions', 'calibration', 'twin', 'execution quality'] },
     { to: '/qhef', icon: '⚡', label: 'QHEF Performance', desc: 'Measured latency per processing stage', keywords: ['qhef', 'latency', 'speed', 'performance'] },
+    { to: '/prediction', icon: '◑', label: 'Prediction Markets', desc: 'Polymarket & Kalshi books, arbitrage checks, reward estimates and replay (research only)', keywords: ['polymarket', 'kalshi', 'prediction', 'betting', 'odds', 'arbitrage', 'liquidity rewards', 'event contracts'] },
     { to: '/academy', icon: '❖', label: 'Quant Academy', desc: 'Your trading library, concepts and research experiments', keywords: ['academy', 'books', 'learn', 'research', 'library', 'concepts'] },
   ] },
   { id: 'settings', label: 'Settings & Security', icon: '⚙', desc: 'Connections, alerts, security and release gates', pages: [
