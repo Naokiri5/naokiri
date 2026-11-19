@@ -6,8 +6,8 @@ import { networkInterfaces } from 'node:os';
 import { config, inContainer } from './config.js';
 
 const [maj, min] = process.versions.node.split('.').map(Number);
-if (maj < 22 || (maj === 22 && min < 13)) {
-  console.error(`\n✖ MIA requires Node.js 22.13 or newer (found ${process.versions.node}).\n  It uses the built-in node:sqlite module. Install Node 22 LTS or newer: https://nodejs.org/\n`);
+if (!(maj >= 24 || (maj === 22 && min >= 16))) {
+  console.error(`\n✖ MIA requires Node.js 22.16+ in the 22 LTS line, or Node.js 24+ (found ${process.versions.node}).\n  It uses the built-in SQLite FTS5 module. Download Node.js LTS: https://nodejs.org/\n`);
   process.exit(1);
 }
 

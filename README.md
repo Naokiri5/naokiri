@@ -26,7 +26,7 @@ executes **paper trades against live order books**. Built from the MIA 4.1 Unifi
 
 ## Quick start
 
-Requirements: **Node.js ≥ 22.13** (uses the built-in `node:sqlite`; `.nvmrc` pins 22), npm, outbound HTTPS to the hosts in
+Requirements: **Node.js 22.16+ in the 22 LTS line or Node.js 24+** (uses built-in SQLite FTS5; `.nvmrc` selects 22), npm, outbound HTTPS to the hosts in
 `docs/API_INTEGRATIONS.md`. Works on macOS, Linux and Windows (cmd/PowerShell); all scripts are cross-platform.
 
 ```bash
@@ -72,7 +72,7 @@ The code is consumed when the account is created. Existing owners can sign in as
 | Browser shows "connection refused" via a forwarded port | server bound to loopback only | `MIA_HOST=0.0.0.0 npm start` |
 | Page says "MIA API is running … UI not built" | `web/dist` missing | `npm run build` |
 | Setup screen asks for a setup code | the owner account has not been created yet | copy the code from the MIA terminal or service log (`journalctl -u mia`) |
-| `✖ MIA requires Node.js 22.13 or newer` | old Node | install Node 22 LTS+ (`nvm use`) |
+| `✖ MIA requires Node.js 22.16+` | unsupported Node version | install the latest Node 22 LTS or Node 24 LTS (`nvm use`) |
 | `✖ Dependencies are not installed` | skipped `npm install` | run `npm install` in the repository root |
 | Market data never loads behind a corporate proxy | proxy env | set `HTTPS_PROXY`; the launcher enables `NODE_USE_ENV_PROXY` for Node's fetch |
 

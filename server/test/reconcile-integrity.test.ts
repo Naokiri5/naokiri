@@ -39,4 +39,21 @@ describe('reconcile integrity (E-01)', () => {
     run("DELETE FROM ledger_entries WHERE kind IN ('BUY','FEE')");
     const r = reconcile(); expect(r.ok).toBe(false); expect(r.unpostedOrders).toBe(1);
   });
+  it('reconciles each account against only its own orders and postings', () => {
+    const account = 'empty-account';
+    expect(reconcile(account)).toMatchObject({ ok: true, cashVsFillsDifference: 0, unpostedOrders: 0 });
+
+    const order = get<{ id: string }>("SELECT id FROM orders WHERE account=? AND status='FILLED'", PAPER_ACCOUNT)!;
+    ledger(account, 'FEE', 0, order.id);
+    expect(reconcile(account)).toMatchObject({ ok: false, orphanPostings: 1 });
+    expect(reconcile(PAPER_ACCOUNT).ok).toBe(true);
+  });
+  it('detects a filled order missing all fills and postings alongside an intact order', () => {
+    const { inst, last } = seedInstrument('BTCUSDT', { seed: 3 });
+    expect(submitEntry(report(inst.id, last), 'bot').ok).toBe(true);
+    const order = get<{ id: string }>("SELECT id FROM orders WHERE instrument=? AND status='FILLED'", inst.id)!;
+    run('DELETE FROM fills WHERE order_id=?', order.id);
+    run("DELETE FROM ledger_entries WHERE ref=? AND kind IN ('BUY','SELL','FEE')", order.id);
+    expect(reconcile()).toMatchObject({ ok: false, filledOrdersMissingFills: 1, unpostedOrders: 1, orphanPostings: 0, cashVsFillsDifference: 0 });
+  });
 });

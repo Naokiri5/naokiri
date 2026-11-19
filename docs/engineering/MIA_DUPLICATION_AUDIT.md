@@ -4,7 +4,7 @@ Sources: Squad J (091–099) and Squad A (circular imports and unused exports). 
 
 | Candidate | Copies | Behaviour equal? | Decision | Status |
 |---|---|---|---|---|
-| Lot rounding `floorStep` | `exec/oms.ts`, `risk/gate.ts` | Yes; both could round up | One canonical `floorToStep` in `core/util.ts` that never rounds up | **DONE** `319ec8f` |
+| Lot rounding `floorStep` | `exec/oms.ts`, `risk/gate.ts` | Yes; both could round up | One canonical `floorToStep` in `core/util.ts` that rounds down with a floating-point tolerance of `step × 1e-6` | **DONE** `319ec8f` |
 | Consensus expiry check | `oms.ts` ×2, `qci/coordinator.ts` | Yes; all failed open on a malformed date | One `expiredAt()` that fails closed | **DONE** `3fa973a` |
 | Round-trip cost in R | `risk/gate.ts:112`, `qci/challenge.ts:37`, `workers/registry.ts:126` | **No**: different entry price, NaN handling and thresholds (0.25 / 0.3 / 0.1–0.25) | One pure function plus thresholds from policy | OPEN: changes consensus and challenge outcomes, so it needs a trading-risk review (J-05) |
 | Candle zod schemas | `ditas/routes.ts:13`, `api/routes.ts:215` | No: int vs finite `t` | One exported `CandleInput` schema | OPEN (J-07) |

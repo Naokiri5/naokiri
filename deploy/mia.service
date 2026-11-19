@@ -25,7 +25,7 @@ Environment=MIA_DATA_DIR=/var/lib/mia
 EnvironmentFile=-/etc/mia/mia.env
 # The supervisor restarts crashes with backoff and gives up on a crash loop (exit 1); systemd then restarts the
 # supervisor after RestartSec, at most StartLimitBurst times per StartLimitIntervalSec.
-# Use the absolute path of your Node.js >= 22.13 binary (`command -v node`).
+# Use the absolute path of your supported Node.js binary (22.16+ in the 22 LTS line or Node 24+) (`command -v node`).
 ExecStart=/usr/bin/node scripts/supervise.mjs
 Restart=on-failure
 RestartSec=30

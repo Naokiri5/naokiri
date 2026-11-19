@@ -30,6 +30,22 @@ test('existing owner sign-in has no setup-code field', async ({ page }) => {
   await expect(page.getByLabel('Setup code')).toHaveCount(0);
 });
 
+test('the passphrase form stays available if the optional Privy bundle fails', async ({ page }) => {
+  await page.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
+  await page.route('**/api/auth/state', route => route.fulfill({ json: { setup: true, authenticated: false } }));
+  await page.route('**/api/auth/privy/config', route => route.fulfill({ json: { enabled: true, linked: true, appId: 'fixture', walletActions: 'LOCKED' } }));
+  await page.route('**/assets/PrivyPanels-*.js', route => route.abort());
+  await page.route('**/api/auth/login', route => route.fulfill({ status: 403, json: { error: 'passphrase submitted' } }));
+
+  await page.goto('/');
+  await expect(page.getByText(/Privy sign-in could not load/)).toBeVisible();
+  const passphrase = page.getByLabel('Passphrase');
+  await expect(passphrase).toBeVisible();
+  await passphrase.fill('test owner passphrase');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByText('passphrase submitted', { exact: true })).toBeVisible();
+});
+
 test('a malformed /api/shell response never blanks the app (CodeRabbit PR #9)', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
   await page.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ contentType: 'text/css', body: '' }));

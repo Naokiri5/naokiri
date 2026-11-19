@@ -1,12 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
 import { getDb } from '../db/db.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { verifyAuditChain } from '../core/audit.js';
-import { verifyMemory } from '../ditas/memory.js';
+import { verifyMemory, type BlobHashRow, type TwinRunHashRow } from '../ditas/memory.js';
 import { config } from '../config.js';
 
 /**
@@ -23,6 +24,7 @@ const MAGIC = Buffer.from('MIAB1');
 const PREFIX = 'mia-';
 export interface BackupManifest { file: string; createdAt: number; schema: number; bytes: number; sha256: string; encrypted: boolean; format: 'sqlite' | 'MIAB1-aes-256-gcm' }
 export interface VerifyResult { ok: boolean; file: string; checks: { name: string; ok: boolean; detail: string }[] }
+const restoreWorkspace = () => mkdtempSync(join(tmpdir(), 'mia-verify-'));
 
 export const backupDir = () => process.env.MIA_BACKUP_DIR || join(config.dataDir, 'backups');
 export const backupKeep = () => { const n = Number(process.env.MIA_BACKUP_KEEP ?? 14); return Number.isInteger(n) && n >= 1 && n <= 1000 ? n : 14; };
@@ -98,18 +100,24 @@ export function pruneBackups(dir = backupDir(), keep = backupKeep()): string[] {
 }
 
 /** Restore check on a backup file (its manifest must sit beside it). Never modifies the backup or the live database. */
-export function verifyBackup(file: string, key: Buffer | null = backupKey()): VerifyResult {
+export function verifyBackup(file: string, key: Buffer | null = backupKey(), workerWorkspace?: string): VerifyResult {
   const checks: VerifyResult['checks'] = []; const add = (name: string, ok: boolean, detail: string) => { checks.push({ name, ok, detail }); return ok; };
   const done = () => ({ ok: checks.every((c) => c.ok), file: basename(file), checks });
   let m: BackupManifest;
   try { m = JSON.parse(readFileSync(`${file}.json`, 'utf8')); } catch { add('manifest', false, 'manifest missing or unreadable'); return done(); }
   if (!add('manifest', m.file === basename(file), m.file === basename(file) ? 'present' : 'manifest names a different file')) return done();
   if (!add('checksum', sha256File(file) === m.sha256, 'sha256 of stored file')) return done();
-  let plainPath = file; const tmp = join(dirname(file), `.verify-${process.pid}-${randomBytes(4).toString('hex')}.db`);
+  let plainPath = file;
+  let workspace = workerWorkspace;
   try {
     if (m.encrypted) {
       if (!add('key', !!key, key ? 'MIA_BACKUP_KEY present' : 'encrypted backup but MIA_BACKUP_KEY is not set')) return done();
-      try { writeFileSync(tmp, decrypt(readFileSync(file), key!), { mode: 0o600 }); plainPath = tmp; add('decrypt', true, 'authenticated (AES-256-GCM)'); }
+      try {
+        workspace ??= restoreWorkspace();
+        plainPath = join(workspace, 'snapshot.db');
+        writeFileSync(plainPath, decrypt(readFileSync(file), key!), { mode: 0o600, flag: 'wx' });
+        add('decrypt', true, 'authenticated (AES-256-GCM)');
+      }
       catch { add('decrypt', false, 'decryption failed: wrong key or modified file'); return done(); }
     }
     let snap: DatabaseSync | null = null;
@@ -121,14 +129,25 @@ export function verifyBackup(file: string, key: Buffer | null = backupKey()): Ve
       add('schema', v === m.schema && v <= SCHEMA_VERSION, `v${v} (manifest v${m.schema}, code v${SCHEMA_VERSION})`);
       const a = verifyAuditChain(snap.prepare('SELECT * FROM audit_log ORDER BY id').all());
       add('audit chain', a.ok, a.ok ? `${a.entries} entries` : `broken at entry ${a.brokenAt}`);
-      const blobs = (() => { try { return snap.prepare('SELECT * FROM ditas_blobs').all(); } catch { return []; } })(); // absent before schema v6
-      const twins = (() => { try { return snap.prepare('SELECT * FROM ditas_twin_runs').all(); } catch { return []; } })();
+      const blobs = v >= 6 ? snap.prepare('SELECT hash, payload FROM ditas_blobs').all() as BlobHashRow[] : [];
+      const twins = snap.prepare('SELECT id, hash, result FROM ditas_twin_runs').all() as TwinRunHashRow[];
       const d = verifyMemory(snap.prepare('SELECT * FROM ditas_events ORDER BY seq').all(), snap.prepare('SELECT * FROM ditas_snapshots').all(), blobs, twins);
       add('decision memory chain', d.ok, d.ok ? `${d.entries} events` : `broken at ${d.brokenAt}`);
     } catch (e: any) { add('open', false, `cannot read snapshot: ${String(e?.message ?? e).slice(0, 200)}`); }
     finally { snap?.close(); }
-  } finally { rmSync(tmp, { force: true }); }
+  } finally {
+    if (workspace && !workerWorkspace) rmSync(workspace, { recursive: true, force: true });
+  }
   return done();
+}
+
+function restoreWorkerEntry(): URL {
+  if (!import.meta.url.endsWith('.ts')) return new URL('./verify-worker.js', import.meta.url);
+  const entry = new URL('./verify-worker.ts', import.meta.url);
+  // Source mode needs to register tsx inside the worker on the minimum supported Node version.
+  const bootstrap = `const { tsImport } = await import(${JSON.stringify(import.meta.resolve('tsx/esm/api'))});\n`
+    + `await tsImport(${JSON.stringify(entry.href)}, ${JSON.stringify(import.meta.url)});`;
+  return new URL(`data:text/javascript,${encodeURIComponent(bootstrap)}`);
 }
 
 /**
@@ -136,25 +155,34 @@ export function verifyBackup(file: string, key: Buffer | null = backupKey()): Ve
  * to the in-thread check if the worker cannot start, so a backup is never left unverified. Times out after `timeoutMs`
  * (reported as a failed check, never as a pass).
  */
-export function verifyBackupInWorker(file: string, key: Buffer | null = backupKey(), timeoutMs = 10 * 60_000): Promise<VerifyResult> {
-  const isTs = import.meta.url.endsWith('.ts');
-  const entry = new URL(isTs ? './verify-worker.ts' : './verify-worker.js', import.meta.url);
-  // Inherit the parent's runtime flags, minus ones that only apply to how the parent was launched (--eval/--print/
-  // --input-type) and would make the worker fail to start.
-  const inherited = process.execArgv.filter((a) => !/^(--input-type|--eval|-e|--print|-p)(=|$)/.test(a));
-  const execArgv = isTs && !inherited.some((a) => a.includes('tsx')) ? [...inherited, '--import', 'tsx'] : inherited;
-  return new Promise((resolve) => {
-    let worker: Worker;
-    try { worker = new Worker(entry, { workerData: { file, keyHex: key ? key.toString('hex') : null }, execArgv }); }
-    catch { resolve(verifyBackup(file, key)); return; }
-    let settled = false;
-    const finish = (r: VerifyResult) => { if (settled) return; settled = true; clearTimeout(timer); void worker.terminate(); resolve(r); };
-    const failed = (detail: string): VerifyResult => ({ ok: false, file: basename(file), checks: [{ name: 'worker', ok: false, detail }] });
-    const timer = setTimeout(() => finish(failed(`restore check timed out after ${timeoutMs} ms`)), timeoutMs);
-    worker.once('message', (m: { ok: boolean; result?: VerifyResult; error?: string }) => finish(m.ok && m.result ? m.result : failed(m.error ?? 'worker failed')));
-    worker.once('error', (e: Error) => finish(failed(`restore check worker error: ${String(e?.message ?? e).slice(0, 200)}`)));
-    worker.once('exit', (code) => { if (!settled) finish(failed(`restore check worker exited (${code}) without a result`)); });
-  });
+export async function verifyBackupInWorker(file: string, key: Buffer | null = backupKey(), timeoutMs = 10 * 60_000): Promise<VerifyResult> {
+  const failed = (detail: string): VerifyResult => ({ ok: false, file: basename(file), checks: [{ name: 'worker', ok: false, detail }] });
+  let workspace: string;
+  try { workspace = restoreWorkspace(); }
+  catch { return failed('cannot create private restore workspace'); }
+  let worker: Worker | undefined;
+  let result: VerifyResult;
+  try {
+    try { worker = new Worker(restoreWorkerEntry(), { workerData: { file, keyHex: key?.toString('hex') ?? null, workspace }, execArgv: [] }); }
+    catch { /* If the worker cannot start, verify in this process using the same workspace. */ }
+    if (!worker) result = verifyBackup(file, key, workspace);
+    else {
+      const activeWorker = worker;
+      result = await new Promise<VerifyResult>((resolve) => {
+        const finish = (verdict: VerifyResult) => { clearTimeout(timer); resolve(verdict); };
+        const timer = setTimeout(() => finish(failed(`restore check timed out after ${timeoutMs} ms`)), timeoutMs);
+        activeWorker.once('message', (m: { ok: boolean; result?: VerifyResult; error?: string }) => finish(m.ok && m.result ? m.result : failed(m.error ?? 'worker failed')));
+        activeWorker.once('error', (e: Error) => finish(failed(`restore check worker error: ${e.message.slice(0, 200)}`)));
+        activeWorker.once('exit', (code) => finish(failed(`restore check worker exited (${code}) without a result`)));
+      });
+    }
+  } catch { result = failed('restore check could not run'); }
+  // Terminate before deleting so a worker cannot write another plaintext copy after cleanup or hold the file open.
+  try { await worker?.terminate(); }
+  catch { result = failed('could not stop restore check worker'); }
+  try { rmSync(workspace, { recursive: true, force: true }); }
+  catch { return failed('could not remove private restore workspace'); }
+  return result;
 }
 
 /** Scheduled run (engine leader only): back up when the newest backup is older than the interval, then prune. */
