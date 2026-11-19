@@ -13,7 +13,12 @@ export function openDb(file?: string) {
   // Restrict existing sidecars before SQLite opens them. New sidecars inherit the main file's mode.
   if (path !== ':memory:') {
     for (const sidecar of [`${path}-wal`, `${path}-shm`]) {
-      try { if (lstatSync(sidecar).isFile()) chmodSync(sidecar, 0o600); } catch { /* absent or owned by another account */ }
+      try {
+        if (lstatSync(sidecar).isFile()) chmodSync(sidecar, 0o600);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== 'ENOENT') process.emitWarning(`Could not restrict SQLite sidecar permissions (${code ?? 'unknown error'})`, { code: 'MIA_DB_PERMISSIONS' });
+      }
     }
   }
   db = new DatabaseSync(path);
