@@ -46,6 +46,7 @@ import { recentAudit, verifyAuditChain } from '../core/audit.js';
 import { botStatus, botStatusView } from '../bot/bot.js';
 import { readiness } from '../ops/readiness.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
+import { decodeCursor, joeEvents, joeEventsForPosition } from '../joe/live/projection.js';
 import { all, get, P, tx } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
@@ -410,6 +411,17 @@ export async function routes(app: FastifyInstance) {
 
   // ── Trader Joe ──
   app.get('/api/joe', async () => ({ history: chatHistory(100), llm: !!config.anthropicApiKey, model: config.joeModel }));
+  // Trader Joe Live (V4 M1): read-only lifecycle story built from committed paper records. Owner session required.
+  app.get('/api/joe/events', async (req) => {
+    const q = z.object({ after: z.string().max(240).optional(), limit: z.coerce.number().int().min(1).max(200).optional() }).strict().parse(req.query);
+    const after = q.after === undefined ? null : decodeCursor(q.after);
+    if (q.after !== undefined && !after) throw httpError(400, 'invalid cursor');
+    return joeEvents({ after, limit: q.limit });
+  });
+  app.get('/api/joe/events/by-position/:id', async (req) => {
+    const { id } = z.object({ id: z.string().regex(/^[A-Za-z0-9_\-]{1,80}$/) }).strict().parse(req.params);
+    return joeEventsForPosition(id);
+  });
   app.post('/api/joe', async (req) => { const { message } = z.object({ message: z.string().min(1).max(4000) }).parse(req.body); limit(req, 'joe', 'Trader Joe'); return askJoe(message); });
 }
 const slim = (r: any) => ({ id: r.id, asset: r.asset, instrumentId: r.instrumentId, strategy: r.strategy, regime: r.regime, decision: r.decision, finalDecision: r.finalDecision, score: r.opportunity.score, consensus: r.consensus, createdAt: r.createdAt, entryCondition: r.entryCondition, invalidation: r.invalidation, stopLoss: r.stopLoss, takeProfit: r.takeProfit, risk: r.risk ? { decision: r.risk.decision, reasonCodes: r.risk.reasonCodes } : null, missing: r.missingInformation });
