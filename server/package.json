@@ -17,6 +17,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
     "@fastify/static": "^10.1.11",
+    "ccxt": "^4.5.93",
     "fast-xml-parser": "^5.12.1",
     "fastify": "^5.12.8",
     "jose": "^4.15.9",

@@ -2,6 +2,7 @@ import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { VikeNotConfiguredError } from '../providers/vike.js';
 import * as privy from '../security/privy.js';
+import { ccxtRoutes } from '../research/ccxtRoutes.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -125,6 +126,7 @@ export async function routes(app: FastifyInstance) {
   await ditasRoutes(app);
   await knowledgeRoutes(app);
   await vikeRoutes(app); // read-only Vike research (owner session required by the gate below)
+  await ccxtRoutes(app); // read-only CCXT exchange research (GET-only transport, keyless)
   /** Paper/Live environments for the shared UI layout. Read-only; Live is reported as LOCKED, never as available. */
   app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
   // ── protection incidents (persistent; owner acknowledgement) ──
