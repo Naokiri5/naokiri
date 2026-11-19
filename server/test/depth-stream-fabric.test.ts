@@ -30,7 +30,7 @@ describe('streaming books wired into the market fabric', () => {
     const { inst, last } = seedInstrument('STRM2USDT');
     Object.assign(config, { streaming: true, offline: false });
     let snaps = 0;
-    const snapshot = async () => { snaps++; return { lastUpdateId: 50, bids: [[last * 0.999, 3]] as [number, number][], asks: [[last * 1.001, 4]] as [number, number][] }; };
+    const snapshot = async () => { snaps++; return { lastUpdateId: 50, ts: Date.now(), bids: [[last * 0.999, 3]] as [number, number][], asks: [[last * 1.001, 4]] as [number, number][] }; };
     const h = syncDepthStreams([inst.id, inst.id], { WebSocketImpl: FakeWS as any, snapshot })!;
     expect(h).not.toBeNull();
     expect(FakeWS.last!.url).toContain('strm2usdt@depth@100ms');
@@ -65,14 +65,26 @@ describe('streaming books wired into the market fabric', () => {
     const { inst, last } = seedInstrument('STRM3USDT');
     market.deep.get(inst.id)!.book = { bids: [[last * 0.99, 1]], asks: [[last * 1.01, 1]], ts: Date.now(), lastUpdateId: 1_000 };
     Object.assign(config, { streaming: true, offline: false });
-    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({ lastUpdateId: 10, bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]] }) });
+    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({ lastUpdateId: 10, ts: Date.now(), bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]] }) });
     await tick(); await tick();
     expect(market.deep.get(inst.id)!.book!.lastUpdateId).toBe(1_000);
+  });
+  it('keeps REST eligible when a snapshot-only book already exceeds its freshness window', async () => {
+    const { inst, last } = seedInstrument('STRM6USDT');
+    market.deep.get(inst.id)!.book = null;
+    Object.assign(config, { streaming: true, offline: false });
+    const ts = Date.now() - 3_000;
+    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({
+      lastUpdateId: 50, ts, bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]],
+    }) });
+    await tick(); await tick();
+    expect(market.deep.get(inst.id)!.book).toMatchObject({ lastUpdateId: 50, ts });
+    expect(streamFresh(inst.id)).toBe(false);
   });
   it('a sequence gap hands the symbol back to REST immediately (MA-18)', async () => {
     const { inst, last } = seedInstrument('STRM4USDT');
     Object.assign(config, { streaming: true, offline: false });
-    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({ lastUpdateId: 50, bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]] }) });
+    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({ lastUpdateId: 50, ts: Date.now(), bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]] }) });
     await tick(); await tick();
     expect(streamFresh(inst.id)).toBe(true);
     FakeWS.last!.send({ e: 'depthUpdate', E: Date.now(), s: 'STRM4USDT', U: 60, u: 61, b: [], a: [] }); // gap: 51..59 missing
@@ -82,7 +94,7 @@ describe('streaming books wired into the market fabric', () => {
     const { inst, last } = seedInstrument('STRM5USDT');
     market.deep.get(inst.id)!.book = { bids: [[last * 0.99, 1]], asks: [[last * 1.01, 1]], ts: Date.now(), lastUpdateId: 1_000 };
     Object.assign(config, { streaming: true, offline: false });
-    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({ lastUpdateId: 10, bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]] }) });
+    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({ lastUpdateId: 10, ts: Date.now(), bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]] }) });
     await tick(); await tick();
     expect(market.deep.get(inst.id)!.book!.lastUpdateId).toBe(1_000);
     expect(streamFresh(inst.id)).toBe(false); // REST keeps refreshing this symbol
