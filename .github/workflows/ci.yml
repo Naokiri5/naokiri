@@ -22,9 +22,11 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
+        id: install
       - name: Production dependencies
         run: npm audit --omit=dev --audit-level=high
       - name: All dependencies, including development tools
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: npm audit --audit-level=high
   secrets:
     name: Secret scan
