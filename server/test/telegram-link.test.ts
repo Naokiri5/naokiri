@@ -62,9 +62,13 @@ describe('Telegram one-time owner link (MIA-TG-01)', () => {
   it('status never exposes chat identifiers or the code', () => {
     const { code } = createLinkCode();
     redeemLinkCode(code, USER, CHAT);
-    const s = JSON.stringify(linkStatus());
-    expect(s).not.toContain(String(USER));
-    expect(s).not.toContain(String(CHAT));
-    expect(s).not.toContain(code);
+    // Checked per field: a substring test on the whole JSON failed whenever the linkedAt timestamp happened to contain
+    // "111" (it did on 2026-11-19, linkedAt 1795111404711), which says nothing about leaking the chat id.
+    const s = linkStatus() as Record<string, unknown>;
+    for (const [k, v] of Object.entries(s)) {
+      expect(v, k).not.toBe(USER); expect(v, k).not.toBe(CHAT);
+      if (typeof v === 'string') { expect(v, k).not.toContain(String(USER)); expect(v, k).not.toContain(String(CHAT)); }
+    }
+    expect(JSON.stringify(s)).not.toContain(code);
   });
 });

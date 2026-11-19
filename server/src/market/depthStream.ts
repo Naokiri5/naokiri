@@ -13,6 +13,7 @@
  * Off by default; enable with MIA_STREAMING=1.
  */
 import { record } from '../core/latency.js';
+import { closeSocketOnce } from '../core/util.js';
 
 export interface DepthEvent { E: number; s: string; U: number; u: number; b: [string, string][]; a: [string, string][] }
 export interface Snapshot { lastUpdateId: number; bids: [number, number][]; asks: [number, number][] }
@@ -253,16 +254,17 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
       status.reconnects++; const delay = Math.min(60_000, 1_000 * 2 ** attempt++) * (0.5 + rand() / 2);
       timer = setTimeout(connect, delay);
     };
-    sock.onerror = () => { try { sock.close(); } catch { /* close triggers reconnect */ } };
+    // Close at most once and ignore errors from a stopped stream (an error on close used to re-enter this handler).
+    sock.onerror = () => { if (!stopped) closeSocketOnce(sock); };
   };
   // Half-open socket watchdog: no message for STALL_MS on a connected socket → close (onclose reconnects with backoff).
-  const watchdog = setInterval(() => { if (status.connected && now() - status.lastMessageAt > STALL_MS) { try { ws?.close(); } catch { /* reconnect follows */ } } }, Math.min(STALL_MS, 5_000));
+  const watchdog = setInterval(() => { if (status.connected && now() - status.lastMessageAt > STALL_MS) closeSocketOnce(ws); }, Math.min(STALL_MS, 5_000));
   (watchdog as any).unref?.();
   connect();
   return {
     status: () => ({ ...status, synced: [...syncs.values()].filter((s) => s.state === 'SYNCED').length }),
     /** Test seam: run the stall check now. */
-    checkStall: () => { if (status.connected && now() - status.lastMessageAt > STALL_MS) { try { ws?.close(); } catch { /* reconnect follows */ } } },
-    stop: () => { stopped = true; generation++; clearInterval(watchdog); if (timer) clearTimeout(timer); try { ws?.close(); } catch { /* already closed */ } },
+    checkStall: () => { if (status.connected && now() - status.lastMessageAt > STALL_MS) closeSocketOnce(ws); },
+    stop: () => { stopped = true; generation++; clearInterval(watchdog); if (timer) clearTimeout(timer); closeSocketOnce(ws); },
   };
 }

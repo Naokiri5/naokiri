@@ -204,3 +204,37 @@ describe('CodeRabbit PR #18 stream findings (SAFE-03)', () => {
     expect(published).toHaveLength(0);
   });
 });
+
+/**
+ * Like Node's WebSocket: closing a still-connecting socket fails it and fires `error` synchronously, before the state
+ * changes. An `onerror` that calls close() again re-entered itself (measured live: 914 error events from one socket).
+ */
+class ReentrantErrorWS {
+  static all: ReentrantErrorWS[] = [];
+  readyState = 0; errorEvents = 0;
+  onopen?: () => void; onmessage?: (m: unknown) => void; onclose?: () => void; onerror?: () => void;
+  constructor(public url: string) { ReentrantErrorWS.all.push(this); }
+  send() { /* not used */ }
+  close() {
+    if (this.readyState === 0) { this.errorEvents++; if (this.errorEvents > 100) throw new Error('error storm'); this.onerror?.(); }
+    if (this.readyState !== 3) { this.readyState = 3; this.onclose?.(); }
+  }
+}
+
+describe('closing a connecting socket (error-storm regression)', () => {
+  it('stop() while connecting fires one error, not a loop', () => {
+    ReentrantErrorWS.all = [];
+    const h = startDepthStream(['BTCUSDT'], { url: () => 'wss://t', snapshot: async () => snap(1), publish: () => {}, WebSocketImpl: ReentrantErrorWS as any });
+    h.stop();
+    expect(ReentrantErrorWS.all).toHaveLength(1);
+    expect(ReentrantErrorWS.all[0].errorEvents).toBe(1);
+  });
+  it('a network error while connecting closes once and schedules one reconnect', () => {
+    ReentrantErrorWS.all = [];
+    const h = startDepthStream(['BTCUSDT'], { url: () => 'wss://t', snapshot: async () => snap(1), publish: () => {}, random: () => 0, WebSocketImpl: ReentrantErrorWS as any });
+    ReentrantErrorWS.all[0].onerror?.();
+    expect(ReentrantErrorWS.all[0].errorEvents).toBe(1);
+    expect(h.status().reconnects).toBe(1);
+    h.stop();
+  });
+});

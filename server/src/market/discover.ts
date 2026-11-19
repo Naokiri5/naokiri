@@ -6,6 +6,7 @@ import { rankSolanaPairs } from '../solana/hunting.js';
 import { isTrustedSolanaQuote } from '../solana/quotes.js';
 import { applyMintChecks, mintCheckSummary } from '../solana/mintChecks.js';
 import { watchAlertStatus } from '../solana/watchAlerts.js';
+import { pumpFeedView, pumpGraduationOf, pumpLaunchOf } from '../solana/pumpFeed.js';
 
 /** Solana watchlist freshness: DEX Screener cache older than this, missing, or future-dated (clock jump) is stale. */
 const SOLANA_HUNTER_MAX_AGE_MS = 5 * 60_000;
@@ -32,12 +33,23 @@ export function solanaWatchlist(nowMs: number) {
       const solana = market.dex.filter((p) => typeof p.chainId === 'string' && p.chainId.toLowerCase() === 'solana');
       const trusted = solana.filter((p) => isTrustedSolanaQuote(p.quoteAddress));
       skippedUntrustedQuote = solana.length - trusted.length;
-      candidates = applyMintChecks(rankSolanaPairs(trusted, { nowMs }), nowMs);
+      candidates = annotatePump(applyMintChecks(rankSolanaPairs(trusted, { nowMs }), nowMs));
     } catch { rankerFailed = true; candidates = []; }
   }
   const mintChecks = mintCheckSummary();
-  return { asOf, stale: !fresh, rankerFailed, skippedUntrustedQuote, candidates, mintChecks, alerts: watchAlertStatus(), executionReady: false as const,
+  return { asOf, stale: !fresh, rankerFailed, skippedUntrustedQuote, candidates, mintChecks, alerts: watchAlertStatus(), pumpfun: pumpFeedView(), executionReady: false as const,
     note: mintChecks.configured ? SOLANA_HUNTER_NOTE_WITH_MINT_CHECKS : SOLANA_HUNTER_NOTE };
+}
+
+/** Omega PR-07: informational notes from the read-only Pump.fun feed. Never changes a row's status. */
+function annotatePump<T extends { mint: string; notes: string[] }>(rows: T[]): T[] {
+  return rows.map((r) => {
+    const g = pumpGraduationOf(r.mint); const l = pumpLaunchOf(r.mint);
+    const notes = [...r.notes];
+    if (l) notes.push('Launched on Pump.fun (seen on chain by MIA)');
+    if (g) notes.push(`Graduated from Pump.fun to PumpSwap (pool ${g.pool})`);
+    return notes.length === r.notes.length ? r : { ...r, notes };
+  });
 }
 
 /** Asset Discovery (Part 10 "Discover"): ranked lists drawn only from live feeds. */
