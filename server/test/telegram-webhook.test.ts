@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { closeDb, openDb, all, get, run } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { config } from '../src/config.js';
-import { createLinkCode, isLinkedIdentity, linkStatus, redeemLinkCode } from '../src/integrations/telegram/link.js';
+import { createLinkCode, linkForIdentity, linkStatus, redeemLinkCode } from '../src/integrations/telegram/link.js';
 import { drainOutbox } from '../src/integrations/telegram/webhook.js';
 import { ownerSetupPayload } from './helpers.js';
 import { getControl } from '../src/core/mode.js';
@@ -153,7 +153,7 @@ describe('Telegram webhook (MIA-TG-01)', () => {
 
     expect(redeemLinkCode(createLinkCode().code, OWNER_USER, chat).ok).toBe(true);
     expect((await cancel(ownerHeaders)).json()).toEqual({ ok: true, canceled: false });
-    expect(isLinkedIdentity(OWNER_USER, chat)).toBe(true);
+    expect(linkForIdentity(OWNER_USER, chat)).toBeDefined();
   });
 
   it('clears queued account replies on unlink and still sends public replies', async () => {
