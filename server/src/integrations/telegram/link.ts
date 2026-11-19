@@ -99,6 +99,15 @@ export function revokeLink(actor = 'owner'): boolean {
   });
 }
 
+export function cancelLinkCode(): boolean {
+  return tx(() => {
+    const result = run("DELETE FROM telegram_links WHERE status='PENDING'");
+    if (Number(result.changes) === 0) return false;
+    audit('owner', 'telegram.link.code_canceled');
+    return true;
+  });
+}
+
 /** Owner-facing status: never returns chat or user identifiers, codes or hashes. */
 export function linkStatus(now = Date.now()) {
   const active = activeLink();

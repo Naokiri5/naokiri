@@ -76,6 +76,22 @@ The code is consumed when the account is created. Existing owners can sign in as
 | `✖ Dependencies are not installed` | skipped `npm install` | run `npm install` in the repository root |
 | Market data never loads behind a corporate proxy | proxy env | set `HTTPS_PROXY`; the launcher enables `NODE_USE_ENV_PROXY` for Node's fetch |
 
+### Enable Google owner sign-in
+
+1. Create a Google OAuth web application. Register your MIA HTTPS URL ending in `/api/auth/google/callback` as an authorized redirect URI.
+2. Set `MIA_GOOGLE_CLIENT_ID`, `MIA_GOOGLE_CLIENT_SECRET`, and `MIA_GOOGLE_REDIRECT_URI` server-side. Set `MIA_SECURE_COOKIE=1` and serve MIA over HTTPS. Configure any reverse proxy to omit OAuth callback query strings from access logs.
+3. Sign in with the existing owner passphrase and open **Settings → Google sign-in**. Confirm the passphrase, choose **Link Google**, and select your account at Google.
+4. Use **Continue with Google** on subsequent visits. **Unlink Google** requires the passphrase and revokes other sessions. Keep the owner passphrase for recovery and action confirmations.
+
+### Connect a private Telegram chat
+
+1. Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` in the server environment. Use a randomly generated URL-safe webhook secret.
+2. Use Telegram Bot API `setWebhook` with your HTTPS MIA URL ending in `/api/integrations/telegram/webhook` and set `secret_token` to the same webhook secret. Keep the bot token and webhook secret server-side.
+3. Open **Connections → Telegram**, enter your MIA owner passphrase, and generate a pairing code. Send the displayed `/link` command in your bot’s private chat before it expires. Use **Cancel pairing code** to invalidate a code you no longer need.
+4. After MIA shows **Linked**, send `/help` to see commands. Use **Unlink Telegram** in MIA to disconnect the chat.
+
+The linked chat can check paper account status and pause new paper entries. Configure outbound notifications separately with `TELEGRAM_CHAT_ID` if you use them.
+
 ## Tests & QA evidence
 
 ```bash

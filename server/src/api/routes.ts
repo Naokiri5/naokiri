@@ -47,7 +47,7 @@ import { botStatus, botStatusView } from '../bot/bot.js';
 import { readiness } from '../ops/readiness.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
 import { decodeCursor, joeEvents, joeEventsForPosition } from '../joe/live/projection.js';
-import { all, get, P, tx } from '../db/db.js';
+import { all, get, P, run, tx } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { config } from '../config.js';
@@ -60,6 +60,9 @@ import { provider, ProviderError } from '../providers/http.js';
 import { limiter, RateLimitError } from '../core/ratelimit.js';
 import { sha256 } from '../core/util.js';
 
+import { clearGoogleFlow, GOOGLE_CALLBACK, googleConfig, googleSubject, readGoogleFlow, startGoogleFlow } from './google.js';
+
+const googleIdentity = () => getSetting<{ clientId: string; subject: string } | null>('auth.google.owner', null);
 const COOKIE = 'mia_session';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 const bad = (reply: FastifyReply, code: number, msg: string) => reply.code(code).send({ error: msg });
@@ -145,7 +148,9 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/auth/state', async (req) => {
     const setup = auth.isSetup();
     if (!setup) auth.ensureSetupCode();
-    return { setup, authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: !setup };
+    const google = googleConfig();
+    return { setup, authenticated: auth.validSession(tokenOf(req)), setupCodeRequired: !setup,
+      googleSignIn: !!google && googleIdentity()?.clientId === google.clientId };
   });
   app.post('/api/auth/setup', async (req, reply) => {
     // A connection to loopback can come from a forwarder. Only the console code authorizes first-owner setup.
@@ -168,6 +173,62 @@ export async function routes(app: FastifyInstance) {
   });
   app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip, { directLocal: isDirectLocal(req) })); });
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
+  app.post('/api/auth/google/start', async (req, reply) => {
+    if (req.headers['x-mia-csrf'] !== '1') return bad(reply, 403, 'missing CSRF header');
+    const cfg = googleConfig();
+    if (!cfg || googleIdentity()?.clientId !== cfg.clientId) return bad(reply, 404, 'Google sign-in is unavailable');
+    const flow = startGoogleFlow(cfg);
+    return reply.header('set-cookie', flow.cookie).send({ url: flow.url });
+  });
+  app.get('/api/settings/google', async () => ({ configured: !!googleConfig(), linked: !!googleIdentity() }));
+  app.post('/api/settings/google/link', async (req, reply) => {
+    const cfg = googleConfig();
+    if (!cfg) return bad(reply, 404, 'Google is not configured');
+    if (googleIdentity()) return bad(reply, 409, 'Unlink your current Google account first');
+    stepUp(req, z.object({ password: PW }).strict().parse(req.body));
+    const flow = startGoogleFlow(cfg, tokenOf(req));
+    return reply.header('set-cookie', flow.cookie).send({ url: flow.url });
+  });
+  app.post('/api/settings/google/unlink', async (req, reply) => {
+    stepUpRiskReducing(req, z.object({ password: PW }).strict().parse(req.body));
+    if (!googleIdentity()) return { ok: true };
+    const token = tx(() => {
+      setSetting('auth.google.owner', null);
+      run('DELETE FROM sessions');
+      audit('owner', 'auth.google.unlinked');
+      return auth.createSession(req.ip, 'passphrase');
+    });
+    return issue(reply, token);
+  });
+  app.get(GOOGLE_CALLBACK, async (req, reply) => {
+    const cfg = googleConfig();
+    const query = z.object({ state: z.string().length(43), code: z.string().min(1).max(4096).optional() }).safeParse(req.query);
+    const flow = cfg && query.success ? readGoogleFlow(cfg, req.headers.cookie ?? '', query.data.state) : null;
+    const destination = flow?.sessionHash ? '/settings' : '/';
+    const fail = () => reply.redirect(`${destination}?google=failed`, 303);
+    reply.header('cache-control', 'no-store');
+    if (!cfg || !flow || !query.success) return fail();
+    reply.header('set-cookie', clearGoogleFlow);
+    if (!query.data.code) return fail();
+    if (flow.sessionHash && !auth.validSessionHash(flow.sessionHash)) return fail();
+
+    let subject: string;
+    try { subject = await googleSubject(cfg, query.data.code, flow.verifier); } catch { return fail(); }
+    if (!auth.isSetup()) return fail();
+    if (flow.sessionHash) {
+      // Recheck after the network round trip. Linking may have been canceled by logout or passphrase rotation.
+      if (!auth.validSessionHash(flow.sessionHash) || googleIdentity()) return fail();
+      tx(() => {
+        setSetting('auth.google.owner', { clientId: cfg.clientId, subject });
+        audit('owner', 'auth.google.linked');
+      });
+      return reply.redirect(destination, 303);
+    }
+    const linked = googleIdentity();
+    if (linked?.clientId !== cfg.clientId || linked.subject !== subject) return fail();
+    issue(reply, auth.createSession(req.ip, 'google'));
+    return reply.redirect(destination, 303);
+  });
   // Privy sign-in (optional). Login requires a Privy identity the owner already linked; link/unlink need a session + step-up.
   app.get('/api/auth/privy/config', async () => privy.privyPublicConfig());
   app.post('/api/auth/privy/login', async (req, reply) => {

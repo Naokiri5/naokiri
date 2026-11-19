@@ -15,16 +15,29 @@ import { SideNav, GroupTabs, MobileNav } from './Navigation';
 
 
 export default function App() {
-  const [auth, setAuth] = useState<{ setup: boolean; authenticated: boolean; setupCodeRequired?: boolean } | null>(null);
+  const [auth, setAuth] = useState<{ setup: boolean; authenticated: boolean; setupCodeRequired?: boolean; googleSignIn?: boolean } | null>(null);
   useEffect(() => { api('/api/auth/state').then(setAuth).catch(() => setAuth({ setup: true, authenticated: false })); const f = () => setAuth((a) => (a ? { ...a, authenticated: false } : a)); window.addEventListener('mia:unauthorized', f); return () => window.removeEventListener('mia:unauthorized', f); }, []);
   useEffect(() => { if (auth?.authenticated) connectStream(); else disconnectStream(); }, [auth?.authenticated]);
   if (!auth) return null;
-  if (!auth.authenticated) return <Login setup={auth.setup} codeRequired={!!auth.setupCodeRequired} onDone={() => setAuth({ setup: true, authenticated: true })} />;
-  return <PresentationProvider><Shell onLogout={() => setAuth({ setup: true, authenticated: false })} /></PresentationProvider>;
+  if (!auth.authenticated) return <Login setup={auth.setup} codeRequired={!!auth.setupCodeRequired} googleSignIn={!!auth.googleSignIn} onDone={() => setAuth({ ...auth, setup: true, authenticated: true })} />;
+  return <PresentationProvider><Shell onLogout={() => setAuth({ ...auth, authenticated: false })} /></PresentationProvider>;
 }
 
-function Login({ setup, codeRequired, onDone }: { setup: boolean; codeRequired: boolean; onDone: () => void }) {
-  const [p, setP] = useState(''); const [p2, setP2] = useState(''); const [code, setCode] = useState(''); const [err, setErr] = useState<string | null>(null);
+function Login({ setup, codeRequired, googleSignIn, onDone }: { setup: boolean; codeRequired: boolean; googleSignIn: boolean; onDone: () => void }) {
+  const [p, setP] = useState(''); const [p2, setP2] = useState(''); const [code, setCode] = useState(''); const [err, setErr] = useState<string | null>(() => new URLSearchParams(window.location.search).get('google') === 'failed'
+    ? 'Google sign-in could not be completed. Try again or use your owner passphrase.' : null);
+  const [googleBusy, setGoogleBusy] = useState(false);
+  const signInWithGoogle = async () => {
+    setGoogleBusy(true);
+    setErr(null);
+    try {
+      const { url } = await api<{ url: string }>('/api/auth/google/start', { body: {} });
+      window.location.assign(url);
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Google sign-in could not be started');
+      setGoogleBusy(false);
+    }
+  };
   const [privy, setPrivy] = useState<PrivyClientConfig | null>(null);
   useEffect(() => { if (setup) api<PrivyClientConfig>('/api/auth/privy/config').then(setPrivy).catch(() => setPrivy(null)); }, [setup]);
   const submit = async (e: React.FormEvent) => { e.preventDefault(); setErr(null); if (!setup && p !== p2) return setErr('passphrases do not match'); try { await api(setup ? '/api/auth/login' : '/api/auth/setup', { body: setup || !codeRequired ? { password: p } : { password: p, setupCode: code } }); onDone(); } catch (x: any) { setErr(x.message); } };
@@ -32,6 +45,7 @@ function Login({ setup, codeRequired, onDone }: { setup: boolean; codeRequired: 
     <form onSubmit={submit} className="card" style={{ width: 'min(400px, 100%)' }}>
       <div className="hd"><div className="row"><div className="logo">M</div><h2>MIA 4.1 {setup ? 'Sign in' : 'Owner setup'}</h2></div></div>
       <div className="bd col">
+        {setup && googleSignIn && <button type="button" disabled={googleBusy} onClick={signInWithGoogle}>Continue with Google</button>}
         {!setup && <div className="hint">Create the owner passphrase (≥10 characters). It protects mode changes, risk limits and withdrawals. MIA never asks for seed phrases or private keys.</div>}
         <label className="col" style={{ gap: 4 }}>Passphrase<input type="password" autoFocus value={p} onChange={(e) => setP(e.target.value)} autoComplete={setup ? 'current-password' : 'new-password'} /></label>
         {!setup && <label className="col" style={{ gap: 4 }}>Confirm<input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" /></label>}
