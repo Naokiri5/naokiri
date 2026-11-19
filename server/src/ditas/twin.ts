@@ -70,6 +70,8 @@ export function simulateTwin(planInput: TwinPlan, candles: readonly Candle[], as
     const qty = filledNotional / entry;
     if (!finite(qty) || qty <= 1e-12 || !positive(qty * (entry - signal.stop))) return noFill(entryDelayBars, 'Position falls outside supported numerical precision');
     const state = newExitState(entry, signal.stop, qty, targets.map(t => ({ r: (t.price - entry) / (entry - signal.stop), fraction: t.fraction })), signal.trailAfterR, signal.maxHoldBars);
+    // The validated ladder allocates the full position. The last target closes any rounding remainder.
+    state.targets[state.targets.length - 1].fraction = 1;
     requireFiniteResult(state);
     const entryFee = filledNotional * feeRate;
     const fills: TwinFill[] = [{ t: first.t, side: 'BUY', reason: 'ENTRY', qty, price: entry, fee: entryFee }];
@@ -78,7 +80,9 @@ export function simulateTwin(planInput: TwinPlan, candles: readonly Candle[], as
       const c = candles[i];
       // Signal targets stay fixed. Entry-bar exits are evaluated but holding count matches existing backtester.
       const exits = stepExit(state, c, slip, i !== entryDelayBars);
-      requireFiniteResult(state);
+      // The validated ladder allocates the full position. The last target closes any rounding remainder.
+    state.targets[state.targets.length - 1].fraction = 1;
+    requireFiniteResult(state);
       for (const fill of exits) {
         const price = fill.reason === 'TARGET' || fill.reason === 'TIME' ? fill.price * (1 - slip) : fill.price;
         const fee = price * fill.qty * feeRate;

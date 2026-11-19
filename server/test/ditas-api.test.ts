@@ -2,11 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/index.js';
 import { all, closeDb, get, J, run } from '../src/db/db.js';
 import { sha256 } from '../src/core/util.js';
+import { buildContext } from '../src/market/scanner.js';
 import { market } from '../src/market/store.js';
 import { recordOpportunity, memoryDetail } from '../src/ditas/memory.js';
 import type { Candidate } from '../src/workers/types.js';
 import type { Candle } from '../src/market/types.js';
-import { freshDb, seedInstrument } from './helpers.js';
+import { freshDb, seedInstrument, ownerSetupPayload } from './helpers.js';
 
 const HOUR = 3_600_000, T = Date.UTC(2026, 10, 10, 0, 0, 1);
 const opening = Math.ceil(T / HOUR) * HOUR;
@@ -17,18 +18,18 @@ describe('DITAS authenticated API and persisted service integration', () => {
   let app: Awaited<ReturnType<typeof buildApp>>, cookie: string;
   const headers = () => ({ cookie, 'x-mia-csrf': '1' });
   const post = (url: string, payload: any) => app.inject({ method: 'POST', url, headers: headers(), payload });
-  const createEvent = (opts: { kind?: 'PROPOSAL' | 'NO_SIGNAL' | 'REJECTED'; badData?: boolean; suffix?: string; symbol?: string } = {}) => {
+  const createEvent = (opts: { kind?: 'PROPOSAL' | 'NO_SIGNAL' | 'REJECTED'; badData?: boolean; withFingerprint?: boolean; suffix?: string; symbol?: string } = {}) => {
     const { inst } = seedInstrument(opts.symbol ?? 'DITASUSDT', { drift: 0, vol: 0 });
     if (opts.badData) market.tickers.get(inst.id)!.providerTs = T - HOUR;
     const kind = opts.kind ?? 'PROPOSAL';
     const candidate: Candidate = { id: `candidate-${opts.suffix ?? 'one'}`, eventId: `fixture-${opts.suffix ?? 'one'}`, traceId: 'fixture-trace', instrumentId: inst.id, symbol: inst.symbol, base: inst.base, market: inst.market, venue: inst.venue, strategyId: 'trend_pullback', strategyVersion: '1.0.0', interval: '1h', regime: 'TREND_UP', createdAt: Date.now(),
       signal: { direction: 'long', entryRef: 100, stop: 95, targets: [{ r: 2, fraction: 1 }], maxHoldBars: 10, trailAfterR: null, trigger: 'test fixture only', invalidation: 'below 95', reasons: ['fixture'] } };
-    return recordOpportunity({ kind, instrumentId: inst.id, strategyId: 'trend_pullback', interval: '1h', dedupeKey: `fixture-${kind}-${opts.suffix ?? 'one'}`, reason: 'integration fixture only', candidate: kind === 'NO_SIGNAL' ? undefined : candidate });
+    return recordOpportunity({ kind, instrumentId: inst.id, strategyId: 'trend_pullback', interval: '1h', dedupeKey: `fixture-${kind}-${opts.suffix ?? 'one'}`, reason: 'integration fixture only', candidate: kind === 'NO_SIGNAL' ? undefined : candidate, ctx: opts.withFingerprint ? buildContext(candidate) : undefined });
   };
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(T);
     market.reset(); freshDb(false); app = await buildApp();
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'ditas integration owner' } });
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('ditas integration owner') });
     expect(r.statusCode).toBe(200); cookie = String(r.headers['set-cookie']).split(';')[0];
   });
   afterEach(async () => { await app.close(); closeDb(); market.reset(); vi.useRealTimers(); });
@@ -46,6 +47,32 @@ describe('DITAS authenticated API and persisted service integration', () => {
     expect((await app.inject({ url: '/api/ditas/events/absent', headers: headers() })).statusCode).toBe(404);
   });
 
+  it('excludes later ledger events from similarity even when they share the event timestamp', async () => {
+    const prior = createEvent({ suffix: 'prior', withFingerprint: true, symbol: 'BEFOREUSDT' });
+    const anchor = createEvent({ suffix: 'anchor', withFingerprint: true, symbol: 'ANCHORUSDT' });
+    const later = createEvent({ suffix: 'later', withFingerprint: true, symbol: 'AFTERUSDT' });
+    const response = await app.inject({ url: `/api/ditas/events/${anchor.id}/similar`, headers: headers() });
+    expect(response.statusCode).toBe(200);
+    const matches = response.json().map((row: { eventId: string }) => row.eventId);
+    expect(matches).toContain(prior.id);
+    expect(matches).not.toContain(later.id);
+  });
+  it('excludes a reused fingerprint captured after the anchor even when its event timestamp qualifies', async () => {
+    const prior = createEvent({ suffix: 'prior', withFingerprint: true, symbol: 'BEFOREUSDT' });
+    vi.setSystemTime(T + 6_000);
+    const future = createEvent({ suffix: 'future-capture', withFingerprint: true, symbol: 'FUTUREUSDT' });
+    vi.setSystemTime(T);
+    const reused = recordOpportunity({
+      kind: 'NO_SIGNAL', instrumentId: future.instrumentId, snapshotId: future.snapshotId!,
+      reason: 'system clock returned to its previous time', dedupeKey: 'reuse-future-capture',
+    });
+    const anchor = createEvent({ suffix: 'anchor', withFingerprint: true, symbol: 'ANCHORUSDT' });
+    const response = await app.inject({ url: `/api/ditas/events/${anchor.id}/similar`, headers: headers() });
+    expect(response.statusCode).toBe(200);
+    const matches = response.json().map((row: { eventId: string }) => row.eventId);
+    expect(matches).toContain(prior.id);
+    expect(matches).not.toContain(reused.id);
+  });
   it('uses frozen depth, stores hashed provenance, and cannot write actual execution ledgers', async () => {
     const event = createEvent(), snapshot = memoryDetail(event.id)!.snapshot!;
     market.deep.get(event.instrumentId)!.book = null; // Later live-store changes must not rewrite the frozen evidence.

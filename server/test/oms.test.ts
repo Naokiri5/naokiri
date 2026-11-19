@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, getControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState, openPositions } from '../src/portfolio/ledger.js';
-import { submitEntry, monitorPositions, emergencyStop, closeAllPositions, closePosition, executeExit, queueForApproval, decideApproval, listOrders } from '../src/exec/oms.js';
+import { submitEntry, monitorPositions, emergencyStop, closeAllPositions, closePosition, executeExit, queueForApproval, decideApproval, listOrders, listPositions, cancelPendingEntries, expireApprovals, paperEntryForDecision } from '../src/exec/oms.js';
+import { tradingHistory } from '../src/journal/history.js';
 import { reconcile, calendar } from '../src/portfolio/calendar.js';
 import { verifyAuditChain } from '../src/core/audit.js';
 import { run, all, get, J } from '../src/db/db.js';
@@ -22,7 +24,7 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
     freshDb(); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
   it('enters with book-walk fill, attaches OMS-monitored stop, exits on stop, reconciles', () => {
     const r = submitEntry(report(id, last), 'bot');
@@ -48,15 +50,74 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
   });
   it('rejects expired consensus and bot entries outside PAPER mode', () => {
     expect(submitEntry(report(id, last, { consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 1, opposition: 0, expiresAt: new Date(Date.now() - 1).toISOString() } }), 'bot').reason).toMatch(/EXPIRED/);
-    updateControl('owner', { mode: 'APPROVAL' });
+    updateControl('owner', { mode: 'APPROVAL' }, modeGate);
     expect(submitEntry(report(id, last), 'bot').ok).toBe(false);
   });
+  it('preserves an approval cancelled before the entry transaction starts', async () => {
+    const { setCrashHook } = await import('../src/exec/crashpoint.js');
+    updateControl('owner', { mode: 'APPROVAL' }, modeGate);
+    const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      rep.id, rep.candidateId, id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
+    const orderId = queueForApproval(rep)!;
+    setCrashHook(point => {
+      if (point === 'entry.preTx') run("UPDATE orders SET status='CANCELLED' WHERE id=?", orderId);
+    });
+    try { expect(decideApproval(orderId, true).ok).toBe(false); }
+    finally { setCrashHook(null); }
+    expect(get('SELECT status FROM orders WHERE id=?', orderId)).toMatchObject({ status: 'CANCELLED' });
+    expect(all('SELECT id FROM fills WHERE order_id=?', orderId)).toHaveLength(0);
+    expect(openPositions()).toHaveLength(0);
+  });
+  it('withholds entry without the matching approval, a valid expiry and an enrolled strategy version', () => {
+    const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    expect(submitEntry(rep, 'owner')).toMatchObject({ ok: false, reason: 'PENDING_APPROVAL_REQUIRED' });
+    const invalid = report(id, last);
+    invalid.consensus.expiresAt = 'invalid';
+    expect(submitEntry(invalid, 'bot')).toMatchObject({ ok: false, reason: 'CONSENSUS_EXPIRY_INVALID' });
+    expect(submitEntry(report(id, last, { strategy: { id: 'trend_pullback', version: '0.0.1' } }), 'bot').reason)
+      .toMatch(/STRATEGY_VERSION_MISMATCH/);
+    expect(openPositions()).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
+  });
   it('approval workflow: queued → owner approves → filled', () => {
-    updateControl('owner', { mode: 'APPROVAL' });
+    updateControl('owner', { mode: 'APPROVAL' }, modeGate);
     const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
     run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', rep.id, rep.candidateId, id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
+    expect(paperEntryForDecision(rep.id, id)).toBeNull();
     const oid = queueForApproval(rep)!; expect(oid).toBeTruthy();
+    expect(paperEntryForDecision(rep.id, id)).toMatchObject({ orderId: oid, status: 'PENDING_APPROVAL', filledQty: 0 });
     const res = decideApproval(oid, true); expect(res, JSON.stringify(res)).toMatchObject({ ok: true });
+    expect(paperEntryForDecision(rep.id, id)).toMatchObject({ orderId: oid, status: 'FILLED', filledQty: expect.any(Number) });
+  });
+  it('does not approve, expire, cancel or list another account’s pending order', () => {
+    const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    rep.consensus.expiresAt = '2020-01-01T00:00:00Z';
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      rep.id, rep.candidateId, id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
+    const oid = queueForApproval(rep)!;
+    run('UPDATE orders SET account=?, venue=? WHERE id=?', 'other-account', 'other-venue', oid);
+    expect(() => decideApproval(oid, true)).toThrow(/not pending approval/);
+    expect(() => decideApproval(oid, false)).toThrow(/not pending approval/);
+    expect(submitEntry(rep, 'owner')).toMatchObject({ ok: false, reason: 'ORDER_ACCOUNT_MISMATCH' });
+    expireApprovals();
+    expect(cancelPendingEntries('owner').cancelled).toBe(0);
+    expect(listOrders()).toHaveLength(0);
+    expect(tradingHistory().orders).toHaveLength(0);
+    expect(paperEntryForDecision(rep.id, id)).toBeNull();
+    expect(get('SELECT status FROM orders WHERE id=?', oid)).toMatchObject({ status: 'PENDING_APPROVAL' });
+  });
+  it('does not paper-fill or list a position belonging to another account', () => {
+    const entered = submitEntry(report(id, last), 'bot');
+    expect(entered.ok).toBe(true);
+    run('UPDATE positions SET account=? WHERE id=?', 'other-account', entered.positionId);
+    const cash = accountState().cash;
+    expect(executeExit(entered.positionId!, Infinity, 'TEST')).toBeNull();
+    expect(() => closePosition('owner', entered.positionId!)).toThrow(/position not open/);
+    expect(listPositions()).toHaveLength(0);
+    expect(accountState().cash).toBe(cash);
+    expect(get('SELECT status FROM positions WHERE id=?', entered.positionId)).toMatchObject({ status: 'OPEN' });
+    expect(all("SELECT 1 FROM orders WHERE side='SELL' AND status='FILLED'")).toHaveLength(0);
   });
   it('emergency stop: blocks, cancels, verifies protection, does not auto-close', () => {
     submitEntry(report(id, last), 'bot');
@@ -78,7 +139,7 @@ describe('Order-book freshness and fill accounting', () => {
   const sells = () => all<any>("SELECT o.purpose, f.qty, f.price, f.fee FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.side='SELL' ORDER BY f.ts, o.created_at");
   beforeEach(() => {
     freshDb(); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
   // ── from PR #4 (fix/mia-4.1-audit-repairs), kept verbatim ──
   it('does not record a full exit when executable order-book depth is unavailable', () => {
@@ -142,6 +203,26 @@ describe('Order-book freshness and fill accounting', () => {
     expect(sells().reduce((a, f) => a + f.qty, 0)).toBeCloseTo(qty0, 9);
     expect(reconcile().ok).toBe(true);
     expect(all("SELECT id FROM orders WHERE purpose='PROTECTIVE_STOP' AND status='ACTIVE'")).toHaveLength(0);
+  });
+  it('a target that closes a small position does not roll back with a TIME exit in the same pass (MIA-OMS-003)', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    // A venue minimum larger than half the position: the first target's remainder is unsellable, so it closes everything.
+    market.instruments.get(id)!.minQty = pos.qty * 0.6;
+    run('UPDATE positions SET max_hold_ms=1000, opened_at=? WHERE id=?', Date.now() - 10_000, pos.id); // max hold also expired
+    setBook(id, last * 1.05); monitorPositions();
+    expect(openPositions()).toHaveLength(0); // before the fix: every pass rolled back and the position never exited
+    expect(all("SELECT id FROM protection_incidents WHERE status='OPEN'")).toHaveLength(0);
+    expect(reconcile().ok).toBe(true);
+  });
+  it('a stale monitor cannot overwrite newer excursion values (CodeRabbit PR #16: mfe/mae in the CAS guard)', async () => {
+    const { setCrashHook } = await import('../src/exec/crashpoint.js');
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    // Another monitor commits a newer mfe after this pass took its snapshot (qty, stop and targets unchanged).
+    setCrashHook((p) => { if (p === 'monitor.preTx') { run('UPDATE positions SET mfe=? WHERE id=?', 123.456, pos.id); setCrashHook(null); } });
+    try { setBook(id, last * 1.01); monitorPositions(); } finally { setCrashHook(null); }
+    expect(get<any>('SELECT mfe FROM positions WHERE id=?', pos.id).mfe).toBe(123.456); // stale pass was skipped, not written
   });
   it('never fills an exit from a thin book at top-of-book or an invented price: waits for real depth', () => {
     // CLAUDE.md invariant #4 (PR #4): sufficient fresh depth or no fill. Originally (PR #3) this booked a partial

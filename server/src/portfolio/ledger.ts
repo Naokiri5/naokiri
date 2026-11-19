@@ -1,9 +1,12 @@
 import { all, get, run } from '../db/db.js';
 import { uid } from '../core/util.js';
 import { market } from '../market/store.js';
+import { quoteAgeOk } from '../market/quality.js';
 import { getSetting, setSetting } from '../core/settings.js';
+import { exitPolicy } from '../risk/policy.js';
 
-export const PAPER_ACCOUNT = 'paper-bot';
+import { PAPER_ACCOUNT } from '../core/accounts.js';
+export { PAPER_ACCOUNT };
 export type LedgerKind = 'DEPOSIT' | 'WITHDRAW' | 'BUY' | 'SELL' | 'FEE';
 export function ledger(account: string, kind: LedgerKind, amount: number, ref?: string, note?: string, ts = Date.now()) {
   run('INSERT INTO ledger_entries(id,account,ts,kind,amount,ref,note) VALUES (?,?,?,?,?,?,?)', uid('led'), account, ts, kind, amount, ref ?? null, note ?? null);
@@ -24,14 +27,21 @@ export interface AccountState {
 const dayKey = (t: number) => new Date(t).toISOString().slice(0, 10);
 const weekKey = (t: number) => { const d = new Date(t); const day = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - day); return d.toISOString().slice(0, 10); };
 
-export function accountState(account = PAPER_ACCOUNT, nowTs = Date.now()): AccountState {
+export function accountState(account = PAPER_ACCOUNT, nowTs = Date.now(), { persistMarks = true } = {}): AccountState {
   const cash = cashBalance(account); const pos = openPositions(account);
   let value = 0, unreal = 0, openRisk = 0; const missing: string[] = [];
+  const pol = exitPolicy(); // open-risk accounting of EXISTING positions: always a validated policy
   for (const p of pos) {
-    const m = markPrice(p.instrument);
+    // MIA-RISK-001: a mark must be fresh, not just present. A frozen feed (delisted/halted symbol) used to keep its last
+    // price forever, so equity, loss breakers and open risk were computed from stale data and the gate failed open.
+    // A stale, future-dated or non-positive mark now counts as missing: the gate denies (POSITION_MARKS_MISSING).
+    const px = market.price(p.instrument); const m = px && Number.isFinite(px.price) && px.price > 0 && quoteAgeOk(px.ts, nowTs) ? px.price : null;
     if (m == null) { missing.push(p.instrument); value += p.qty * p.entry_price; continue; }
     value += p.qty * m; unreal += p.qty * (m - p.entry_price);
-    openRisk += Math.max(0, p.qty * (Math.min(m, p.entry_price) - p.stop_price));
+    // MIA-RISK-007: measured like new-trade sizing — to the conservative stop FILL (stop minus the slippage buffer) plus
+    // the exit fee — so open risk is not understated relative to maxOpenRiskPct. (The entry fee is already paid.)
+    const stopFill = p.stop_price * (1 - pol.stopFillBufferPct / 100);
+    openRisk += Math.max(0, p.qty * (Math.min(m, p.entry_price) - stopFill + pol.feeRate * stopFill));
   }
   const equity = cash + value;
   const deposits = totalDeposits(account);
@@ -43,7 +53,7 @@ export function accountState(account = PAPER_ACCOUNT, nowTs = Date.now()): Accou
   if (marks.day !== dayKey(nowTs)) { marks.day = dayKey(nowTs); marks.sodPerf = perf; changed = true; }
   if (marks.week !== weekKey(nowTs)) { marks.week = weekKey(nowTs); marks.sowPerf = perf; changed = true; }
   if (perf > marks.hwmPerf) { marks.hwmPerf = perf; changed = true; }
-  if (changed && !missing.length) setSetting(`marks2:${account}`, marks);
+  if (persistMarks && changed && !missing.length) setSetting(`marks2:${account}`, marks);
   const sod = deposits + marks.sodPerf, sow = deposits + marks.sowPerf, hwm = deposits + marks.hwmPerf;
   const closed = all<{ realized_pnl: number }>("SELECT realized_pnl FROM positions WHERE account=? AND status='CLOSED' ORDER BY closed_at DESC LIMIT 20", account);
   let streak = 0; for (const c of closed) { if (c.realized_pnl < 0) streak++; else break; }

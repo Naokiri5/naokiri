@@ -48,6 +48,45 @@ describe('deterministic chart intelligence', () => {
     expect(r.trend).toBe('BULLISH');
     expect(r.detections.find(d => d.kind === 'SWING_STRUCTURE')!.evidence.join(' ')).not.toContain('112');
   });
+  it('detects the first continuation close through a confirmed swing', () => {
+    const cs = history();
+    cs[5].h = 105; cs[15].h = 108;
+    cs[10].l = 95; cs[20].l = 96;
+    cs[29] = { ...cs[29], h: 110, c: 109 };
+    expect(analyze(cs).detections.map(d => d.kind)).toContain('STRUCTURE_BREAK_UP');
+    cs[28] = { ...cs[28], h: 110, c: 109 };
+    expect(analyze(cs).detections.map(d => d.kind)).not.toContain('STRUCTURE_BREAK_UP');
+  });
+  it('classifies the first break against the prior trend as a change of character', () => {
+    const cs = history();
+    cs[5].h = 105; cs[15].h = 108;
+    cs[10].l = 95; cs[20].l = 96;
+    cs[29] = { ...cs[29], l: 94, c: 95 };
+    expect(analyze(cs).detections.map(d => d.kind)).toContain('CHANGE_OF_CHARACTER_DOWN');
+    cs[29].c = 96;
+    expect(analyze(cs).detections.map(d => d.kind)).not.toContain('CHANGE_OF_CHARACTER_DOWN');
+  });
+  it('requires a close beyond the original breakout level after touching it', () => {
+    const cs = history();
+    cs[28] = { ...cs[28], h: 106, c: 105 };
+    cs[29] = { ...cs[29], o: 104, l: 102, h: 105, c: 104 };
+    expect(analyze(cs).detections.map(d => d.kind)).toContain('BREAKOUT_RETEST_UP');
+    cs[29].c = 102;
+    expect(analyze(cs).detections.map(d => d.kind)).not.toContain('BREAKOUT_RETEST_UP');
+  });
+  it('weights complete UTC anchors by volume and omits prices for missing anchor history', () => {
+    const cs = history(26);
+    cs[24] = { t: 24 * H, o: 100, h: 100, l: 100, c: 100, v: 1 };
+    cs[25] = { t: 25 * H, o: 120, h: 120, l: 120, c: 120, v: 3 };
+    const run = (bars: Candle[]) => analyzeChart('crypto:binance:TEST', '1h', bars, 26 * H).anchoredVwap;
+    expect(run(cs)).toEqual([
+      { anchor: 'UTC_DAY', anchorAt: 24 * H, price: 115, deviationPct: expect.closeTo(100 / 23) },
+      { anchor: 'UTC_WEEK', anchorAt: -72 * H, price: null, deviationPct: null },
+      { anchor: 'UTC_MONTH', anchorAt: 0, price: expect.any(Number), deviationPct: expect.any(Number) },
+    ]);
+    cs[24].v = 0; cs[25].v = 0;
+    expect(run(cs)[0].price).toBeNull();
+  });
   it('is pure and deterministic', () => {
     const cs = history(); const original = structuredClone(cs);
     expect(analyze(cs)).toEqual(analyze(cs)); expect(cs).toEqual(original);

@@ -1,8 +1,15 @@
-import { useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { api, fmt, useApi } from '../api';
-import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Page, Stat, Tabs } from '../ui';
+import { api, authInfo, fmt, useApi, stepUpBody } from '../api';
+import { TwoFactorCard } from '../auth/TwoFactorCard';
+import { GuardianCard } from '../components/GuardianCard';
+import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Page, Stat, Tabs , rowProps} from '../ui';
 import { StepUp } from './Trading';
+import { VikeResearchPanel } from './VikeResearch';
+import { PrivyAccountCard, type PrivyClientConfig } from '../privy/lazy';
+import { SecFilings } from './SecFilings';
+import { MarketCoverage } from './MarketCoverage';
+import { SolanaWatchlist } from './SolanaWatchlist';
 
 /** Asset Discovery — ranked lists from live feeds only. */
 export function Discover() {
@@ -10,15 +17,19 @@ export function Discover() {
   const [tab, setTab] = useState('Volume leaders'); const nav = useNavigate();
   const lists: Record<string, any[]> = { 'Volume leaders': data?.volumeLeaders ?? [], Gainers: data?.gainers ?? [], Losers: data?.losers ?? [], 'Unusual volume': data?.unusualVolume ?? [], 'Large caps': data?.largeCaps ?? [] };
   const rows = lists[tab] ?? [];
+  const research = tab === 'Solana watchlist' ? <SolanaWatchlist view={data?.solanaHunter} loaded={data !== undefined} /> : tab === 'Vike research' ? <VikeResearchPanel /> : tab === 'SEC filings' ? <SecFilings /> : tab === 'Market coverage' ? <MarketCoverage /> : null;
   return <Page title="Asset Discovery" sub={<>Find assets worth a closer look. Every list is computed from live exchange data. {data?.note}</>}
     right={<><Freshness at={data?.asOf} /><select value={minVol} onChange={(e) => setMinVol(Number(e.target.value))} aria-label="Minimum 24h volume"><option value={1e6}>≥ $1M vol</option><option value={1e7}>≥ $10M</option><option value={1e8}>≥ $100M</option></select></>}>
     <ErrorLine e={error} />
-    <Tabs tabs={[...Object.keys(lists), 'New DEX tokens']} value={tab} onChange={setTab} />
+    <Tabs tabs={[...Object.keys(lists), 'New DEX tokens', 'Solana watchlist', 'Market coverage', 'SEC filings', 'Vike research']} value={tab} onChange={setTab} />
+    {research}
+    {research === null && <>
     {tab !== 'New DEX tokens' ? <Card flush title={`${rows.length} of ${data?.universe ?? 0} liquid pairs`}><div className="tablewrap"><table><thead><tr><th>Asset</th><th className="num">Price</th><th className="num">24h</th><th className="num">Volume</th><th className="num">Mkt cap</th><th className="num">Rel. vol 1h</th><th>Regime</th><th>Safety</th><th /></tr></thead>
-      <tbody>{rows.map((r) => <tr key={r.instrumentId} className="click" onClick={() => nav(`/terminal/${r.symbol}`)}><td><b>{r.base}</b> <span className="faint">{r.name ?? ''}</span>{r.rank && <span className="faint"> #{r.rank}</span>}</td><td className="num">{fmt.px(r.price)}</td><td className="num"><Chg v={r.changePct} /></td><td className="num">{fmt.big(r.quoteVolume)}</td><td className="num">{fmt.big(r.marketCap)}</td><td className="num">{r.relVol1h == null ? '—' : `${fmt.num(r.relVol1h, 2)}×`}</td><td>{r.regime ? <Badge v={r.regime} /> : <span className="faint">not deep-scanned</span>}</td><td>{r.safety ? <Badge v={r.safety} /> : ''}</td><td><Action className="sm" label="Analyze" run={async () => { nav(`/terminal/${r.symbol}`); }} /></td></tr>)}</tbody></table>
+      <tbody>{rows.map((r) => <tr key={r.instrumentId} {...rowProps(() => nav(`/terminal/${r.symbol}`), `Open ${r.symbol} in the terminal`)}><td><b>{r.base}</b> <span className="faint">{r.name ?? ''}</span>{r.rank && <span className="faint"> #{r.rank}</span>}</td><td className="num">{fmt.px(r.price)}</td><td className="num"><Chg v={r.changePct} /></td><td className="num">{fmt.big(r.quoteVolume)}</td><td className="num">{fmt.big(r.marketCap)}</td><td className="num">{r.relVol1h == null ? '—' : `${fmt.num(r.relVol1h, 2)}×`}</td><td>{r.regime ? <Badge v={r.regime} /> : <span className="faint">not deep-scanned</span>}</td><td>{r.safety ? <Badge v={r.safety} /> : ''}</td><td><Action className="sm" label="Analyze" run={async () => { nav(`/terminal/${r.symbol}`); }} /></td></tr>)}</tbody></table>
       {!rows.length && <Empty>{tab === 'Unusual volume' ? 'Relative volume is available for deep-tier instruments once their candles load.' : 'Waiting for market data…'}</Empty>}</div></Card>
       : <Card flush title="Newest DEX token profiles" right={<Freshness at={data?.dexAsOf} />}><div className="banner info" style={{ margin: 12 }}>DEX tokens are never eligible for automated trading: contract-level honeypot checks need an on-chain provider. Names are untrusted external content.</div>
         <div className="tablewrap"><table><thead><tr><th>Token</th><th>Chain</th><th className="num">Liquidity</th><th className="num">Vol 24h</th><th className="num">24h</th><th>Age</th><th>Safety</th></tr></thead><tbody>{(data?.dexLaunches ?? []).map((p: any) => <tr key={p.pairAddress}><td><a href={p.url} target="_blank" rel="noreferrer noopener"><b>{p.baseSymbol}</b></a> <span className="faint">{p.baseName}</span></td><td>{p.chainId}</td><td className="num">{fmt.usd(p.liquidityUsd, 0)}</td><td className="num">{fmt.big(p.volume24h)}</td><td className="num"><Chg v={p.change24h} /></td><td className="faint">{p.pairCreatedAt ? fmt.ago(p.pairCreatedAt) : '—'}</td><td><Badge v={p.safety.status} title={p.safety.reasons.join('\n')} /></td></tr>)}</tbody></table>{!data?.dexLaunches?.length && <Empty>Loading DEX listings…</Empty>}</div></Card>}
+    </>}
   </Page>;
 }
 
@@ -55,16 +66,20 @@ export function SecurityCenter() {
   const { data, error, reload } = useApi('/api/security'); const [pw, setPw] = useState(''); const [area, setArea] = useState('All');
   const areas = ['All', ...new Set<string>((data?.checks ?? []).map((c: any) => c.area))];
   const checks = (data?.checks ?? []).filter((c: any) => area === 'All' || c.area === area);
+  const privy = useApi<PrivyClientConfig>('/api/auth/privy/config');
   return <Page title="Security Center" sub="Live security checks, sessions and sign-in activity. Secrets are reported as configured or not, never shown.">
     <ErrorLine e={error} />
     <div className="grid g3" style={{ marginBottom: 14 }}><Stat k="Passing" v={data?.summary.pass ?? '—'} tone="up" /><Stat k="Warnings" v={data?.summary.warn ?? '—'} tone={data?.summary.warn ? 'warn' : undefined} /><Stat k="Failing" v={data?.summary.fail ?? '—'} tone={data?.summary.fail ? 'down' : undefined} /></div>
     <Card title="Security checks" flush right={<select value={area} onChange={(e) => setArea(e.target.value)} aria-label="Area">{areas.map((a) => <option key={a}>{a}</option>)}</select>}>
       <table><tbody>{checks.map((c: any) => <tr key={c.id}><td className="mono faint">{c.id}</td><td>{c.area}</td><td><b>{c.name}</b><div className="hint">{c.detail}</div></td><td><Badge v={c.status} tone={c.status === 'PASS' ? 'b-good' : c.status === 'FAIL' ? 'b-bad' : c.status === 'WARN' ? 'b-warn' : 'b-neutral'} /></td></tr>)}</tbody></table></Card>
+    <div style={{ marginTop: 14 }}><GuardianCard /></div>
+    <div style={{ marginTop: 14 }}><TwoFactorCard /></div>
+    {privy.data?.enabled && <div style={{ marginTop: 14 }}><Suspense fallback={<Card title="Privy account"><Empty>Loading Privy…</Empty></Card>}><PrivyAccountCard config={privy.data} onChange={privy.reload} /></Suspense></div>}
     <div className="grid g2" style={{ marginTop: 14 }}>
       <Card title={`Active sessions (${data?.sessions.length ?? 0})`}><div className="col">
         <table><tbody>{(data?.sessions ?? []).map((s: any) => <tr key={s.id}><td className="mono faint">{s.id}…</td><td>signed in {fmt.ago(s.createdAt)}</td><td className="faint">expires {fmt.time(s.expiresAt)}</td><td>{s.current && <Badge v="THIS DEVICE" tone="b-info" />}</td></tr>)}</tbody></table>
-        <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="danger" label="Sign out all other sessions" run={async () => { await api('/api/security/sessions/revoke-others', { body: { password: pw } }); setPw(''); reload(); }} /></div>
-        <div className="hint">Change your passphrase in <Link to="/settings">Settings</Link>; that signs out every session.</div></div></Card>
+        <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="danger" label="Sign out all other sessions" run={async () => { await api('/api/security/sessions/revoke-others', { body: { ...stepUpBody(pw) } }); setPw(''); reload(); }} /></div>
+        {authInfo.mode === 'passphrase' && <div className="hint">Change your passphrase in <Link to="/settings">Settings</Link>; that signs out every session.</div>}</div></Card>
       <Card title="Sign-in & security events" flush><div className="tablewrap" style={{ maxHeight: 320 }}><table><tbody>{(data?.authEvents ?? []).map((e: any, i: number) => <tr key={i}><td className="faint" style={{ whiteSpace: 'nowrap' }}>{fmt.time(e.ts)}</td><td><Badge v={e.action} tone={e.action.includes('failed') ? 'b-bad' : 'b-neutral'} /></td><td className="hint">{e.detail?.slice(0, 120)}</td></tr>)}</tbody></table>{!data?.authEvents?.length && <Empty>No events.</Empty>}</div></Card>
     </div>
     <Card title="More" className="" ><div className="row"><Link to="/qa">Release gates & audit log →</Link><Link to="/wallet">Withdrawal freeze →</Link><Link to="/risk">Emergency controls →</Link></div></Card>
@@ -92,7 +107,10 @@ export function CopyTrading() {
 /** Trading history — orders and closed trades with filters + CSV export. */
 export function History() {
   const [f, setF] = useState({ instrument: '', status: '', purpose: '', days: '30' });
-  const qs = new URLSearchParams(Object.entries({ instrument: f.instrument, status: f.status, purpose: f.purpose, from: f.days ? String(Date.now() - Number(f.days) * 86400_000) : '' }).filter(([, v]) => v)).toString();
+  // MIA-WEB-030: `from` used Date.now() on every render, so the request path changed every render and the page refetched
+  // in a loop (753 requests in 3 s, measured). The window start is fixed per period choice; Refresh-on-events still works.
+  const from = useMemo(() => (f.days ? String(Date.now() - Number(f.days) * 86400_000) : ''), [f.days]);
+  const qs = new URLSearchParams(Object.entries({ instrument: f.instrument, status: f.status, purpose: f.purpose, from }).filter(([, v]) => v)).toString();
   const { data, error } = useApi(`/api/history?${qs}`, { topics: ['order', 'position'] }); const [tab, setTab] = useState('Closed trades');
   const s = data?.summary;
   return <Page title="Trading History" sub="Every paper order and closed trade, filterable and exportable. All entries are simulated (paper)."

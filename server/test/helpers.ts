@@ -19,7 +19,13 @@ import { seedStrategies } from '../src/lab/lab.js';
 import type { Instrument } from '../src/market/types.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
 import { stats, type BtResult, type BtTrade } from '../src/lab/backtest.js';
-export function seedBacktestFixture(strategyId = STRATEGIES[0].id) {
+import { ensureSetupCode } from '../src/api/auth.js';
+
+export function ownerSetupPayload(password: string) {
+  return { password, setupCode: ensureSetupCode(false, () => {}) };
+}
+
+export function seedBacktestFixture(strategyId = STRATEGIES[0].id, oosTrades = 30) {
   const strategy = STRATEGIES.find((s) => s.id === strategyId)!;
   const trade: BtTrade = {
     entryT: 1, exitT: 2, entry: 100, exit: 101, r: 0.2, reason: 'SYNTHETIC TEST FIXTURE',
@@ -28,7 +34,7 @@ export function seedBacktestFixture(strategyId = STRATEGIES[0].id) {
   const result: BtResult = {
     strategyId, strategyVersion: strategy.version, instrument: 'crypto:fixture:SYNTHETIC', interval: strategy.interval,
     bars: 500, from: 0, to: 3, splitAt: 1, costs: { feeRate: 0.001, slippageBps: 3, spreadBps: 2 },
-    inSample: stats([]), outOfSample: stats([trade]), all: stats([trade]), trades: [trade], equityR: [0.2],
+    inSample: stats([]), outOfSample: stats(Array(oosTrades).fill(trade)), all: stats(Array(oosTrades).fill(trade)), trades: Array(oosTrades).fill(trade), equityR: Array(oosTrades).fill(0.2),
     warnings: ['Synthetic test fixture — not market data or performance evidence'],
   };
   run('INSERT INTO backtests(id,strategy_id,created_at,instrument,interval,result) VALUES (?,?,?,?,?,?)', `bt_fixture_${strategyId}`, strategyId, Date.now(), result.instrument, strategy.interval, J(result));
