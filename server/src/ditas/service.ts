@@ -1,4 +1,6 @@
-import { all, get, run, J, P } from '../db/db.js';
+import { all, get, run, tx, J, P } from '../db/db.js';
+import { appendEvent } from '../fabric/outbox.js';
+import { buildEvent } from '../fabric/contracts.js';
 import { uid, sha256 } from '../core/util.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import { getControl } from '../core/mode.js';
@@ -89,12 +91,23 @@ export function addForecast(eventId: string, probability: number, targetAt: numb
   return { id, eventId, createdAt: now, targetAt, probability, cohort, ...payload };
 }
 export function addOutcome(forecastId: string, observedPrice: number, observedAt: number, sourceReference: string) {
-  const f = get<any>('SELECT * FROM ditas_forecasts WHERE id=?', forecastId), now = Date.now();
-  if (!f) throw new Error('forecast not found');
-  if (!Number.isFinite(observedPrice) || observedPrice <= 0 || observedAt !== f.target_at || observedAt > now || observedAt <= f.created_at) throw new Error('outcome must match the forecast target time and follow its recorded forecast');
-  const prediction = P(f.payload), outcome = observedPrice > prediction.referencePrice ? 1 : 0, id = uid('outcome');
-  const payload = { observedPrice, observedAt, sourceReference, provenance: 'OWNER_REPORTED_UNVERIFIED', target: prediction.target, note: 'Operator-supplied observation, not independently verified exchange history.' };
-  if (get('SELECT 1 FROM ditas_outcomes WHERE forecast_id=?', forecastId)) throw new Error('duplicate outcome: this forecast is already settled');
-  run('INSERT INTO ditas_outcomes(id,forecast_id,created_at,outcome,payload) VALUES (?,?,?,?,?)', id, forecastId, now, outcome, J(payload));
-  return { id, forecastId, createdAt: now, outcome, ...payload };
+  // NEXUS N2: the outcome row and its fabric event commit together, or neither does.
+  return tx(() => {
+    const f = get<any>('SELECT * FROM ditas_forecasts WHERE id=?', forecastId), now = Date.now();
+    if (!f) throw new Error('forecast not found');
+    if (!Number.isFinite(observedPrice) || observedPrice <= 0 || observedAt !== f.target_at || observedAt > now || observedAt <= f.created_at) throw new Error('outcome must match the forecast target time and follow its recorded forecast');
+    const prediction = P(f.payload), outcome = observedPrice > prediction.referencePrice ? 1 : 0, id = uid('outcome');
+    const payload = { observedPrice, observedAt, sourceReference, provenance: 'OWNER_REPORTED_UNVERIFIED', target: prediction.target, note: 'Operator-supplied observation, not independently verified exchange history.' };
+    if (get('SELECT 1 FROM ditas_outcomes WHERE forecast_id=?', forecastId)) throw new Error('duplicate outcome: this forecast is already settled');
+    run('INSERT INTO ditas_outcomes(id,forecast_id,created_at,outcome,payload) VALUES (?,?,?,?,?)', id, forecastId, now, outcome, J(payload));
+    const origin = get<{ id: string; instrument: string; snapshot_id: string | null }>('SELECT id, instrument, snapshot_id FROM ditas_events WHERE id=?', f.event_id);
+    appendEvent(buildEvent({
+      eventId: `ditas.outcome.${id}`, eventType: 'ditas.outcome.recorded.v1', source: 'ditas:service', sourceClass: 'DITAS',
+      instrumentId: origin?.instrument, traceId: f.event_id, causationId: forecastId, occurredAt: new Date(observedAt).toISOString(),
+      snapshotId: origin?.snapshot_id ?? undefined, producerVersion: 'ditas-service@1', dataStatus: 'UNVERIFIED', accessClass: 'OWNER_PRIVATE',
+      // Owner-reported observation: labelled UNVERIFIED, never presented as exchange truth. No secrets, no free text.
+      payload: { outcomeId: id, forecastId, decisionEventId: f.event_id, outcome, observedPrice, observedAt, provenance: 'OWNER_REPORTED_UNVERIFIED' },
+    }, now), now);
+    return { id, forecastId, createdAt: now, outcome, ...payload };
+  });
 }

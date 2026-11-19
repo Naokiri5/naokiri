@@ -2,6 +2,8 @@
  * MIA NEXUS fabric topic catalog (N1). One entry per canonical topic from the NEXUS Ω V3 spec (V3-04.4), each with
  * its SOLE owner (the existing file that writes the authoritative state), consumers, priority, durability, retention,
  * access class and payload limit — and an honest implementation status:
+ *  - OUTBOX_DURABLE         the owner appends a fabric.event.v1 to the transactional outbox in the same transaction as
+ *                           its row; the relay delivers it at-least-once to idempotent consumers (N2);
  *  - ACTIVE_BEST_EFFORT     the owner already publishes it as an in-process bus notification (core/bus.ts topic);
  *  - STATE_EXISTS_NO_EVENT  the authoritative state already exists (OMS, ledger, DITAS tables, the in-memory book…);
  *                           no fabric event is emitted yet — a later phase (N2) records events ABOUT committed state;
@@ -11,7 +13,7 @@
  */
 export type Priority = 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
 export type Durability = 'BEST_EFFORT' | 'DURABLE' | 'NEVER_COALESCE';
-export type TopicStatus = 'ACTIVE_BEST_EFFORT' | 'STATE_EXISTS_NO_EVENT' | 'RESERVED';
+export type TopicStatus = 'OUTBOX_DURABLE' | 'ACTIVE_BEST_EFFORT' | 'STATE_EXISTS_NO_EVENT' | 'RESERVED';
 export type SourceClass = 'MARKET' | 'PROVIDER' | 'STRATEGY' | 'QMC' | 'QCI' | 'RISK' | 'OMS' | 'LEDGER' | 'DITAS' | 'SYSTEM';
 export type AccessClass = 'PUBLIC_MARKET' | 'OWNER_PRIVATE' | 'SYSTEM_RESTRICTED';
 
@@ -57,7 +59,7 @@ export const CATALOG: readonly TopicSpec[] = Object.freeze([
   t({ topic: 'order.state.changed.v1', ownerFile: 'exec/oms.ts', sourceClass: 'OMS', consumers: ['portfolio/ledger', 'web'], priority: 'P1', durability: 'NEVER_COALESCE', retention: 'PERMANENT', accessClass: 'OWNER_PRIVATE', maxPayloadBytes: 8_192, status: 'STATE_EXISTS_NO_EVENT', busTopic: 'order', authority: 'orders table (paper)' }),
   t({ topic: 'fill.recorded.v1', ownerFile: 'exec/oms.ts', sourceClass: 'OMS', consumers: ['portfolio/ledger', 'ditas'], priority: 'P1', durability: 'NEVER_COALESCE', retention: 'PERMANENT', accessClass: 'OWNER_PRIVATE', maxPayloadBytes: 8_192, status: 'STATE_EXISTS_NO_EVENT', busTopic: 'order', authority: 'fills table (paper)' }),
   t({ topic: 'ledger.updated.v1', ownerFile: 'portfolio/ledger.ts', sourceClass: 'LEDGER', consumers: ['web', 'risk/gate'], priority: 'P1', durability: 'NEVER_COALESCE', retention: 'PERMANENT', accessClass: 'OWNER_PRIVATE', maxPayloadBytes: 8_192, status: 'STATE_EXISTS_NO_EVENT', busTopic: 'position', authority: 'ledger tables (paper)' }),
-  t({ topic: 'ditas.outcome.recorded.v1', ownerFile: 'ditas/memory.ts', sourceClass: 'DITAS', consumers: ['ditas calibration', 'loss lab'], priority: 'P2', durability: 'DURABLE', retention: 'PERMANENT', accessClass: 'OWNER_PRIVATE', maxPayloadBytes: 16_384, status: 'STATE_EXISTS_NO_EVENT', busTopic: null, authority: 'ditas_events (hash chain, immutability triggers)' }),
+  t({ topic: 'ditas.outcome.recorded.v1', ownerFile: 'ditas/service.ts', sourceClass: 'DITAS', consumers: ['ditas calibration', 'loss lab'], priority: 'P2', durability: 'DURABLE', retention: 'PERMANENT', accessClass: 'OWNER_PRIVATE', maxPayloadBytes: 16_384, status: 'OUTBOX_DURABLE', busTopic: null, authority: 'ditas_outcomes (immutable) + fabric_outbox event in the same transaction' }),
   t({ topic: 'qmc.agent.assessed.v1', ownerFile: null, sourceClass: 'QMC', consumers: ['qmc passports', 'web'], priority: 'P3', durability: 'DURABLE', retention: 'PERMANENT', accessClass: 'OWNER_PRIVATE', maxPayloadBytes: 8_192, status: 'RESERVED', busTopic: null, authority: 'no agent evaluator exists (ditas/passports.ts holds STRATEGY passports, not agent ones)' }),
   t({ topic: 'research.challenger.proposed.v1', ownerFile: null, sourceClass: 'STRATEGY', consumers: ['owner review'], priority: 'P3', durability: 'DURABLE', retention: 'PERMANENT', accessClass: 'OWNER_PRIVATE', maxPayloadBytes: 16_384, status: 'RESERVED', busTopic: null, authority: 'no loss-lab challenger producer exists; never auto-promotes' }),
   t({ topic: 'ops.system.degraded.v1', ownerFile: 'ops/readiness.ts', sourceClass: 'SYSTEM', consumers: ['notify', 'trader joe', 'web'], priority: 'P0', durability: 'DURABLE', retention: '1Y', accessClass: 'SYSTEM_RESTRICTED', maxPayloadBytes: 4_096, status: 'ACTIVE_BEST_EFFORT', busTopic: 'health', authority: 'readiness checks + exec/incidents protection incidents' }),
@@ -72,7 +74,7 @@ export function catalogSummary() {
   return {
     schemaVersion: 'fabric.catalog.v1' as const,
     topics: CATALOG,
-    counts: { total: CATALOG.length, activeBestEffort: count('ACTIVE_BEST_EFFORT'), stateExistsNoEvent: count('STATE_EXISTS_NO_EVENT'), reserved: count('RESERVED') },
-    note: 'N1 catalog: describes topics, owners and status. Nothing is delivered through a durable outbox yet (N2). The OMS, ledger, DITAS and audit log remain the sources of truth.',
+    counts: { total: CATALOG.length, outboxDurable: count('OUTBOX_DURABLE'), activeBestEffort: count('ACTIVE_BEST_EFFORT'), stateExistsNoEvent: count('STATE_EXISTS_NO_EVENT'), reserved: count('RESERVED') },
+    note: 'Topics marked OUTBOX_DURABLE are recorded in the same transaction as their owner\'s row and delivered at-least-once (N2). The OMS, ledger, DITAS and audit log remain the sources of truth.',
   };
 }

@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { freshDb } from './helpers.js';
+import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { failureGate } from '../src/core/ratelimit.js';
 import { CATALOG, topicSpec, catalogSummary } from '../src/fabric/catalog.js';
 import { buildEvent, canonicalJson, payloadHash, validateEvent } from '../src/fabric/contracts.js';
 
-/** MIA NEXUS N1: event envelope and topic catalog. Contracts only — nothing produces or consumes fabric events yet. */
+/** MIA NEXUS N1/N2: event envelope and topic catalog. N2 enables durable delivery for one research topic only. */
 const SRC = new URL('../src/', import.meta.url).pathname;
 const NOW = Date.parse('2026-11-19T08:00:00.000Z');
 const base = () => ({
@@ -97,7 +97,14 @@ describe('topic catalog', () => {
   it('the fabric module has no authority: it imports nothing from risk, OMS, ledger, wallet, decision or QCI', () => {
     const dir = join(SRC, 'fabric');
     const src = readdirSync(dir).filter((f) => statSync(join(dir, f)).isFile()).map((f) => readFileSync(join(dir, f), 'utf8')).join('\n');
-    expect(src).not.toMatch(/from ['"][^'"]*(risk\/|exec\/|portfolio\/|wallet\/|decision\/|qci\/|db\/)/);
+    expect(src).not.toMatch(/from ['"][^'"]*(risk\/|exec\/|portfolio\/|wallet\/|decision\/|qci\/)/);
+    // N2: the outbox and relay may use only the shared DB helpers, the audit chain and owner notifications.
+    const external = [...src.matchAll(/from ['"](\.\.\/[^'"]+)['"]/g)].map((m) => m[1]);
+    expect(new Set(external)).toEqual(new Set(['../core/util.js', '../db/db.js', '../core/audit.js', '../notify/notify.js']));
+  });
+  it('only the DITAS outcome topic is enabled for durable delivery in N2', () => {
+    expect(CATALOG.filter((t) => t.status === 'OUTBOX_DURABLE').map((t) => t.topic)).toEqual(['ditas.outcome.recorded.v1']);
+    expect(topicSpec('ditas.outcome.recorded.v1')).toMatchObject({ ownerFile: 'ditas/service.ts', producer: 'ditas:service' });
   });
 });
 
@@ -105,7 +112,7 @@ describe('fabric catalog route', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
   beforeAll(async () => {
     freshDb(); failureGate.reset(); app = await buildApp();
-    cookie = String((await app.inject({ method: 'POST', url: '/api/auth/setup', headers: { 'content-type': 'application/json' }, payload: { password: 'fabric route owner' } })).headers['set-cookie']).split(';')[0];
+    cookie = String((await app.inject({ method: 'POST', url: '/api/auth/setup', headers: { 'content-type': 'application/json' }, payload: ownerSetupPayload('fabric route owner') })).headers['set-cookie']).split(';')[0];
   });
   afterAll(async () => { await app.close(); });
   it('needs an owner session and returns the catalog with honest counts', async () => {

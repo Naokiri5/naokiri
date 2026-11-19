@@ -30,6 +30,7 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | [`SECURITY.md`](SECURITY.md) | security register (SEC-01 … SEC-14) and controls |
 | [`architecture/MIA_NEXUS_CURRENT_VS_TARGET.md`](architecture/MIA_NEXUS_CURRENT_VS_TARGET.md) | MIA NEXUS N0 audit: baseline, open-PR graph, single-authority matrix, gaps and phase order |
 | [`architecture/MIA_NEXUS_EVENT_CATALOG.md`](architecture/MIA_NEXUS_EVENT_CATALOG.md) | MIA NEXUS fabric topics: owners, priority, durability and honest status (generated from code) |
+| [`architecture/MIA_NEXUS_DURABLE_LOG.md`](architecture/MIA_NEXUS_DURABLE_LOG.md) | MIA NEXUS N2: transactional outbox, inbox dedup, relay retry and dead letters (one research topic) |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | design, trust boundaries, technology choices |
 
 ## Features

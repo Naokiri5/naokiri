@@ -1,4 +1,5 @@
 import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBooks, syncDepthStreams, stopDepthStreams, depthStreamStatus } from '../market/fabric.js';
+import { relayOnce } from '../fabric/relay.js';
 import { market } from '../market/store.js';
 import { scanOnce } from '../market/scanner.js';
 import { monitorPositions, expireApprovals, submitEntry, queueForApproval } from '../exec/oms.js';
@@ -129,6 +130,8 @@ async function backgroundPass() {
   try { await scanPrints(); botStatus.lastPrintsAt = Date.now(); } catch { /* tracked */ }
   if (Date.now() - botStatus.lastNewsAt > 5 * 60_000) { try { await refreshNews(); botStatus.lastNewsAt = Date.now(); } catch { /* tracked */ } }
   if (!stillLeader()) return; // backups and strategy suspension write: only the current leader, re-checked after the awaits
+  // NEXUS fabric relay (N2): leader-only, bounded batch, never throws out of the lane, no financial writes.
+  try { relayOnce(); } catch (e: any) { botStatus.lastError = `fabric relay: ${e?.message ?? e}`; }
   await backupPass();
   if (!stillLeader()) return; // the restore check is awaited: re-check before strategy suspension writes
   try { const s = checkStrategyHealth(); if (s.length) notify('WARNING', 'Strategy auto-suspended', s.join(', '), 'strategy-health'); } catch { /* */ }

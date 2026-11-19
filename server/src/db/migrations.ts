@@ -156,6 +156,22 @@ const MIGRATIONS: string[] = [
   UPDATE telegram_outbox SET status = 'FAILED', text = '', last_error = 'Legacy reply has no link authorization'
     WHERE status = 'QUEUED';
   `,
+  // v10 — MIA NEXUS fabric (N2): durable transactional outbox + per-consumer inbox. Generic event records ABOUT committed
+  // state; the OMS, ledger, DITAS and audit tables stay the sources of truth. Envelopes are immutable and never deleted;
+  // only delivery bookkeeping (status/attempts/next time/error) may change. (telegram_outbox is a separate message queue.)
+  `
+  CREATE TABLE fabric_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, event_type TEXT NOT NULL,
+    producer TEXT NOT NULL, trace_id TEXT NOT NULL, envelope TEXT NOT NULL, payload_hash TEXT NOT NULL, recorded_at INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('PENDING','DELIVERED','NO_CONSUMER','DEAD')), attempts INTEGER NOT NULL DEFAULT 0,
+    deliver_after INTEGER NOT NULL, last_error TEXT, delivered_at INTEGER);
+  CREATE INDEX fabric_outbox_due ON fabric_outbox(status, deliver_after, seq);
+  CREATE INDEX fabric_outbox_topic ON fabric_outbox(event_type, status, seq);
+  CREATE TRIGGER fabric_outbox_envelope_immutable BEFORE UPDATE OF event_id, event_type, producer, trace_id, envelope, payload_hash, recorded_at ON fabric_outbox
+    BEGIN SELECT RAISE(ABORT, 'fabric events are immutable'); END;
+  CREATE TRIGGER fabric_outbox_no_delete BEFORE DELETE ON fabric_outbox BEGIN SELECT RAISE(ABORT, 'fabric events are append-only'); END;
+  CREATE TABLE fabric_inbox (consumer_id TEXT NOT NULL, event_id TEXT NOT NULL REFERENCES fabric_outbox(event_id), handled_at INTEGER NOT NULL,
+    PRIMARY KEY (consumer_id, event_id));
+  `,
 ];
 
 const OBJECT_RE = /CREATE\s+(?:UNIQUE\s+)?(?:VIRTUAL\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;

@@ -1,10 +1,11 @@
-# MIA NEXUS: fabric event catalog (N1)
+# MIA NEXUS: fabric event catalog (N1 + N2)
 
 Source of truth: `server/src/fabric/catalog.ts`. This table is generated from it; edit the code, not this file. Read-only API: `GET /api/fabric/catalog` (owner session).
 
 **Status meanings:**
+- **OUTBOX_DURABLE:** (N2) the owner appends the event to `fabric_outbox` in the same SQLite transaction as the state it describes; the relay delivers it at least once to idempotent consumers. See [MIA_NEXUS_DURABLE_LOG.md](MIA_NEXUS_DURABLE_LOG.md).
 - **ACTIVE_BEST_EFFORT:** the owner already publishes this as an in-process bus notification (`core/bus.ts`). It is not durable.
-- **STATE_EXISTS_NO_EVENT:** the authoritative state already exists (OMS, ledger, DITAS tables, or the in-memory book), but no fabric event is emitted yet. N2 will record events *about* committed state; it never replaces that state.
+- **STATE_EXISTS_NO_EVENT:** the authoritative state already exists (OMS, ledger, DITAS tables, or the in-memory book), but no fabric event is emitted yet. Events only ever describe committed state; they never replace it.
 - **RESERVED:** no producer exists. Validation rejects these topics, so nothing can fake activity. All `qmc.*` topics are reserved, because the 1,000-profile registry was not supplied.
 
 **Envelope:** `fabric.event.v1` (`server/src/fabric/contracts.ts`, Zod, strict). Each event is checked for:
@@ -36,7 +37,7 @@ Source of truth: `server/src/fabric/catalog.ts`. This table is generated from it
 | `order.state.changed.v1` | `exec/oms.ts` | STATE_EXISTS_NO_EVENT | P1 | NEVER_COALESCE | PERMANENT | OWNER_PRIVATE | order | orders table (paper) |
 | `fill.recorded.v1` | `exec/oms.ts` | STATE_EXISTS_NO_EVENT | P1 | NEVER_COALESCE | PERMANENT | OWNER_PRIVATE | order | fills table (paper) |
 | `ledger.updated.v1` | `portfolio/ledger.ts` | STATE_EXISTS_NO_EVENT | P1 | NEVER_COALESCE | PERMANENT | OWNER_PRIVATE | position | ledger tables (paper) |
-| `ditas.outcome.recorded.v1` | `ditas/memory.ts` | STATE_EXISTS_NO_EVENT | P2 | DURABLE | PERMANENT | OWNER_PRIVATE | — | ditas_events (hash chain, immutability triggers) |
+| `ditas.outcome.recorded.v1` | `ditas/service.ts` | OUTBOX_DURABLE | P2 | DURABLE | PERMANENT | OWNER_PRIVATE | — | ditas_outcomes (immutable) + fabric_outbox event in the same transaction |
 | `qmc.agent.assessed.v1` | — | RESERVED | P3 | DURABLE | PERMANENT | OWNER_PRIVATE | — | no agent evaluator exists (ditas/passports.ts holds STRATEGY passports, not agent ones) |
 | `research.challenger.proposed.v1` | — | RESERVED | P3 | DURABLE | PERMANENT | OWNER_PRIVATE | — | no loss-lab challenger producer exists; never auto-promotes |
 | `ops.system.degraded.v1` | `ops/readiness.ts` | ACTIVE_BEST_EFFORT | P0 | DURABLE | 1Y | SYSTEM_RESTRICTED | health | readiness checks + exec/incidents protection incidents |
