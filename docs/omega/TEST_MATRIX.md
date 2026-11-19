@@ -23,8 +23,19 @@
 
 Full-suite results for this branch are recorded in the PR description.
 
+## PR-06: read-only Solana mint checks
+
+| Area | Test | File | Result (local, this branch) |
+|---|---|---|---|
+| Size cap | `fetchProvider` `maxBytes` refuses an oversized Content-Length and a body that streams past the cap; a small body parses as before | `server/test/solana-rpc.test.ts` | pass; fails without the cap |
+| Transport | URL only from `MIA_SOLANA_RPC_URL` (https, no credentials or fragment); exactly one `getMultipleAccounts`; redirects refused; bad input sends nothing; malformed or error replies rejected, node text not echoed | same | pass; fails if redirects are followed |
+| Mint checks | Trusted-quote Solana mints only (deduplicated, at most 100); pass, block and missing account recorded with the slot in one request; TTL; dropped mints; error codes without the URL; stale pass becomes "not checked"; block always stands; no request without the setting; one request at a time | same | pass; fails if a stale pass still counts |
+| Watchlist join | A block turns WATCH into REJECT (sorted last); a pass adds a note; nothing becomes tradable; `/api/discover` never contains the RPC URL or key | same | pass; fails without the join |
+| UI | Mint check column; "authorities revoked" and "blocked" badges; failed-check banner; no buttons | `e2e/solana.spec.ts` | pass |
+| Live (opt-in) | wSOL passes and USDC blocks on real chain data | `server/test/live.providers.test.ts` | **not run**: the sandbox network refuses the Solana host |
+
 ## Not run (no credentials or network; recorded honestly)
 - **GMGN:** live API calls (no key).
-- **Solana RPC:** `getAccountInfo` against real mints, including real Token-2022 accounts (no RPC URL).
+- **Solana RPC:** the owner chose `https://api.mainnet.solana.com` (PR-06). The live test is written but not run here, because this sandbox's network policy refuses the host. It needs to run on the server. Real Token-2022 accounts with every extension type are not covered yet.
 - **DEX Screener:** live fetch (the sandbox has no outbound access to it).
 - **Latency:** the subsecond scorecard (requirement 006). Not measured.

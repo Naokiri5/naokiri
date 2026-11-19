@@ -65,12 +65,37 @@ export function setRateLimit(id: string, perMin: number) { buckets.set(id, new B
 
 export class ProviderError extends Error { constructor(public providerId: string, msg: string, public status?: number) { super(`${providerId}: ${msg}`); } }
 
+/** Read at most `max` bytes of a response body; larger bodies are refused (Content-Length first, then while streaming). */
+async function readLimited(id: string, res: Response, max: number): Promise<Uint8Array> {
+  const tooLarge = () => new ProviderError(id, `response exceeds ${max} bytes`);
+  const declared = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > max) { await res.body?.cancel().catch(() => {}); throw tooLarge(); }
+  if (!res.body) return new Uint8Array(0);
+  const reader = res.body.getReader(); const chunks: Uint8Array[] = []; let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) { await reader.cancel().catch(() => {}); throw tooLarge(); }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total); let at = 0;
+  for (const c of chunks) { out.set(c, at); at += c.byteLength; }
+  return out;
+}
+const decodeLimited = (bytes: Uint8Array, as: 'json' | 'text' | undefined): unknown => {
+  const text = new TextDecoder().decode(bytes);
+  return as === 'text' ? text : JSON.parse(text);
+};
+
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
 /**
  * `redirectMode`/`redirect: 'error'` is for credentialed providers: a redirect must never carry an API key to another host
  * (fetch keeps custom headers across redirects). Default stays 'follow' for the public, keyless providers.
  * `jsonBody` sends a JSON POST (used only for read-only JSON-RPC such as eth_call); everything else is a GET.
  * `decode` (Codex four-layer) validates the raw payload into a typed result inside the provider boundary.
+ * `maxBytes` (opt-in) refuses a body larger than this many bytes, by Content-Length and while streaming, so an
+ * untrusted endpoint cannot make MIA buffer an unbounded response.
  */
 export async function fetchProvider<T = any>(id: string, url: string, opts: {
   timeoutMs?: number;
@@ -80,6 +105,7 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
   redirectMode?: 'error' | 'follow';
   jsonBody?: unknown;
   decode?: (raw: unknown) => T;
+  maxBytes?: number;
 } = {}): Promise<T> {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
@@ -102,7 +128,9 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
       if (res.status === 429 || res.status === 418 || res.status === 503) { const ms = retryAfterMs(res, res.status); if (ms != null) blockedUntil.set(id, Date.now() + ms); }
       throw new ProviderError(id, `HTTP ${res.status}`, res.status);
     }
-    const raw: unknown = opts.as === 'text' ? await res.text() : await res.json();
+    const raw: unknown = opts.maxBytes
+      ? decodeLimited(await readLimited(id, res, opts.maxBytes), opts.as)
+      : opts.as === 'text' ? await res.text() : await res.json();
     const body = opts.decode ? opts.decode(raw) : raw as T;
     const ms = performance.now() - t0;
     record(`provider.${id}`, ms);

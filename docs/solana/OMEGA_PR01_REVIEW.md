@@ -49,7 +49,8 @@ Kept as is, with reasons:
 Known limit, fail closed: `latestTokenPairs` still keeps the most liquid pool per token before anything else sees it. If that pool has an untrusted quote, the token is left out of the watchlist (counted as skipped) even when a SOL or USDC pool also exists. Preferring trusted-quote pools at ingestion would change the shared "New DEX tokens" data, so it is left for a separate, reviewed change.
 
 ## Noted for later PRs (not changed now)
-- **Response size caps.** `http.ts` reads whole provider bodies (10 s timeout, no size cap); add a cap before wiring GMGN or RPC.
+- **Response size caps.** *Update (PR-06):* `fetchProvider` now has an opt-in `maxBytes`, used by the Solana RPC adapter. GMGN still needs it when it is wired (PR-05).
+- *Original note:* `http.ts` reads whole provider bodies (10 s timeout, no size cap); add a cap before wiring GMGN or RPC.
 - `gmgn-read.ts` uses `fetch` directly. When it is wired (PR-05), route it through `providers/http.ts`: shared rate limits, backoff, credential-safe redirects and `ProviderError`. Add typed normalizers. Fractional fields mean `0.1783 = 17.83%`.
 - `mint-audit.ts` reads the whole JSON-RPC response. When it is wired (PR-06), cap the response size, and test against real Token-2022 mints (for example ones with `mintCloseAuthority` or `interestBearingConfig`, which correctly stay UNKNOWN today).
 - The base58 regex is format-only. Mint ownership is proven only by the RPC owner check (starter SKILL rule 5).

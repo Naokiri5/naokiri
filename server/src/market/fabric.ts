@@ -14,6 +14,7 @@ import { config } from '../config.js';
 import { openPositions } from '../portfolio/ledger.js';
 import type { Book } from '../providers/binance.js';
 import { startDepthStream, binanceStreamUrl, type StreamBook, type StreamDeps } from './depthStream.js';
+import { refreshMintChecks } from '../solana/mintChecks.js';
 
 /** Install a book snapshot unless it is older than the one already held (concurrent refreshes can land out of order). */
 /** Install a book unless it is older than the held one. Returns whether it was installed. */
@@ -243,6 +244,9 @@ export async function refreshBackground() {
   if (t - market.dexFetchedAt > 3 * 60_000) {
     try { market.dex = await dexscreener.latestTokenPairs(30); market.dexFetchedAt = t; } catch { /* tracked */ }
   }
+  // Omega PR-06: read-only Solana mint checks for the watchlist; no-op unless MIA_SOLANA_RPC_URL is set. Not awaited:
+  // one batched RPC call must never delay the market-data lane. It never throws (errors become a status code).
+  if (market.dex.length) void refreshMintChecks(market.dex, t);
   if (t - market.fxFetchedAt > 30 * 60_000) {
     try { market.fx = await frankfurter.fxSeries(180); market.fxFetchedAt = t; } catch { /* tracked */ }
   }
