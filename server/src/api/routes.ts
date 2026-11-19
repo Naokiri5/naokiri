@@ -12,6 +12,8 @@ import { posture, recentGuardianActions } from '../security/guardian/posture.js'
 import { ccxtRoutes } from '../research/ccxtRoutes.js';
 import { defiRoutes } from '../research/defiRoutes.js';
 import { predictionRoutes } from '../prediction/routes.js';
+import { buildCertificate } from '../decision/certificate.js';
+import { replayDecision, ReplayError } from '../ditas/replay.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -359,6 +361,16 @@ export async function routes(app: FastifyInstance) {
   // ── scanner / decisions ──
   app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
   app.get('/api/decisions', async (req) => { const q = z.object({ decision: TOKEN.optional() }).parse(req.query); return all<any>(`SELECT id, instrument, strategy, decision, score, risk_decision, created_at FROM decisions ${q.decision ? 'WHERE decision=?' : ''} ORDER BY created_at DESC LIMIT 300`, ...(q.decision ? [q.decision] : [])); });
+  /** THINK Reason-to-Trade Certificate: deterministic, read-only explanation of a stored decision (no authority). */
+  app.get('/api/decisions/:id/certificate', async (req, reply) => {
+    const r = get<{ report: string; consensus_id: string }>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found');
+    const c = get<{ record: string }>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id);
+    return buildCertificate(r.report, c?.record ?? null);
+  });
+  /** THINK evidence replay from the frozen DITAS snapshot (read-only; no side effects). */
+  app.get('/api/decisions/:id/replay', async (req, reply) => {
+    try { return replayDecision(idOf(req)); } catch (e) { if (e instanceof ReplayError) return bad(reply, 404, e.message); throw e; }
+  });
   app.get('/api/decisions/:id', async (req, reply) => { const r = get<any>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found'); const c = get<any>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id); return { report: P(r.report), consensus: c ? P(c.record) : null }; });
   app.post('/api/analyze', async (req) => { const { symbol, strategyId } = z.object({ symbol: z.string().min(1).max(20), strategyId: z.string().max(60).optional() }).parse(req.body); const i = market.bySymbol(symbol); if (!i) throw httpError(404, 'unknown symbol'); limit(req, 'analyze', 'analysis'); return analyzeInstrument(i.id, strategyId); });
 

@@ -113,3 +113,28 @@ For the newer Decision Intelligence, Trust & Adaptive Strategy System work, star
 ## Autopilot presentation and monitor
 
 See [the preserved Autopilot requirements and Claude handoff](docs/autopilot/README.md) before continuing the 100-function blueprint. The compact paper cockpit, presentation presets and read-only monitor reuse existing services. [Implementation and verification](docs/autopilot/IMPLEMENTATION_REPORT.md) distinguishes delivered behavior from remaining requirements.
+
+## MIA Ω THINK (Quantum Thinking Engine)
+
+THINK is the name for how the **existing** pipeline (100 deterministic workers → QCI → `decide` → risk gate → paper OMS) reasons and explains itself. Do not add new agents, scanners, risk engines or OMS. Start with:
+
+1. `docs/think/ADR-0001-THINK-CERTIFICATE.md`: decision, ownership map, rollback.
+2. `docs/think/THINK_TICKET_AUDIT.json` / `.csv`: the 100 MIA-THINK tickets audited against code (DONE / PARTIAL / MISSING / BLOCKED, with evidence).
+3. `docs/think/THINK_BASELINE_2026-11-18.md`: measured compute-only latency and its limits (`scripts/benchmark-think.mjs`).
+
+Delivered so far:
+
+- **Reason-to-Trade Certificate** (`server/src/decision/certificate.ts`): `GET /api/decisions/:id/certificate`, plus a Certificate tab on the Decision record page.
+- **Profit Laboratory** (`server/src/decision/profitLab.ts`).
+- **Slice 2, boundaries and fault injection** (tests only): `server/test/import-boundaries.test.ts` locks who may import order, mode, policy and wallet mutators (Trader Joe may only pause), and keeps evidence code away from `exec/`, `wallet/` and `portfolio/`. `server/test/worker-fault-injection.test.ts` proves crashes become ABSTAIN or quarantine, and that a missing mandatory check is NO_QUORUM. Extend the allow-list only through review.
+- **Slice 3, risk-gate invariants** (tests only): `server/test/risk-correlation-sizing.test.ts` proves the correlation limit (unknown correlation counts as correlated) and the sizing invariants (a wider stop never increases quantity, the budget is never exceeded, rounding is always down). A volatility-scaled risk budget and factor clustering are NOT built; they need an independent trading-risk review first.
+- **Slice 4, evidence replay** (`server/src/ditas/replay.ts`, `GET /api/decisions/:id/replay`, Certificate tab card). It re-runs the workers on the frozen DITAS snapshot with the recorded evaluation clock (`WorkerContext.asOf`), through the canonical `aggregate`, and compares the result with the stored consensus. It is read-only with no side effects, and refuses tampered snapshots. Workers must never read the wall clock: use `ctx.asOf`. Runbook: `docs/think/THINK_OFFLINE_RECONNECT_RUNBOOK.md`. Reviewer handoff: `docs/think/THINK_SECURITY_REVIEW_HANDOFF.md`. Tracks: `docs/think/THINK_ROADMAP_TRACKS_A_TO_E.md`.
+- **Slice 5, horizon conflict** (`qci/challenge.ts` `horizonAlignment`). The CONTRARIAN reviewer classifies 15m/1h/4h trends (UP/DOWN/FLAT/UNKNOWN). A trend-following long against a 1h AND 4h downtrend is critical (veto, certificate `HORIZON_CONFLICT`); other conflicts are opposing evidence only; range-reversion is exempt. It can only block, never add support.
+
+Rules for further THINK work:
+
+- **Certificates explain, they never authorize** (`canAuthorizeTrade: false`).
+- **No invented probabilities.** Win probability stays `NO_VALID_FORECAST` until a calibrated out-of-sample cohort (`ditas/calibration.ts`) exists. Opportunity score and QCI agreement are not probabilities.
+- **Scenario values are hypothetical.** Stops are triggers, not guaranteed fills.
+- **One canonical owner per change,** in small draft PRs, following the ticket audit's next slices: event provenance/as-known-at replay, bounded task graph + recorded-snapshot benchmark, calibrated forecast cohort, offline replay with honest LIVE/DEGRADED/OFFLINE_REPLAY state, account-scoped records.
+- **Never weaken** risk checks, release gates, signer isolation, account separation or approval requirements. No live orders, wallets or transfers.

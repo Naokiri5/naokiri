@@ -22,7 +22,7 @@ import { run, J } from '../db/db.js';
  */
 export const QCI_POLICY = { supportThreshold: 0.5, maxOpposition: 0.25, minResponseRatio: 0.6, validityMs: 5 * 60_000 };
 export const DOMAIN_WEIGHTS: Record<string, number> = { trend: 0.16, momentum: 0.1, volatility: 0.08, flow: 0.1, liquidity: 0.12, structure: 0.1, regime: 0.1, news: 0.06, onchain: 0.04, risk: 0.08, execution: 0.06 };
-const COORDINATOR_VERSION = 'qci-coordinator@1.2.0';
+const COORDINATOR_VERSION = 'qci-coordinator@1.3.0'; // 1.3.0: CONTRARIAN horizon-conflict veto (MIA-THINK-037)
 const CAPABILITY = new Map(WORKERS.map((w) => [w.id, w.capability]));
 /** Authenticated packets from an unknown worker id (test fixtures) are treated as data-driven. */
 const isEvidence = (p: EvidencePacket) => (CAPABILITY.get(p.worker_id) ?? 'DATA_DRIVEN') === 'DATA_DRIVEN';
@@ -46,6 +46,8 @@ export function validatePacket(raw: unknown, candidateId: string): EvidencePacke
  *  - COVERAGE: a domain's support/oppose/abstain are its OWN data-driven packets, wherever the group's vote went. A required
  *    domain is covered only by its own non-abstaining evidence; another domain's worker can never satisfy it.
  */
+/** Evidence domains that apply to a candidate (on-chain evidence only for DEX instruments). Shared with ditas/replay. */
+export function applicableDomains(candidate: { market: string }) { return new Set<string>(DOMAINS.filter((d) => d !== 'onchain' || candidate.market === 'crypto-dex')); }
 export function aggregate(packets: EvidencePacket[], applicableDomains: Set<string>) {
   const evidence = packets.filter((p) => isEvidence(p) && applicableDomains.has(p.evidence_domain));
   const primary = new Map<string, string>();
@@ -113,7 +115,7 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     if (packets.some((p) => p.worker_id === v.worker_id)) { rejected++; continue; } // one packet per worker (D-03)
     packets.push(v);
   }
-  const applicable = new Set(DOMAINS.filter((d) => d !== 'onchain' || ctx.candidate.market === 'crypto-dex'));
+  const applicable = applicableDomains(ctx.candidate);
   const agg = aggregate(packets, applicable);
   const challenge = challengePanel(ctx, packets);
   const responding = packets.filter((p) => p.stance !== 'ABSTAIN').length;
