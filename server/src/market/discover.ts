@@ -5,6 +5,7 @@ import { classifyRegime } from '../regime/regime.js';
 import { rankSolanaPairs } from '../solana/hunting.js';
 import { isTrustedSolanaQuote } from '../solana/quotes.js';
 import { applyMintChecks, mintCheckSummary } from '../solana/mintChecks.js';
+import { watchAlertStatus } from '../solana/watchAlerts.js';
 
 /** Solana watchlist freshness: DEX Screener cache older than this, missing, or future-dated (clock jump) is stale. */
 const SOLANA_HUNTER_MAX_AGE_MS = 5 * 60_000;
@@ -35,7 +36,7 @@ export function solanaWatchlist(nowMs: number) {
     } catch { rankerFailed = true; candidates = []; }
   }
   const mintChecks = mintCheckSummary();
-  return { asOf, stale: !fresh, rankerFailed, skippedUntrustedQuote, candidates, mintChecks, executionReady: false as const,
+  return { asOf, stale: !fresh, rankerFailed, skippedUntrustedQuote, candidates, mintChecks, alerts: watchAlertStatus(), executionReady: false as const,
     note: mintChecks.configured ? SOLANA_HUNTER_NOTE_WITH_MINT_CHECKS : SOLANA_HUNTER_NOTE };
 }
 

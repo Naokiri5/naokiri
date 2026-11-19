@@ -40,6 +40,7 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | [`omega/README.md`](omega/README.md) | MIA Ω: preserved spec, TASK-00 audit (traceability, PR overlap, licenses, conflicts, plan, test matrix) |
 | [`solana/OMEGA_PR01_REVIEW.md`](solana/OMEGA_PR01_REVIEW.md) | Read-only Solana Hunter (Omega PR-01): provenance, review findings, limits |
 | [`solana/OMEGA_PR06_SOLANA_RPC.md`](solana/OMEGA_PR06_SOLANA_RPC.md) | Read-only on-chain mint checks for the Solana watchlist (Omega PR-06): configuration, safety, limits |
+| [`solana/OMEGA_06A_TELEGRAM_WATCH_ALERTS.md`](solana/OMEGA_06A_TELEGRAM_WATCH_ALERTS.md) | Opt-in Telegram alerts for the Solana watchlist (read-only, no trading links); why BONKbot/Axiom are not connected |
 | [`security/GUARDIAN_SHIELD.md`](security/GUARDIAN_SHIELD.md) | Guardian Shield: seven-layer posture, security events, opt-in pause, 100-ticket gap matrix and incident runbooks |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | design, trust boundaries, technology choices |
 

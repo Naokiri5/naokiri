@@ -16,7 +16,8 @@
 | 04 | Durable order/fill events in the NEXUS outbox (beyond DITAS outcomes) | Claude design, Codex | Not started | Trading-risk review; migration v11+ |
 | 05 | GMGN typed read-only client via `providers/http.ts` (rate limit, backoff, redirect guard), normalizers | Codex | Client inert in PR-01 | **Owner `GMGN_API_KEY` + ToS review** |
 | 06 | Solana RPC mint audit wired: `mint-audit.ts` + slot provenance | Claude (owner's choice, 2026-11-19), Codex review | **Draft PR** (stacked on PR-01); live test passed | Codex review |
-| 07 | Pump.fun / PumpSwap launch and migration stream | Codex | Not started | Verified program IDs/IDL, licensed stream |
+| 06a | Opt-in Telegram alerts for the Solana watchlist (read-only, no trading links) | Claude (owner's choice, 2026-11-19) | **Draft PR** (stacked on PR-06) | Codex review |
+| 07 | Pump.fun / PumpSwap launch and migration stream, read-only from chain | Claude (owner's choice, 2026-11-19) | In progress | Data-source spike: official program IDs, event volume on the public RPC |
 | 08 | Raydium / Orca / Jupiter quotes and sell-viability | Codex | Not started | **License decision (GPL-3.0 / Orca)** |
 | 09–12 | Research/replay, unified OMS adapter, testnet parity, Trader Joe UI | Mixed | Not started | Testnet venue keys for 11 |
 | 13 | Cloudflare stage deploy (Tunnel + Access → `127.0.0.1:8787`) | SRE + Codex | Plan only | **Owner domain, host, Cloudflare access** |

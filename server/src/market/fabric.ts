@@ -15,6 +15,7 @@ import { openPositions } from '../portfolio/ledger.js';
 import type { Book } from '../providers/binance.js';
 import { startDepthStream, binanceStreamUrl, type StreamBook, type StreamDeps } from './depthStream.js';
 import { refreshMintChecks } from '../solana/mintChecks.js';
+import { alertNewWatchRows, watchAlertsEnabled } from '../solana/watchAlerts.js';
 
 /** Install a book snapshot unless it is older than the one already held (concurrent refreshes can land out of order). */
 /** Install a book unless it is older than the held one. Returns whether it was installed. */
@@ -246,7 +247,15 @@ export async function refreshBackground() {
   }
   // Omega PR-06: read-only Solana mint checks for the watchlist; no-op unless MIA_SOLANA_RPC_URL is set. Not awaited:
   // one batched RPC call must never delay the market-data lane. It never throws (errors become a status code).
-  if (market.dex.length) void refreshMintChecks(market.dex, t).catch(() => { /* never throws; guard against a future change */ });
+  // Omega 06a: then send opt-in watchlist alerts. Nothing is built unless the owner enabled them. discover.ts imports this
+  // module, so it is loaded lazily here rather than creating an import cycle.
+  if (market.dex.length) void refreshMintChecks(market.dex, t)
+    .then(async () => {
+      if (!watchAlertsEnabled()) return;
+      const { solanaWatchlist } = await import('./discover.js');
+      alertNewWatchRows(solanaWatchlist(Date.now()).candidates);
+    })
+    .catch(() => { /* alerts are best-effort; the market-data lane never waits for or fails on them */ });
   if (t - market.fxFetchedAt > 30 * 60_000) {
     try { market.fx = await frankfurter.fxSeries(180); market.fxFetchedAt = t; } catch { /* tracked */ }
   }

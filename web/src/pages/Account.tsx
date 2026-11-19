@@ -166,6 +166,10 @@ export function Settings() {
       <Card title="Notifications"><div className="col">{p && <>
         <label className="row">Telegram minimum severity <select value={p.telegramMinSeverity} onChange={(e) => setPrefs({ ...p, telegramMinSeverity: e.target.value })}><option>INFO</option><option>WARNING</option><option>CRITICAL</option></select></label>
         <label className="row">Quiet hours (UTC, critical always delivered) <input type="number" min={0} max={23} style={{ width: 60 }} value={p.quietHoursUtc?.[0] ?? ''} onChange={(e) => setPrefs({ ...p, quietHoursUtc: e.target.value === '' ? null : [Number(e.target.value), p.quietHoursUtc?.[1] ?? 7] })} />–<input type="number" min={0} max={23} style={{ width: 60 }} value={p.quietHoursUtc?.[1] ?? ''} onChange={(e) => setPrefs({ ...p, quietHoursUtc: [p.quietHoursUtc?.[0] ?? 22, Number(e.target.value)] })} /></label>
+        <label className="row"><input type="checkbox" checked={!!p.solanaWatchlistTelegram} onChange={(e) => setPrefs({ ...p, solanaWatchlistTelegram: e.target.checked })} />
+          Send Solana watchlist alerts to Telegram</label>
+        <div className="hint">Only tokens rated WATCH whose on-chain mint check passed; at most 5 per hour, once per token per day. Read-only: the
+          message has the mint address and checks, never a buy button or a trading-bot link. Not a trade signal.</div>
         <div className="row"><Action className="primary" label="Save" run={async () => { await api('/api/settings/notify', { body: p }); reload(); }} /><Action label="Send test notification" run={() => api('/api/notifications/test', { body: {} })} /></div>
         <div className="hint">Telegram: {data?.telegram.configured ? 'configured' : 'not configured (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID on the server)'}</div></>}</div></Card>
       <GoogleSignInSettings />
