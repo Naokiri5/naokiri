@@ -45,7 +45,12 @@ const appUrl = () => process.env.MIA_PUBLIC_URL?.trim() || 'the MIA app (open it
 const money = (n: number) => (Number.isFinite(n) ? n.toFixed(2) : 'unknown');
 const publicReply = (text: string): TelegramReply => ({ text, linkId: null });
 
-export function handleCommand(rawText: string, sender: TelegramSender, now = Date.now()): TelegramReply {
+export function handleCommand(
+  rawText: string,
+  sender: TelegramSender,
+  now = Date.now(),
+  deferModePublish?: (publish: () => void) => void,
+): TelegramReply {
   if (rawText.length > MAX_TEXT) return publicReply('Message too long. Send a short command such as /status.');
   const p = parseCommand(rawText);
   if (!p) return publicReply(HELP_TEXT);
@@ -100,7 +105,7 @@ export function handleCommand(rawText: string, sender: TelegramSender, now = Dat
     case 'pause': {
       if (getControl().pausedNewOrders) return linkedReply('New entries are already paused.');
       // Risk-reducing only: sets pausedNewOrders and never creates, resumes or sizes an order.
-      updateControl(`telegram:${link.id}`, { pausedNewOrders: true });
+      updateControl(`telegram:${link.id}`, { pausedNewOrders: true }, undefined, deferModePublish);
       return linkedReply('New paper entries paused. Existing positions are still monitored. Resume only in the MIA app.');
     }
     case 'unlink': {

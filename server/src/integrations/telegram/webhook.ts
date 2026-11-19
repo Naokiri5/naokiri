@@ -176,22 +176,35 @@ export async function telegramRoutes(app: FastifyInstance) {
     // Edits, callbacks, channel posts and other update types are acknowledged but not processed in v1.
     if (!m || !sender || sender.is_bot) return reply.send({ ok: true, ignored: true });
     if (m.chat.type !== 'private') return reply.send({ ok: true, ignored: true });
-    if (Math.floor(Date.now() / 1000) - m.date > STALE_MESSAGE_S) return reply.send({ ok: true, ignored: true, reason: 'stale' });
+    const receivedAt = Date.now();
+    if (Math.floor(receivedAt / 1000) - m.date > STALE_MESSAGE_S) return reply.send({ ok: true, ignored: true, reason: 'stale' });
 
-    const result = tx(() => {
-      // A failed command or reply insert rolls back the deduplication marker so Telegram can retry it.
-      const ins = run('INSERT OR IGNORE INTO telegram_update_dedupe(update_id, received_at) VALUES (?,?)', update.update_id, Date.now());
-      if (Number(ins.changes) === 0) return { ok: true, duplicate: true };
-      if (typeof m.text !== 'string') return { ok: true, ignored: true };
-      try { chatLimiter.take(String(m.chat.id), 'telegram commands'); }
-      catch (error) {
-        if (!(error instanceof RateLimitError)) throw error;
-        return { ok: true, ignored: true, reason: 'rate limited' };
-      }
-      const commandReply = handleCommand(m.text, { userId: sender.id, chatId: m.chat.id, chatType: m.chat.type });
-      enqueueReply(m.chat.id, commandReply);
-      return { ok: true };
-    });
+    const chatKey = String(m.chat.id);
+    let charged = false;
+    let publishMode: (() => void) | undefined;
+    let result;
+    try {
+      result = tx(() => {
+        // A failed command or reply insert rolls back the deduplication marker so Telegram can retry it.
+        const ins = run('INSERT OR IGNORE INTO telegram_update_dedupe(update_id, received_at) VALUES (?,?)', update.update_id, receivedAt);
+        if (Number(ins.changes) === 0) return { ok: true, duplicate: true };
+        if (typeof m.text !== 'string') return { ok: true, ignored: true };
+        try { chatLimiter.take(chatKey, 'telegram commands', receivedAt); }
+        catch (error) {
+          if (!(error instanceof RateLimitError)) throw error;
+          return { ok: true, ignored: true, reason: 'rate limited' };
+        }
+        charged = true;
+        const commandReply = handleCommand(m.text, { userId: sender.id, chatId: m.chat.id, chatType: m.chat.type }, receivedAt,
+          (publish) => { publishMode = publish; });
+        enqueueReply(m.chat.id, commandReply, receivedAt);
+        return { ok: true };
+      });
+    } catch (error) {
+      if (charged) chatLimiter.refund(chatKey);
+      throw error;
+    }
+    publishMode?.();
     return reply.send(result);
   });
 

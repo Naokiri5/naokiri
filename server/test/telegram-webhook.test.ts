@@ -5,6 +5,7 @@ import { config } from '../src/config.js';
 import { createLinkCode, redeemLinkCode } from '../src/integrations/telegram/link.js';
 import { drainOutbox } from '../src/integrations/telegram/webhook.js';
 import { getControl } from '../src/core/mode.js';
+import { bus } from '../src/core/bus.js';
 import { parseCommand } from '../src/integrations/telegram/commands.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 
@@ -105,19 +106,34 @@ describe('Telegram webhook (MIA-TG-01)', () => {
     expect(outbox().length).toBe(before);
   });
 
-  it('retries a command whose reply failed to persist, without committing partial command state', async () => {
+  it('retries a rolled-back pause at the rate limit and publishes only the committed mode', async () => {
     const chat = chatSeq++;
     const { code } = createLinkCode();
     redeemLinkCode(code, OWNER_USER, chat);
-    const update = msg('/pause', OWNER_USER, chat);
-    run("CREATE TEMP TRIGGER fail_telegram_reply BEFORE INSERT ON telegram_outbox BEGIN SELECT RAISE(ABORT, 'fixture'); END");
-    expect((await hook(update)).statusCode).toBe(500);
-    expect(getControl().pausedNewOrders).toBe(false);
-    expect(all('SELECT update_id FROM telegram_update_dedupe')).toHaveLength(0);
-    run('DROP TRIGGER fail_telegram_reply');
-    expect((await hook(update)).json()).toEqual({ ok: true });
-    expect(getControl().pausedNewOrders).toBe(true);
-    expect(outbox()).toHaveLength(1);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    const modeEvent = vi.fn();
+    bus.on('mode', modeEvent);
+    try {
+      for (let used = 0; used < 9; used++) {
+        expect((await hook(msg('/help', OWNER_USER, chat))).json()).toEqual({ ok: true });
+      }
+      const update = msg('/pause', OWNER_USER, chat);
+      run("CREATE TEMP TRIGGER fail_telegram_reply BEFORE INSERT ON telegram_outbox BEGIN SELECT RAISE(ABORT, 'fixture'); END");
+      expect((await hook(update)).statusCode).toBe(500);
+      expect(getControl().pausedNewOrders).toBe(false);
+      expect(get('SELECT update_id FROM telegram_update_dedupe WHERE update_id=?', update.update_id)).toBeUndefined();
+      expect(modeEvent).not.toHaveBeenCalled();
+      run('DROP TRIGGER fail_telegram_reply');
+
+      expect((await hook(update)).json()).toEqual({ ok: true });
+      expect(getControl().pausedNewOrders).toBe(true);
+      expect(outbox()).toHaveLength(10);
+      expect(modeEvent).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ pausedNewOrders: true }));
+      expect((await hook(msg('/help', OWNER_USER, chat))).json()).toEqual({ ok: true, ignored: true, reason: 'rate limited' });
+    } finally {
+      bus.off('mode', modeEvent);
+      now.mockRestore();
+    }
   });
   it('ignores group chats and stale messages', async () => {
     const chat = chatSeq++;
