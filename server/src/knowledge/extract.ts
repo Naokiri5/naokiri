@@ -8,8 +8,16 @@ import { dirname, join } from 'node:path';
  * Output is a list of page-tagged text units in a light markdown form ("# Heading", "$$ formula $$", "| table |").
  */
 export const EXTRACTOR_VERSION = 'kb-extract@1.0.0';
+/** A-01: a malformed value (e.g. an inline comment copied from .env.example) used to give NaN and a cryptic Fastify
+ *  registration error at startup. Validate and name the setting instead. */
+function uploadMb() {
+  const raw = process.env.MIA_KB_MAX_UPLOAD_MB; if (raw == null || raw === '') return 60;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 1024) throw new Error(`MIA_KB_MAX_UPLOAD_MB must be an integer between 1 and 1024 (got "${raw}")`);
+  return n;
+}
 export const LIMITS = {
-  maxUploadBytes: Number(process.env.MIA_KB_MAX_UPLOAD_MB ?? 60) * 1024 * 1024,
+  maxUploadBytes: uploadMb() * 1024 * 1024,
   maxZipEntries: 5_000, maxZipTotalBytes: 300 * 1024 * 1024, maxZipEntryBytes: 80 * 1024 * 1024,
   maxPdfPages: 3_000, maxTextChars: 40_000_000,
 };
@@ -175,11 +183,20 @@ function epub(bytes: Buffer): Extracted {
   const spine = [...opf.matchAll(/<itemref\b[^>]*idref="([^"]+)"/g)].map((m) => manifest.get(m[1])).filter(Boolean) as string[];
   if (!spine.length) throw new ExtractionError('EPUB spine is empty', 'EMPTY');
   const warnings: string[] = []; const units: TextUnit[] = [];
-  spine.forEach((href) => {
-    const name = decodeURIComponent(base + href.split('#')[0]); const e = entries.find((x) => x.name === name);
-    if (!e) { warnings.push(`spine item missing: ${href}`); return; }
-    const t = htmlToText(zipRead(bytes, e).toString('utf8')).text; if (t.trim()) units.push({ page: null, text: t });
-  });
+  // MIA-KB-001: a spine may list the same file many times (a 2 KB EPUB repeating one chapter 120× produced 65 MB of
+  // text). Each file is read once, and inflated bytes and text are budgeted as they accumulate, so an archive is
+  // rejected before it can exhaust memory or block the event loop — not after everything is in memory.
+  const seen = new Set<string>(); let inflated = 0; let chars = 0;
+  for (const href of spine) {
+    const name = decodeURIComponent(base + href.split('#')[0]);
+    if (seen.has(name)) continue; seen.add(name);
+    const e = entries.find((x) => x.name === name);
+    if (!e) { warnings.push(`spine item missing: ${href}`); continue; }
+    inflated += e.size; if (inflated > LIMITS.maxZipTotalBytes) throw new ExtractionError('archive expands beyond the size limit', 'TOO_LARGE');
+    const t = htmlToText(zipRead(bytes, e).toString('utf8')).text;
+    chars += t.length; if (chars > LIMITS.maxTextChars) throw new ExtractionError('extracted text exceeds the size limit', 'TOO_LARGE');
+    if (t.trim()) units.push({ page: null, text: t });
+  }
   if (opf.includes('encryption') || entries.some((x) => x.name === 'META-INF/encryption.xml')) {
     // Encrypted resources decode to binary noise, so judge by readable text, not by whether bytes were present.
     if (!units.some((u) => (u.text.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= 20)) throw new ExtractionError('EPUB content is DRM-encrypted; MIA cannot and will not bypass DRM', 'ENCRYPTED');

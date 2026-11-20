@@ -1,10 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmt, useApi } from '../api';
-import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter } from '../ui';
+import { api, authInfo, fmt, useApi, stepUpBody } from '../api';
+import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter , rowProps} from '../ui';
 
-export const StepUp = ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
-  <input type="password" placeholder="Owner passphrase (step-up)" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="current-password" aria-label="Owner passphrase for step-up authentication" />;
+import { PaperStress } from './PaperStress';
+
+/**
+ * Step-up proof for a protected action. With an authenticator enrolled it takes the current 6-digit code; before that,
+ * on an existing install, the legacy owner passphrase; with neither, protected actions stay unavailable (the server
+ * refuses them) and the input explains how to enable them.
+ */
+export function StepUp({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  if (authInfo.stepUp === 'totp') return <input inputMode="numeric" pattern="[0-9]*" maxLength={6} placeholder="Authenticator code" value={value} onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))} autoComplete="one-time-code" aria-label="Six-digit authenticator code for step-up authentication" style={{ width: 150 }} />;
+  if (authInfo.stepUp === 'passphrase') return <input type="password" placeholder="Owner passphrase (step-up)" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="current-password" aria-label="Owner passphrase for step-up authentication" />;
+  return <span className="hint warn" role="note">Protected actions need two-factor: <Link to="/security">set up an authenticator app</Link> first.</span>;
+}
 
 const MODES = [
   ['OBSERVE', 'Observe', 'Scan and explain only. No orders.'],
@@ -28,11 +38,11 @@ export function Bot() {
     <div className="grid g2">
       <Card title="Automation mode (Part 26.2)"><div className="col">
         {MODES.map(([m, l, d]) => <label key={m} className="row" style={{ alignItems: 'flex-start', opacity: m === 'BOUNDED_LIVE' ? 0.6 : 1 }}><input type="radio" name="mode" checked={s?.mode === m} readOnly style={{ marginTop: 3 }} /><div style={{ flex: 1 }}><b>{l}</b> <span className="muted">— {d}</span></div>
-          {s?.mode !== m && <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}</label>)}
+          {s?.mode !== m && (m === 'BOUNDED_LIVE' ? <Badge v="LOCKED" /> : <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, ...stepUpBody(pw) } }); reload(); } finally { setPw(''); } }} />)}</label>)}
         <StepUp value={pw} onChange={setPw} />
         {!s?.policyAccepted && <div className="hint warn">Accept a risk policy in the <Link to="/risk">Risk Center</Link> before paper execution.</div>}
         <div className="row"><Action className="danger" label="Pause new orders" run={async () => { await api('/api/emergency/pause', { body: {} }); reload(); }} />
-          {s?.paused && !s?.emergency && <Action label="Resume" run={async () => { try { await api('/api/control', { body: { pausedNewOrders: false, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}</div>
+          {s?.paused && !s?.emergency && <Action label="Resume" run={async () => { try { await api('/api/control', { body: { pausedNewOrders: false, ...stepUpBody(pw) } }); reload(); } finally { setPw(''); } }} />}</div>
         {s?.paused && !s?.emergency && <div className="hint">Resuming needs the owner passphrase above (step-up).</div>}
       </div></Card>
       <Card title="Paper allocation"><div className="col">
@@ -54,8 +64,9 @@ export function Bot() {
 }
 /** Revoking reduces risk and needs no passphrase; re-enabling increases it and uses the step-up passphrase entered above. */
 function StrategyToggle({ id, pw, clearPassphrase, onChange }: { id: string; pw: string; clearPassphrase: () => void; onChange: () => void }) {
-  const shell = useApi('/api/shell'); const dis: string[] = shell.data?.control.disabledStrategies ?? []; const off = dis.includes(id);
-  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { try { await api('/api/control', { body: off ? { disabledStrategies: dis.filter((x) => x !== id), password: pw || undefined } : { disabledStrategies: [...dis, id] } }); shell.reload(); onChange(); } finally { if (off) clearPassphrase(); } }} />;
+  // MIA-WEB-010: send one operation for THIS strategy; the server applies it to its current list (never a stale copy).
+  const shell = useApi('/api/shell', { topics: ['mode'] }); const dis: string[] = shell.data?.control.disabledStrategies ?? []; const off = dis.includes(id);
+  return <Action className="sm" label={off ? 'Re-enable' : 'Revoke'} run={async () => { try { await api('/api/control', { body: off ? { enableStrategy: id, ...stepUpBody(pw) } : { disableStrategy: id } }); shell.reload(); onChange(); } finally { if (off) clearPassphrase(); } }} />;
 }
 export function PositionsTable({ rows, onChange }: { rows: any[]; onChange: () => void }) {
   return <Card title={`Open positions (${rows.length})`} flush>{rows.length ? <div className="tablewrap"><table><thead><tr><th>Instrument</th><th>Strategy</th><th className="num">Qty</th><th className="num">Entry</th><th className="num">Mark</th><th className="num">Stop</th><th>Targets</th><th className="num">Unrealized</th><th>Opened</th><th /></tr></thead>
@@ -94,6 +105,7 @@ export function Risk() {
   return <Page title="Risk Center" sub="Deterministic, fail-closed risk authority (Part 17). No agent, QCI result or assistant can bypass it. Limits change only through this authenticated, versioned workflow.">
     <ErrorLine e={error} />
     {!data?.policy && <div className="banner info">No risk policy accepted yet. Review the conservative paper defaults below and accept them (or adjust) to enable paper execution.</div>}
+    {data?.policy?.invalid && <div className="banner warn">Stored risk policy v{data.policy.version} is invalid. Review and accept a valid policy before opening paper positions.</div>}
     <div className="grid g-1-2">
       <div className="col" style={{ gap: 14 }}>
         <Card title="Circuit breakers">{a && p ? <div className="col">
@@ -106,9 +118,9 @@ export function Risk() {
           <Action label="Cancel pending entry orders" run={async () => { setResult(await api('/api/emergency/cancel-pending', { body: {} })); reload(); }} />
           <Action label="Verify / protect existing positions" run={async () => { setResult(await api('/api/emergency/protect', { body: {} })); reload(); }} />
           <Action className="danger" label="EMERGENCY STOP" confirm="Engage emergency stop? New orders are blocked and pending entries cancelled. Positions are not closed." run={async () => { setResult(await api('/api/emergency/stop', { body: {} })); reload(); }} />
-          {data?.control.pausedNewOrders && !data?.control.emergency && <Action label="Resume new orders (step-up)" run={async () => { try { await api('/api/control', { body: { pausedNewOrders: false, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}
-          {data?.control.emergency && <Action label="Clear emergency (step-up)" run={async () => { try { await api('/api/control', { body: { emergency: false, pausedNewOrders: false, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}
-          <div className="row"><input placeholder='Type "CLOSE ALL"' value={confirm} onChange={(e) => setConfirm(e.target.value)} style={{ width: 150 }} /><Action className="danger" label="Close all positions" run={async () => { try { setResult(await api('/api/emergency/close-all', { body: { confirm, password: pw || undefined } })); reload(); } finally { setPw(''); } }} /></div>
+          {data?.control.pausedNewOrders && !data?.control.emergency && <Action label="Resume new orders (step-up)" run={async () => { try { await api('/api/control', { body: { pausedNewOrders: false, ...stepUpBody(pw) } }); reload(); } finally { setPw(''); } }} />}
+          {data?.control.emergency && <Action label="Clear emergency (step-up)" run={async () => { try { await api('/api/control', { body: { emergency: false, pausedNewOrders: false, ...stepUpBody(pw) } }); reload(); } finally { setPw(''); } }} />}
+          <div className="row"><input placeholder='Type "CLOSE ALL"' value={confirm} onChange={(e) => setConfirm(e.target.value)} style={{ width: 150 }} /><Action className="danger" label="Close all positions" run={async () => { try { setResult(await api('/api/emergency/close-all', { body: { confirm, ...stepUpBody(pw) } })); reload(); } finally { setPw(''); } }} /></div>
           <StepUp value={pw} onChange={setPw} />
           {result && <div className="card"><div className="bd"><div className="row">Result: <Badge v={result.state ?? 'CONFIRMED'} /></div><pre className="hint">{JSON.stringify(result, null, 1).slice(0, 1200)}</pre></div></div>}
         </div></Card>
@@ -120,13 +132,14 @@ export function Risk() {
           {draft && <div className="col">
             <div className="grid g3" style={{ gap: 10 }}>{POLICY_FIELDS.map(([k, l, r]) => <label key={k} className="col" style={{ gap: 3 }}><span className="hint">{l} <span className="faint">[{r}]</span></span><input type="number" step="any" value={draft[k]} onChange={(e) => setDraft({ ...draft, [k]: e.target.value === '' ? '' : Number(e.target.value) })} /></label>)}</div>
             <div className="hint">Illustrative paper defaults from the spec — not financial advice. Hard bounds are enforced server-side; leverage is fixed at 1×. Limits are never raised automatically after profits.</div>
-            <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="primary" label={data?.policy ? 'Save new version' : 'Accept policy'} run={async () => { try { await api('/api/risk/policy', { body: { policy: draft, password: pw || undefined } }); reload(); } finally { setPw(''); } }} /><button onClick={() => setDraft({ ...data.defaults })}>Reset to defaults</button></div>
+            <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="primary" label={data?.policy ? 'Save new version' : 'Accept policy'} run={async () => { try { await api('/api/risk/policy', { body: { policy: draft, ...stepUpBody(pw) } }); reload(); } finally { setPw(''); } }} /><button onClick={() => setDraft({ ...data.defaults })}>Reset to defaults</button></div>
           </div>}
         </Card>
         <Card title="Correlation of open positions (1h returns)" flush>{data?.correlation.instruments.length ? <table><thead><tr><th />{data.correlation.instruments.map((i: string) => <th key={i}>{i.split(':')[2].replace('USDT', '')}</th>)}</tr></thead><tbody>{data.correlation.matrix.map((row: any[], i: number) => <tr key={i}><td>{data.correlation.instruments[i].split(':')[2].replace('USDT', '')}</td>{row.map((c, j) => <td key={j} className="num" style={{ background: c == null ? undefined : `rgba(240,80,90,${Math.max(0, c) * 0.35})` }}>{c == null ? '?' : c.toFixed(2)}</td>)}</tr>)}</tbody></table> : <Empty>No open positions.</Empty>}</Card>
-        <Card title="Policy history" flush><table><tbody>{(data?.history ?? []).map((h: any) => <tr key={h.version}><td>v{h.version}</td><td className="faint">{fmt.time(h.created_at)}</td><td>{h.accepted_by}</td><td className="hint">risk {h.policy.riskPerTradePct}% · day {h.policy.dailyLossPct}% · DD {h.policy.drawdownHaltPct}%</td></tr>)}</tbody></table>{!data?.history.length && <Empty>No versions yet.</Empty>}</Card>
+        <Card title="Policy history" flush><table><tbody>{(data?.history ?? []).map((h: any) => <tr key={h.version}><td>v{h.version}</td><td className="faint">{fmt.time(h.created_at)}</td><td>{h.accepted_by}</td><td className="hint">{h.policy ? <>risk {h.policy.riskPerTradePct}% · day {h.policy.dailyLossPct}% · DD {h.policy.drawdownHaltPct}%</> : 'Invalid stored policy'}</td></tr>)}</tbody></table>{!data?.history.length && <Empty>No versions yet.</Empty>}</Card>
       </div>
     </div>
+    <div style={{ marginTop: 14 }}><PaperStress /></div>
   </Page>;
 }
 
@@ -168,12 +181,14 @@ function DecisionsList() {
 }
 
 export function Calendar() {
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7)); const { data, error } = useApi(`/api/calendar?month=${month}`, { topics: ['position'] });
+  const [selectedMonth, setMonth] = useState<string | null>(null);
+  const { data, error } = useApi(selectedMonth ? `/api/calendar?month=${selectedMonth}` : '/api/calendar', { topics: ['position'] });
+  const month = selectedMonth ?? data?.month ?? new Date().toISOString().slice(0, 7);
   const [day, setDay] = useState<any>(null);
   const [y, m] = month.split('-').map(Number); const first = new Date(Date.UTC(y, m - 1, 1)); const lead = (first.getUTCDay() + 6) % 7; const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
   const byDate = new Map((data?.days ?? []).map((d: any) => [d.date, d]));
   const shift = (k: number) => { const d = new Date(Date.UTC(y, m - 1 + k, 1)); setMonth(d.toISOString().slice(0, 7)); };
-  return <Page title="Profit Calendar" sub={data?.definition} right={<><button onClick={() => shift(-1)}>‹</button><b className="mono">{month}</b><button onClick={() => shift(1)}>›</button><span className="hint">UTC{data?.tzOffsetMin ? `${data.tzOffsetMin > 0 ? '+' : ''}${data.tzOffsetMin / 60}` : ''}</span></>}>
+  return <Page title="Profit Calendar" sub={data?.definition} right={<><button onClick={() => shift(-1)}>‹</button><b className="mono">{month}</b><button onClick={() => shift(1)}>›</button><span className="hint">{data?.timeZone ?? `UTC${data?.tzOffsetMin ? `${data.tzOffsetMin > 0 ? '+' : ''}${data.tzOffsetMin / 60}` : ''}`}</span></>}>
     <ErrorLine e={error} />
     {data && <div className="grid g4" style={{ marginBottom: 14 }}><Stat k="Net realized" v={fmt.usd(data.summary.net)} tone={data.summary.net < 0 ? 'down' : 'up'} /><Stat k="Fees" v={fmt.usd(data.summary.fees)} /><Stat k="Trades" v={data.summary.trades} s={`${data.summary.greenDays} green / ${data.summary.redDays} red days`} /><Stat k="Best / worst day" v={<span style={{ fontSize: 15 }}>{data.summary.bestDay ? fmt.usd(data.summary.bestDay.net) : '—'} / {data.summary.worstDay ? fmt.usd(data.summary.worstDay.net) : '—'}</span>} /></div>}
     <Card><div className="cal">{['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => <div key={d} className="hint" style={{ textAlign: 'center' }}>{d}</div>)}
@@ -202,8 +217,8 @@ export function Lab() {
       <tbody>{(data?.strategies ?? []).map((s: any) => <tr key={s.id}><td><b>{s.name}</b><div className="hint">{s.note}</div></td><td><Badge v={s.status} /></td><td className="mono" style={{ fontSize: 12 }}>{s.stats ? `${S(s.stats)} · ${s.stats.instruments} instr.` : '—'}</td>
         <td className="mono" style={{ fontSize: 12 }}>{s.stats?.monteCarlo ? `P5 ${fmt.pct(s.stats.monteCarlo.returnP5 * 100, 1)} · P50 ${fmt.pct(s.stats.monteCarlo.returnP50 * 100, 1)} · DD95 ${(s.stats.monteCarlo.maxDdP95 * 100).toFixed(1)}%` : '—'}</td>
         <td className="mono">{s.live ? `${s.live.trades} · ${s.live.expectancyR.toFixed(2)}R` : '—'}</td>
-        <td className="row">{s.status !== 'PAPER' && <Action className="sm" label="Promote to paper" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'PAPER', password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}{s.status !== 'SUSPENDED' && <Action className="sm" label="Suspend" run={async () => { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'SUSPENDED' } }); reload(); }} />}<Action className="sm" label="Live candidate" title="Blocked until release gates pass" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'LIVE_CANDIDATE', password: pw || undefined } }); } finally { setPw(''); } }} /></td></tr>)}</tbody></table></Card>
+        <td className="row">{s.status !== 'PAPER' && <Action className="sm" label="Promote to paper" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'PAPER', ...stepUpBody(pw) } }); reload(); } finally { setPw(''); } }} />}{s.status !== 'SUSPENDED' && <Action className="sm" label="Suspend" run={async () => { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'SUSPENDED' } }); reload(); }} />}<Action className="sm" label="Live candidate" title="Blocked until release gates pass" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'LIVE_CANDIDATE', ...stepUpBody(pw) } }); } finally { setPw(''); } }} /></td></tr>)}</tbody></table></Card>
     <div style={{ height: 14 }} />
-    <Card title="Backtest history" flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Strategy</th><th>Instrument</th><th>Out-of-sample</th></tr></thead><tbody>{(data?.backtests ?? []).map((b: any) => <tr key={b.id} className="click" onClick={() => setRes(b)}><td className="faint">{fmt.ago(b.created_at)}</td><td>{b.strategyId}</td><td>{b.instrument.split(':')[2]}</td><td className="mono" style={{ fontSize: 12 }}>{S(b.outOfSample)} <Chg v={null} /></td></tr>)}</tbody></table>{!data?.backtests.length && <Empty>No backtests yet.</Empty>}</div></Card>
+    <Card title="Backtest history" flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Strategy</th><th>Instrument</th><th>Out-of-sample</th></tr></thead><tbody>{(data?.backtests ?? []).map((b: any) => <tr key={b.id} {...rowProps(() => setRes(b), `Open backtest ${b.id}`)}><td className="faint">{fmt.ago(b.created_at)}</td><td>{b.strategyId}</td><td>{b.instrument.split(':')[2]}</td><td className="mono" style={{ fontSize: 12 }}>{S(b.outOfSample)} <Chg v={null} /></td></tr>)}</tbody></table>{!data?.backtests.length && <Empty>No backtests yet.</Empty>}</div></Card>
   </Page>;
 }

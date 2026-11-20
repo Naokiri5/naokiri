@@ -1,11 +1,11 @@
 import { test, expect, type Page, type Locator } from '@playwright/test';
+import { readTestSetupCode, TEST_OWNER_PASSPHRASE as PW } from './owner-fixture';
 
 /**
  * QA-02 Frontend Testing · end-to-end, in order: owner setup → risk policy → funding → PAPER mode →
  * every workspace renders with zero console errors → command palette → mobile layout.
  * Runs against an OFFLINE server (no live data), so pages must show honest empty/stale states, not crash.
  */
-const PW = 'e2e owner passphrase';
 const ROUTES = ['/', '/terminal/BTCUSDT', '/scanner', '/discover', '/intelligence', '/qhef', '/joe', '/bubbles', '/whales', '/copy', '/holders', '/news',
   '/bot', '/risk', '/portfolio', '/history', '/journal', '/calendar', '/lab', '/wallet', '/security', '/connections', '/notifications', '/qa', '/settings', '/academy'];
 const errors: string[] = [];
@@ -34,9 +34,18 @@ test.beforeAll(async ({ browser }) => {
 test('owner setup and sign-in', async () => {
   await page.goto('/');
   const pws = page.locator('input[type=password]'); await pws.nth(0).fill(PW); await pws.nth(1).fill(PW);
+  await page.getByLabel('Setup code').fill(readTestSetupCode());
   await page.getByRole('button', { name: 'Create owner' }).click();
   await expect(page.locator('.mode')).toHaveText('READ-ONLY');
   await expect(page.getByText('Market data is stale or disconnected')).toBeVisible(); // offline ⇒ honest stale banner
+});
+
+test('Discover: Vike research tab is research-only and shows PENDING_CREDENTIALS without a server key', async () => {
+  await page.goto('/discover');
+  await page.getByRole('tab', { name: 'Vike research' }).click();
+  await expect(page.getByText(/research only/i).first()).toBeVisible();
+  await expect(page.getByText('PENDING CREDENTIALS')).toBeVisible(); // Badge renders underscores as spaces
+  await expect(page.getByText(/MIA_VIKE_API_KEY/)).toBeVisible();
 });
 
 test('status ribbon tells the truth about an offline server', async () => {
@@ -65,10 +74,15 @@ test('accept risk policy (step-up) → fund → PAPER mode', async () => {
 
 test('BOUNDED LIVE cannot be enabled', async () => {
   const before = errors.length;
-  await page.goto('/bot'); await page.getByPlaceholder('Owner passphrase (step-up)').fill(PW);
-  await page.locator('label:has-text("Bounded live")').getByRole('button', { name: 'Switch' }).click();
-  await expect(page.getByText(/BOUNDED_LIVE blocked/)).toBeVisible();
-  await expect(page.locator('.mode')).toHaveText('PAPER');
+  await page.goto('/bot');
+  // The UI no longer offers a Switch for live mode (MIA-WEB-017): it is shown as LOCKED.
+  const live = page.locator('label:has-text("Bounded live")');
+  await expect(live.getByRole('button', { name: 'Switch' })).toHaveCount(0);
+  await expect(live.getByText('LOCKED', { exact: true })).toBeVisible();
+  // The server still refuses it directly, even with the correct passphrase (the authoritative check).
+  const r = await page.evaluate(async (pw) => { const res = await fetch('/api/control', { method: 'POST', headers: { 'content-type': 'application/json', 'x-mia-csrf': '1' }, body: JSON.stringify({ mode: 'BOUNDED_LIVE', password: pw }) }); return { status: res.status, body: await res.json() }; }, PW);
+  expect(r.status).toBe(400); expect(r.body.error).toMatch(/BOUNDED_LIVE is locked/); // SAFE-01: refused in the core
+  await page.reload(); await expect(page.locator('.mode')).toHaveText('PAPER');
   // the server's refusal (HTTP 400) is the expected outcome; the browser logs it as a failed resource
   const extra = errors.splice(before); expect(extra.every((e) => /status of 400/.test(e)), extra.join('\n')).toBe(true);
 });
@@ -95,7 +109,7 @@ test('status ribbon goes STALE (never green) when the server stops answering, th
 
 for (const r of ROUTES) {
   test(`renders ${r}`, async () => {
-    await page.goto(r); await expect(page.locator('h1')).toBeVisible(); await page.waitForTimeout(400);
+    await page.goto(r); await expect(page.locator('h1')).toBeVisible(); await page.waitForLoadState('networkidle'); // every API call answered
     await expect(page.locator('[role=alert]')).toHaveCount(0); // no API error lines
   });
 }
@@ -168,16 +182,55 @@ test('trading history CSV export downloads', async () => {
   expect(dl.suggestedFilename()).toBe('mia-orders-paper.csv');
 });
 
-test('terminal displays chart intelligence evidence and invalidation', async () => {
+test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', async () => {
   await page.route('**/api/instrument/CHARTFIXTURE?interval=1h', async route => route.fulfill({ json: {
     instrument: { base: 'CHARTFIXTURE', symbol: 'CHARTFIXTURE' }, cross: {}, candles: [], indicators: [],
-    chartIntelligence: { status: 'VALID', trend: 'UNKNOWN', note: 'Fixture evidence only; confidence is not calibrated.', issues: [], detections: [{ kind: 'BREAKOUT_UP', confidence: 0.6, calibration: 'NOT_CALIBRATED', boundaries: { low: 100, high: 105 }, evidence: ['close=105'], method: 'Prior 20-bar high', invalidation: 'Close back below 100', expiresAt: 3600000 }] }
+    cexActivity: {
+      source: 'binance', baseAsset: 'BASE', quoteAsset: 'USDT',
+      volume: [
+        { window: '5m', status: 'UNAVAILABLE', reason: 'NO_CANDLE_FEED' },
+        { window: '1h', status: 'AVAILABLE', baseVolume: 400, closedAt: 43200000, relativeToMedian: 2,
+          baselineWindows: 5, changeVsPreviousPct: 100, aggressiveFlow: { deltaBase: 120, tradeCount: 100 } },
+      ],
+      book: {
+        status: 'AVAILABLE', spreadBps: 1, quoteAgeMs: 250, bidDepth1pctQuote: 3000, askDepth1pctQuote: 1000,
+        bidShare1pct: 0.75, exit: { conservativeBaseCapacity: 12 },
+        impactCurve: [{ side: 'sell', requestedQuote: 50000, filledFully: false }],
+      },
+    },
+    featuresResearch: {
+      candleOpenAt: 39600000, wma20: 104, hma20: 106, keltner: null, parabolicSar: null,
+      ichimoku: { conversion9: 100, base26: 100, leadingA: 100, leadingB52: null, laggingClose: 105, displacementBars: 26 },
+      parkinson20: null, garmanKlass20: null,
+    },
+    timeframeAgreement: { state: 'CONFLICTING_SIGNALS', asOf: 43200000, readings: [
+      { timeframe: '15m', trend: 'BULLISH', status: 'VALID', closedAt: 43200000, issues: [] },
+      { timeframe: '1h', trend: 'UNKNOWN', status: 'UNAVAILABLE', closedAt: null, issues: ['No closed candles in the market cache'] },
+      { timeframe: '4h', trend: 'BEARISH', status: 'VALID', closedAt: 43200000, issues: [] },
+    ] },
+    chartIntelligence: { status: 'VALID', trend: 'UNKNOWN', note: 'Fixture evidence only; confidence is not calibrated.', issues: [],
+      anchoredVwap: [
+        { anchor: 'UTC_DAY', anchorAt: 0, price: 100, deviationPct: 5 },
+        { anchor: 'UTC_WEEK', anchorAt: -259200000, price: null, deviationPct: null },
+      ],
+      detections: [{ kind: 'BREAKOUT_UP', confidence: 0.6, calibration: 'NOT_CALIBRATED', boundaries: { low: 100, high: 105 }, evidence: ['close=105'], method: 'Prior 20-bar high', invalidation: 'Close back below 100', expiresAt: 3600000 }] }
   } }));
   await page.goto('/terminal/CHARTFIXTURE');
   await expect(page.getByText('Chart intelligence · closed candles')).toBeVisible();
+  const agreement = page.getByRole('table', { name: /Timeframe agreement · CONFLICTING SIGNALS/ });
+  await expect(agreement.getByRole('row', { name: /15m/ })).toContainText('BULLISH');
+  await expect(agreement.getByRole('row', { name: /1h/ })).toContainText('No closed candles in the market cache');
+  await expect(agreement.getByRole('row', { name: /4h/ })).toContainText('BEARISH');
   await expect(page.getByRole('cell', { name: /BREAKOUT_UP/ })).toBeVisible();
   await expect(page.getByText('Close back below 100')).toBeVisible();
+  await expect(page.getByRole('row', { name: /UTC DAY/ })).toContainText('+5.00%');
+  await expect(page.getByRole('row', { name: /UTC WEEK/ })).toContainText('Unavailable');
   await expect(page.getByText(/60% rule strength/)).toBeVisible();
+  await expect(page.getByRole('row', { name: /Hull moving average/ })).toContainText('106.0000');
+  const activity = page.getByRole('table', { name: 'Binance closed-candle observations' });
+  await expect(activity.getByRole('row', { name: /5m/ })).toContainText('Unavailable');
+  await expect(activity.getByRole('row', { name: /1h/ })).toContainText('2.00×');
+  await expect(page.getByRole('row', { name: /sell 50,000/ })).toContainText('Insufficient visible depth');
   await page.unroute('**/api/instrument/CHARTFIXTURE?interval=1h');
 });
 
@@ -202,6 +255,7 @@ test('academy: upload a document, see it indexed, search it with a cited source'
 
 test('overview dashboard shows account, market intelligence, risk monitor, data sources and activity from the backend', async () => {
   await page.goto('/');
+  await page.getByLabel('Presentation mode').selectOption('analyst');
   for (const t of ['Paper account', 'Market intelligence', 'Risk monitor', 'Data sources', 'Activity', 'Trader Joe daily briefing']) await expect(page.getByText(t, { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Equity', { exact: true })).toBeVisible();
   await expect(page.getByRole('meter', { name: 'Daily loss' })).toBeVisible(); // policy accepted earlier in this suite
@@ -215,6 +269,74 @@ test('DITAS execution quality tab lists actual paper orders only', async () => {
   await expect(page.getByText(/Actual paper OMS records only/)).toBeVisible();
 });
 
+test('market coverage uses the saved IANA timezone and shows unsupported venues', async () => {
+  await page.goto('/settings');
+  await page.getByRole('textbox', { name: 'IANA timezone' }).fill('Asia/Manila');
+  const [response] = await Promise.all([
+    page.waitForResponse(r => r.url().endsWith('/api/calendar/tz') && r.request().method() === 'POST'),
+    page.getByRole('button', { name: 'Save timezone' }).click(),
+  ]);
+  expect(response.ok()).toBe(true);
+  await expect(page.getByRole('textbox', { name: 'IANA timezone' })).toHaveValue('Asia/Manila');
+  await page.goto('/discover');
+  await page.getByRole('tab', { name: 'Market coverage' }).click();
+  await expect(page.getByText(/Asia\/Manila/)).toBeVisible();
+  await expect(page.getByRole('row', { name: /U.S. equities/ })).toContainText('PENDING CREDENTIALS');
+  await expect(page.getByRole('row', { name: /Tokenized equities/ })).toContainText('Unavailable');
+  await page.goto('/calendar');
+  await expect(page.getByText('Asia/Manila', { exact: true })).toBeVisible();
+});
+
+test('SEC research keeps acceptance and report dates separate', async () => {
+  const sourceUrl = 'https://www.sec.gov/Archives/edgar/data/123456/000012345626000001/0000123456-26-000001-index.htm';
+  await page.route('**/api/research/filings/123456', route => route.fulfill({ json: {
+    cik: '0000123456', note: 'Fixture SEC filing metadata.',
+    filings: [{
+      accessionNumber: '0000123456-26-000001', form: '10-Q', filingDate: '2026-05-06',
+      reportDate: '2026-03-31', acceptedAt: '2026-05-06T20:00:00Z', items: [], sourceUrl,
+    }],
+  } }));
+  await page.goto('/discover');
+  await page.getByRole('tab', { name: 'SEC filings' }).click();
+  await page.getByRole('textbox', { name: 'Company CIK' }).fill('123456');
+  await page.getByRole('button', { name: 'Find filings' }).click();
+  await expect(page.getByRole('link', { name: '10-Q' })).toHaveAttribute('href', sourceUrl);
+  const filing = page.getByRole('row', { name: /10-Q/ });
+  await expect(filing).toContainText('2026-05-06T20:00:00Z');
+  await expect(filing).toContainText('2026-03-31');
+  await page.unroute('**/api/research/filings/123456');
+});
+
+test('risk center shows research-only paper scenarios', async () => {
+  await page.goto('/risk');
+  await expect(page.getByText('Paper portfolio stress', { exact: true })).toBeVisible();
+  await expect(page.getByRole('row', { name: /Flash crash/ })).toContainText('NO EXPOSURE');
+  await expect(page.getByRole('row', { name: /USDT cash depeg/ })).toContainText('MODELED');
+});
+
+test('decision record displays a recorded paper rejection separately from strategy and risk', async () => {
+  const url = '**/api/decisions/omega-fixture';
+  await page.route(url, route => route.fulfill({ json: {
+    report: {
+      asset: 'OMEGA', market: 'crypto', venue: 'binance',
+      strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',
+      decision: 'PAPER_TRADE', finalDecision: 'ENTER', direction: 'LONG',
+      consensus: { id: 'q-fixture', state: 'STRONG_CONSENSUS' }, createdAt: '2026-06-01T00:00:00Z',
+      reason: 'Fixture strategy decision', disclaimer: 'Paper research fixture.', takeProfit: [],
+      expectedCosts: { funding: 'N/A' }, dataFreshness: { status: 'OK', quoteAgeMs: 500, bookAgeMs: 500 },
+      opportunity: { score: 70, version: 'fixture' }, riskAssessment: [], missingInformation: [],
+      supportingEvidence: [], opposingEvidence: [], risk: { decision: 'ALLOW', policyVersion: 1, traceId: 'fixture' },
+    },
+    paperEntry: { orderId: 'ord-omega-test', status: 'REJECTED', filledQty: 0, averageFillPrice: null, rejectReason: 'ORDER_BOOK_STALE' },
+  } }));
+  await page.goto('/decision/omega-fixture');
+  await expect(page.getByText('Defend · Risk assessment')).toBeVisible();
+  await expect(page.getByText('Execute · Paper OMS')).toBeVisible();
+  await expect(page.getByText('ord-omega-test')).toBeVisible();
+  await expect(page.getByText('ORDER_BOOK_STALE')).toBeVisible();
+  await page.unroute(url);
+});
+
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });
 
 test('mobile layout has no horizontal overflow', async ({ browser }) => {
@@ -223,4 +345,62 @@ test('mobile layout has no horizontal overflow', async ({ browser }) => {
   for (const r of ['/', '/scanner', '/bot', '/risk', '/lab', '/intelligence', '/qhef', '/history', '/academy']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
   await expect(m.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=live]')).toBeInViewport();
   await ctx.close();
+});
+
+test('Trader Joe: a failed send shows the error and gives the message back (MIA-WEB-011)', async () => {
+  await page.goto('/joe');
+  await page.route('**/api/joe', (r) => r.request().method() === 'POST' ? r.fulfill({ status: 429, json: { error: 'rate limit: Trader Joe is limited to 10/min — try again shortly' } }) : r.fallback());
+  const box = page.getByRole('textbox', { name: 'Message' });
+  await box.fill('what is the risk on ETH today?');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.getByText(/Not sent: rate limit/)).toBeVisible();
+  await expect(box).toHaveValue('what is the risk on ETH today?');
+  await page.unroute('**/api/joe');
+});
+
+test('terminal never shows the previous symbol after an in-app switch to one that fails (MIA-WEB-013)', async () => {
+  await page.route('**/api/instrument/BTCUSDT*', (r) => r.fulfill({ json: { instrument: { base: 'BTC', symbol: 'BTCUSDT' }, cross: {}, ticker: { last: 50_000, receivedAt: Date.now() }, candles: [], features: null } }));
+  await page.route('**/api/instrument/FOOUSDT*', (r) => r.fulfill({ status: 404, json: { error: 'unknown symbol FOOUSDT' } }));
+  await page.goto('/terminal/BTCUSDT');
+  await expect(page.getByRole('heading', { name: /Market Terminal · BTC$/ })).toBeVisible();
+  await page.evaluate(() => { history.pushState({}, '', '/terminal/FOOUSDT'); dispatchEvent(new PopStateEvent('popstate')); });
+  await expect(page.getByText('No data for FOOUSDT')).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Market Terminal · BTC$/ })).toHaveCount(0);
+  await page.unroute('**/api/instrument/BTCUSDT*'); await page.unroute('**/api/instrument/FOOUSDT*');
+});
+
+test('trading history loads once instead of refetching in a loop (MIA-WEB-030)', async () => {
+  let n = 0; const count = (r: any) => { if (r.url().includes('/api/history?')) n++; };
+  page.on('request', count);
+  await page.goto('/history'); await expect(page.locator('h1')).toHaveText('Trading History');
+  await page.waitForTimeout(2000);
+  page.off('request', count);
+  expect(n, `history requests in ~2 s: ${n}`).toBeLessThanOrEqual(3); // was 753 in 3 s
+});
+
+test('academy rejects an over-limit file before uploading it (MIA-WEB-032)', async () => {
+  await page.route('**/api/academy/stats', async (r) => { const res = await r.fetch(); const j = await res.json(); await r.fulfill({ json: { ...j, uploadLimitBytes: 1024 } }); });
+  let uploads = 0; const watchUploads = (r: any) => { if (r.method() === 'POST' && r.url().includes('/api/academy/documents')) uploads++; };
+  page.on('request', watchUploads);
+  await page.goto('/academy'); await page.getByRole('tab', { name: 'Library' }).click();
+  await page.getByLabel('Document file').setInputFiles({ name: 'big.txt', mimeType: 'text/plain', buffer: Buffer.alloc(4096, 'a') });
+  await page.getByRole('button', { name: 'Upload' }).click();
+  await expect(page.getByText(/big\.txt is 0\.0 MB; the limit is 0 MB/)).toBeVisible();
+  page.off('request', watchUploads); await page.unroute('**/api/academy/stats');
+  expect(uploads).toBe(0);
+});
+
+test('sign-out that fails on the network keeps the session and says so (MIA-WEB-001)', async () => {
+  await page.goto('/');
+  await page.route('**/api/auth/logout', (r) => r.abort('failed'));
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Sign-out failed' })).toBeVisible();
+  await expect(page.locator('.mode')).toBeVisible(); // still in the app, matching the server session
+  expect((await page.evaluate(async () => (await fetch('/api/auth/state')).json())).authenticated).toBe(true);
+  await page.unroute('**/api/auth/logout');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  expect((await page.evaluate(async () => (await fetch('/api/auth/state')).json())).authenticated).toBe(false);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible(); // a reload does not sign back in
 });

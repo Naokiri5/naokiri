@@ -10,3 +10,13 @@ test-results/
 e2e/.data/
 test-results/
 playwright-report/
+
+# Python research labs (scripts/research-python.sh): environments, downloaded/synthetic data and results stay local
+research/python/*/.venv/
+research/python/*/install.log
+research/python/freqtrade/user_data/*
+!research/python/freqtrade/user_data/config.json
+!research/python/freqtrade/user_data/strategies/
+research/python/freqtrade/user_data/strategies/*
+!research/python/freqtrade/user_data/strategies/MiaResearchEmaCross.py
+__pycache__/

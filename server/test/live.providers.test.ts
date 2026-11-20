@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { modeGate } from '../src/qa/gates.js';
 /** Opt-in live integration test: MIA_LIVE_TESTS=1 npx vitest run test/live.providers.test.ts */
 const LIVE = process.env.MIA_LIVE_TESTS === '1';
 describe.skipIf(!LIVE)('live providers (read-only)', () => {
@@ -37,7 +38,7 @@ describe.skipIf(!LIVE)('live paper execution (real order book, simulated fills)'
     const { updateControl } = await import('../src/core/mode.js');
     const { ledger, PAPER_ACCOUNT, openPositions } = await import('../src/portfolio/ledger.js');
     const oms = await import('../src/exec/oms.js'); const { reconcile } = await import('../src/portfolio/calendar.js');
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     const px = market.price('crypto:binance:BTCUSDT')!;
     const stop = px.price * 0.98;
     const r: any = { id: 'dec_live', candidateId: 'cand_live', traceId: 't', asset: 'BTCUSDT', instrumentId: 'crypto:binance:BTCUSDT', market: 'crypto', venue: 'binance', strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',

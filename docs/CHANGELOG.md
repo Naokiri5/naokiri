@@ -1,5 +1,92 @@
 # Changelog
 
+## Unreleased: Python research labs — NautilusTrader and Freqtrade (2026-11-18)
+- **New:** isolated research environments for NautilusTrader 1.231.0 and Freqtrade 2026.10 (`scripts/research-python.sh setup|smoke`). They are not trading bots and not part of MIA's runtime.
+- **Safety:** Nautilus runs a simulated venue only; Freqtrade runs keyless dry-run backtests. A required CI test fails if either is configured to trade, carries keys, or imports live-trading code.
+- **Optional CI:** a separate workflow runs both labs when their files change.
+- **Docs:** `docs/research/PYTHON_RESEARCH_LABS.md`.
+
+## Unreleased: DeFi research — DefiLlama yields and Aave V3 flash loans (2026-11-18)
+- **New:** read-only DefiLlama yield pools and protocol TVL. Risky yields are flagged: outlier APY, reward-dependent, impermanent loss, low TVL.
+- **New:** Aave V3 flash-loan research: on-chain flash-loan fee, enabled/paused/frozen status and available liquidity, plus a hypothetical cost calculator.
+- **Safety:** MIA cannot take a flash loan. Only read-only node calls are allowed, contract addresses come from the official registry, and failed reads are shown as missing, never as zero.
+- **Docs:** `docs/research/DEFI_RESEARCH.md`.
+
+## Unreleased: CCXT exchange research (2026-11-18)
+- **New:** read-only exchange research through CCXT (Binance, Coinbase Exchange, Kraken, OKX, Bybit): markets, ticker, order book and candles, labelled research only.
+- **Safety:** CCXT runs without keys and through MIA's own GET-only transport, so it cannot place orders or move funds. It uses MIA's rate limits and health tracking. `MIA_CCXT_SANDBOX=1` switches to official test URLs.
+- **Docs:** `docs/research/CCXT_RESEARCH.md`.
+
+## Unreleased: Privy optional embedded wallets (2026-11-18)
+- **Optional:** with `MIA_PRIVY_EMBEDDED_WALLETS=1`, the owner can create a Privy-secured wallet from Security Center. MIA only shows its address.
+- **Still locked:** signing, sending, delegated signing, funding and key export. A new CI test fails if MIA's Privy code uses any of those Privy APIs.
+
+## Unreleased: Tailscale Funnel guide (2026-11-18)
+- **New guide:** `docs/operations/TAILSCALE_FUNNEL.md` gives MIA a free HTTPS address with Tailscale Funnel (for your phone, or Privy's Allowed origins).
+- **Safety:** requests relayed by Tailscale Serve or Funnel are treated as remote even though they arrive from this computer, so the setup code and normal lockout still apply.
+
+## Unreleased: Privy sign-in (2026-11-18)
+- **New: sign in with Privy** (email, phone, Google, Apple, passkey, wallet, as enabled in your Privy dashboard). Link your Privy account once in Security Center, with your passphrase; after that the login screen offers "Sign in with Privy".
+- **Safety:** the server checks every Privy token, and only your linked account can sign in. Your passphrase is still needed for sensitive actions. Wallets are view-only; creating embedded wallets and signing, sending, funding or exporting are LOCKED.
+- **Off by default:** nothing changes, and the browser security policy stays strict, unless `MIA_PRIVY_APP_ID` is set.
+- **Known issue:** Privy's wallet libraries trigger a high-severity `npm audit` warning (old `zod`), so the CI audit job fails until Privy updates.
+- **Docs:** `docs/operations/PRIVY_SIGN_IN.md`.
+
+## Unreleased: Vike research provider and Paper/Live contract (2026-11-18)
+- **New: Vike on-chain research** (Discover → Vike research tab): token screener and search from data.vike.io, read-only. It is labelled research only and can never place, approve or size a trade.
+- **Key safety:** the key is read only from the server setting `MIA_VIKE_API_KEY`. Without it MIA shows PENDING_CREDENTIALS and sends nothing. Presigned archive links never leave the server.
+- **Paper/Live:** Live trading stays locked. Every Live command is refused (`LIVE_LOCKED`), and `/api/trading/environments` shows it truthfully.
+- **Docs:** `docs/research/VIKE_INTEGRATION.md`.
+
+## Unreleased: Master repair audit (2026-11-18)
+- **A broken saved risk setting can no longer stop a stop-loss.** Exits use the last valid fee rate, and new entries stay blocked until the owner fixes the setting. The release gate shows a broken setting as FAIL.
+- **Worker votes:** a required area (for example liquidity) now needs its own evidence. A worker from another area can no longer count for it.
+- **Login:** behind a proxy, a stranger's wrong passwords can no longer block the owner's close-all.
+- **Backups:** a manual backup run in the wrong folder now fails instead of backing up an empty database.
+- **Server install:** the systemd unit creates its data folder, and its crash-loop limit now actually applies.
+- **Streaming (still off by default):** snapshot retries back off, lagging or broken books are not used, a silent connection reconnects, and the local book stays small (1.67 → 0.039 ms per update).
+- **CI:** the security audit runs as its own required job, so tests always run and report.
+- **Register:** `docs/engineering/MASTER_AUDIT_2026-11-18.md`.
+
+## Unreleased: Architecture blueprint (2026-11-18)
+- **Streaming order books (milestone 3), off by default.** With `MIA_STREAMING=1`, open positions and the deep tier get Binance WebSocket books that are checked update by update. Any gap, bad data or crossed book throws the local book away and re-syncs. REST polling stays the fallback. Live latency has not been measured yet.
+- **QA evidence is tied to the exact build (Q-01).** The release gate accepts a test report only from the same commit, a clean tree and a run at most 7 days old.
+- **Stale leader proven with two real processes (L-01).** An old leader's write fails after another process takes the lease.
+- **Draft PR #17 (autopilot cockpit) merged into this branch,** with its request-cancelling bug fixed.
+- **Status table:** `docs/engineering/BLUEPRINT_STATUS.md`.
+
+## Unreleased: Debug audit Batch C (2026-11-17)
+- **Trading History no longer refetches in a loop.** It made 753 requests in 3 s before the fix.
+- **Strategy revoke/re-enable** is a single operation on the server's current list.
+- **Bot work loops** cannot crash the process on a database error.
+- **Provider data is validated where it comes in:** symbol rules, cross-venue quotes, timestamps and DEX ids. Token safety no longer reports PASS on missing or stale data.
+- **Smaller fixes:** live mode shows LOCKED in the UI; Academy checks the upload limit first; table rows work from the keyboard; open risk includes the stop buffer and exit fee.
+- **Measurements:** decision-memory growth measured at ≈ 394 MB/day, which needs an owner decision. Performance baseline script: `scripts/load-baseline.mjs`.
+
+## Unreleased: Debug audit Batch B (2026-11-17)
+- **Stale prices fail closed.** A stale or future-dated price for an open position now counts as missing, so the risk gate denies new entries (MIA-RISK-001).
+- **Exits and risk policy.** A paper exit can no longer roll back forever when a small position closes early in a pass (MIA-OMS-003). A stored risk policy that fails validation is denied (MIA-RISK-006).
+- **Resource and injection limits.** EPUB spine amplification is bounded. Provider symbols and links are treated as untrusted. Trader Joe can pause only when the owner asks, and its tool calls are capped. Academy research runs are rate limited.
+- **Operations.** The database file is owner-only. Graceful stop no longer hangs while a browser tab is open (32 s → 1.1 s), and the shutdown order is fixed. The supervisor treats a spawn failure as a crash.
+- **Web.** The Joe chat keeps the message and shows the error when a send fails. The terminal no longer shows the previous symbol. A page error boundary keeps banners visible. An empty book no longer crashes the page. Missing data ages show as "missing". Stale search responses are ignored.
+- **Audit records.** The machine-readable file inventory is `docs/engineering/audit-files.json`. The full register is §8 of `DEBUG_AUDIT_2026-11-17.md`.
+
+## Unreleased: Debug audit Batch A (2026-11-17)
+- **SEC-13 fixed.** First-owner setup from a non-local browser (forwarded port, container, LAN) now needs a one-time code printed in the server console. A loopback socket that carries proxy headers counts as remote. Tests: `server/test/auth-setup.test.ts`, `e2e/auth.spec.ts`.
+- **MIA-WEB-001 fixed.** Sign-out only leaves the app after the server confirms; a failed sign-out says the session is still active.
+- **Audit report.** `docs/engineering/DEBUG_AUDIT_2026-11-17.md` holds the bug register, the CR-01–CR-20 matrix, and review notes for Capy PR #13.
+- **SEC-14 (global lockout) reproduced** and left open for an owner decision.
+
+## Unreleased: Autopilot Phase 1 (24/7 PAPER-only server)
+- **Single-runner engine lease.** Migration v5 adds `runtime_leases`. Only the lease holder scans and manages paper positions, and a second copy waits on STANDBY.
+- **Readiness.** `GET /api/ready` is unauthenticated and returns 200 or 503.
+- **Stall alarm.** One CRITICAL notification when the scanner stalls, and one when it recovers.
+- **Graceful drain on SIGTERM.**
+- **Backups.** Snapshots with a sha256 manifest, optional AES-256-GCM encryption, retention, scheduled runs by the leader, and a restore check (integrity, schema, audit chain, DITAS chain). Run them yourself with `npm run backup -- create|verify|list`.
+- **Supervisor.** `npm run start:supervised` restarts crashes with bounded backoff and stops after a crash loop. Adds the `deploy/mia.service` systemd unit.
+- **Inventory.** `docs/engineering/AUTOPILOT_100_INVENTORY.md` gives the status of all 100 backlog items.
+- **Soak.** `docs/engineering/PHASE1_SOAK.md` records the headless soak. It was shorter than 24 h and did not run on a hosted server.
+- Nothing is deployed and live execution stays locked.
 ## Unreleased: engine lease hardening (builds on the Phase 1 engine lease in bot/bot.ts and ops/)
 - The lanes re-check the lease synchronously with the existing holdEngine() right before writing after awaited network
   calls: the position monitor and approval expiry in the ticker lane, OMS writes from onDecision in the scan lane, and
@@ -112,7 +199,7 @@ PR #6 `feat/ditas-foundation`.
 - Fixes: Market Terminal no longer crashes before market data loads; event-loop delay reports true blocking time.
 
 ## Unreleased: Phase 0 audit (branch `claude/blissful-planck-lazglg`)
-- Full audit against spec Parts 1–33 (`REQUIREMENTS_TRACEABILITY.md`): 27 implemented, 34 partial, 4 missing, 9 blocked,
+- Full audit against spec Parts 1–33 (`docs/planning/REQUIREMENTS_TRACEABILITY.md`): 27 implemented, 34 partial, 4 missing, 9 blocked,
   0 mocked.
 - Security audit (`SECURITY.md`): 1 high-severity dependency advisory found (SEC-01), no committed secrets.
 - Documentation reorganised into the required `docs/` file set; the old numbered docs were renamed, not duplicated.

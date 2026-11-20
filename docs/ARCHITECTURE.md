@@ -109,10 +109,10 @@ release gate.
 | vite · @vitejs/plugin-react · concurrently | 8.3.8 · 6.3.0 · 10.0.7 | build & dev tooling | dev only |
 | @playwright/test | 1.63.0 | browser end-to-end suite | dev only (Phase 1) |
 
-Runtime requirement: Node.js ≥ 22.13 (enforced at startup).
+Runtime requirement: Node.js 22.16+ in the 22 LTS line or Node.js 24+, with SQLite FTS5.
 
 ## Code size (Phase 0)
 ~4,800 lines of TypeScript across 23 server modules, 12 UI files and 10 test files. The largest modules are the market
 fabric (411 lines), providers (312), workers (297) and the strategy lab (271).
 
-Measured latency baseline: `QHEF_LATENCY_BASELINE.md`.
+Measured latency baseline: `docs/operations/QHEF_LATENCY_BASELINE.md`.
