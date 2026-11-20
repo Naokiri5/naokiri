@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { freshDb, seedInstrument } from './helpers.js';
 import { closeDb } from '../src/db/db.js';
 import { market } from '../src/market/store.js';
