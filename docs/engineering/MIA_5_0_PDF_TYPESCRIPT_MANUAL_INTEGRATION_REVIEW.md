@@ -1,0 +1,144 @@
+# MIA 5.0 — Unified PDF TypeScript source preservation and manual integration review
+
+**Status: DOCUMENTATION ONLY. No production code, dependencies, database, trading mode, orders, exchange credentials or LIVE authority changed.**
+**Review:** 2026-11-21 | **Repo:** [Naokiri5/naokiri](https://github.com/Naokiri5/naokiri) | **Baseline:** [unmerged PR #45](https://github.com/Naokiri5/naokiri/pull/45), branch `claude/mia-unified-01`.
+
+This review uses the owner's complete uploaded **49-page PDF**, not a guessed feature list. It separates **unaltered source evidence** from **new review conclusions**. The PDF claims to be `server/src/mia-unified-core.ts` and proposes six core modules; that claim is not proof the implementation already runs in GitHub.
+
+## 1. Original source preservation — no words silently removed or edited
+
+| Reference | Contents / guarantee |
+| --- | --- |
+| [Entire 49-page PDF text transcription](sources/MIA_5_0_UNIFIED_CORE_PDF_VERBATIM.txt) | Every page was extracted, including the introductory module map, full TypeScript, the final Quick Integration Check, original line breaks, page breaks and invisible U+200B characters. The committed GitHub copy was fetched back and **exactly matched the complete extraction** (73,860 characters, 49 pages). |
+| [TypeScript section only — unedited, non-executable](sources/MIA_5_0_UNIFIED_CORE_TYPESCRIPT_UNEDITED.ts.txt) | An exact contiguous substring of the full transcription, from the PDF's first code-like line to the final closing brace, with **no corrections or reorganizing** (68,717 characters). Saved as `.ts.txt` to avoid accidental compilation or importing a real-money adapter. |
+| **Original 49-page uploaded PDF** | The original PDF attachment is the definitive source for any visual ambiguity. SHA-256 of original PDF bytes: `37750d5e195fa88bb6d4a29bb4b7e016aff43823a61da7da24ae822cf4993336`; size 335,235 bytes. The PDF binary was not claimed to be GitHub-hosted or byte-identical to text extraction. |
+
+**Accuracy note:** PDF extraction cannot recover an underlying original .ts file byte-for-byte. The uploaded PDF itself has page wrapping that splits strings and a displaced block of TypeScript at the beginning. The archived text is strictly unedited *relative to the PDF extraction*; the original PDF remains authoritative. Any later corrected/compilable candidate must be kept in a **different** file and independently reviewed; do not modify either source-preservation file.
+
+The PDF's instruction to drop its code into `server/src/mia-unified-core.ts` is preserved as **quoted original source**, NOT approved integration guidance.
+
+## 2. Complete labeled feature inventory — matched to the existing MIA repository
+
+| PDF module / pages | Manually identified features | Existing owner in PR #45 | Duplication decision |
+| --- | --- | --- | --- |
+| **MIA-CORE-01**, pp. 3–10 | `NexusFabricRouter`, strict-intent DAG publisher roles, typed market/regime/signal/exit/fill topics, Worker/MessagePort fan-out, five-second TCA markout | `server/src/fabric/contracts.ts`, `fabric/catalog.ts`, `fabric/outbox.ts`, `fabric/relay.ts`, `core/bus.ts`, `market/fabric.ts` | **Do not add another event fabric.** Five-second verified markout sampling is a possible research-only increment |
+| **MIA-CORE-02**, pp. 10–19 | `CanonicalPositionLedger`, independent SQLite WAL tables, weighted fills/PnL, local position map, fill replay dedupe, exchange snapshot drift overwrite | `server/src/db/db.ts`, `db/migrations.ts`, `portfolio/ledger.ts`, `exec/oms.ts` | **Critical duplicate financial ledger.** Preserve existing account-specific ledger; use only safe reconciliation requirements |
+| **MIA-CORE-03**, pp. 19–28 | `UnifiedRiskGovernor`, daily/hard drawdown breakers, macro veto, VPIN/markout toxicity, static correlated buckets, Kelly/regime sizing, emergency flatten intents | `risk/gate.ts`, `risk/policy.ts`, `core/mode.ts`, `portfolio/stress.ts`, `ditas/calibration.ts`; [PR #67](https://github.com/Naokiri5/naokiri/pull/67) overlaps | **Critical duplicate risk authority.** Investigate missing market-toxicity and sizing evidence in research/shadow scope only |
+| **MIA-CORE-04**, pp. 28–34 | `ExitSupervisor`; five-stage hard/BE stop, regime-scaled partial TP/fee lock, ATR chandelier, OFI/VPIN exhaustion, time stop | `lab/exits.ts`, `exec/oms.ts` protective monitor, `exec/incidents.ts` | **Duplicate active exit supervisor.** Study proposed exits as challengers in Strategy Lab/DITAS |
+| **MIA-CORE-05A**, pp. 34–39 | `PaperOmsAdapter`, in-memory order states, synthetic top-three depth, fabricated 60%/40% partial fills, post-only and IOC logic, fee timers | `exec/oms.ts`, `exec/environment.ts`, `market/quality.ts`, `portfolio/ledger.ts` | **Duplicate PAPER OMS.** Partial-fill/queue behavior belongs in research until reviewed |
+| **MIA-CORE-05B**, pp. 39–46 | `LiveOmsAdapter`, signed Bybit V5 order/cancel REST, private WS executions, reconnect, reconciliation, client IDs, dead-man REST timer | `exec/environment.ts` contains **LOCKED** adapter; [PR #64](https://github.com/Naokiri5/naokiri/pull/64) contains read-only venue assessment | **Do not activate.** New real-money order authority conflicts with the existing LIVE lock |
+| **MIA-CORE-06**, pp. 46–49 | `MiaUnifiedCore`, startup ledger/risk/OMS construction, boot order, Express SSE handler, status topics, heartbeat/shutdown | `server/src/index.ts`, `bot/bot.ts`, `ops/lease.ts`, `ops/readiness.ts`, `api/routes.ts`, `api/sse.ts` and `joe/live/*` | **Duplicate engine and SSE infrastructure.** Adapt only truthful operator-facing views to existing code |
+
+The PDF's **six core IDs** are complete; `MIA-CORE-05` is split into PAPER `05A` and signed Bybit LIVE `05B`. The PDF is an **architecture proposal with code**, not a tested six-feature release.
+
+### Features actually present in the PDF
+
+1. Event topics with a caller-supplied role check and in-process Worker fan-out; five-second post-fill markout.
+2. Second SQLite database/position table with fill deduplication, realized/unrealized PnL and exchange drift update.
+3. Drawdown, macro, VPIN, adverse markout, fixed correlated buckets and quarter-Kelly/regime-based sizing.
+4. Five-stage exit waterfall including ATR, OFI/VPIN and time-based rules.
+5. Synthetic PAPER and signed Bybit LIVE order adapters, state machine, partial fills, REST/WS and dead-man requests.
+6. New orchestrator and SSE telemetry endpoint.
+
+### Features **not** supplied by the PDF
+
+No complete implementation of **TITAN HUNTER/Hunt Radar**, **Solana holder/LP/sellability/Pump.fun safety**, **feed-provider failover**, **Social Calls Radar**, **B-MIND/decision certificates**, **robust historical challenger framework**, or **Trader Joe Live UI** appears in the PDF. These are separate priorities in [the existing unified eight-priority plan](MIA_OMEGA_FOUR_LAYER_TRACEABILITY.md). Do not claim the PDF completes them.
+
+## 3. GitHub compatibility and authoritative file ownership
+
+Reviewed on open PR #45:
+
+- `server/package.json` currently identifies `@mia/server` v4.1.0 and depends on **Fastify**. It does **not** declare the PDF's `better-sqlite3`, `express`, or `ws` packages. The PDF's v5.0 banner is not the installed app version.
+- `server/src/db/db.ts` uses `DatabaseSync` from **`node:sqlite`**, migrations, WAL and existing owner-only protections. The PDF's `new Database(sqlitePath)` would be an unrelated connection/schema.
+- `portfolio/ledger.ts` already has account-specific PAPER entries and position state. `exec/oms.ts` already handles simulated PAPER fills, risk rechecks, lease fencing, transaction boundaries, protection and reconciliation assumptions.
+- `risk/gate.ts` is the **canonical fail-closed risk gate**. A new `UnifiedRiskGovernor` must not independently approve trades.
+- `exec/environment.ts` already has an adapter contract and `LockedLiveExecutionAdapter` that refuses commands. `core/mode.ts` explicitly sets `LIVE_EXECUTION_AVAILABLE = false`.
+- `fabric/contracts.ts`, `fabric/catalog.ts`, `fabric/outbox.ts`, `fabric/relay.ts` and `core/bus.ts` already own event schema and delivery. A new EventEmitter/router cannot supersede their source-of-truth and import-boundary checks.
+- `lab/exits.ts`, `exec/oms.ts` and `exec/incidents.ts` already handle exits and incidents.
+- `index.ts`/`bot/bot.ts` already provide supervised startup/leader leases; `api/routes.ts` and `api/sse.ts` own Fastify and SSE lifecycle.
+- `ditas/execution.ts` and `joe/live/*` already provide research execution-quality evidence and read-only committed PAPER event narration.
+
+**Do not confuse existing paper orchestration with current LIVE execution:** the bot currently submits PAPER through the existing `exec/oms.ts` under the fencing/control flow. The locked LIVE adapter is not a licensed venue connector. No PDF class is present as the authoritative running implementation merely because it is now copied into docs.
+
+## 4. Manual defects and unsafe assumptions — original PDF, unmodified
+
+These findings describe the **proposal** and what would happen if it were installed, not a known failure in the current MIA code.
+
+| ID | Severity | PDF evidence and actual concern |
+| --- | --- | --- |
+| PDF-01 | **BLOCKER** | Pages 2–3 contain displaced `takeProfitPrice`/`regimeAtEntry`/`riskUsd` lines before the banner. Many PDF wraps split single-quoted TypeScript SQL/error strings. The verbatim extraction contains roughly 1,962 U+200B zero-width characters. A diagnostic attempt to parse the extracted code with TypeScript reported `TS1002` unterminated-string errors. It is not a valid drop-in TypeScript module as extracted. |
+| PDF-02 | **CRITICAL** | MIA-CORE-06 constructs `new LiveOmsAdapter(...)` whenever config says LIVE, and 05B sends signed Bybit `POST /v5/order/create`. It has no connection to MIA's `LIVE_EXECUTION_AVAILABLE` lock, owner release gates or existing paper bot authority. **Directly installing it could bypass LIVE safety.** |
+| PDF-03 | **CRITICAL** | MIA-CORE-02 creates new `canonical_positions`, `processed_fills` and `account_state` on a separate finance DB. It keys position state by symbol, not scoped owner+account+venue. This is a competing ledger and cannot be merged into current PAPER/LIVE accounting. |
+| PDF-04 | **CRITICAL** | `reconcileExchangeSnapshot` deletes locally held positions when absent from a passed remote list, without an explicitly verified complete snapshot, stable epoch, account scope or transactional cross-check. A partial response could erase a protected but still open position. |
+| PDF-05 | **HIGH** | Fill dedupe uses `clientOrderId:tsMs:filledQty:avgFillPrice`, not a unique venue execution ID. Two distinct equal-sized/equal-price executions at the same time could collide, and reconnect replays need stronger identity. |
+| PDF-06 | **HIGH** | LIVE `submitApprovedOrder` can set `REJECTED` after a REST exception, although the exchange might have accepted the order and the response was lost. This is an **UNKNOWN** order state requiring query/reconciliation, not automatic reject/retry. |
+| PDF-07 | **HIGH** | Router's `publishFromRole(role,...)` accepts caller-asserted roles. A role string plus EventEmitter is not an authentication boundary, durable write log, independent risk gate or authoritative OMS. |
+| PDF-08 | **HIGH** | Risk governor and ledger maintain separate equity/realized PnL numbers and exchange-derived state; paper entry fees and close transitions need account-specific double-entry reconciliation, not parallel finance calculations. |
+| PDF-09 | **HIGH** | `resetDailyAnchor` directly calls `setGlobalHalt(false)` and clears drawdown halt, without an owner-reviewed recovery/active-incident guard. It must not silently resume trading. |
+| PDF-10 | **HIGH** | Exit trail, partial-TP and in-flight timer are local Maps. Restart resets some state and the open duration is derived from a position update, not necessarily true entry time. Confirmed protective stops and unknown order outcomes are not proven. |
+| PDF-11 | **HIGH** | The new PAPER OMS invents 60%/40% partial fills from a depth threshold; post-only matching ignores realistic queue priority. It could create misleading paper PnL if treated as real fills; use as explicit research model only. |
+| PDF-12 | **HIGH** | SSE uses Express `Request/Response` rather than MIA Fastify, has no explicit owner authorization or field redaction in the method, and does not show bounded stream backpressure/replay. Never mount as a public financial endpoint. |
+| PDF-13 | **HIGH** | The dead-man HTTP call and private WebSocket do not establish full durable order lifecycle, verified venue-native protective stops, signer isolation, unknown outcomes and recovery certification. Do not label LIVE "ready". |
+| PDF-14 | **MEDIUM** | The module map promises `registerWorkers` during startup, while the visible `boot()` only reconciles risk, rebroadcasts positions and starts OMS. Documented pipeline is not wired as described. |
+| PDF-15 | **MEDIUM** | The five-second markout timer reads the latest in-memory frame without an explicit provider-time freshness/quality check. Stale quotes should produce unavailable research results rather than misleading toxicity statistics. |
+
+Risk thresholds and sizing numbers in the PDF are **untested design constants**, not validated MIA policy. No owner approval, provider license, live-trading venue readiness, OOS performance test or actual integrated build evidence accompanies this PDF.
+
+## 5. Non-duplicating feature proposals extracted from the PDF
+
+These are the **genuine candidates to develop later**, inside the existing system, not six new engines:
+
+| Candidate improvement | Extend existing files (do not replace) | Scope / evidence required |
+| --- | --- | --- |
+| Verified five-second markout/TCA | `ditas/execution.ts`, `ditas/memory.ts`, `market/quality.ts`, `fabric/catalog.ts` | Read-only post-fill research with true source timestamps, stable event IDs, fee/slippage markout and abstention for stale books |
+| Flow toxicity (VPIN/OFI) | `market/cexActivity.ts`, `features/`, `ditas/`, `decision/certificate.ts` | Initially watch/research-only; calibrated thresholds, input integrity, independent OOS test and uncertainty; no risk override |
+| Macro and correlated risk | `risk/gate.ts`, `risk/policy.ts`, `portfolio/stress.ts`; reconcile PR #67 | Shadow-veto evaluation first; policy review, account isolation, missing-source behavior, fail closed |
+| Regime/Kelly sizing | `lab/`, `ditas/calibration.ts`, `risk/policy.ts` | Compare with current sizing in a frozen challenger; no live/paper policy promotion by default |
+| Five-stage exit waterfall | `lab/exits.ts`, `lab/backtest.ts`, `ditas/twin.ts` | Alternative research strategy only; include time stamps, depth, fees, gaps, partials and honest stop priority |
+| Partial/queued fill simulation | `lab/backtest.ts`, `ditas/twin.ts`, `ditas/execution.ts` | Shadow execution scenarios, not a second financial ledger or live OMS |
+| Account-scoped venue reconciliation | Future reviewed venue integration; `exec/environment.ts`; review PR #64 | Read-only evidence first, verified complete snapshots, order/exec IDs, no destructive unknown-state handling; LIVE stays locked |
+| Operational telemetry | `api/routes.ts`, `api/sse.ts`, `joe/live/*`, `ops/readiness.ts` | Existing owner-protected endpoints, read-only PAPER truth, source freshness, backpressure, replay and LIVE LOCKED label |
+| Producer DAG and ordered delivery | `fabric/contracts.ts`, `catalog.ts`, `outbox.ts`, `relay.ts` and `import-boundaries.test.ts` | Extend existing NEXUS contracts, never create a second routing authority |
+
+## 6. PAPER and LIVE architecture requirements
+
+**One source/analysis system; separate, independently validated financial accounts:**
+
+~~~text
+Current verified market observations, source/event/receive clocks
+  -> Existing market scanner -> workers / QCI -> decision and DITAS evidence
+  -> Existing independent risk check using a specific account/venue/policy
+      -> PAPER: existing exec/oms.ts and PAPER ledger, simulated orders only
+      -> LIVE: LockedLiveExecutionAdapter, NO REAL MONEY ORDERS
+  -> Existing owner-only journal / Trader Joe / operations UI
+~~~
+
+Every proposed research capability may be visible in PAPER and LIVE **analysis views**, but LIVE order/position/fill/PnL records must never be synthesized from PAPER records. Source equality does not mean execution permission. No prediction, VPIN signal, Kelly result, PDF engine or owner deposit unlocks the current LIVE lock.
+
+## 7. Relationship to the eight selected MIA development priorities
+
+| Priority | How the PDF relates | Correct existing work |
+| --- | --- | --- |
+| 1 — PR reconciliation | **Required** before changing any canonical owner | Unified PR #45 first, plus #64 venue read-model, #67 macro/shadow risk, #44 Trader Joe and all relevant stacked PRs |
+| 2 — TITAN HUNTER | **Not implemented by PDF** | `hunt/ranker.ts`, `market/discover.ts` and existing UI |
+| 3 — Solana safety | **Not implemented by PDF** | Reconcile #46 → #50 → #51 → #52; never use a Bybit OMS as Solana safety validation |
+| 4 — Market feeds | Markout/event-time ideas only | `market/fabric.ts`, `depthStream.ts`, `quality.ts`; preserve open-position priority |
+| 5 — Social Calls Radar | **Not implemented by PDF** | Existing licensed sources / `news/` and DITAS research history |
+| 6 — Certificates and B-MIND | VPIN/regime research input concept only | Existing certificate/DITAS plus B-MIND PRs #56/#61 |
+| 7 — Historical challengers | Exit/Kelly/partial-fill **hypotheses** | Existing `lab/` and `ditas/`; do not treat PDF thresholds as OOS-tested |
+| 8 — Trader Joe Live | SSE/telemetry idea only | Existing `joe/live/`, owner API, dashboard and PR #71 status UI |
+
+Detailed ownership, PR graph and acceptance tests are in [MIA Ω four-layer traceability](MIA_OMEGA_FOUR_LAYER_TRACEABILITY.md).
+
+## 8. Proposed documentation-first development order and test gates
+
+1. **D0 — complete:** preserve PDF source without editing it, manually identify all `MIA-CORE-01..06` and `05A/05B`, map to GitHub, and record blockers.
+2. **D1 — mandatory:** reconcile current PR #45 with #64/#67 and overlaps; compare changed-file owners, code behavior, schema migration order, CI and security review; record each candidate as `EXISTS`, `PARTIAL`, `DUPLICATE`, `RESEARCH_ONLY`, `BLOCKED`.
+3. **D2 — review only:** design optional event-time markout/flow observations using the existing NEXUS catalog and DITAS schema (source+account+timestamp+event ID, no finance writes).
+4. **D3 — research only:** verify toxicity and exit/Kelly challengers on frozen histories including rejected signals, stale market data, costs, gaps, delistings, fee assumptions, OOS and negative controls.
+5. **D4 — safe UI:** enhance current Joe/readiness views with committed PAPER events, telemetry and explicit LIVE LOCKED status; test owner access, SSE disconnect, backpressure and replay.
+6. **D5 — separate future project:** design LIVE venue/order/ledger isolation only after explicit owner approval and an independently reviewed certification plan; this PDF provides **no authorization** to activate real-money trading.
+
+**Required tests before any later coding merge:** event publisher/import boundaries, source clock/replay, unique exchange execution IDs, partial/unknown fill and duplicate delivery, snapshot incompleteness, account/venue separation, crash/restart while a stop or partial exit is in flight, active halt over UTC reset, markout stale-quote abstention, risk vetoes, strategy champion/challenger cost and OOS, Joe privacy and load/fault tests, plus full repository CI and owner review. Preserve current `risk.test.ts`, `oms.test.ts`, `import-boundaries.test.ts`, `lab.test.ts`, `think-replay.test.ts`, `depth-stream.test.ts` and `joe-live.test.ts`.
+
+**Final manual judgment:** Copy the entire proposed TypeScript **as a source reference**, **not as runnable code**. Most modules would duplicate your existing MIA engine and some introduce critical real-money risks. The defensible new work is narrowly scoped, research-first markout/TCA, flow context, challenger rules and read-only operational evidence through current modules. No production files were touched by this documentation effort.
