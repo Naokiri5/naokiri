@@ -42,3 +42,15 @@ export function safeHttpUrl(u: unknown): string {
   try { const x = new URL(u.trim()); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : ''; } catch { return ''; }
 }
 export const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/**
+ * Display-safe text from an untrusted provider string (token symbols and names are attacker-controlled). Removes
+ * control and format characters (including bidi overrides that make one ticker render as another), line/paragraph
+ * separators, combining marks left after NFC (stacked "zalgo" marks) and the invisible Hangul filler letters, then
+ * truncates by code point so a surrogate pair is never cut in half. React still escapes whatever remains; look-alike
+ * letters are not removed here, so callers that rank or match tokens must use addresses, not this text.
+ */
+const INVISIBLE_OR_SPOOFING = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{M}\u115F\u1160\u3164\uFFA0]/gu;
+export function displayText(x: unknown, fallback: string, max = 40): string {
+  const s = typeof x === 'string' ? x.normalize('NFC').replace(INVISIBLE_OR_SPOOFING, '').trim() : '';
+  return Array.from(s || fallback).slice(0, max).join('');
+}

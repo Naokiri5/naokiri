@@ -37,6 +37,8 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | [`architecture/MIA_NEXUS_EVENT_CATALOG.md`](architecture/MIA_NEXUS_EVENT_CATALOG.md) | MIA NEXUS fabric topics: owners, priority, durability and honest status (generated from code) |
 | [`architecture/MIA_NEXUS_DURABLE_LOG.md`](architecture/MIA_NEXUS_DURABLE_LOG.md) | MIA NEXUS N2: transactional outbox, inbox dedup, relay retry and dead letters (one research topic) |
 | [`architecture/TRADER_JOE_LIVE.md`](architecture/TRADER_JOE_LIVE.md) | Trader Joe Live (V4): read-only trade-lifecycle story feed for Joe; milestones, sources of truth, limits |
+| [`omega/README.md`](omega/README.md) | MIA Ω: preserved spec, TASK-00 audit (traceability, PR overlap, licenses, conflicts, plan, test matrix) |
+| [`solana/OMEGA_PR01_REVIEW.md`](solana/OMEGA_PR01_REVIEW.md) | Read-only Solana Hunter (Omega PR-01): provenance, review findings, limits |
 | [`security/GUARDIAN_SHIELD.md`](security/GUARDIAN_SHIELD.md) | Guardian Shield: seven-layer posture, security events, opt-in pause, 100-ticket gap matrix and incident runbooks |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | design, trust boundaries, technology choices |
 

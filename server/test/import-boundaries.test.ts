@@ -50,7 +50,7 @@ function reachable(from: string): Set<string> {
   return seen;
 }
 
-const EVIDENCE_ROOTS = ['workers/', 'qci/', 'providers/', 'research/', 'knowledge/', 'chart/', 'features/', 'regime/', 'safety/', 'news/', 'whales/', 'lab/', 'journal/', 'notify/', 'decision/certificate.ts', 'decision/profitLab.ts', 'ditas/replay.ts'];
+const EVIDENCE_ROOTS = ['solana/', 'workers/', 'qci/', 'providers/', 'research/', 'knowledge/', 'chart/', 'features/', 'regime/', 'safety/', 'news/', 'whales/', 'lab/', 'journal/', 'notify/', 'decision/certificate.ts', 'decision/profitLab.ts', 'ditas/replay.ts'];
 const FORBIDDEN_FOR_EVIDENCE = ['exec/', 'wallet/', 'portfolio/'];
 
 /** Functions that change orders, positions, mode, policy or wallet state. */
@@ -89,6 +89,23 @@ describe('Import boundaries (static, runtime imports only)', () => {
     }
     expect(violations).toEqual([]);
   });
+  it('read-only Solana code imports no packages (a signer SDK such as @solana/web3.js needs a reviewed change here)', () => {
+    // The relative-import graph above cannot see npm packages, so solana/ gets an explicit, empty package allow-list.
+    const SOLANA_PACKAGE_ALLOW: string[] = [];
+    const bare = /(?:^|\n)\s*(?:import|export)\s+(?!type\s)(?:[^;]*?\s+from\s+)?['"]([^'".][^'"]*)['"]|import\(\s*['"]([^'".][^'"]*)['"]\s*\)|require\(\s*['"]([^'".][^'"]*)['"]\s*\)/g;
+    const violations: string[] = [];
+    for (const f of FILES.filter((x) => rel(x).startsWith('solana/'))) {
+      for (const m of readFileSync(f, 'utf8').matchAll(bare)) {
+        const pkg = m[1] ?? m[2] ?? m[3];
+        if (!SOLANA_PACKAGE_ALLOW.includes(pkg)) violations.push(`${rel(f)} imports ${pkg}`);
+      }
+    }
+    expect(FILES.some((x) => rel(x) === 'solana/hunting.ts')).toBe(true); // the guard is looking at real files
+    expect(violations).toEqual([]);
+    // Not vacuous: the same pattern catches a signer import.
+    expect([..."import { Keypair } from '@solana/web3.js';\nconst x = await import('bs58');".matchAll(bare)].map((m) => m[1] ?? m[2])).toEqual(['@solana/web3.js', 'bs58']);
+  });
+
   it('pause-only callers can only pause new orders (never resume, change mode, policy or strategies)', () => {
     for (const f of PAUSE_ONLY_CALLERS) {
       const calls = [...readFileSync(join(SRC, f), 'utf8').matchAll(/updateControl\(([^;]*?)\)/g)].map((m) => m[1]);

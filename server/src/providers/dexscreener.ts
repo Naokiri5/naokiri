@@ -1,5 +1,5 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
-import { safeHttpUrl } from '../core/util.js';
+import { displayText, safeHttpUrl } from '../core/util.js';
 registerProvider({
   id: 'dexscreener', name: 'DEX Screener (public API)', sourceClass: 'dex', markets: ['crypto-dex'],
   license: 'DEX Screener API Terms — rate-limited public use.', realtime: 'NEAR_REALTIME', requiresCredentials: false,
@@ -8,15 +8,21 @@ setRateLimit('dexscreener', 50); // documented 60/min for profiles endpoints
 
 export interface DexPair {
   chainId: string; dexId: string; pairAddress: string; url: string; baseSymbol: string; baseName: string; baseAddress: string; quoteSymbol: string;
+  /** The pool's quote-token address; absent or '' means unknown (callers must treat it as untrusted). */
+  quoteAddress?: string;
   priceUsd: number; liquidityUsd: number; fdv: number; marketCap: number; volume24h: number; volume1h: number;
   buys24h: number; sells24h: number; buys1h: number; sells1h: number; change1h: number; change24h: number; pairCreatedAt: number | null;
   hasSocials: boolean; hasWebsite: boolean;
 }
 export const SAFE_CHAIN = /^[a-z0-9-]{1,32}$/; export const SAFE_ADDRESS = /^[A-Za-z0-9]{20,64}$/;
+/** Token symbols and names are chosen by whoever minted the token: display-safe text only (Omega PR-01 review). */
 function mapPair(p: any): DexPair {
+  const quoteAddress = String(p.quoteToken?.address ?? '');
   return {
-    chainId: p.chainId, dexId: p.dexId, pairAddress: p.pairAddress, url: safeHttpUrl(p.url), baseSymbol: p.baseToken?.symbol ?? '?', baseName: p.baseToken?.name ?? '?',
-    baseAddress: p.baseToken?.address ?? '', quoteSymbol: p.quoteToken?.symbol ?? '?', priceUsd: +(p.priceUsd ?? 0), liquidityUsd: p.liquidity?.usd == null ? NaN : +p.liquidity.usd,
+    chainId: p.chainId, dexId: displayText(p.dexId, '?'), pairAddress: p.pairAddress, url: safeHttpUrl(p.url),
+    baseSymbol: displayText(p.baseToken?.symbol, '?'), baseName: displayText(p.baseToken?.name, '?', 80),
+    baseAddress: p.baseToken?.address ?? '', quoteSymbol: displayText(p.quoteToken?.symbol, '?'),
+    quoteAddress: SAFE_ADDRESS.test(quoteAddress) ? quoteAddress : '', priceUsd: +(p.priceUsd ?? 0), liquidityUsd: p.liquidity?.usd == null ? NaN : +p.liquidity.usd,
     fdv: +(p.fdv ?? 0), marketCap: +(p.marketCap ?? 0), volume24h: +(p.volume?.h24 ?? 0), volume1h: +(p.volume?.h1 ?? 0),
     buys24h: +(p.txns?.h24?.buys ?? 0), sells24h: +(p.txns?.h24?.sells ?? 0), buys1h: +(p.txns?.h1?.buys ?? 0), sells1h: +(p.txns?.h1?.sells ?? 0),
     change1h: +(p.priceChange?.h1 ?? 0), change24h: +(p.priceChange?.h24 ?? 0), pairCreatedAt: Number.isFinite(+p.pairCreatedAt) ? +p.pairCreatedAt : null,
