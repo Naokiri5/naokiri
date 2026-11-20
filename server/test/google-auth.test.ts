@@ -12,6 +12,7 @@ let app: Awaited<ReturnType<typeof buildApp>>;
 
 function provider(subject: string) {
   const upstream = vi.fn(async (input: string, init: RequestInit) => {
+    expect(init.redirect).toBe('error');
     if (input === 'https://oauth2.googleapis.com/token') {
       expect((init.body as URLSearchParams).get('code_verifier')).toMatch(/^[\w-]{43}$/);
       expect((init.body as URLSearchParams).get('redirect_uri')).toBe(redirect);
