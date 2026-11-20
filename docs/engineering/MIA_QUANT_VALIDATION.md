@@ -23,6 +23,12 @@
 | Solana stacked work | PR #46 → #50 → #51 → #52 | Cherry-pick or merge in reviewed order; no duplicate RPC/token/pool implementation |
 | B-MIND stacked work | PR #55 → #56 | B-MIND 32-construct research foundation exists in later PR, not in integration base; read-only and not a trading vote |
 
+## First integrated TypeScript enhancement (MIA-Q technical data truth)
+
+This branch updates the **existing** `server/src/features/indicators.ts` rather than adding another indicator engine. It now abstains (`NaN`) during incomplete 14-, 15-, 20-, and 21-bar rolling windows for stochastic, Williams %R, MFI, Bollinger, CCI, VWAP, realized volatility, and volume-relative metrics. The change is intended to close the previously documented C-05 early-history warm-up gap. A regression was added to **existing** `server/test/features.test.ts`.
+
+**Verification:** GitHub code committed; repository typecheck, unit tests, full build, and end-to-end runs are **NOT RUN / NOT VERIFIED in this review**. CI and independent numerical reference fixtures are mandatory before merging. The adjustment does not enable any new trade route, change the QCI quorum, lower risk limits, or change account/ledger logic.
+
 ## Specific corrections to the uploaded main-branch-only baseline
 
 1. PAPER promotion: `server/src/lab/lab.ts` in the unified branch already requires ≥30 out-of-sample trades and positive expectancy, **or an audited owner override**. This is better than the old main-branch behavior; do not implement a duplicate promotion registry. A future improvement is reducing exceptional overrides through a formal certification review, not silently removing the owner override.
