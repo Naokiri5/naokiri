@@ -37,6 +37,10 @@ function capture(instrumentId: string, interval: Interval, asOf: number, ctx?: W
 }
 
 function eventRow(r: any): MemoryEvent { return { id: r.id, kind: r.kind, instrumentId: r.instrument, strategyId: r.strategy, decisionId: r.decision_id, createdAt: r.created_at, snapshotId: r.snapshot_id, parentEventId: r.parent_event_id, payload: P(r.payload), hash: r.hash }; }
+interface SnapshotRow { id: string; instrument: string; created_at: number; payload: string; hash: string }
+function validSnapshotHash(snapshot: Pick<SnapshotRow, 'id' | 'hash' | 'payload'>) {
+  return snapshot.id === `snap_${snapshot.hash}` && sha256(snapshot.payload) === snapshot.hash;
+}
 function hashEvent(r: any) {
   return sha256(J([r.id, r.dedupe_key, r.created_at, r.kind, r.instrument, r.strategy, r.decision_id, r.snapshot_id, r.parent_event_id, r.payload, r.prev_hash]));
 }
@@ -77,10 +81,34 @@ export function memoryDetail(id: string) {
   return { event: eventRow(r), snapshot: snapshot ? { id: snapshot.id, createdAt: snapshot.created_at, hash: snapshot.hash, ...P(snapshot.payload) } : null,
     relatedEvents: all<any>('SELECT * FROM ditas_events WHERE parent_event_id=? ORDER BY seq', id).map(eventRow) };
 }
+
+/** Read and verify only the two records needed for one research projection. */
+export function readFrozenSnapshot(eventId: string) {
+  const event = get<{ id: string; hash: string; instrument: string; created_at: number; snapshot_id: string | null }>(
+    'SELECT * FROM ditas_events WHERE id=?', eventId,
+  );
+  if (!event) return { status: 'NOT_FOUND' } as const;
+  if (hashEvent(event) !== event.hash) return { status: 'CORRUPT' } as const;
+  const snapshot = get<SnapshotRow>(
+    'SELECT * FROM ditas_snapshots WHERE id=?', event.snapshot_id,
+  );
+  if (!snapshot || snapshot.instrument !== event.instrument || snapshot.created_at > event.created_at
+    || !validSnapshotHash(snapshot)) {
+    return { status: 'CORRUPT' } as const;
+  }
+  try {
+    return {
+      status: 'OK', instrumentId: snapshot.instrument, snapshotId: snapshot.id,
+      capturedAt: snapshot.created_at, payload: JSON.parse(snapshot.payload) as unknown,
+    } as const;
+  } catch {
+    return { status: 'CORRUPT' } as const;
+  }
+}
 /** Verifies the event chain and snapshot hashes; rows may come from a backup snapshot instead of the live database. */
 export function verifyMemory(events: any[] = all<any>('SELECT * FROM ditas_events ORDER BY seq'), snapshots: any[] = all<any>('SELECT * FROM ditas_snapshots')) {
   let prev = 'GENESIS';
   for (const r of events) { if (r.prev_hash !== prev || r.hash !== hashEvent(r)) return { ok: false, brokenAt: r.id }; prev = r.hash; }
-  for (const r of snapshots) if (sha256(r.payload) !== r.hash || r.id !== `snap_${r.hash}`) return { ok: false, brokenAt: r.id };
+  for (const r of snapshots) if (!validSnapshotHash(r)) return { ok: false, brokenAt: r.id };
   return { ok: true, entries: events.length };
 }

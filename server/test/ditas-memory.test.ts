@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { freshDb, seedInstrument } from './helpers.js';
 import { all, closeDb, get, getDb, openDb, run, tx } from '../src/db/db.js';
 import { SCHEMA_VERSION } from '../src/db/migrations.js';
@@ -161,7 +162,7 @@ describe('DITAS permanent decision memory', () => {
   });
 
   it('persists immutable evidence across a real SQLite close and reopen', () => {
-    const folder = mkdtempSync('/tmp/mia-ditas-memory-'); folders.push(folder);
+    const folder = mkdtempSync(join(tmpdir(), 'mia-ditas-memory-')); folders.push(folder);
     const dbPath = join(folder, 'memory.sqlite'); closeDb(); openDb(dbPath);
     const event = record(), before = memoryDetail(event.id);
     closeDb(); market.reset(); openDb(dbPath);

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmt, useApi } from '../api';
+import { fmt, useApi } from '../api';
 import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
 
 const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Foundation coverage'];
 const count = (v: unknown) => Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0;
+type Detail = { eventId: string } | { title: string; value: unknown };
 
 /** Read-only DITAS evidence. No control, strategy promotion, simulation or execution authority. */
 export function Ditas() {
@@ -12,20 +13,12 @@ export function Ditas() {
   const { data, error, loading, reload } = useApi(`/api/ditas${cohort ? `?cohort=${encodeURIComponent(cohort)}` : ''}`, { topics: ['scan', 'decision', 'order', 'position', 'mode'], every: 30_000 });
   const [tab, setTab] = useState(tabs[0]);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [detail, setDetail] = useState<{ title: string; value: unknown } | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
-  const [opening, setOpening] = useState<string | null>(null);
-  const inspectEvent = async (id: string) => {
-    setOpening(id); setDetailError(null);
-    try { setDetail({ title: 'Decision evidence and market snapshot', value: await api(`/api/ditas/events/${encodeURIComponent(id)}`) }); }
-    catch (e: any) { setDetailError(e.message); }
-    finally { setOpening(null); }
-  };
+  const [detail, setDetail] = useState<Detail | null>(null);
   const counts = data?.counts;
   const calibration = data?.calibration;
   return <Page title="DITAS · Decision intelligence" sub="Inspect the evidence behind decisions, strategy health and hypothetical alternatives. Every result is tied to stored records."
     right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={() => { reload(); setRefreshKey((k) => k + 1); }} disabled={loading}>Refresh</button></>}>
-    <ErrorLine e={error} /><ErrorLine e={detailError} />
+    <ErrorLine e={error} />
     <div className="banner info">Research and paper trading. Decision Twin results are hypothetical simulations; rule strength and specialist agreement are not calibrated win probabilities. Live execution remains locked.</div>
     <div className="grid g4" style={{ marginBottom: 14 }}>
       <Stat k="Decision events" v={counts?.events ?? '—'} s="Append-only decision history" />
@@ -56,7 +49,7 @@ export function Ditas() {
       </tbody></table>{!data.fingerprints?.length && <Empty>No stored fingerprints yet. Missing fundamentals and other inputs remain explicit.</Empty>}</div></Card>
     </div>}
     {data && tab === 'Decision ledger' && <Card title="Permanent decision memory" flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Event</th><th>Instrument</th><th>Strategy</th><th>Evidence</th></tr></thead><tbody>
-      {(data.events ?? []).map((e: any) => <tr key={e.id}><td>{fmt.time(e.createdAt)}</td><td><Badge v={e.kind} /></td><td>{e.instrumentId}</td><td>{e.strategyId ?? '—'}</td><td><button className="sm" disabled={opening === e.id} onClick={() => inspectEvent(e.id)}>{opening === e.id ? 'Loading…' : 'Inspect decision'}</button></td></tr>)}
+      {(data.events ?? []).map((e: any) => <tr key={e.id}><td>{fmt.time(e.createdAt)}</td><td><Badge v={e.kind} /></td><td>{e.instrumentId}</td><td>{e.strategyId ?? '—'}</td><td><button className="sm" onClick={() => setDetail({ eventId: e.id })}>Inspect decision</button></td></tr>)}
     </tbody></table>{!data.events?.length && <Empty>No DITAS events recorded yet. Earlier decisions are not assigned fabricated snapshots.</Empty>}</div></Card>}
     {data && tab === 'Decision Twin' && <Card title="Shadow & counterfactual portfolios · HYPOTHETICAL" right={<Badge v="HYPOTHETICAL" tone="b-warn" />}>
       <p className="hint">Stored simulations use the original decision evidence and explicit fee, spread, slippage and fill assumptions. Hypothetical orders do not create paper positions or change strategy settings.</p>
@@ -89,8 +82,80 @@ export function Ditas() {
     {data && tab === 'Foundation coverage' && <Card title="Implementation coverage" flush><div className="tablewrap"><table><thead><tr><th>Foundation</th><th>Status</th><th>Scope and limitations</th></tr></thead><tbody>
       {(data.coverage ?? []).map((c: any) => <tr key={c.foundation}><td>{c.foundation}</td><td><Badge v={c.status} /></td><td>{c.detail}</td></tr>)}
     </tbody></table></div><div style={{ padding: 14 }} className="hint">A passing test suite does not certify live trading, calibrated forecasts or strategy profitability. See the release gates for outstanding evidence.</div></Card>}
-    {detail && <Modal title={detail.title} onClose={() => setDetail(null)}><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '65vh', overflowY: 'auto', fontSize: 12 }}>{JSON.stringify(detail.value, null, 2)}</pre></Modal>}
+    {detail && ('eventId' in detail
+      ? <Modal title="Decision evidence and market snapshot" onClose={() => setDetail(null)}>
+        <DecisionEvidence key={detail.eventId} eventId={detail.eventId} />
+      </Modal>
+      : <Modal title={detail.title} onClose={() => setDetail(null)}><DetailJson value={detail.value} /></Modal>)}
   </Page>;
+}
+
+type EvidenceSource = { kind: 'TICKER' | 'BOOK' } & (
+  | { status: 'UNKNOWN' | 'STALE'; reason: string }
+  | {
+    status: 'AVAILABLE'; originId: string; dependencyGroup: string;
+    eventTimeMs: number | null; receivedTimeMs: number | null; requestStartedAtMs: number | null;
+  }
+);
+interface BehaviorEvidence {
+  asOf: number;
+  status: 'AVAILABLE' | 'UNKNOWN';
+  dataQuality: 'OK' | 'WARN' | 'FAIL';
+  evidence: EvidenceSource[];
+}
+
+const evidenceReasons: Record<string, string> = {
+  TICKER_MISSING_OR_INVALID: 'The snapshot has no valid ticker.',
+  TICKER_IDENTITY_MISMATCH: 'The ticker does not match the saved instrument.',
+  TICKER_INVALID_SPREAD_OR_CLOCK: 'The saved ticker has an invalid spread or timestamp.',
+  TICKER_EXPIRED_AT_CAPTURE: 'The ticker was stale at capture.',
+  BOOK_MISSING_OR_INVALID: 'The snapshot has no valid order book.',
+  BOOK_INVALID_DEPTH_OR_CLOCK: 'The saved order book has invalid depth or timing.',
+  BOOK_EXPIRED_AT_CAPTURE: 'The order book was stale at capture.',
+  PRIMARY_IDENTITY_UNVERIFIED: 'A valid ticker is required to attribute the saved order book.',
+  SNAPSHOT_QUALITY_FAILED: 'The snapshot failed market data quality checks.',
+};
+
+function DecisionEvidence({ eventId }: { eventId: string }) {
+  const path = `/api/ditas/events/${encodeURIComponent(eventId)}`;
+  const detail = useApi<unknown>(path);
+  const evidence = useApi<BehaviorEvidence>(`${path}/behavior-evidence`);
+  const report = evidence.data;
+  const time = (ts: number | null) => ts === null ? 'Unknown' : fmt.time(ts);
+  return <div className="col" style={{ gap: 14 }}>
+    <section aria-labelledby="behavior-evidence-heading" className="col" style={{ gap: 10 }}>
+      <div className="row between">
+        <h3 id="behavior-evidence-heading">B-MIND evidence</h3>
+        <Badge v="Research only" />
+      </div>
+      {evidence.error && <ErrorLine e={`B-MIND evidence unavailable. ${evidence.error}`} />}
+      {!report && !evidence.error && <p role="status">Loading B-MIND evidence…</p>}
+      {report && <div className="col" style={{ gap: 12 }}>
+        <div className="kv">
+          <span>Captured at</span><span>{fmt.time(report.asOf)}</span>
+          <span>Evidence</span><span><Badge v={report.status} /></span>
+          <span>Data quality</span><span><Badge v={report.dataQuality} /></span>
+        </div>
+        {report.evidence.map(source => <div className="col" key={source.kind} style={{ gap: 4 }}>
+          <div className="row"><strong>{source.kind === 'TICKER' ? 'Ticker' : 'Order book'}</strong><Badge v={source.status} /></div>
+          {source.status === 'AVAILABLE' ? <div className="kv" style={{ overflowWrap: 'anywhere' }}>
+            <span>Dependency group</span><span>{source.dependencyGroup}</span>
+            <span>Origin ID</span><code>{source.originId}</code>
+            <span>Event time</span><span>{time(source.eventTimeMs)}</span>
+            <span>Received at</span><span>{time(source.receivedTimeMs)}</span>
+            {source.requestStartedAtMs !== null && <><span>Request started</span><span>{time(source.requestStartedAtMs)}</span></>}
+          </div> : <div className="hint">{evidenceReasons[source.reason] ?? 'Evidence is unavailable for this source.'}</div>}
+        </div>)}
+      </div>}
+    </section>
+    <ErrorLine e={detail.error} />
+    {!detail.data && !detail.error && <p role="status">Loading saved decision…</p>}
+    {detail.data != null && <DetailJson value={detail.data} />}
+  </div>;
+}
+
+function DetailJson({ value }: { value: unknown }) {
+  return <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '65vh', overflowY: 'auto', fontSize: 12 }}>{JSON.stringify(value, null, 2)}</pre>;
 }
 
 /** Read-only paper execution quality (actual paper OMS orders and fills only; never hypothetical Twin results). */
