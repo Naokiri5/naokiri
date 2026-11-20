@@ -138,3 +138,12 @@ Rules for further THINK work:
 - **Scenario values are hypothetical.** Stops are triggers, not guaranteed fills.
 - **One canonical owner per change,** in small draft PRs, following the ticket audit's next slices: event provenance/as-known-at replay, bounded task graph + recorded-snapshot benchmark, calibrated forecast cohort, offline replay with honest LIVE/DEGRADED/OFFLINE_REPLAY state, account-scoped records.
 - **Never weaken** risk checks, release gates, signer isolation, account separation or approval requirements. No live orders, wallets or transfers.
+
+
+## MIA quantitative feature unification (MIA-Q001…MIA-Q100)
+
+- Canonical merged quantitative spec **in the existing docs**, not a new execution engine: `docs/engineering/MIA_QUANT_VALIDATION.md`.
+- Machine-readable task/feature IDs with the original source requirements preserved: `docs/engineering/MIA_QUANT_FEATURE_CATALOG_100.json`. Read only the feature IDs needed for the current change, plus their mapped canonical code owners/tests; do not paste the entire 100-feature document into every prompt.
+- Treat `repoReconciliation` as a branch-scoped audit claim, not a runtime certification. Features staged in the Omega PR stack must be integrated through the reviewed PR chain, not copied into this branch.
+- All quantitative features must use the same frozen-input analytical, decision, QCI and risk logic for PAPER and any future authorized LIVE mode. Do not add a second coordinator, feature store, decision engine, or risk gate. Live remains locked in this build; no live adapter, signing, wallet transfer or approval bypass is authorized by this spec.
+- For feature work, supply one source-anchored failing regression, precise affected files, completed verification commands, and evidence of no leaks, no-look-ahead, and no weakening of risk controls. In the absence of tests, mark implementation `NOT VERIFIED`.
