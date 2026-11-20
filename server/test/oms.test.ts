@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
+import { buildStage, removeCaseDirs, withDb } from './crash/harness.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, getControl } from '../src/core/mode.js';
@@ -47,6 +48,38 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     setBook(id, last * 1.0); monitorPositions();
     expect(openPositions()).toHaveLength(0);
     expect(reconcile().ok).toBe(true);
+  });
+  it('keeps monitoring protective stops with new entries paused in an emergency', () => {
+    const now = Date.now();
+    expect(submitEntry(report(id, last), 'bot', now).ok).toBe(true);
+    const [position] = openPositions();
+    expect(emergencyStop('owner').close).toBe('NOT_REQUESTED');
+    expect(openPositions()).toHaveLength(1);
+
+    setBook(id, position.stop_price * 0.98, now + 1);
+    monitorPositions(now + 1);
+
+    expect(getControl()).toMatchObject({ emergency: true, pausedNewOrders: true });
+    expect(listPositions('CLOSED')).toMatchObject([{ id: position.id, exit_reason: 'STOP', qty: 0 }]);
+  });
+  it('prioritizes a gapped stop over the time exit due in the same pass', () => {
+    const now = Date.now();
+    expect(submitEntry(report(id, last), 'bot', now).ok).toBe(true);
+    const [position] = openPositions();
+    const maxHoldMs = 1_000;
+    run('UPDATE positions SET max_hold_ms=? WHERE id=?', maxHoldMs, position.id);
+    const dueAt = position.opened_at + maxHoldMs;
+    setBook(id, position.stop_price * 0.98, dueAt);
+    const [bestBid, availableQty] = market.deep.get(id)!.book!.bids[0];
+    expect(bestBid).toBeLessThan(position.stop_price);
+    expect(availableQty).toBeGreaterThanOrEqual(position.qty);
+
+    monitorPositions(dueAt);
+
+    const exits = listOrders().filter(order => order.position_id === position.id && order.side === 'SELL' && order.status === 'FILLED');
+    expect(exits).toMatchObject([{ purpose: 'EXIT_STOP', filled_qty: position.qty }]);
+    expect(exits[0].avg_price).toBeCloseTo(bestBid, 10);
+    expect(listPositions('CLOSED')).toMatchObject([{ id: position.id, exit_reason: 'STOP', qty: 0 }]);
   });
   it('rejects expired consensus and bot entries outside PAPER mode', () => {
     expect(submitEntry(report(id, last, { consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 1, opposition: 0, expiresAt: new Date(Date.now() - 1).toISOString() } }), 'bot').reason).toMatch(/EXPIRED/);
@@ -129,6 +162,45 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     expect(closeAllPositions('owner', 'CLOSE ALL').state).toBe('CONFIRMED');
     expect(verifyAuditChain().ok).toBe(true);
   });
+});
+
+it('preserves a tightened protective stop across a partial target and SQLite reopen', () => {
+  try {
+    const { db, last } = buildStage('open');
+    const now = Date.now();
+    const partial = withDb(db, () => {
+      const [entry] = openPositions();
+      setBook(entry.instrument, last * 1.035, now);
+      monitorPositions(now);
+      const [trailed] = openPositions();
+      expect(trailed.stop_price).toBeGreaterThan(entry.stop_price);
+      expect(trailed.qty).toBe(entry.qty);
+
+      setBook(entry.instrument, last * 1.05, now + 1);
+      monitorPositions(now + 1);
+      const [position] = openPositions();
+      expect(position.qty).toBeLessThan(entry.qty);
+      expect(position.stop_price).toBe(trailed.stop_price);
+      return position;
+    });
+
+    market.reset();
+    seedInstrument('ETHUSDT', { seed: 2, nowTs: now + 2 });
+    withDb(db, () => {
+      setBook(partial.instrument, last * 1.02, now + 2);
+      monitorPositions(now + 2);
+      expect(openPositions()).toMatchObject([{ id: partial.id, stop_price: partial.stop_price, qty: partial.qty }]);
+      expect(listOrders().filter(order => order.position_id === partial.id && order.purpose === 'PROTECTIVE_STOP' && order.status === 'ACTIVE'))
+        .toMatchObject([{ stop_price: partial.stop_price, qty: partial.qty }]);
+
+      // This bid breaches the persisted trail but remains above the original stop.
+      setBook(partial.instrument, last, now + 3);
+      monitorPositions(now + 3);
+      expect(listPositions('CLOSED')).toMatchObject([{ id: partial.id, exit_reason: 'TRAIL_STOP', qty: 0 }]);
+    });
+  } finally {
+    removeCaseDirs();
+  }
 });
 
 describe('Order-book freshness and fill accounting', () => {

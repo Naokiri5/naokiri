@@ -20,13 +20,25 @@ const MODES = [
   ['OBSERVE', 'Observe', 'Scan and explain only. No orders.'],
   ['PAPER', 'Paper', 'Automatic paper entries/exits with live-book fills and real fees.'],
   ['APPROVAL', 'Approval', 'Bot prepares paper orders; you approve each one.'],
-  ['BOUNDED_LIVE', 'Bounded live', 'LOCKED — requires every release gate, an isolated signer and your explicit authorization.'],
+  ['BOUNDED_LIVE', 'Bounded live', 'Requires every release gate, an isolated signer and your explicit authorization.'],
 ];
+
+interface TradingEnvironments {
+  environments: {
+    environment: 'PAPER' | 'LIVE';
+    state: 'ACTIVE' | 'AVAILABLE' | 'LOCKED';
+    reasons: string[];
+  }[];
+}
 
 export function Bot() {
   const { data, error, reload } = useApi('/api/bot', { topics: ['bot', 'order', 'position', 'mode'], every: 20_000 });
+  const environments = useApi<TradingEnvironments>('/api/trading/environments', { topics: ['mode'], every: 20_000 });
   const [pw, setPw] = useState(''); const [amt, setAmt] = useState('10000');
   const s = data?.status; const a = data?.account;
+  const environmentStatus = environments.error ? undefined : environments.data?.environments;
+  const paper = environmentStatus?.find(environment => environment.environment === 'PAPER');
+  const live = environmentStatus?.find(environment => environment.environment === 'LIVE');
   return <Page title="Bot Account" sub="Dedicated paper strategy allocation (Part 26). The bot can never withdraw, transfer, change destinations, raise its allocation or its own permissions.">
     <ErrorLine e={error} />
     <div className="grid g4" style={{ marginBottom: 14 }}>
@@ -36,9 +48,16 @@ export function Bot() {
       <Stat k="Decisions / entries" v={`${s?.decisionsTotal ?? 0} / ${s?.entriesToday ?? 0}`} s={s?.lastError ? <span className="err">{s.lastError}</span> : 'no engine errors'} />
     </div>
     <div className="grid g2">
-      <Card title="Automation mode (Part 26.2)"><div className="col">
+      <Card title="Automation mode (Part 26.2)" right={paper && <>
+        <span className="hint">Paper environment</span>
+        <span role="status" aria-label="Paper execution status"><Badge v={paper.state} title={paper.reasons.join(', ')} /></span>
+      </>}><div className="col">
         {MODES.map(([m, l, d]) => <label key={m} className="row" style={{ alignItems: 'flex-start', opacity: m === 'BOUNDED_LIVE' ? 0.6 : 1 }}><input type="radio" name="mode" checked={s?.mode === m} readOnly style={{ marginTop: 3 }} /><div style={{ flex: 1 }}><b>{l}</b> <span className="muted">— {d}</span></div>
-          {s?.mode !== m && (m === 'BOUNDED_LIVE' ? <Badge v="LOCKED" /> : <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, ...stepUpBody(pw) } }); reload(); } finally { setPw(''); } }} />)}</label>)}
+          {m === 'BOUNDED_LIVE' ? <Badge v={live?.state ?? 'LOCKED'} /> : s?.mode !== m && <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, ...stepUpBody(pw) } }); reload(); environments.reload(); } finally { setPw(''); } }} />}</label>)}
+        {live?.reasons.length ? <ul className="hint" aria-label="Live execution blockers" style={{ margin: 0 }}>
+          {live.reasons.map(reason => <li key={reason}>{reason}</li>)}
+        </ul> : null}
+        {environments.error && <ErrorLine e="Execution status could not be loaded." />}
         <StepUp value={pw} onChange={setPw} />
         {!s?.policyAccepted && <div className="hint warn">Accept a risk policy in the <Link to="/risk">Risk Center</Link> before paper execution.</div>}
         <div className="row"><Action className="danger" label="Pause new orders" run={async () => { await api('/api/emergency/pause', { body: {} }); reload(); }} />

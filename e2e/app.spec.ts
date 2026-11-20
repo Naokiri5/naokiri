@@ -79,6 +79,8 @@ test('BOUNDED LIVE cannot be enabled', async () => {
   const live = page.locator('label:has-text("Bounded live")');
   await expect(live.getByRole('button', { name: 'Switch' })).toHaveCount(0);
   await expect(live.getByText('LOCKED', { exact: true })).toBeVisible();
+  await expect(page.getByText(/NOT_CERTIFIED: no live venue adapter or isolated signer/)).toBeVisible();
+  await expect(page.getByLabel('Paper execution status')).toHaveText('ACTIVE');
   // The server still refuses it directly, even with the correct passphrase (the authoritative check).
   const r = await page.evaluate(async (pw) => { const res = await fetch('/api/control', { method: 'POST', headers: { 'content-type': 'application/json', 'x-mia-csrf': '1' }, body: JSON.stringify({ mode: 'BOUNDED_LIVE', password: pw }) }); return { status: res.status, body: await res.json() }; }, PW);
   expect(r.status).toBe(400); expect(r.body.error).toMatch(/BOUNDED_LIVE is locked/); // SAFE-01: refused in the core
@@ -283,6 +285,8 @@ test('market coverage uses the saved IANA timezone and shows unsupported venues'
   await expect(page.getByText(/Asia\/Manila/)).toBeVisible();
   await expect(page.getByRole('row', { name: /U.S. equities/ })).toContainText('PENDING CREDENTIALS');
   await expect(page.getByRole('row', { name: /Tokenized equities/ })).toContainText('Unavailable');
+  await expect(page.getByRole('row', { name: /Forex/ })).toContainText('Reference only');
+  await expect(page.getByRole('row', { name: /DEX tokens and memecoins/ })).toContainText('Research only');
   await page.goto('/calendar');
   await expect(page.getByText('Asia/Manila', { exact: true })).toBeVisible();
 });
