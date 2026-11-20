@@ -157,6 +157,26 @@ describe('paper entry rechecks mutable state under its write lock', () => {
     expect(cashBalance()).toBeCloseTo(remaining, 6);
   });
 
+  it('rejects a simulated fill whose executable price exceeds the equity cap', () => {
+    const now = Date.UTC(2026, 10, 19, 12);
+    market.reset();
+    const { inst, last: price } = seedInstrument('ETHUSDT', { seed: 2, nowTs: now });
+    acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 5 });
+    const book = market.deep.get(inst.id)!.book!;
+    const bestAsk = book.asks[0][0];
+    book.asks = [[bestAsk, 0.001], [bestAsk * 1.001, 100]];
+    const proposed = report(inst.id, price, now + 60_000);
+    const planned = evaluateRisk({ instrumentId: inst.id, strategyId: proposed.strategy.id, side: 'buy', entryPrice: proposed.entryRef,
+      stopPrice: proposed.stopLoss, idempotencyKey: `entry-${proposed.candidateId}`, traceId: 'tr' }, now);
+    expect(planned.decision).toBe('ALLOW');
+    expect(planned.sizing!.qty * bestAsk).toBeLessThanOrEqual(500);
+
+    expect(submitEntry(proposed, 'bot', now)).toMatchObject({ ok: false, reason: expect.stringContaining('POSITION_NOTIONAL_LIMIT') });
+    expect(get('SELECT id FROM fills')).toBeUndefined();
+    expect(openPositions()).toHaveLength(0);
+    expect(cashBalance()).toBe(10_000);
+  });
+
   it('preserves cash and refuses the fill after a concurrent withdrawal', () => {
     const result = submitAfter(() => ledger(PAPER_ACCOUNT, 'WITHDRAW', -9_999), 'bot');
     expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('INSUFFICIENT_CASH') });

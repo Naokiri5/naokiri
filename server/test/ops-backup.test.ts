@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, statSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -84,9 +84,22 @@ describe('database backups', () => {
     expect(listBackups(dir)).toEqual([]); expect(verifyBackup(join(dir, m.file), null).ok).toBe(false);
     expect(existsSync(join(dir, m.file))).toBe(true);
   });
-  it('I-03: a plaintext backup file is owner-only (0600) even when the backup directory already existed', async () => {
-    const { statSync, chmodSync } = await import('node:fs');
+  it('I-03: a plaintext backup file is owner-only before SQLite writes in an existing destination', () => {
     chmodSync(dir, 0o755);
+    const prepare = DatabaseSync.prototype.prepare;
+    vi.spyOn(DatabaseSync.prototype, 'prepare').mockImplementation(function (this: DatabaseSync, sql: string) {
+      const stmt = prepare.call(this, sql);
+      if (sql === 'VACUUM INTO ?') {
+        const execute = stmt.run.bind(stmt);
+        vi.spyOn(stmt, 'run').mockImplementation((...args: Parameters<typeof stmt.run>) => {
+          const raw = String(args[0]);
+          expect(statSync(raw).mode & 0o777).toBe(0o600);
+          expect(statSync(dirname(raw)).mode & 0o777).toBe(0o700);
+          return execute(...args);
+        });
+      }
+      return stmt;
+    });
     const m = createBackup({ dir, key: null, nowTs: 1_800_000_000_000 });
     expect(statSync(join(dir, m.file)).mode & 0o777).toBe(0o600);
   });
@@ -116,6 +129,7 @@ describe('database backups', () => {
         vi.spyOn(stmt, 'run').mockImplementation((...args: Parameters<typeof stmt.run>) => {
           const raw = String(args[0]); privatePaths.push(raw);
           expect(relative(dir, raw).startsWith('..')).toBe(true); expect(statSync(dirname(raw)).mode & 0o777).toBe(0o700);
+          expect(statSync(raw).mode & 0o777).toBe(0o600);
           const r = execute(...args); expect(readdirSync(dir).some((name) => name.endsWith('.partial'))).toBe(false); return r;
         });
       }

@@ -74,25 +74,41 @@ export function decrypt(blob: Buffer, key: Buffer): Buffer {
 export function createBackup(opts: { dir?: string; key?: Buffer | null; nowTs?: number } = {}): BackupManifest {
   const dir = opts.dir ?? backupDir(); const key = opts.key === undefined ? backupKey() : opts.key; const t = opts.nowTs ?? Date.now();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const name = `${PREFIX}${stamp(t)}${key ? '.db.enc' : '.db'}`; const final = join(dir, name);
-  if (existsSync(final)) throw new Error(`backup ${name} already exists`);
-  // Capy #14: an encrypted backup's plaintext snapshot lives only in a private temp workspace, never in the backup directory.
-  const scratch = key ? mkdtempSync(join(tmpdir(), 'mia-backup-')) : null;
-  const raw = scratch ? join(scratch, 'snapshot.db') : join(dir, `.${name}.partial`);
-  const encoded = join(dir, `.${name}.partial.enc`);
-  try {
-    rmSync(raw, { force: true });
-    getDb().prepare('VACUUM INTO ?').run(raw);
-    chmodSync(raw, 0o600); // I-03: VACUUM INTO creates the file with the process umask; a backup holds credentials and the ledger
-    if (key) { writeFileSync(encoded, encrypt(readFileSync(raw), key), { mode: 0o600 }); rmSync(raw); renameSync(encoded, final); }
-    else renameSync(raw, final);
-  } finally {
-    try { rmSync(raw, { force: true }); rmSync(encoded, { force: true }); }
-    finally { if (scratch) rmSync(scratch, { recursive: true, force: true }); }
+  const name = `${PREFIX}${stamp(t)}${key ? '.db.enc' : '.db'}`;
+  const final = join(dir, name);
+  const finalManifest = `${final}.json`;
+  // Stage on the destination filesystem for atomic renames and claim this timestamp before either file is published.
+  const staging = join(dir, `.${name}.staging`);
+  try { mkdirSync(staging, { mode: 0o700 }); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`backup ${name} is already being created`);
+    throw error;
   }
-  const m: BackupManifest = { file: name, createdAt: t, schema: SCHEMA_VERSION, bytes: statSync(final).size, sha256: sha256File(final), encrypted: !!key, format: key ? 'MIAB1-aes-256-gcm' : 'sqlite' };
-  writeFileSync(`${final}.json.partial`, JSON.stringify(m, null, 2) + '\n', { mode: 0o600 }); renameSync(`${final}.json.partial`, `${final}.json`);
-  return m;
+  let scratch: string | undefined;
+  try {
+    if (existsSync(final) || existsSync(finalManifest)) throw new Error(`backup ${name} already exists`);
+    // Encrypted backups keep their plaintext snapshot in the private system temporary workspace.
+    if (key) scratch = mkdtempSync(join(tmpdir(), 'mia-backup-'));
+    const raw = join(scratch ?? staging, 'snapshot.db');
+    writeFileSync(raw, '', { flag: 'wx', mode: 0o600 });
+    getDb().prepare('VACUUM INTO ?').run(raw);
+    chmodSync(raw, 0o600);
+    const payload = key ? join(staging, 'snapshot.db.enc') : raw;
+    if (key) {
+      writeFileSync(payload, encrypt(readFileSync(raw), key), { flag: 'wx', mode: 0o600 });
+      rmSync(raw);
+    }
+    const m: BackupManifest = { file: name, createdAt: t, schema: SCHEMA_VERSION, bytes: statSync(payload).size, sha256: sha256File(payload), encrypted: !!key, format: key ? 'MIAB1-aes-256-gcm' : 'sqlite' };
+    const manifest = join(staging, 'manifest.json');
+    writeFileSync(manifest, JSON.stringify(m, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
+    renameSync(payload, final);
+    try { renameSync(manifest, finalManifest); }
+    catch (error) { rmSync(final, { force: true }); throw error; }
+    return m;
+  } finally {
+    try { if (scratch) rmSync(scratch, { recursive: true, force: true }); }
+    finally { rmSync(staging, { recursive: true, force: true }); }
+  }
 }
 
 /** Backups in a directory, newest first (only files that have a manifest count as complete). */

@@ -2,7 +2,7 @@ import { all, get, run, tx, J, P } from '../db/db.js';
 import { uid, iso, floorToStep, expiredAt } from '../core/util.js';
 import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
-import { entryAuthorityVetoes, evaluateRisk } from '../risk/gate.js';
+import { entryAuthorityVetoes, evaluateRisk, positionNotionalLimit } from '../risk/gate.js';
 import { currentPolicy, exitPolicy } from '../risk/policy.js';
 import { ledger, cashBalance, accountState, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
 import { journal } from '../journal/journal.js';
@@ -195,16 +195,15 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     // maxPositionNotionalPct of what remains. Missing open-position marks make equity unknown: fail closed.
     const lockedAcct = accountState(PAPER_ACCOUNT, nowTs);
     if (lockedAcct.marksMissing.length) return { rejected: persistRejection(`POSITION_MARKS_MISSING:${lockedAcct.marksMissing.join(',')}`) };
-    const capPct = lockedPolicy?.policy?.maxPositionNotionalPct;
-    if (capPct === undefined) return { rejected: persistRejection('POLICY_INVALID: entries need a valid owner-accepted risk policy') };
-    const cap = lockedAcct.equity * (capPct / 100);
-    const planned = fresh.sizing!.notional;
-    if (!Number.isFinite(cap) || !Number.isFinite(planned) || planned > cap + 1e-9) {
-      return { rejected: persistRejection(`POSITION_NOTIONAL_LIMIT: ${planned.toFixed(2)} exceeds ${capPct}% of current equity (${cap.toFixed(2)})`) };
+    const activePolicy = lockedPolicy?.policy;
+    if (!activePolicy) return { rejected: persistRejection('POLICY_INVALID: entries need a valid owner-accepted risk policy') };
+    const cap = positionNotionalLimit(lockedAcct.equity, activePolicy);
+    if (!Number.isFinite(cap) || cap <= 0 || notional > cap + 1e-9) {
+      return { rejected: persistRejection(`POSITION_NOTIONAL_LIMIT: fill ${notional.toFixed(2)}, current equity limit ${cap.toFixed(2)}`) };
     }
     // Trading-risk review: every gate limit (concurrent positions, aggregate open risk, correlation, loss breakers, ...)
     // is re-evaluated on the state inside this write lock, so a second process that committed in between cannot push the
-    // account past a limit the pre-lock evaluation accepted. evaluateRisk is read-only; a smaller size than planned fails.
+    // account past a limit the pre-lock evaluation accepted. An allowed size smaller than the proposed size rejects it.
     const locked = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId }, nowTs);
     const lockedAllowed = locked.decision === 'ALLOW' || (locked.decision === 'NEEDS_REVIEW' && actor === 'owner');
     if (!lockedAllowed || !locked.sizing || locked.sizing.qty + 1e-12 < qty) {
