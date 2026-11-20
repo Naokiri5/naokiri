@@ -125,42 +125,144 @@ and a blocked part, so the categories overlap.
 
 ## Unified quantitative intelligence overlay (2026-11-20)
 
-**Canonical home:** This existing traceability document merges the owner's uploaded `MIA_AI_UNIFIED_QUANT_MASTER(1).md` and 100-feature JSON, rather than introducing another trading engine. The DOCX is a formatted presentation of that same specification. The appended feature catalog is a **requirements overlay**; it does not replace Parts 1–33 or retroactively upgrade their test status.
+## MIA AI — Single Unified Quantitative Intelligence & Trading Parity Master
 
-**Machine-readable index:** [Quant Feature Catalog](engineering/QUANT_FEATURE_CATALOG.json) retains all original 100 feature IDs and adds repository ownership hints and code-grounded exceptions. Names, descriptions and original status labels are preserved; repository ownership maps are for implementation planning, not proof of feature completion.
+**Consolidated edition:** 1.2.0 • **Date:** November 20, 2026  
+**Project:** [Naokiri5/naokiri](https://github.com/Naokiri5/naokiri)  
+**Review baseline:** `main` tree `2627cd276d2108c15a47ba41d60cdb54fddf10ff`  
+**Review changes:** [Draft PR #58](https://github.com/Naokiri5/naokiri/pull/58), branch `feat/quant-unified-existing-core`  
+**CI evidence:** [GitHub Actions run 44655902028](https://github.com/Naokiri5/naokiri/actions/runs/44655902028) — completed successfully at inspected PR head `e2e692d7814dced5bf3c79bce1a66361e5639bae`  
+**Release status:** paper-trading source base; live execution not operational/certified; no real-money execution enabled in PR #58.
 
-### Verified architectural integration decisions
+> **Single-document rule:** This is one authoritative *portable* combination of the previously uploaded master and the GitHub audit. In the repository, the canonical requirements home remains **`docs/REQUIREMENTS_TRACEABILITY.md`** and the machine-readable catalog remains **`docs/engineering/QUANT_FEATURE_CATALOG.json`**. Do not install the old standalone TypeScript reference kit as a second application.
 
-| Owner in existing code | Reused responsibilities | Augmentation boundary |
+## 1. Consolidation decisions and source traceability
+
+The uploaded `MIA_AI_UNIFIED_QUANT_MASTER(2).md` and `(3).md` are byte-identical. The uploaded 100-feature catalog contains all IDs `MIA-Q001`–`MIA-Q100`, each once. The DOCX upload is an alternate formatted version of the master, not an independent design authority. This edition preserves the original 100 feature names, priorities, phases, baseline labels, requirements and acceptance constraints. It combines the user-provided GitHub audit and PR results with verified code evidence and explicitly corrects older assumptions.
+
+**Preservation priority:** Preserve existing GitHub code and its documentation, contracts, database records, security and execution controls. No new scanner, QCI coordinator, feature engine, strategy lab, risk engine, OMS or second live trading core. `BASE_EXISTS` only means related code was inspected, not that the complete item is deployed. `PARTIAL`, `PROPOSED` and `NEEDS_EXTERNAL_FEED` remain planning statuses until independent proof exists.
+
+### Source provenance and intentional corrections
+
+| Topic | Earlier source framing | Verified integrated interpretation |
 |---|---|---|
-| `server/src/features/indicators.ts` | Closed-candle incremental features; existing 50 reader adapters consume it | Add validated moments, distribution diagnostics and reference vectors here; never create another indicator engine |
-| `server/src/chart/analysis.ts` / `chart/replay.ts` | Rule-based chart evidence and prefix replay | New pattern evidence is explanatory until prospectively validated and formally routed through QCI |
-| `server/src/knowledge/research.ts` + `lab/backtest.ts` | **Already has walk-forward** with multiple OOS windows, crossing-trade purge and embargo; reuses backtest | Improve dynamic certification, point-in-time universe, execution realism and dependence-aware uncertainty; do not duplicate research engines |
-| `server/src/qci/coordinator.ts` | Signed worker packets, quorum, dependency caps and vetoes | Add measured quantitative evidence behind current authenticated schema; avoid uncalibrated probability claims |
-| `server/src/decision/engine.ts` + `risk/gate.ts` | One decision and risk authority | Certification may only restrict entry, not bypass owner limits; require adversarial regression tests |
-| `server/src/ditas/*` | Forecast calibration, memory, fingerprint and decision twins | Link independently observed outcomes and model versions; no secondary trading authority |
-| `server/src/market/fabric.ts` + `safety/safety.ts` | Existing CEX+DEX discovery and safety gates | Future Solana RPC/event provider adapters must fail closed until verified; no new global scanner |
-| `server/src/exec/oms.ts` + `portfolio/ledger.ts` | Paper execution and authoritative accounting | Shared pretrade policies can support future live mode; actual live execution/signing remains absent and locked |
+| Walk-forward evaluation | Backtester alone lacks rolling walk-forward | `server/src/knowledge/research.ts` **already implements** `strategyWalkforward`, with OOS windows, boundary-trade purging, embargo, and metrics; harden/reuse instead of duplicating |
+| 100 workers | Sometimes treated as 100 AI brains | `workers/registry.ts` contains deterministic workers; not 100 independent trained models |
+| 50 indicators | Sometimes treated as 50 predictor models | `workers/indicators.ts` maps canonical features to indicator readings; do not build another indicator calculation engine |
+| Forecast confidence | Score implies win probability | QCI consensus and weighted score are **not** calibrated profit probabilities |
+| Solana safety | Heuristic checks might authorize DEX sniping | `safety/safety.ts` provides incomplete DEX heuristics and fails closed; real permission/authority/liquidity and sell-route verification needed |
+| Live mode | PAPER and LIVE should share features | This is a **parity requirement**, not operational live readiness; mode-specific signing and venue execution remain prohibited by the current release lock |
+| Old standalone paths | `src/catalog.ts`, `src/adapters.ts`, `docs/REPO_FILE_MAP.md` suggested as existing repo components | These belonged to the original separate starter kit; current repo owns features through existing `server/src/` modules and `CLAUDE.md` |
+| PR #58 test state | Browser tests were running during earlier progress report | Both CI jobs subsequently completed successfully; CI does not establish actual trading profitability or certify the 100 new features |
 
-**Corrections versus the earlier standalone brief:** the `knowledge/research.ts` research walk-forward already exists; the previous package's `src/catalog.ts`, `src/adapters.ts` and `docs/REPO_FILE_MAP.md` are **not present** in this GitHub repository and must not be copied in as competing services. Existing experimental status should never be read as complete certification. The default `main` release lock remains intact.
+## 2. GitHub source audit — what MIA already has
 
-### Mode-parity acceptance contract
+The verified repository baseline contains substantial implementations in **statistics, chart evidence, 100 deterministic workers, 50 indicator readers, QCI, DITAS, backtesting, walk-forward research, risk controls and paper OMS**. The next upgrades should extend these owners and their tests, not introduce competing services.
 
-- PAPER and future LIVE must call the same feature functions, strategy versions, QCI, decision engine, owner policy and risk veto on identical frozen evidence. Do **not** maintain two separately evolving decision engines.
-- The mode-specific adapter enters only **after** shared risk approval. PAPER uses simulated fills; LIVE would additionally require separate owner approval, release gates, isolated signing, provider authorization and reconciliation. No real transaction path is introduced by this documentation.
-- Any incomplete or stale Solana token authority, liquidity or sell-route check must prevent automation in both modes. DEX sniping features in the catalog are planned, not enabled.
-- No automatic risk-limit relaxation, speculative strategy promotion, or unreviewed model self-update. Every increment must include reproducible unit/regression tests and explicit proof of acceptance gates.
+| Capability | Existing owner | What is present / what to enhance |
+|---|---|---|
+| Technical indicators and statistics | `server/src/features/indicators.ts` | Incremental EMA/RSI/MACD/ADX/ATR, VWAP and volatility; add reference validations and distribution metrics |
+| Worker coordination | `server/src/workers/registry.ts`, `runtime.ts` | 100 deterministic workers; improve independent evidence and outcome measurement |
+| Indicator readers | `server/src/workers/indicators.ts` | 50 readers over shared features; preserve adapter, avoid duplicating computation |
+| Chart intelligence | `server/src/chart/analysis.ts`, `chart/replay.ts` | Swings, patterns, FVG hypotheses, prefix replay; extend and validate causality |
+| Backtester/Monte Carlo | `server/src/lab/backtest.ts` | IS/OOS backtest and independent bootstrap; improve cost and dependent-loss simulation |
+| Existing walk-forward research | `server/src/knowledge/research.ts` | Multiple OOS windows, crossing-trade purge and embargo; improve certification and point-in-time robustness |
+| Strategy lifecycle | `server/src/lab/lab.ts` | Owner-led promotion; require positive independent OOS certification instead of mere stored backtest |
+| Decision/QCI | `server/src/decision/engine.ts`, `qci/coordinator.ts` | Single authoritative decision engine; prevent bypass of failed mandatory evidence gates |
+| Probability calibration | `server/src/ditas/calibration.ts` | Brier/log loss/ECE-style cohort evaluation; link validated prospective labels and governed models |
+| Portfolio and risk | `server/src/risk/gate.ts`, `portfolio/ledger.ts` | Deterministic fail-closed controls, correlation/size/loss safeguards; add tail stress without loosening caps |
+| Paper execution | `server/src/exec/oms.ts` | Simulated execution, accounting and protection; preserve exactly one OMS/ledger authority |
+| Solana DEX safety | `server/src/safety/safety.ts`, `market/fabric.ts` | Heuristic DEX intelligence only; add verified provider adapters and Token-2022 checks |
+| Trader Joe | `server/src/joe/joe.ts` | Existing assistant; explanation/alerts only, no autonomous sign/withdraw permission |
+| Modes and live release | `server/src/core/mode.ts`, `qa/gates.ts` | OBSERVE/PAPER/APPROVAL/locked BOUNDED_LIVE; leave actual live execution disabled pending certification |
 
-### First bounded implementation increment on this branch
+### Most important confirmed gaps
 
-`MIA-Q001`: extend **existing** `FeatureEngine` with 20-return mean, population skewness and excess kurtosis; abstain (NaN) for incomplete history or zero-variance standardized moments. New test cases check 20-return warm-up, deterministic incremental calculation and constant-price abstention. These are descriptive features only, not QCI votes, order signals or win probabilities. CI confirmation is required before considering the implementation verified.
+**P0-A: Strategy certification.** The existing paper-promotion lifecycle can accept a stored backtest without a robust independent OOS positive-edge certificate. Make the hard gate require valid reviewed evidence and sample/uncertainty checks; reuse `strategyWalkforward` rather than implementing another backtester.
 
-### Appended original 100-feature specification (reconciled)
+**P0-B: Decision certification enforcement.** Any mandatory statistical or strategy-performance failure must create an explicit `DENY` before OMS, regardless of QCI agreement or Trader Joe interpretation.
 
-**Version:** 1.0.0  
-**Prepared:** November 20, 2026  
-**Repo:** https://github.com/Naokiri5/naokiri  
-**Status:** IMPLEMENTATION BLUEPRINT + TYPECHECKED REFERENCE CONTRACTS, NOT A PRODUCTION LIVE BOT
+**P0-C: Calibrated prediction.** Do not rename consensus scores as trading success probabilities. Train/evaluate outcome-specific models on settled, point-in-time cohorts; abstain when calibration sample size is insufficient.
+
+**P0-D: Solana provider truth.** Mint/freeze/Token-2022 authority, liquidity resilience, exit-route simulation, holder concentration and quote expiry require real provenance-backed Solana RPC and quote integrations; unavailable critical evidence must deny automation.
+
+## 3. PR #58: integration already completed, and what is not completed
+
+**Pull request:** https://github.com/Naokiri5/naokiri/pull/58  
+**Branch:** `feat/quant-unified-existing-core`  
+**Status at verification:** OPEN, DRAFT, UNMERGED. Seven commits ahead of baseline `main`; no base drift at inspection.  
+**CI:** https://github.com/Naokiri5/naokiri/actions/runs/44655902028 — completed **successfully**, including typecheck/unit-and-integration/audit/secret-scan job and Playwright browser job.
+
+The PR updates exactly six existing/new paths:
+
+| Changed path | Purpose |
+|---|---|
+| `server/src/features/indicators.ts` | Adds descriptive 20-return mean, population skewness and excess kurtosis to **existing** FeatureEngine |
+| `server/test/features.test.ts` | Adds warm-up, skewness, flat-history and deterministic ingestion tests |
+| `docs/REQUIREMENTS_TRACEABILITY.md` | Appends full 100-requirement master to existing Parts 1–33 requirements; records module ownership corrections |
+| `docs/engineering/QUANT_FEATURE_CATALOG.json` | Machine-readable 100-ID catalog with existing owner-module maps and evidence exceptions |
+| `CLAUDE.md` | Sends Claude/Codex to the canonical requirements and existing source owners |
+| `docs/CLAUDE_CODE_WORKFLOW.md` | Documents low-token one-feature-at-a-time task workflow |
+
+**Verification boundaries:** Successful CI is evidence the PR passed its configured build/test workflow. It is **not** a complete runtime or profitability certification. PR #58 does **not** implement all 100 enhancements, build a new live venue adapter or activate real-money trading. Do not merge the draft without owner review.
+
+## 4. Shared DEMO/PAPER and future LIVE design requirements
+
+One shared **market data truth → canonical FeatureEngine → specialist evidence → QCI → single decision engine → deterministic risk gate → unified order intent** must serve both modes. PAPER and LIVE may differ **only downstream of shared evaluation** in order routing, actual fills, secure key custody and additional live permissions. Any new risk rule must apply equally to paper and live, and live is permitted to be *more restrictive*, never less restrictive.
+
+| Layer | PAPER / DEMO | Future authorized LIVE | Parity rule |
+|---|---|---|---|
+| Trusted data, timestamps and features | Real observed feeds; simulated actions | Same validated observed feeds | Same input snapshot and algorithm/version |
+| Strategy, QCI and calibrated models | Shared evaluation | Shared evaluation | Identical pretrade evidence and scoring |
+| Independent policy and sizing | Shared fail-closed risk gate | Same gate plus additional release authorizations | A failure must reject in both modes |
+| OMS contract and audit | Paper book-walk simulation and synthetic fill journal | Real venue path and independent signer after separate authorization | Comparable intents, distinguish real vs simulated fills |
+| Provider errors, liquidity changes, unsafe tokens | `DENY`/`ABSTAIN` | Same `DENY`/`ABSTAIN` | No unsafe fallback in either mode |
+| Release gate | Approved paper operation | Remains locked until certified and owner explicitly authorizes | Cannot bypass shared rules |
+
+**Non-negotiable:** Existing code is currently paper-only. This document defines eventual live architecture, **not a command to unlock or secretly add real-money execution**.
+
+## 5. Implementation roadmap and agent handoffs
+
+| Order | Work packet | Existing owners | Acceptance criterion |
+|---|---|---|---|
+| T01 | Verify numeric indicators and descriptive distribution moments | `features/indicators.ts`, `test/features.test.ts` | Closed candle, warm-up, reference vectors, no-future-data tests |
+| T02 | Strategy promotion certification | `lab/lab.ts`, `knowledge/research.ts`, `lab/backtest.ts` | Stored backtest alone never grants paper authority; fail-closed on weak OOS |
+| T03 | Enforce mandatory certification in decisions | `decision/engine.ts`, `risk/gate.ts` | All invalid/expired/weak evidence is vetoed before OMS |
+| T04 | Calibration, estimates and model registry | `ditas/calibration.ts`, `ditas/service.ts` | Defined target/horizon, testable cohorts, independent settlement |
+| T05 | Research robustness | `knowledge/research.ts`, `lab/backtest.ts` | Reuse existing purge/embargo; correct serial dependence/cost assumptions |
+| T06 | Chart and QCI quantitative evidence | `chart/analysis.ts`, `qci/coordinator.ts` | Versioned, signed packets; no second vote for the same dependency |
+| T07 | Solana provider-backed safety and route feasibility | `market/fabric.ts`, `safety/safety.ts`, providers | Verified sources; no unsafe DEX entry if checks are unavailable |
+| T08 | Paper/live invariant certification and incident drills | `risk/gate.ts`, `exec/oms.ts`, `qa/gates.ts` | Frozen evidence same core verdict; live remains locked without owner sign-off |
+
+### Low-token Claude/Codex execution contract
+
+1. Read only `CLAUDE.md`, one `MIA-Q###` catalog record, relevant owner files and their direct tests.
+2. Before coding, report `REUSE`, `EXTEND`, `BLOCKED`, or `UNVERIFIED` with exact evidence. Do **not** copy old standalone `src/*.ts` files into this repository.
+3. Implement one vertical slice per PR increment; add no duplicate worker, feature engine, risk gate or trade router.
+4. Require tests for mathematical references, historical causality, paper/live core parity, failed trade attempts and no-change invariants.
+5. Document SHA, exact tests run, CI result, residual risk and rollback path. Do not declare a model profitable without independently reproduced OOS/live evidence.
+
+### Minimal reusable agent task prompt
+
+```text
+MIA enhancement task: MIA-Q### — <feature name>.
+Use repo Naokiri5/naokiri, current draft branch only.
+Read CLAUDE.md, docs/engineering/QUANT_FEATURE_CATALOG.json
+for this ID, and the existing owner paths/tests only.
+Map call sites; REUSE or EXTEND current code; never create a
+parallel FeatureEngine, research lab, QCI, risk engine or OMS.
+Shared PAPER/LIVE pretrade math and risk are mandatory; real LIVE
+execution is locked and must stay locked.
+Add deterministic negative tests and document exact results.
+Output: small diff, traceability update, verification, remaining gaps.
+Do not merge main or alter owner-approved risk limits.
+```
+
+---
+
+## 6. Preserved original feature specification (100 IDs, corrected integration context)
+
+The following is the supplied master specification **with only the code-evidence corrections documented above**. Original feature names, descriptions, priorities, baseline labels and category groupings remain intact. Section numbering below follows the uploaded source.
 
 ## Purpose and non-removal rule
 
@@ -178,26 +280,9 @@ This document supersedes no owner files: it is an additive implementation refere
 - LIVE routes require **additional** owner authorization, release certification, separate signer, venue access and telemetry; those are **never substitutes for shared policy checks**.
 - Deploy in bounded, test-first phases. Each phase includes clear acceptance tests and a rollback plan.
 
-## Grounded code inventory (reviewed `main`)
+## Original baseline inventory (integrated above)
 
-| Existing implementation | Present today | Deficiency / direction |
-|---|---|---|
-| `server/src/features/indicators.ts` | EMA, RSI, ATR, MACD, ADX, bands, stochastic, OBV, volume Z, realized vol, VWAP20 etc. | Improve per-metric warm-up, full reference fixtures, division by zero, numerical behavior |
-| `server/src/workers/registry.ts` | 100 deterministic market workers in 11 domains | Not 100 separately trained AI models; validate coverage and correlated sources |
-| `server/src/workers/indicators.ts` | 50 normalized indicator readers across 15m/1h/4h | Not 50 independent predictive models; extend only useful evidence |
-| `server/src/chart/analysis.ts` | Confirmed swings, basic patterns, breakout/sweeps, FVG hypotheses | Confidence marked NOT_CALIBRATED; explanatory `NO TRADE` by design |
-| `server/src/lab/backtest.ts` | IS/OOS split, next-bar entry, fees, spread, slippage, R results, Monte Carlo | Research walk-forward with purge/embargo already exists in `knowledge/research.ts`; lacks full independent certification, robust fill queues and dependence-aware stress |
-| `server/src/ditas/calibration.ts` | Brier, log loss, ECE, Wilson intervals on settled binary cohorts | Needs verified observed outcomes, prospective forecasts, trained model registry |
-| `server/src/qci/coordinator.ts` | Signed packets, quorum, capped dependency votes, vetoes | Fixed thresholds, uncalibrated; preserve rather than duplicate |
-| `server/src/decision/scoring.ts` | Transparent fixed weighted scores, missing-value penalty | Research weights only; do not convert score to probability |
-| `server/src/decision/engine.ts` | Central authority, signed QCI, independent risk and paper path | Make failed mandatory statistical gates deterministically block entry |
-| `server/src/lab/lab.ts` | Owner-controlled strategy lifecycle | Paper promotion currently only requires saved backtest; require durable certification |
-| `server/src/safety/safety.ts` | CEX risk + DEX heuristic flags | DEX cannot be auto-eligible; no validated SPL/Token-2022 security provider |
-| `server/src/risk/gate.ts` | Loss limits, sizing, correlation, cost, freshness, pause and incidents | Extend stress/tail risk without relaxing hard limits |
-| `server/src/market/fabric.ts` | Binance spot REST polling, cross venue, data fabric | Add authorized event streams and venue-specific integrity checks |
-| `server/src/core/mode.ts` | OBSERVE/PAPER/APPROVAL/BOUNDED_LIVE controls | Preserve live lock until release certification |
-
-Historic repository docs report 3 strategies losing money OOS on very small samples. These results are *not* proof of edge. Source review does not certify runtime performance. See `docs/engineering/IMPLEMENTATION_INVENTORY.md` for exact file/feature references.
+The complete baseline inventory has been reconciled into Section 2; previously understated walk-forward work is described there. Original module ownership, component responsibilities and improvement targets are all retained in the integrated audit table.
 
 ## Target architecture
 
@@ -233,7 +318,7 @@ Core analytics must never branch on `mode`. Reusing the same functions and polic
 
 ## Feature priority
 
-P0 = mandatory correctness, data, risk, certification and mode parity; P1 = high-value feature expansion; P2 = research ideas contingent on demonstrated incremental value. `BASE_EXISTS` means some related implementation was observed, not that it is production-complete. `NEEDS_EXTERNAL_FEED` explicitly means a provider/credential/certification is required. **All 100 requirements are preserved in `docs/engineering/QUANT_FEATURE_CATALOG.json` and below.**
+P0 = mandatory correctness, data, risk, certification and mode parity; P1 = high-value feature expansion; P2 = research ideas contingent on demonstrated incremental value. `BASE_EXISTS` means some related implementation was observed, not that it is production-complete. `NEEDS_EXTERNAL_FEED` explicitly means a provider/credential/certification is required. **All 100 requirements are preserved below and in repository `docs/engineering/QUANT_FEATURE_CATALOG.json`.** The earlier `catalog/FEATURE_CATALOG.json` and `src/catalog.ts` are standalone-kit files, not canonical repository modules.
 
 ## Complete 100-feature catalog
 
@@ -381,7 +466,7 @@ Catalog entries define a primary phase, not a claim that all features have to be
 
 ## Token-cost-efficient agent workflow
 
-The entire master is *not* a daily agent prompt. See `agent_instructions/QUICK_CONTEXT.md`, `docs/TASK_CARDS.md` and `docs/LOW_TOKEN_WORKFLOW.md`. Tell Codex/Claude one task ID and two or three exact source paths; let them inspect only relevant code. Reuse the repo's existing `CLAUDE.md` without overwriting. Keep a minimal feature manifest and provenance logs, not giant conversation dumps. Every task produces a diff summary, test evidence, parity result and next task ID.
+The entire master is *not* a daily agent prompt. In the repository, see `CLAUDE.md` and `docs/CLAUDE_CODE_WORKFLOW.md`. The standalone kit also includes `agent_instructions/QUICK_CONTEXT.md`, `docs/TASK_CARDS.md` and `docs/LOW_TOKEN_WORKFLOW.md`; those are not assumed to be installed in GitHub. Tell Codex/Claude one task ID and two or three exact source paths; let them inspect only relevant code. Reuse the repo's existing `CLAUDE.md` without overwriting. Keep a minimal feature manifest and provenance logs, not giant conversation dumps. Every task produces a diff summary, test evidence, parity result and next task ID.
 
 ## Repository research references (research, not copy-paste dependency mandate)
 
@@ -399,7 +484,7 @@ The entire master is *not* a daily agent prompt. See `agent_instructions/QUICK_C
 
 Review current licenses, APIs, security and terms before adopting external packages. Do not bulk import vendor code or grant an external MCP unrestricted signing permissions.
 
-## Historical standalone reference-kit index (not an installed repo module)
+## Historical standalone reference-kit index (not installed as parallel MIA modules)
 
 - `docs/MIA_UNIFIED_MASTER.md` — this canonical architecture and all 100 feature IDs.
 - `catalog/FEATURE_CATALOG.json` — structured searchable 100-feature machine catalog.
@@ -412,10 +497,18 @@ Review current licenses, APIs, security and terms before adopting external packa
 - `src/index.ts` — public exports.
 - `tests/parity.test.mjs` — smoke tests for 100 IDs, math, shared-parity, certificate blocks, DEX safety and locked execution.
 - `docs/PARITY_MATRIX.md` — invariant matrix.
-- `docs/engineering/IMPLEMENTATION_INVENTORY.md` — exact integration targets in user repo.
+- `docs/REPO_FILE_MAP.md` — exact integration targets in user repo.
 - `docs/TASK_CARDS.md` — bounded implementation sequence for Claude and Codex.
 - `docs/LOW_TOKEN_WORKFLOW.md` — prompt/context cost control.
 - `agent_instructions/QUICK_CONTEXT.md` — context summary for both agents.
 - `agent_instructions/CODEX_PROMPT.md` / `CLAUDE_PROMPT.md` — short prompts.
 
-**Status statement:** The original standalone package did not modify Naokiri5/naokiri. This feature branch integrates the specification and a limited indicator enhancement but does not claim to implement all 100 requirements. It does not unlock live trading. Source-code references are based on a read-only inspection of the repository as available for this task.
+**Source-history clarification:** The original standalone package did not modify the repository. The later, separately reviewed **draft PR #58** does change the existing indicator engine, relevant tests and repository documentation. PR #58 is not merged and does not unlock live trading. This section preserves original package filenames for traceability only.
+
+---
+
+## 7. Final status and approval boundary
+
+**Delivery status:** Unified specification published as a portable Markdown and Word document; the GitHub baseline is the open draft PR #58. The document is not an instruction to remove existing files, merge the PR, unlock live trading or treat all 100 requirements as implemented. New changes must be tested in existing owners, reconciled with `docs/REQUIREMENTS_TRACEABILITY.md`, and reviewed before release.
+
+**Verified evidence:** owner-uploaded 100-feature JSON and master Markdown; inspected GitHub source tree on `main`; inspected PR #58 and its successful GitHub Actions workflow. No claim of current trading accuracy, live order fill performance or audited profitability is made.
