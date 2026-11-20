@@ -1,16 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join, relative } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  EMOTION_ATLAS, MIA_INPUT_BASELINE, BEHAVIORAL_INPUTS, BMIND_DOMAINS, baselineCapabilities, constructById, constructCoverage,
-  checkObservation, independentSources, type BehavioralObservation, type InputCapabilities,
+  EMOTION_ATLAS, MIA_INPUT_BASELINE, BEHAVIORAL_INPUTS, BMIND_DOMAINS, BMIND_STANCES, baselineCapabilities, constructById, constructCoverage,
+  checkObservation, independentEvidenceCount, type BehavioralObservation, type InputCapabilities,
 } from '../src/bmind/index.js';
 
 /**
  * MIA 5.0 M5-U03a: the B-MIND read-only foundation (JDR-001). These tests pin its safety promises:
- * unknown stays unknown, price alone never proves an emotion, nothing can say "buy", a foundation-level effect never
- * exceeds WAIT (and only EXPLAIN without a calibrated cohort), and nothing outside bmind/ uses it yet.
+ * unknown stays unknown, price alone never proves an emotion, nothing can say "buy" or block, no effect goes beyond
+ * EXPLAIN in this foundation, a caller can only lower what MIA observes, and B-MIND only ever opposes or abstains.
+ * The import boundaries (not wired; never reachable from orders, exits, risk or portfolio) are in import-boundaries.test.ts.
  */
 const SOURCE_NAMES = ['Fear', 'Panic', 'Anxiety', 'Dread', 'Capitulation', 'Despair', 'Regret', 'Relief', 'Hope', 'Optimism', 'Greed',
   'Euphoria', 'FOMO', 'Overconfidence', 'Complacency', 'Conviction', 'Skepticism', 'Distrust', 'Disbelief', 'Confusion', 'Uncertainty',
@@ -52,6 +53,10 @@ describe('the emotion atlas preserves all 32 source constructs', () => {
     }
     expect(EMOTION_ATLAS.filter((c) => c.effectCeiling === 'WAIT').map((c) => c.id)).toEqual(['EM-02', 'EM-13', 'EM-22', 'EM-31', 'EM-32']);
   });
+  it('B-MIND may only oppose or abstain in QCI, never support an entry; no role text grants sizing or entry authority', () => {
+    expect(BMIND_STANCES).toEqual(['OPPOSE', 'ABSTAIN']);
+    for (const c of EMOTION_ATLAS) expect(c.role, c.id).not.toMatch(/smaller entry|larger (entry|position)|increase (the )?(size|risk|exposure)/i);
+  });
   it('is frozen: callers cannot change it', () => {
     expect(Object.isFrozen(EMOTION_ATLAS)).toBe(true);
     expect(Object.isFrozen(EMOTION_ATLAS[0])).toBe(true);
@@ -65,13 +70,15 @@ describe('coverage: what MIA can observe with the data it has', () => {
     for (const c of constructCoverage(caps)) out[c.state].push(c.id);
     return out;
   };
-  it('today: constructs that need social, options, holder, search or cost-basis data are UNKNOWN, not guessed', () => {
+  it('today: constructs that need social, options, holder, search, calendar or cost-basis data are UNKNOWN, not guessed', () => {
     const s = byState();
-    expect(s.UNKNOWN).toEqual(['EM-04', 'EM-07', 'EM-12', 'EM-13', 'EM-16', 'EM-23', 'EM-25', 'EM-27', 'EM-29']);
-    expect(s.OBSERVABLE).toEqual(['EM-02', 'EM-08', 'EM-21', 'EM-30', 'EM-31', 'EM-32']);
-    expect(s.WEAK).toHaveLength(17);
+    expect(s.UNKNOWN).toEqual(['EM-04', 'EM-07', 'EM-12', 'EM-13', 'EM-16', 'EM-23', 'EM-24', 'EM-25', 'EM-27', 'EM-29']);
+    // Only evidence-state and MIA-discipline constructs: no market emotion is fully observable with today's data.
+    expect(s.OBSERVABLE).toEqual(['EM-21', 'EM-30', 'EM-31', 'EM-32']);
+    expect(s.WEAK).toHaveLength(18);
     expect(constructCoverage().find((c) => c.id === 'EM-13')).toMatchObject({ state: 'UNKNOWN', missing: ['SOCIAL'] });
     expect(constructCoverage().find((c) => c.id === 'EM-01')).toMatchObject({ state: 'WEAK', degraded: ['TRADE_FLOW'] });
+    expect(constructCoverage().find((c) => c.id === 'EM-02')).toMatchObject({ state: 'WEAK', degraded: ['ORDER_BOOK'] }); // one snapshot, no history
   });
   it('fails closed: an input that is not listed counts as unavailable', () => {
     const all = constructCoverage({});
@@ -88,31 +95,42 @@ describe('coverage: what MIA can observe with the data it has', () => {
   it('a licensed social feed would change only the constructs that need it; a partial one only to WEAK', () => {
     const base = baselineCapabilities();
     const withSocial = byState({ ...base, SOCIAL: 'AVAILABLE' });
-    expect(withSocial.OBSERVABLE).toEqual(expect.arrayContaining(['EM-07', 'EM-12', 'EM-13']));
-    expect(withSocial.UNKNOWN).toEqual(['EM-04', 'EM-16', 'EM-23', 'EM-29']);
-    expect(byState({ ...base, SOCIAL: 'DEGRADED' }).WEAK).toEqual(expect.arrayContaining(['EM-07', 'EM-12', 'EM-13', 'EM-25']));
+    expect(withSocial.OBSERVABLE).toEqual(expect.arrayContaining(['EM-07', 'EM-12', 'EM-13', 'EM-25']));
+    expect(withSocial.WEAK).toContain('EM-27'); // Scarcity/Urgency also needs trade flow, which is partial
+    expect(withSocial.UNKNOWN).toEqual(['EM-04', 'EM-16', 'EM-23', 'EM-24', 'EM-29']);
+    expect(byState({ ...base, SOCIAL: 'DEGRADED' }).WEAK).toEqual(expect.arrayContaining(['EM-07', 'EM-12', 'EM-13', 'EM-25', 'EM-27']));
   });
   it('the baseline states its evidence and keeps sources MIA does not have as UNAVAILABLE', () => {
     for (const i of BEHAVIORAL_INPUTS) expect(MIA_INPUT_BASELINE[i].evidence.length, i).toBeGreaterThan(10);
-    for (const i of ['SOCIAL', 'SEARCH_INTEREST', 'OPTIONS_IV', 'WALLET_HOLDERS', 'COST_BASIS'] as const) expect(MIA_INPUT_BASELINE[i].capability, i).toBe('UNAVAILABLE');
-    expect(MIA_INPUT_BASELINE.DEX_ACTIVITY.capability).toBe('DEGRADED'); // DEX Screener counts are not unique wallets
+    for (const i of ['SOCIAL', 'SEARCH_INTEREST', 'OPTIONS_IV', 'WALLET_HOLDERS', 'COST_BASIS', 'MACRO_EVENTS'] as const) expect(MIA_INPUT_BASELINE[i].capability, i).toBe('UNAVAILABLE');
+    for (const i of ['ORDER_BOOK', 'TRADE_FLOW', 'NEWS', 'DEX_ACTIVITY'] as const) expect(MIA_INPUT_BASELINE[i].capability, i).toBe('DEGRADED');
   });
 });
 
 describe('observation checks', () => {
-  it('accepts an honest observation; ten reposts of one source are one independent source', () => {
-    expect(checkObservation(obs(), NOW)).toEqual({ ok: true, state: 'WEAK', independentSources: 1 });
-    expect(independentSources({ dependencyGroups: ['x-post-1', 'x-post-1', 'x-post-1', 'binance-price', ' '] })).toBe(2);
+  it('accepts an honest observation; reposts of one source count once, and never more groups than origins', () => {
+    expect(checkObservation(obs(), NOW)).toEqual({ ok: true, state: 'WEAK', independentEvidence: 1 });
+    expect(independentEvidenceCount({ dependencyGroups: ['x-post-1', 'X-POST-1 ', ' x-post-1', 'binance-price', ' '], originIds: ['a', 'b', 'c'] })).toBe(2);
+    expect(independentEvidenceCount({ dependencyGroups: ['g1', 'g2', 'g3'], originIds: ['only-one'] })).toBe(1);
+    expect(independentEvidenceCount({})).toBe(0);
   });
-  it('turns STALE at expiry instead of staying current', () => {
-    const r = checkObservation(obs({ expiresAtMs: NOW }), NOW);
-    expect(r).toMatchObject({ ok: true, state: 'STALE' });
+  it('turns OBSERVED/WEAK into STALE at expiry; UNKNOWN stays UNKNOWN', () => {
+    expect(checkObservation(obs({ expiresAtMs: NOW }), NOW)).toMatchObject({ ok: true, state: 'STALE' });
+    expect(checkObservation(obs({ state: 'UNKNOWN', features: { downsideVol: null }, expiresAtMs: NOW }), NOW)).toMatchObject({ ok: true, state: 'UNKNOWN' });
   });
-  it('cannot claim more than the inputs allow', () => {
+  it('STALE comes only from the clock: a producer cannot hand in a STALE observation to skip the checks', () => {
+    expect(reasons({ state: 'STALE', features: { downsideVol: null } })).toEqual(['STALE_INPUT']);
+    // The integration review's case: FOMO (unobservable today), numbers, no origins or groups.
+    expect(reasons({ constructId: 'EM-13', state: 'STALE', features: { mentionSurge: 0.97 }, originIds: [], dependencyGroups: [] }))
+      .toEqual(['STALE_INPUT', 'UNKNOWN_WITH_VALUES']);
+  });
+  it('cannot claim more than the inputs allow, and a caller can only lower the reviewed baseline', () => {
     expect(reasons({ state: 'OBSERVED' })).toEqual(['STATE_ABOVE_COVERAGE']); // EM-01 is WEAK today (trade flow is partial)
-    expect(reasons({ constructId: 'EM-13', state: 'WEAK' })).toEqual(['STATE_ABOVE_COVERAGE']); // FOMO needs social data
+    expect(reasons({ constructId: 'EM-13', state: 'WEAK' })).toEqual(['UNKNOWN_WITH_VALUES', 'STATE_ABOVE_COVERAGE']); // FOMO needs social data
     expect(reasons({ constructId: 'EM-13', state: 'UNKNOWN', features: { mentionSurge: null } })).toEqual([]);
-    expect(reasons({ constructId: 'EM-13', state: 'OBSERVED' }, { ...baselineCapabilities(), SOCIAL: 'AVAILABLE' })).toEqual([]);
+    // Claiming a social feed MIA does not have changes nothing: only the reviewed baseline can add a source.
+    expect(reasons({ constructId: 'EM-13', state: 'OBSERVED', features: {} }, { ...baselineCapabilities(), SOCIAL: 'AVAILABLE' })).toEqual(['STATE_ABOVE_COVERAGE']);
+    expect(reasons({}, { TRADE_FLOW: 'UNAVAILABLE' })).toEqual(['UNKNOWN_WITH_VALUES', 'STATE_ABOVE_COVERAGE']); // lowering works
   });
   it('UNKNOWN carries no numbers a reader could mistake for a measurement', () => {
     expect(reasons({ state: 'UNKNOWN', features: { downsideVol: 0.4 } })).toEqual(['UNKNOWN_WITH_VALUES']);
@@ -129,11 +147,15 @@ describe('observation checks', () => {
     expect(reasons({ dependencyGroups: ['', ' '] })).toEqual(['NO_DEPENDENCY_GROUP']);
     expect(reasons({ features: { downsideVol: Number.POSITIVE_INFINITY } })).toEqual(['NON_FINITE_FEATURE']);
   });
-  it('an effect never exceeds the construct ceiling, and nothing beyond EXPLAIN without a calibrated cohort', () => {
+  it('nothing goes beyond EXPLAIN in this foundation, whatever the calibration says; BLOCK and ALLOW do not exist', () => {
     expect(reasons({ effect: 'WAIT' })).toEqual(['EFFECT_ABOVE_CEILING', 'EFFECT_NOT_VALIDATED']); // Fear: EXPLAIN only
     expect(reasons({ constructId: 'EM-02', effect: 'WAIT' })).toEqual(['EFFECT_NOT_VALIDATED']);
-    expect(reasons({ constructId: 'EM-02', effect: 'WAIT', calibration: { cohortId: 'cohort-2026-q4', horizonMs: 3_600_000, brier: 0.21 } })).toEqual([]);
-    for (const c of EMOTION_ATLAS) expect(reasons({ constructId: c.id, effect: 'BLOCK', state: 'UNKNOWN', features: {} }), c.id).toContain('EFFECT_ABOVE_CEILING');
+    // A plausible-looking calibration object unlocks nothing (M5-U06 will require an EVALUATED ditas calibration report).
+    expect(reasons({ constructId: 'EM-02', effect: 'WAIT', calibration: { cohortId: 'cohort-2026-q4', horizonMs: 3_600_000, brier: 0.21 } })).toEqual(['EFFECT_NOT_VALIDATED']);
+    for (const bad of ['BLOCK', 'ALLOW', 'BUY']) expect(reasons({ effect: bad as never }), bad).toEqual(['INVALID_EFFECT']);
+  });
+  it('missing lists are rejected with reasons, not a crash', () => {
+    expect(reasons({ originIds: undefined as never, dependencyGroups: undefined as never })).toEqual(['NO_ORIGIN', 'NO_DEPENDENCY_GROUP']);
   });
   it('rejects an invalid calibration, an unknown construct and missing identity', () => {
     expect(reasons({ calibration: { cohortId: ' ', horizonMs: 1, brier: 0.2 } })).toEqual(['INVALID_CALIBRATION']);
@@ -143,23 +165,15 @@ describe('observation checks', () => {
   });
 });
 
-describe('boundaries: read-only, not wired, no clock or network', () => {
-  const SRC = join(dirname(fileURLToPath(import.meta.url)), '../src');
-  const files = (dir: string): string[] => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? files(p) : p.endsWith('.ts') ? [p] : []; });
-  const bmindFiles = files(join(SRC, 'bmind'));
-  it('bmind/ has no runtime import from outside bmind/ (type-only imports are erased)', () => {
-    for (const f of bmindFiles) {
-      for (const m of readFileSync(f, 'utf8').matchAll(/(?:^|\n)\s*(import|export)\s+(type\s+)?[^;]*?from\s+['"]([^'"]+)['"]/g)) {
-        if (m[2]) continue;
-        expect(m[3], `${relative(SRC, f)} imports ${m[3]}`).toMatch(/^\.\/[\w-]+\.js$/);
-      }
+describe('no clock, randomness, environment, network or packages', () => {
+  const DIR = join(dirname(fileURLToPath(import.meta.url)), '../src/bmind');
+  it('bmind/ sources use none of them (the caller passes the clock, as workers do with ctx.asOf)', () => {
+    const files = readdirSync(DIR).filter((n) => n.endsWith('.ts'));
+    expect(files).toEqual(expect.arrayContaining(['atlas.ts', 'contracts.ts', 'index.ts', 'observation.ts']));
+    for (const n of files) {
+      const src = readFileSync(join(DIR, n), 'utf8');
+      expect(src, n).not.toMatch(/Date\.now|new Date\(|Math\.random|process\.env|fetch\(|WebSocket|submitEntry|require\(|import\(/);
+      expect(src, n).not.toMatch(/from\s+['"](?!\.{1,2}\/)/); // no npm package imports
     }
-  });
-  it('nothing outside bmind/ imports it yet: B-MIND has no effect on decisions (wiring needs a reviewed PR, M5-U05/U06)', () => {
-    const users = files(SRC).filter((f) => !f.includes(`${join(SRC, 'bmind')}`) && /from\s+['"][^'"]*bmind\//.test(readFileSync(f, 'utf8')));
-    expect(users.map((f) => relative(SRC, f))).toEqual([]);
-  });
-  it('bmind/ never reads the wall clock, randomness, the environment or the network', () => {
-    for (const f of bmindFiles) expect(readFileSync(f, 'utf8'), relative(SRC, f)).not.toMatch(/Date\.now|new Date\(|Math\.random|process\.env|fetch\(|WebSocket|submitEntry/);
   });
 });

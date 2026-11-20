@@ -17,29 +17,29 @@ const DEFS: Def[] = [
   { name: 'Fear', required: ['PRICE_VOLUME', 'TRADE_FLOW'], optional: ['NEWS'], domains: ['flow', 'risk'], effectCeiling: 'EXPLAIN',
     role: 'Check downside and liquidity at entry; trend strategies may follow, reversal strategies must wait for their own rules.', caveat: 'A falling market may continue falling.' },
   { name: 'Panic', required: ['PRICE_VOLUME', 'ORDER_BOOK'], optional: ['TRADE_FLOW'], domains: ['liquidity', 'risk'], effectCeiling: 'WAIT',
-    role: 'Raise liquidity stress; restrict discretionary new entries under tested policies; protect exits.', caveat: 'Extreme price action alone cannot prove panic.' },
+    role: 'Raise liquidity stress; restrict discretionary new entries under tested policies; never delays an exit.', caveat: 'Extreme price action alone cannot prove panic.' },
   { name: 'Anxiety', required: ['PRICE_VOLUME', 'ORDER_BOOK', 'NEWS'], optional: ['MACRO_EVENTS'], domains: ['liquidity', 'news'], effectCeiling: 'EXPLAIN',
     role: 'Flag an unstable environment, shorten evidence validity and demand fresher quotes.', caveat: 'Macro uncertainty cannot be inferred from one headline.' },
   { name: 'Dread', required: ['NEWS', 'OPTIONS_IV'], optional: ['PRICE_VOLUME'], domains: ['news', 'regime'], effectCeiling: 'EXPLAIN',
     role: 'Label sustained high risk rather than a single sell event; monitor hold-time effects.', caveat: 'Often indistinguishable from fear without licensed options data.' },
   { name: 'Capitulation', required: ['PRICE_VOLUME', 'TRADE_FLOW'], optional: [], domains: ['flow', 'regime'], effectCeiling: 'EXPLAIN',
-    role: 'Mark possible exhaustion for a separate validated reversal system; never buy automatically.', caveat: 'Capitulation can repeat.' },
+    role: 'Context only: marks possible exhaustion; it never supports or triggers an entry.', caveat: 'Capitulation can repeat.' },
   { name: 'Despair', required: ['PRICE_VOLUME', 'NEWS'], optional: [], domains: ['regime', 'news'], effectCeiling: 'EXPLAIN',
     role: 'Track regime persistence; discourage premature bottom-catching.', caveat: 'No direct access to individual psychological states.' },
   { name: 'Regret', required: ['PRICE_VOLUME', 'SOCIAL'], optional: [], domains: ['regime'], effectCeiling: 'EXPLAIN',
     role: 'Research reversal FOMO; no automatic buy signal.', caveat: 'Do not infer regret from a green candle.' },
   { name: 'Relief', required: ['PRICE_VOLUME', 'ORDER_BOOK'], optional: [], domains: ['liquidity', 'regime'], effectCeiling: 'EXPLAIN',
-    role: 'Determine whether risk conditions are improving; feed a recovery-state classifier.', caveat: 'A relief rally may reverse.' },
+    role: 'Context only: whether risk conditions are improving; it never supports an entry.', caveat: 'A relief rally may reverse.' },
   { name: 'Hope', required: ['NEWS', 'TRADE_FLOW'], optional: ['SOCIAL'], domains: ['news', 'flow'], effectCeiling: 'EXPLAIN',
     role: 'Classify narrative lead versus confirmation; keep provisional status.', caveat: 'A positive story is not executable demand.' },
   { name: 'Optimism', required: ['PRICE_VOLUME', 'TRADE_FLOW', 'NEWS'], optional: ['SOCIAL'], domains: ['flow', 'news'], effectCeiling: 'EXPLAIN',
-    role: 'Possible trend-quality evidence for eligible strategies only.', caveat: 'Positive sentiment can lag price.' },
+    role: 'Context only for eligible strategies; it never supports an entry.', caveat: 'Positive sentiment can lag price.' },
   { name: 'Greed', required: ['PRICE_VOLUME', 'TRADE_FLOW'], optional: ['NEWS', 'SOCIAL'], domains: ['flow', 'risk'], effectCeiling: 'EXPLAIN',
     role: 'Alert on crowded execution, fee pressure and concentration; evaluate trend sustainability.', caveat: 'Greed can support momentum for longer than expected.' },
   { name: 'Euphoria', required: ['PRICE_VOLUME', 'SOCIAL'], optional: ['SEARCH_INTEREST'], domains: ['risk'], effectCeiling: 'EXPLAIN',
     role: 'Trigger late-entry quality checks; avoid automatic contrarian shorting.', caveat: 'Sentiment magnitude is not a sell signal.' },
   { name: 'FOMO', required: ['PRICE_VOLUME', 'SOCIAL'], optional: [], domains: ['risk'], effectCeiling: 'WAIT',
-    role: 'Late-entry WAIT research overlay, or a smaller entry only if risk policy already allows it.', caveat: 'New strong trends can be valid.' },
+    role: 'Late-entry WAIT research overlay; position size stays with the risk gate.', caveat: 'New strong trends can be valid.' },
   { name: 'Overconfidence', required: ['NEWS'], optional: ['SOCIAL'], domains: ['news', 'risk'], effectCeiling: 'EXPLAIN',
     role: 'Challenge consensus, penalize source dependence, require a dissent audit.', caveat: "Cannot read participants' minds." },
   { name: 'Complacency', required: ['ORDER_BOOK', 'NEWS'], optional: ['SOCIAL'], domains: ['liquidity'], effectCeiling: 'EXPLAIN',
@@ -93,10 +93,10 @@ export const constructById = (id: string): ConstructDefinition | null => BY_ID.g
  */
 export const MIA_INPUT_BASELINE: Readonly<Record<BehavioralInput, { capability: InputCapability; evidence: string }>> = Object.freeze({
   PRICE_VOLUME: { capability: 'AVAILABLE', evidence: 'CEX candles and indicators (WorkerContext.f, features/indicators.ts)' },
-  ORDER_BOOK: { capability: 'AVAILABLE', evidence: 'Spread, depth and imbalance (WorkerContext.impact); Binance depth stream. Crypto CEX only' },
-  TRADE_FLOW: { capability: 'DEGRADED', evidence: 'Aggregated large CEX prints only (whales/prints.ts); no full taker tape, no wallets' },
+  ORDER_BOOK: { capability: 'DEGRADED', evidence: 'One spread/depth/imbalance snapshot per decision (WorkerContext.impact), Binance spot only, no history or timestamp' },
+  TRADE_FLOW: { capability: 'DEGRADED', evidence: 'Large CEX prints for the first 12 instruments only (whales/prints.ts); elsewhere zeros mean "not scanned", not "no selling"' },
   NEWS: { capability: 'DEGRADED', evidence: 'Headline counts and sentiment from RSS (news/news.ts); credibility not verified' },
-  MACRO_EVENTS: { capability: 'DEGRADED', evidence: 'High-impact macro headline count (WorkerContext.news.highImpactMacro); no scheduled event calendar' },
+  MACRO_EVENTS: { capability: 'UNAVAILABLE', evidence: 'No scheduled event calendar; macro headlines are counted after the fact under NEWS' },
   CROSS_ASSET: { capability: 'AVAILABLE', evidence: 'BTC 1h/4h context and correlation (WorkerContext.btc1h/btc4h/corrToBtc, portfolio/correlation.ts)' },
   SOURCE_HEALTH: { capability: 'AVAILABLE', evidence: 'Data quality and provider status (market/quality.ts, provider registry)' },
   MIA_ACTIVITY: { capability: 'AVAILABLE', evidence: "MIA's own decisions, approvals, orders, positions and worker votes (database)" },
@@ -111,6 +111,14 @@ export const MIA_INPUT_BASELINE: Readonly<Record<BehavioralInput, { capability: 
 export const baselineCapabilities = (): InputCapabilities =>
   Object.fromEntries(BEHAVIORAL_INPUTS.map((k) => [k, MIA_INPUT_BASELINE[k].capability]));
 
+const CAP_RANK: Record<InputCapability, number> = { UNAVAILABLE: 0, DEGRADED: 1, AVAILABLE: 2 };
+/** The weaker of the reviewed baseline and the caller's view: a caller can lower what MIA observes, never raise it. */
+export const effectiveCapabilities = (caps: InputCapabilities = {}): InputCapabilities =>
+  Object.fromEntries(BEHAVIORAL_INPUTS.map((k) => {
+    const base = MIA_INPUT_BASELINE[k].capability; const asked = caps[k] ?? base;
+    return [k, CAP_RANK[asked] < CAP_RANK[base] ? asked : base];
+  }));
+
 export type CoverageState = 'OBSERVABLE' | 'WEAK' | 'UNKNOWN';
 export interface ConstructCoverage {
   id: ConstructDefinition['id']; name: string; state: CoverageState;
@@ -122,7 +130,11 @@ export interface ConstructCoverage {
   priceOnly: boolean;
 }
 
-/** Whether each construct can be observed with the given inputs. Fails closed: an input not listed is unavailable. */
+/**
+ * Whether each construct could be observed with the given inputs (a what-if; observations are checked against
+ * `effectiveCapabilities`). OBSERVABLE means the required inputs exist, not that a validated detector does.
+ * Fails closed: an input not listed is unavailable.
+ */
 export function constructCoverage(caps: InputCapabilities = baselineCapabilities()): ConstructCoverage[] {
   return EMOTION_ATLAS.map((c) => {
     const cap = (i: BehavioralInput): InputCapability => caps[i] ?? 'UNAVAILABLE';

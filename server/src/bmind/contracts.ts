@@ -4,21 +4,33 @@
  * "Emotion" here is a hypothesis about how market participants behave, inferred from observable data. It is not a
  * feeling inside MIA, not a diagnosis of any person, and not a forecast. Nothing in `server/src/bmind/` may place,
  * size, approve or sign an order, change risk policy, or read secrets. The most a future, validated strategy overlay
- * may ever do is WAIT; a hard block stays with the existing safety and risk gates (JDR-001 K-03, K-10).
+ * may ever do is WAIT on a NEW entry. It never delays a stop, target, time exit, reduce-only order or protection
+ * incident, never adds a supporting vote, and never blocks: hard blocks stay with the existing safety and risk gates
+ * (JDR-001 K-03, K-10, D-11).
  *
  * Source: the B-MIND 3.0 master (EM-01…EM-32) and MIA 5.0 Part I section 5. Status of this slice: types, the construct
  * atlas, input coverage and observation checks only. It is not wired into workers, QCI, decisions or the OMS.
  */
-import type { Domain } from '../workers/types.js';
+import type { Domain, Stance } from '../workers/types.js';
 
 /** State of one observation. Unknown is never turned into neutral or favorable. */
 export type EvidenceStatus = 'OBSERVED' | 'WEAK' | 'UNKNOWN' | 'STALE';
 
-/** What an observation may do to a decision. There is deliberately no ALLOW or BUY. */
-export type BehavioralEffect = 'NONE' | 'EXPLAIN' | 'WAIT' | 'BLOCK';
+/**
+ * What an observation may do to a decision. There is deliberately no ALLOW, BUY or BLOCK. WAIT defers a new entry only;
+ * it never applies to exits or protection.
+ */
+export type BehavioralEffect = 'NONE' | 'EXPLAIN' | 'WAIT';
 
-/** Probability-like numbers are shown only with a calibrated out-of-sample cohort; otherwise NOT_CALIBRATED. */
+/**
+ * A reference to a calibration cohort. In this foundation it unlocks nothing: every effect above EXPLAIN is rejected
+ * whatever this says. M5-U06 will require an EVALUATED report from `ditas/calibration.ts` bound to the construct and
+ * strategy, with skill above a reference, before WAIT can apply.
+ */
 export type BehavioralCalibration = 'NOT_CALIBRATED' | { cohortId: string; horizonMs: number; brier: number };
+
+/** If B-MIND ever feeds QCI, it may only oppose or abstain, never support an entry (like the horizon-conflict challenger). */
+export const BMIND_STANCES = ['OPPOSE', 'ABSTAIN'] as const satisfies readonly Stance[];
 
 /**
  * Observable inputs the 32 constructs are built from. Each maps to evidence MIA can (or cannot yet) read.
@@ -55,8 +67,8 @@ export interface ConstructDefinition {
   /** Strengthen an observation when present; never required. */
   optional: readonly BehavioralInput[];
   domains: readonly BmindDomain[];
-  /** The most a future validated overlay may do with this construct. Never above WAIT in this foundation. */
-  effectCeiling: Exclude<BehavioralEffect, 'BLOCK'>;
+  /** The most a future validated overlay may do with this construct (WAIT defers a new entry only). */
+  effectCeiling: BehavioralEffect;
   /** What the construct is for in MIA (from the source atlas). */
   role: string;
   /** The source's own warning about what the construct cannot show. */
@@ -70,7 +82,11 @@ export interface BehaviorVector {
   narrativeShock: number | null; reversalCandidate: number | null; behaviorShift: number | null;
 }
 
-/** One time-stamped observation of one construct for one instrument and strategy (MIA 5.0 Part I section 5). */
+/**
+ * One time-stamped observation of one construct for one instrument and strategy (MIA 5.0 Part I section 5).
+ * An observation built from several inputs carries the event and receipt time of its OLDEST required input. A replay
+ * passes the recorded DITAS `asOf` as the clock and reads only the frozen snapshot, never the live database.
+ */
 export interface BehavioralObservation {
   constructId: `EM-${string}`;
   state: EvidenceStatus;
@@ -90,7 +106,9 @@ export interface BehavioralObservation {
 
 /** Output of a future strategy overlay (M5-U06). This object is deliberately not an order authorization. */
 export interface BehavioralOverlay {
-  decision: 'CONTINUE' | 'WAIT' | 'BLOCK';
+  decision: 'CONTINUE' | 'WAIT';
+  /** It can only ever concern a new entry: never an exit, stop, target or protection action. */
+  scope: 'NEW_ENTRY';
   reasons: readonly string[];
   evidenceHash: string;
   policyVersion: string;
