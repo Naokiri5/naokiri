@@ -34,7 +34,7 @@ npm install
 npm start              # builds the UI on first run if needed, then serves API + UI on port 8787
 ```
 
-Open **http://localhost:8787/**. The terminal prints the exact URLs:
+Open **http://localhost:8787/** for the public Obsidian Palazzo landing page, or **http://localhost:8787/app** to create the owner passphrase and enter the protected MIA terminal. The server prints its base URLs:
 
 ```
   ➜ Local:     http://localhost:8787/
