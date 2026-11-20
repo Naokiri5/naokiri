@@ -22,7 +22,7 @@ describe('market data hardening (Squad B)', () => {
     const book = { lastUpdateId: 777, bids: [[String(last * 0.999), '5']], asks: [[String(last * 1.001), '5']] };
     stub(() => json(book));
     await refreshBooks([inst.id]); const first = market.deep.get(inst.id)!.book!;
-    expect(first.lastUpdateId).toBe(777);
+    expect(first).toMatchObject({ lastUpdateId: 777, source: 'BINANCE_SPOT_REST' });
     const later = first.ts + 120_000; // two minutes on, the venue book still has not changed
     await refreshBooks([inst.id]);
     expect(market.deep.get(inst.id)!.book!.ts).toBe(first.ts); // was re-stamped with a fresh receive time

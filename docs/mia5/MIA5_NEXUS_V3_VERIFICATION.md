@@ -20,6 +20,33 @@ The separate owner-provided manifest is 1,595 bytes. The master Markdown is 184,
 
 SOURCE-A and SOURCE-B are byte-identical. They describe the same implementation scope. Embedded code sketches and historical status claims were used as requirements context. The two supplied files remain outside this register.
 
+## MIA 5.0 TypeScript package compatibility
+
+The package manifest matched all 46 listed ZIP members. The enclosed PDF has 102 pages and SHA-256 `c59a196bff19b81c5830b75e063abbd94c090cb4989faae5cdd1677192a4d304`. The duplicate integration prompts matched the enclosed prompt byte for byte, and the standalone review matched the enclosed master. The archived files remain the source references. The table maps the 18 embedded proposals to their canonical owners and the existing traceability rows.
+
+| PDF file and pages | Existing owner and integration decision |
+| --- | --- |
+| `IExecutionAdapter.ts` 3–4 | `exec/oms.ts` owns PAPER execution. `core/mode.ts` and the environment capability view retain the LIVE release gate (F27–F30, F52). |
+| `RateLimitBudgetGovernor.ts` 4–7 | `core/ratelimit.ts` covers app request throttling. Venue request reservations require a venue adapter and verified endpoint quotas (F39–F40, F60). |
+| `PaperOmsAdapter.ts` 7–18 | `exec/oms.ts` owns book-aware simulation and durable fills. Additional maker and partial-fill modeling needs deterministic liquidity and queue fixtures (F27–F33). |
+| `LiveOmsAdapter.ts` 18–31 | [PR #72](https://github.com/Naokiri5/naokiri/pull/72) extends the read-only assessor from #64 with venue, account and instrument-scoped precision. Broker recovery and dead-man protection require venue capability evidence (F29–F30, F37–F40, F60). |
+| `ExitSupervisor.ts` 32–40 | `lab/exits.ts` and `exec/oms.ts` own exits and protective stops. Order-book exhaustion remains a research candidate (F33–F39). |
+| `CorrelationExposureGuard.ts` 40–43 | `portfolio/correlation.ts` and `risk/gate.ts` own current correlation and exposure checks. Cluster sizing needs validated history and stress evidence (F21, F45). |
+| `TreasurySweepGuard.ts` 43–49 | `portfolio/ledger.ts` records cash activity. Treasury automation would require a defined policy, verified destinations and signer approval (F41, F46–F47, F57). |
+| `UnifiedRiskGovernor.ts` 49–52 | `risk/gate.ts` and `risk/policy.ts` own limits and sizing. Existing safety and account decisions run through that boundary (F20–F26). |
+| `MacroCalendarVetoSkill.ts` 52–53 | [PR #67](https://github.com/Naokiri5/naokiri/pull/67) owns the macro calendar work. Integration follows the outcome of that draft and source-freshness verification (F11, F23–F24). |
+| `CapitalAllocatorSkill.ts` 54–55 | #67 owns shadow allocation research. The existing risk gate owns operational sizing (F18, F20–F21). |
+| `TcaDatabase.ts` 55–59 | `ditas/execution.ts` reports paper OMS costs from the existing fill ledger. It adds recorded maker, taker and unknown fill counts, fee basis points and a fee-inclusive cost summary (F22, F31, F54). |
+| `pinWorkerThread.ts` 59 | `workers/runtime.ts` runs the worker pool. CPU affinity requires platform benchmarks (F07, F58). |
+| `fastReflexWorker.ts` 59–62 | `workers/registry.ts` owns specialist evidence. Order intents and permissions belong to the risk gate and OMS. Bundle dispatch remains outside the current release (F07, F25–F27, F57). |
+| `deepConfluenceWorker.ts` 62–68 | The worker registry, chart analysis and DITAS snapshots own the available inputs. Derivatives-specific funding needs a validated source (F05, F07, F12, F16). |
+| `marketIngressWorker.ts` 68–74 | `market/fabric.ts` labels the accepted REST or synchronized stream book. DITAS freezes its source and available update ID with the existing bounded book evidence. A continuous event tape and funding replay require provider and retention work (F04, F12, F16, F56). |
+| `NexusFabricRouter.ts` 75–81 | `fabric/contracts.ts`, `outbox.ts` and `relay.ts` own event delivery and read models. Bot Account displays measured outbox health (F53, F59). |
+| `index.ts` 81–96 | `server/src/index.ts`, the existing route owners and owner authentication retain app bootstrap and control authority (F52, F57, F62). |
+| `FabricHealthStatusBar.tsx` 96–101 | Bot Account uses the existing owner-authenticated outbox and environment endpoints. The card reports pending age, delivery outcomes and registered consumers, with an unavailable state after a failed refresh (F52–F53, F59). |
+
+The DITAS cost window is bounded by the existing orders endpoint. Fee basis points use executed notional. Fee-inclusive cost compares recorded fills and fees against the decision price for the filled quantity and averages comparable orders equally. A missing decision price leaves benchmark-relative costs unavailable. Fill delays measure local recording. Historical decision snapshots remain readable, and new captures mark unrecorded book provenance as unknown.
+
 ## Acceptance evidence to reconcile
 
 This increment adds feed-use labels to the existing Market Coverage view and shows the server's environment status in Bot Account (F02, F03 and F52). The new PAPER fixtures exercise stop handling during an emergency pause, stop priority over the maximum hold time, and stop persistence across a database reopen (F31 and F33–F37). These changes supply diagnostics and regression evidence for the existing execution boundary.

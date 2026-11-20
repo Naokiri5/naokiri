@@ -89,6 +89,50 @@ test('BOUNDED LIVE cannot be enabled', async () => {
   const extra = errors.splice(before); expect(extra.every((e) => /status of 400/.test(e)), extra.join('\n')).toBe(true);
 });
 
+test('Bot Account shows measured NEXUS outbox health and drops stale counts after an error', async ({ browser }) => {
+  const ctx = await browser.newContext({ storageState: await page.context().storageState() });
+  try {
+    await ctx.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
+    const p = await ctx.newPage();
+    const path = '**/api/fabric/outbox';
+    await p.clock.install();
+    await p.goto('/bot');
+    const card = p.locator('section').filter({ has: p.getByRole('heading', { name: 'NEXUS outbox health' }) });
+    await expect(card).toContainText('No consumers registered');
+    await expect(card).toContainText(/Oldest pending\s*None/);
+
+    let unavailable = false;
+    await p.route(path, route => {
+      expect(route.request().method()).toBe('GET');
+      return unavailable ? route.fulfill({ status: 503, json: { error: 'internal endpoint details' } }) : route.fulfill({ json: {
+        counts: { PENDING: 3, DELIVERED: 5, NO_CONSUMER: 2, DEAD: 1 }, oldestPendingAgeMs: 45_000,
+        deadLetters: [{ lastError: 'internal relay failure details' }], consumers: [{ id: 'fixture', topics: ['ditas.outcome.recorded.v1'] }],
+      } });
+    });
+    await p.clock.fastForward('00:20');
+    await expect(card).toContainText(/Pending\s*3/);
+    await expect(card).toContainText(/Oldest pending\s*45s ago/);
+    await expect(card).toContainText(/Delivered\s*5/);
+    await expect(card).toContainText(/No consumer\s*2/);
+    await expect(card).toContainText(/Dead letters\s*1/);
+    await expect(card).toContainText(/Registered consumers\s*1/);
+    await expect(card).not.toContainText('internal relay failure details');
+    await expect(card.getByRole('button')).toHaveCount(0);
+
+    unavailable = true;
+    await p.clock.fastForward('00:20');
+    await expect(card.getByRole('alert')).toHaveText('Outbox health is unavailable.');
+    await expect(card).not.toContainText('Pending');
+    await expect(card).not.toContainText('internal endpoint details');
+
+    unavailable = false;
+    await p.clock.fastForward('00:20');
+    await expect(card).toContainText(/Pending\s*3/);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test('status ribbon goes STALE (never green) when the server stops answering, then recovers', async ({ browser }) => {
   const ctx = await browser.newContext({ storageState: await page.context().storageState() }); // own tab: aborted requests are expected noise here
   const p = await ctx.newPage();

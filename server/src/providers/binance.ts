@@ -42,7 +42,10 @@ export async function klines(symbol: string, interval: string, limit = 300): Pro
   return raw.map((k) => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], qv: +k[7], n: +k[8], tbv: +k[9], closeTime: +k[6] })); // numeric: a string timestamp would concatenate in candle-time math (MIA-PROV-004)
 }
 /** ts is stamped when the request STARTS (age is never understated by latency); lastUpdateId orders snapshots. */
-export interface Book { bids: [number, number][]; asks: [number, number][]; ts: number; lastUpdateId?: number }
+export interface Book {
+  bids: [number, number][]; asks: [number, number][]; ts: number; lastUpdateId?: number;
+  source?: 'BINANCE_SPOT_REST' | 'BINANCE_SPOT_DEPTH_STREAM';
+}
 export async function depth(symbol: string, limit = 100): Promise<Book> {
   const ts = Date.now();
   const raw = await fetchProvider('binance', `${BASE}/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);

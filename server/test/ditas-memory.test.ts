@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { freshDb, seedInstrument } from './helpers.js';
 import { all, closeDb, get, getDb, openDb, run, tx } from '../src/db/db.js';
@@ -34,17 +35,22 @@ describe('DITAS permanent decision memory', () => {
   });
 
   it('freezes market snapshots and returns independent parsed objects', () => {
-    const event = record(), frozen = memoryDetail(event.id)!;
     const d = market.deep.get(instrumentId)!;
+    expect(memoryDetail(record('fixture:unattributed-book').id)!.snapshot!.book).toMatchObject({ source: null, lastUpdateId: null });
+    d.book = { ...d.book!, source: 'BINANCE_SPOT_DEPTH_STREAM', lastUpdateId: 123 };
+    const event = record(), frozen = memoryDetail(event.id)!;
+    expect(frozen.snapshot!.book).toMatchObject({ source: 'BINANCE_SPOT_DEPTH_STREAM', lastUpdateId: 123, ts: d.book.ts });
     market.tickers.get(instrumentId)!.last = 99999;
     d.engines['1h'].candles[0].c = 55555;
     d.book!.bids[0][0] = 44444;
+    d.book.lastUpdateId = 124;
+    d.book.source = 'BINANCE_SPOT_REST';
     d.cross.kraken.price = 33333;
     expect(memoryDetail(event.id)).toEqual(frozen);
     frozen.snapshot!.ticker.last = 12345;
     expect(memoryDetail(event.id)!.snapshot!.ticker.last).not.toBe(12345);
     expect(memoryDetail(event.id)!.snapshot!.lineage).toMatchObject({ modelVersion: null, promptVersion: null, calibrationId: null });
-    expect(verifyMemory()).toEqual({ ok: true, entries: 1 });
+    expect(verifyMemory()).toEqual({ ok: true, entries: 2 });
   });
 
   it('uses frozen pre-QCI evidence for the final decision despite intervening market refreshes', async () => {
@@ -161,7 +167,7 @@ describe('DITAS permanent decision memory', () => {
   });
 
   it('persists immutable evidence across a real SQLite close and reopen', () => {
-    const folder = mkdtempSync('/tmp/mia-ditas-memory-'); folders.push(folder);
+    const folder = mkdtempSync(join(tmpdir(), 'mia-ditas-memory-')); folders.push(folder);
     const dbPath = join(folder, 'memory.sqlite'); closeDb(); openDb(dbPath);
     const event = record(), before = memoryDetail(event.id);
     closeDb(); market.reset(); openDb(dbPath);
