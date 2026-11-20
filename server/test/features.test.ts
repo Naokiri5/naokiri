@@ -29,6 +29,26 @@ describe('FeatureEngine (incremental, Part 33.5)', () => {
     const e = new FeatureEngine(); e.ingest(closes.map((c, i) => ({ t: i, o: c, h: c, l: c, c, v: 1 })));
     expect(e.last!.rsi14).toBeCloseTo(70.46, 1);
   });
+  it('abstains on incomplete rolling windows instead of publishing partial-history indicator values', () => {
+    const candles = synthCandles(25);
+    const engine = new FeatureEngine();
+    engine.ingest(candles.slice(0, 5));
+    expect(engine.last).not.toBeNull();
+    for (const key of ['bbMid', 'bbUpper', 'bbLower', 'bbPctB', 'cci20', 'vwap20', 'zscore20', 'stochK14', 'williamsR14', 'mfi14', 'realizedVol20', 'volZ20', 'relVol20'] as const) {
+      expect(Number.isNaN(engine.last![key]), key).toBe(true);
+    }
+    engine.ingest(candles.slice(5, 14));
+    expect(Number.isFinite(engine.last!.stochK14)).toBe(true);
+    expect(Number.isFinite(engine.last!.williamsR14)).toBe(true);
+    expect(Number.isNaN(engine.last!.mfi14)).toBe(true);
+    engine.ingest(candles.slice(14, 20));
+    expect(Number.isFinite(engine.last!.bbMid)).toBe(true);
+    expect(Number.isFinite(engine.last!.vwap20)).toBe(true);
+    expect(Number.isNaN(engine.last!.realizedVol20)).toBe(true);
+    engine.ingest(candles.slice(20, 21));
+    expect(Number.isFinite(engine.last!.realizedVol20)).toBe(true);
+  });
+
   it('regime: uptrend detected, insufficient history is UNKNOWN', () => {
     const up = new FeatureEngine(); up.ingest(synthCandles(300, { drift: 0.004, vol: 0.004 }));
     expect(classifyRegime(up.last).regime).toBe('TREND_UP');
