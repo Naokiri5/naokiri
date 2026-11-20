@@ -103,7 +103,9 @@ export function deriveStatus({ shell: raw, requestedAt, error, streamConnected, 
   if (stale) segs.push(unknown('engine', 'Engine', 'STALE', `Engine state ${staleNote}`, '/bot'));
   else if (!b.running) segs.push({ id: 'engine', label: 'Engine', value: shell.offline ? 'OFF (OFFLINE)' : 'STOPPED', tone: 'bad', detail: `The headless scan/monitor loop is not running, so open paper positions are not being monitored.${errNote}`, to: '/bot' });
   // A completion time in the future cannot prove the engine is healthy (CodeRabbit PR #9): same 5 s tolerance as the ticker.
-  else if (monAt > serverNow + 5_000 || b.lastScanAt > serverNow + 5_000) segs.push(unknown('engine', 'Engine', 'CLOCK?', `An engine completion time is in the future relative to the server clock.${errNote}`, '/bot'));
+  // Validate chronology against the server's snapshot time. Letting snapshot age advance this bound would eventually
+  // turn an invalid future completion into apparently healthy evidence without a new server response.
+  else if (monAt > shell.serverTime + 5_000 || b.lastScanAt > shell.serverTime + 5_000) segs.push(unknown('engine', 'Engine', 'CLOCK?', `An engine completion time is in the future relative to the server clock.${errNote}`, '/bot'));
   else if (b.monitorFailing) segs.push({ id: 'engine', label: 'Engine', value: 'MONITOR FAILING', tone: 'bad', detail: `The last position-monitor pass failed; open paper positions are not being evaluated.${errNote}`, to: '/bot' });
   else if (!monAt) segs.push(unknown('engine', 'Engine', 'STARTING', `Engine started; position monitor has not completed a pass yet.${errNote}`, '/bot'));
   else if (monAge > monStall) segs.push({ id: 'engine', label: 'Engine', value: `MONITOR STALLED · ${ago(monAge)}`, tone: 'bad', detail: `Position monitoring has not completed for ${ago(monAge)} (expected every ${ago(shell.tickerIntervalMs)}).${errNote}`, to: '/bot' });

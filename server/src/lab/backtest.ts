@@ -1,9 +1,10 @@
 import { FeatureEngine } from '../features/indicators.js';
 import { classifyRegime } from '../regime/regime.js';
 import type { StrategyDef } from './strategies.js';
-import type { Candle } from '../market/types.js';
+import { INTERVAL_MS, type Candle } from '../market/types.js';
 import { newExitState, stepExit } from './exits.js';
 import { quantile } from '../core/util.js';
+import { validateCandles } from '../chart/analysis.js';
 
 /**
  * Part 18.2 / 32.5 backtester: point-in-time features (incremental engine, no look-ahead),
@@ -16,6 +17,11 @@ export interface BtStats { trades: number; winRate: number; avgR: number; expect
 export interface BtResult { strategyId: string; strategyVersion: string; instrument: string; interval: string; bars: number; from: number; to: number; costs: BtCosts; splitAt: number; inSample: BtStats; outOfSample: BtStats; all: BtStats; trades: BtTrade[]; equityR: number[]; warnings: string[] }
 
 export function backtest(strat: StrategyDef, instrument: string, candles: Candle[], costs: BtCosts = { feeRate: 0.001, slippageBps: 3, spreadBps: 2 }, isFraction = 0.6): BtResult {
+  // Historical evidence must remain chronological and complete. Reuse chart replay's OHLCV guard at the supplied
+  // history's closing boundary; wall-clock freshness is irrelevant to a historical backtest.
+  const asOf = (candles.at(-1)?.t ?? NaN) + INTERVAL_MS[strat.interval];
+  const issues = validateCandles(candles, strat.interval, asOf);
+  if (issues.length) throw new Error(`invalid backtest history: ${issues.join('; ')}`);
   const eng = new FeatureEngine(); const trades: BtTrade[] = [];
   const splitAt = candles[Math.floor(candles.length * isFraction)]?.t ?? Infinity;
   let pos: { st: ReturnType<typeof newExitState>; entryT: number; regime: string; cost: number; proceeds: number; fees: number } | null = null;
@@ -25,7 +31,7 @@ export function backtest(strat: StrategyDef, instrument: string, candles: Candle
     const next = candles[i + 1];
     if (pos) {
       const fills = stepExit(pos.st, next, slip);
-      for (const f of fills) { const px = f.reason === 'TARGET' ? f.price * (1 - slip) : f.price; pos.proceeds += px * f.qty; pos.fees += px * f.qty * costs.feeRate; }
+      for (const f of fills) { const px = f.reason === 'TARGET' || f.reason === 'TIME' ? f.price * (1 - slip) : f.price; pos.proceeds += px * f.qty; pos.fees += px * f.qty * costs.feeRate; }
       if (pos.st.qtyLeft <= 1e-12) {
         const risk = pos.st.entry - pos.st.initialStop; // per unit, qty=1
         const pnl = pos.proceeds - pos.cost - pos.fees;
@@ -45,10 +51,11 @@ export function backtest(strat: StrategyDef, instrument: string, candles: Candle
     pos = { st, entryT: next.t, regime: reg.regime, cost: entry, proceeds: 0, fees: entry * costs.feeRate };
     // the entry bar itself can hit stop/targets (bar opens at entry) — evaluate without counting a held bar
     const fills = stepExit(st, { o: entry, h: next.h, l: next.l, c: next.c }, slip, false);
-    for (const fl of fills) { const px = fl.reason === 'TARGET' ? fl.price * (1 - slip) : fl.price; pos.proceeds += px * fl.qty; pos.fees += px * fl.qty * costs.feeRate; }
+    for (const fl of fills) { const px = fl.reason === 'TARGET' || fl.reason === 'TIME' ? fl.price * (1 - slip) : fl.price; pos.proceeds += px * fl.qty; pos.fees += px * fl.qty * costs.feeRate; }
     if (st.qtyLeft <= 1e-12) { trades.push({ entryT: next.t, exitT: next.t, entry, exit: pos.proceeds, r: (pos.proceeds - pos.cost - pos.fees) / (entry - st.initialStop), reason: fills[fills.length - 1].reason, regime: reg.regime, segment: next.t < splitAt ? 'IS' : 'OOS', bars: 0, mfe: st.mfe, mae: st.mae }); pos = null; }
   }
   const warnings: string[] = [];
+  if (pos) warnings.push('history ends with an open position; closed-trade statistics exclude its unrealized PnL and entry costs');
   const oos = trades.filter((t) => t.segment === 'OOS');
   if (oos.length < 30) warnings.push(`only ${oos.length} out-of-sample trades — not statistically meaningful`);
   if (candles.length < 1000) warnings.push('short history; single market regime likely');

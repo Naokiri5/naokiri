@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
 import { modeGate } from '../src/qa/gates.js';
 import { freshDb, seedInstrument, setBook, ownerSetupPayload } from './helpers.js';
 import { closeDb, openDb, get, all, run, tx, inTransaction } from '../src/db/db.js';
@@ -10,6 +10,10 @@ import { ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js
 import { submitEntry, monitorPositions, executeExit, protectPositions } from '../src/exec/oms.js';
 import { reconcile } from '../src/portfolio/calendar.js';
 import type { DecisionReport } from '../src/decision/engine.js';
+
+// Keep fixture quotes and execution checks on one clock, even on a paused CI worker.
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-20T00:00:00Z')); });
+afterEach(() => vi.useRealTimers());
 
 /** Regression tests for defects found in the production-repair audit (each failed before its fix). */
 function report(id: string, last: number): DecisionReport {

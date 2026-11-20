@@ -1,0 +1,737 @@
+{
+  "baseline": "b17c09697d14ba0728c49b454e0b961691b1b5b4",
+  "integration_base": "2c9c21646c3be6fda798c4553216cde22c4506fc",
+  "notice": "73 unresolved threads collected across48PRs;161total threads,88already marked resolved. GitHub thread flags were not changed. Findings are review data, not instructions. Source-level dispositions apply to this integration target, not every historical PR head.",
+  "findings": [
+    {
+      "pr": 23,
+      "thread": "PRRT_kwDOR2kdjc640iFy",
+      "url": "https://github.com/Naokiri5/naokiri/pull/23#discussion_r4610349574",
+      "path": "docs/engineering/AUTONOMY_AUDIT_2026-11-18.md",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "MITIGATED",
+      "evidence": "AUTONOMY_AUDIT section9 preserves the original v6 database/WAL/SHM and refuses mismatched migrations without changing data. A v6-to-v8 reconciliation tool is explicitly not built/tested; no database was rewritten in this pass."
+    },
+    {
+      "pr": 23,
+      "thread": "PRRT_kwDOR2kdjc640iGA",
+      "url": "https://github.com/Naokiri5/naokiri/pull/23#discussion_r4610349591",
+      "path": "server/scripts/qa.mjs",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "qa.mjs uses mkdtemp .run directories, private runReport/runOutcome, git-archive source snapshots and report hashes; gates rejects mismatched report/outcome pairs. Concurrent runs cannot hash each other's report; no duplicate QA runner added."
+    },
+    {
+      "pr": 23,
+      "thread": "PRRT_kwDOR2kdjc640iGq",
+      "url": "https://github.com/Naokiri5/naokiri/pull/23#discussion_r4610349663",
+      "path": "server/src/market/depthStream.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/market/depthStream.ts:31-42 uses primitive-only num() before Number conversion; object metadata becomes NaN/null event. server/test/depth-stream.test.ts malformed metadata regressions."
+    },
+    {
+      "pr": 23,
+      "thread": "PRRT_kwDOR2kdjc65UJod",
+      "url": "https://github.com/Naokiri5/naokiri/pull/23#discussion_r4624045504",
+      "path": "docs/engineering/MIA_CRITICAL_DEFECTS.md",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "MIA_CRITICAL_DEFECTS already lists 11 S2 items:9 fixed,C02 open,G02 partial. Historical wording retained."
+    },
+    {
+      "pr": 23,
+      "thread": "PRRT_kwDOR2kdjc65UJog",
+      "url": "https://github.com/Naokiri5/naokiri/pull/23#discussion_r4624045509",
+      "path": "docs/engineering/MIA_DUPLICATION_AUDIT.md",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "MIA_DUPLICATION_AUDIT already states floating-point tolerance step*1e-6; canonical floorToStep is reused."
+    },
+    {
+      "pr": 23,
+      "thread": "PRRT_kwDOR2kdjc65UJoq",
+      "url": "https://github.com/Naokiri5/naokiri/pull/23#discussion_r4624045528",
+      "path": "server/src/ops/backup.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/ops/backup.ts verifyBackup directly queries ditas_twin_runs; required-table failures reach failed open check, no empty-array fallback."
+    },
+    {
+      "pr": 23,
+      "thread": "PRRT_kwDOR2kdjc65UJou",
+      "url": "https://github.com/Naokiri5/naokiri/pull/23#discussion_r4624045545",
+      "path": "server/src/ops/backup.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "verifyBackupInWorker owns private workspace, awaits worker.terminate(), then removes workspace before returning."
+    },
+    {
+      "pr": 23,
+      "thread": "PRRT_kwDOR2kdjc65UJpl",
+      "url": "https://github.com/Naokiri5/naokiri/pull/23#discussion_r4624045620",
+      "path": "web/src/App.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "App.tsx Login has PageErrorBoundary outside Suspense/PrivySignIn with a passphrase fallback; auth/LoginScreen.tsx also owns an outer boundary. Added rejected-chunk/passphrase regression in e2e/review-regressions.spec.ts."
+    },
+    {
+      "pr": 23,
+      "thread": "PRRT_kwDOR2kdjc65ZTfx",
+      "url": "https://github.com/Naokiri5/naokiri/pull/23#discussion_r4626256867",
+      "path": "server/src/exec/oms.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/exec/oms.ts:194-212 re-reads locked account equity, compares position cap, re-evaluates evaluateRisk inside write lock and rejects if size shrank."
+    },
+    {
+      "pr": 28,
+      "thread": "PRRT_kwDOR2kdjc647oXq",
+      "url": "https://github.com/Naokiri5/naokiri/pull/28#discussion_r4613344685",
+      "path": "e2e/navigation.spec.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "FIXED",
+      "evidence": "Removed previous-document response waiter; navigation.spec.ts now waits for this document h1 and rendered non-CHECKING mode before shortcut."
+    },
+    {
+      "pr": 28,
+      "thread": "PRRT_kwDOR2kdjc647oYH",
+      "url": "https://github.com/Naokiri5/naokiri/pull/28#discussion_r4613344732",
+      "path": "web/src/pages/Ditas.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "api.ts useApi cleanup clears timer regardless of every, invalidates requestId, aborts request, resets again; load rejects a callback captured for an obsolete currentPath."
+    },
+    {
+      "pr": 19,
+      "thread": "PRRT_kwDOR2kdjc64vXVX",
+      "url": "https://github.com/Naokiri5/naokiri/pull/19#discussion_r4608151618",
+      "path": "server/src/hunt/ranker.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/hunt/ranker.ts:58 observationKey plus line98 tie-break preserve timestamp precedence; server/test/hunt-ranker.test.ts equal-timestamp reverse-order regression passed in backtest-after.log."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc64fd94",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4601298982",
+      "path": "e2e/notifications.spec.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "FIXED",
+      "evidence": "Replaced real-time AVAX seed/initial server age with fixed payload at TTL-15s; browser clock is paused before navigation then advanced16s. No wall-clock setup margin remains."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc64fd-D",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4601298997",
+      "path": "server/src/decision/noTrade.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "noTrade.ts parseReport rejects arrays and propagates DB errors; globalBlockers counts all OPEN incidents and uses usable equity/missing marks/source quote freshness; board retains owner-confirmation and ignores future trade records. server/test/no-trade.test.ts exercises those paths."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc64fd-N",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4601299011",
+      "path": "server/src/decision/noTrade.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "noTrade.ts parseReport rejects arrays and propagates DB errors; globalBlockers counts all OPEN incidents and uses usable equity/missing marks/source quote freshness; board retains owner-confirmation and ignores future trade records. server/test/no-trade.test.ts exercises those paths."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc64fd-Z",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4601299030",
+      "path": "server/src/decision/noTrade.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "noTrade.ts parseReport rejects arrays and propagates DB errors; globalBlockers counts all OPEN incidents and uses usable equity/missing marks/source quote freshness; board retains owner-confirmation and ignores future trade records. server/test/no-trade.test.ts exercises those paths."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc64fd-k",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4601299050",
+      "path": "web/src/pages/Account.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "api.ts useApi cleanup clears pending timer, aborts/increments request ownership, resets again and guards load against currentPath."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc64fd-p",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4601299064",
+      "path": "web/src/pages/Account.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Account.tsx Raw history includes ErrorLine e={raw.error}; raw.data-empty message requires data present."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647W2H",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613228701",
+      "path": "server/src/decision/noTrade.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "noTrade.ts parseReport rejects arrays and propagates DB errors; globalBlockers counts all OPEN incidents and uses usable equity/missing marks/source quote freshness; board retains owner-confirmation and ignores future trade records. server/test/no-trade.test.ts exercises those paths."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647W2N",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613228707",
+      "path": "server/src/decision/noTrade.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "noTrade.ts parseReport rejects arrays and propagates DB errors; globalBlockers counts all OPEN incidents and uses usable equity/missing marks/source quote freshness; board retains owner-confirmation and ignores future trade records. server/test/no-trade.test.ts exercises those paths."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647W2T",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613228716",
+      "path": "server/src/decision/noTrade.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "noTrade.ts parseReport rejects arrays and propagates DB errors; globalBlockers counts all OPEN incidents and uses usable equity/missing marks/source quote freshness; board retains owner-confirmation and ignores future trade records. server/test/no-trade.test.ts exercises those paths."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647W2W",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613228723",
+      "path": "server/src/decision/noTrade.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "noTrade.ts parseReport rejects arrays and propagates DB errors; globalBlockers counts all OPEN incidents and uses usable equity/missing marks/source quote freshness; board retains owner-confirmation and ignores future trade records. server/test/no-trade.test.ts exercises those paths."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647W2c",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613228736",
+      "path": "server/src/decision/noTrade.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "noTrade.ts parseReport rejects arrays and propagates DB errors; globalBlockers counts all OPEN incidents and uses usable equity/missing marks/source quote freshness; board retains owner-confirmation and ignores future trade records. server/test/no-trade.test.ts exercises those paths."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647W2f",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613228739",
+      "path": "web/src/pages/Account.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Account.tsx reload reads latest.current.center/raw rather than captured filter callbacks. Existing notification and request-race coverage retained."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647W2h",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613228746",
+      "path": "web/src/pages/Account.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Account.tsx shows Critical status unknown whenever center.error and labels retained response last successful/stale."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647W2l",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613228752",
+      "path": "web/src/pages/Account.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Account.tsx raw row uses shared Action, which catches/visibly renders POST error and reloads after success. notifications.spec.ts exercises failure/retry."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647iUm",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613304367",
+      "path": ".github/workflows/ci.yml",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "CI all-dependency audit step has !cancelled() && install.outcome == success, so production-audit failure cannot skip it."
+    },
+    {
+      "pr": 15,
+      "thread": "PRRT_kwDOR2kdjc647iUq",
+      "url": "https://github.com/Naokiri5/naokiri/pull/15#discussion_r4613304379",
+      "path": "e2e/notifications.spec.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Earlier test already held later no-trade polls. This change installs fixed paused clock and a one-shot fixture before loading, then holds every later request and asserts one delivered response."
+    },
+    {
+      "pr": 14,
+      "thread": "PRRT_kwDOR2kdjc64fZSj",
+      "url": "https://github.com/Naokiri5/naokiri/pull/14#discussion_r4601267847",
+      "path": "server/src/ops/backup.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "maybeScheduledBackup catches pruneBackups failure, returns manifest/verification plus retentionWarning; existing ops-backup.test.ts regression."
+    },
+    {
+      "pr": 14,
+      "thread": "PRRT_kwDOR2kdjc64fZSm",
+      "url": "https://github.com/Naokiri5/naokiri/pull/14#discussion_r4601267860",
+      "path": "server/test/ops-backup.test.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "ops-backup.test invokes backup-cli.ts explicitly with node --import tsx and isolated fixture paths, independent of stale server/dist."
+    },
+    {
+      "pr": 14,
+      "thread": "PRRT_kwDOR2kdjc647V2G",
+      "url": "https://github.com/Naokiri5/naokiri/pull/14#discussion_r4613222258",
+      "path": "server/src/bot/bot.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/bot/bot.ts:147-153 determines restore failure first, guards retention reporting separately, then throws original failed-check names."
+    },
+    {
+      "pr": 14,
+      "thread": "PRRT_kwDOR2kdjc647V2M",
+      "url": "https://github.com/Naokiri5/naokiri/pull/14#discussion_r4613222270",
+      "path": "server/src/ops/backup.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "FIXED",
+      "evidence": "recordVerification now records directoryHash; backupVerificationStatus requires matching configured-directory fingerprint and hashes current local bytes. Before: 2/2 new binding tests failed; after: passing. Same size and restored mtime formerly produced false PASS; offsite identical copy formerly produced false local PASS."
+    },
+    {
+      "pr": 14,
+      "thread": "PRRT_kwDOR2kdjc647V2V",
+      "url": "https://github.com/Naokiri5/naokiri/pull/14#discussion_r4613222284",
+      "path": "server/src/ops/backup.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "FIXED",
+      "evidence": "recordError was already returned but scheduled retention still ran. maybeScheduledBackup now skips retention after recordError, CLI follows same rule and prints warning/nonzero status. New recording-failure retention test failed before and passes after."
+    },
+    {
+      "pr": 14,
+      "thread": "PRRT_kwDOR2kdjc647iVA",
+      "url": "https://github.com/Naokiri5/naokiri/pull/14#discussion_r4613304413",
+      "path": "server/test/ops-backup.test.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Retention fixture captures one start timestamp and passes explicit offsets to backup creation/verification; retention order is controlled by those inputs."
+    },
+    {
+      "pr": 18,
+      "thread": "PRRT_kwDOR2kdjc64uaB6",
+      "url": "https://github.com/Naokiri5/naokiri/pull/18#discussion_r4607745463",
+      "path": "server/src/api/routes.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/api/routes.ts:192-202 always requires auth.checkSetupCode; direct loopback no longer exempts first-owner setup."
+    },
+    {
+      "pr": 18,
+      "thread": "PRRT_kwDOR2kdjc64uaCB",
+      "url": "https://github.com/Naokiri5/naokiri/pull/18#discussion_r4607745474",
+      "path": "server/src/risk/policy.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/risk/policy.ts shared validatePolicy applies schema plus three relational checks to acceptance and stored reads."
+    },
+    {
+      "pr": 18,
+      "thread": "PRRT_kwDOR2kdjc64uaCE",
+      "url": "https://github.com/Naokiri5/naokiri/pull/18#discussion_r4607745481",
+      "path": "server/src/risk/policy.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "InvalidPolicy discriminant excludes typed policy; exitPolicy selects last valid policy or DEFAULT_POLICY; OMS monitorPositions uses validated exitPolicy. Existing risk.test.ts regressions."
+    },
+    {
+      "pr": 18,
+      "thread": "PRRT_kwDOR2kdjc64uoKw",
+      "url": "https://github.com/Naokiri5/naokiri/pull/18#discussion_r4607837284",
+      "path": "e2e/auth.spec.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "FIXED",
+      "evidence": "auth.spec.ts now explicitly waits engine .v UNKNOWN after malformed response, rather than networkidle/fixed elapsed time."
+    },
+    {
+      "pr": 18,
+      "thread": "PRRT_kwDOR2kdjc64u9PA",
+      "url": "https://github.com/Naokiri5/naokiri/pull/18#discussion_r4607978301",
+      "path": "server/src/market/depthStream.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Depth stream rejects future updates using requireSnapshotThrough; stale publication is invalidated, snapshot buffered-event freshness checked. Existing depth-stream.test.ts fresh/stale buffered and future-update tests. Stale continuous events may advance synchronization but never publish as fresh."
+    },
+    {
+      "pr": 18,
+      "thread": "PRRT_kwDOR2kdjc64u9PL",
+      "url": "https://github.com/Naokiri5/naokiri/pull/18#discussion_r4607978315",
+      "path": "server/test/ops-lease-fence.process.test.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "stale-writer-process renew-write acquires the lease and commits the positive-control write synchronously before reporting; fence process test sends renew-write before takeover."
+    },
+    {
+      "pr": 6,
+      "thread": "PRRT_kwDOR2kdjc64OfBB",
+      "url": "https://github.com/Naokiri5/naokiri/pull/6#discussion_r4594095056",
+      "path": "server/src/ditas/memory.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/ditas/memory.ts atomic delegates to tx; server/src/db/db.ts:41-48 tracks txDepth without DatabaseSync.isTransaction; root/server engines require ^22.16.0 or >=24.0.0. server/test/repair.test.ts has explicit nested-transaction rollback regression."
+    },
+    {
+      "pr": 6,
+      "thread": "PRRT_kwDOR2kdjc64OfBI",
+      "url": "https://github.com/Naokiri5/naokiri/pull/6#discussion_r4594095066",
+      "path": "server/src/ditas/service.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/ditas/service.ts:72-76 uses e.seq < anchor seq and orders by e.seq DESC, with createdAt/fingerprint point-in-time guards. Existing server/test/ditas-api.test.ts same-millisecond similarity regression passed in backtest-after.log."
+    },
+    {
+      "pr": 6,
+      "thread": "PRRT_kwDOR2kdjc64OfBk",
+      "url": "https://github.com/Naokiri5/naokiri/pull/6#discussion_r4594095101",
+      "path": "server/src/ditas/twin.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/ditas/twin.ts:73 sets final accepted target fraction=1 so stepExit clips it to remaining qty. Existing server/test/ditas-twin.test.ts nearly-complete fraction ladder regression passed in backtest-after.log. A duplicated idempotent re-assignment in the simulation loop remains a readability issue, not the reported residual defect."
+    },
+    {
+      "pr": 6,
+      "thread": "PRRT_kwDOR2kdjc64OfBp",
+      "url": "https://github.com/Naokiri5/naokiri/pull/6#discussion_r4594095112",
+      "path": "server/src/market/fabric.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "market/fabric.ts ingestCandleBatch provides explicit full contiguous validated REBUILD_MIN_BARS recovery. quality.test.ts covers an outage beyond one polling window and short/invalid refusal."
+    },
+    {
+      "pr": 6,
+      "thread": "PRRT_kwDOR2kdjc64OfBy",
+      "url": "https://github.com/Naokiri5/naokiri/pull/6#discussion_r4594095122",
+      "path": "web/src/pages/Ditas.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "useApi path ownership/render guard prevents superseded cohort data; Ditas.tsx explicitly requires lastCalibration.cohort === cohort before displaying metrics."
+    },
+    {
+      "pr": 6,
+      "thread": "PRRT_kwDOR2kdjc64OfB7",
+      "url": "https://github.com/Naokiri5/naokiri/pull/6#discussion_r4594095131",
+      "path": "web/src/pages/Ditas.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Ditas.tsx inspection request id guards detail/detailError/opening updates and increments on unmount/new detail."
+    },
+    {
+      "pr": 9,
+      "thread": "PRRT_kwDOR2kdjc64dd9D",
+      "url": "https://github.com/Naokiri5/naokiri/pull/9#discussion_r4600442446",
+      "path": "web/src/api.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "useApi scheduled interval/SSE refresh uses inFlight/again to queue one followup rather than aborting slow request; forced reload remains intentional after mutations."
+    },
+    {
+      "pr": 9,
+      "thread": "PRRT_kwDOR2kdjc64dd9M",
+      "url": "https://github.com/Naokiri5/naokiri/pull/9#discussion_r4600442461",
+      "path": "web/src/App.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "App.tsx reads s?.control?.emergency and s?.dataHealth?.stale; malformed shell auth regression keeps shell mounted."
+    },
+    {
+      "pr": 9,
+      "thread": "PRRT_kwDOR2kdjc64dd9Y",
+      "url": "https://github.com/Naokiri5/naokiri/pull/9#discussion_r4600442476",
+      "path": "web/src/status.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "status.ts count requires finite nonnegative integers for live/degraded; status.test.ts covers negative and fractional provider counts."
+    },
+    {
+      "pr": 9,
+      "thread": "PRRT_kwDOR2kdjc64dd9f",
+      "url": "https://github.com/Naokiri5/naokiri/pull/9#discussion_r4600442486",
+      "path": "web/src/status.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "FIXED",
+      "evidence": "Latest follow-up remained valid: compare completion against immutable shell.serverTime+5000, not advancing serverNow. New regression ages snapshot by6/15s; old code incorrectly changed CLOCK? to SCANNING."
+    },
+    {
+      "pr": 12,
+      "thread": "PRRT_kwDOR2kdjc64fMqo",
+      "url": "https://github.com/Naokiri5/naokiri/pull/12#discussion_r4601183106",
+      "path": "server/src/bot/bot.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "ops/lease.ts acquireOrRenewLease distinguishes ACQUIRED from RENEWED from persisted row; bot.holdEngine runs takeoverAllowed after every acquisition regardless of cached role."
+    },
+    {
+      "pr": 12,
+      "thread": "PRRT_kwDOR2kdjc64fMqz",
+      "url": "https://github.com/Naokiri5/naokiri/pull/12#discussion_r4601183130",
+      "path": "server/src/bot/bot.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "bot uses withWriteFence around entry/approval/monitor/expiration; OMS calls assertWriteFence inside BEGIN IMMEDIATE write transactions. Existing lease fencing tests."
+    },
+    {
+      "pr": 12,
+      "thread": "PRRT_kwDOR2kdjc64fMrF",
+      "url": "https://github.com/Naokiri5/naokiri/pull/12#discussion_r4601183157",
+      "path": "server/test/ops-lease-hardening.test.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "ops-lease-hardening monitor-freshness test uses fake Date and vi.setSystemTime(+5), not a real5ms sleep."
+    },
+    {
+      "pr": 12,
+      "thread": "PRRT_kwDOR2kdjc64fMrO",
+      "url": "https://github.com/Naokiri5/naokiri/pull/12#discussion_r4601183168",
+      "path": "server/test/ops-lease.process.test.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "ops-lease.process records persisted holder/expires_at before kill and compares successor acquired_at against that expiry."
+    },
+    {
+      "pr": 16,
+      "thread": "PRRT_kwDOR2kdjc64fcla",
+      "url": "https://github.com/Naokiri5/naokiri/pull/16#discussion_r4601290101",
+      "path": "server/src/exec/oms.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "OMS monitor compare-and-set includes mfe IS ? and mae IS ?; oms.test.ts has stale monitor excursion regression."
+    },
+    {
+      "pr": 13,
+      "thread": "PRRT_kwDOR2kdjc64fOf1",
+      "url": "https://github.com/Naokiri5/naokiri/pull/13#discussion_r4601195595",
+      "path": "server/src/api/routes.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Strategy status route requires step-up on any transition lifting suspension, including RESEARCH/BACKTESTED; api.test.ts contains explicit denied assertions."
+    },
+    {
+      "pr": 13,
+      "thread": "PRRT_kwDOR2kdjc64fOf8",
+      "url": "https://github.com/Naokiri5/naokiri/pull/13#discussion_r4601195613",
+      "path": "server/src/qa/gates.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "qa.mjs records exitCode/signal/reportSHA/commit/source; gates.runOutcomeProblem requires successful outcome, matching reporthash and currentcommit."
+    },
+    {
+      "pr": 10,
+      "thread": "PRRT_kwDOR2kdjc64eVed",
+      "url": "https://github.com/Naokiri5/naokiri/pull/10#discussion_r4600813445",
+      "path": "server/src/main.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "main.ts dynamically loads server after guarding Node22.16+ or24+; package engines excludes Node23 entirely."
+    },
+    {
+      "pr": 10,
+      "thread": "PRRT_kwDOR2kdjc64eVe8",
+      "url": "https://github.com/Naokiri5/naokiri/pull/10#discussion_r4600813487",
+      "path": "web/src/pages/Phase1.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "SUPERSEDED",
+      "evidence": "No backupData/backupError/runBackup or backup control exists anywhere under web/src at b17c096. This refers to an unintegrated PR10 UI; do not import a duplicate backup implementation to apply a local display fix."
+    },
+    {
+      "pr": 5,
+      "thread": "PRRT_kwDOR2kdjc64OYhj",
+      "url": "https://github.com/Naokiri5/naokiri/pull/5#discussion_r4594052397",
+      "path": "server/src/chart/analysis.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "FIXED",
+      "evidence": "Chart SWING_STRUCTURE bounds use extrema across all selected high+low pivots; chart-review regression fails old200..108 and expects105..210."
+    },
+    {
+      "pr": 5,
+      "thread": "PRRT_kwDOR2kdjc64OYhp",
+      "url": "https://github.com/Naokiri5/naokiri/pull/5#discussion_r4594052406",
+      "path": "server/src/chart/analysis.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "FIXED",
+      "evidence": "Upper/lower sweep closes must lie within both prior support and resistance. Chart-review tests distinguish breakouts and preserve inclusive boundary sweeps."
+    },
+    {
+      "pr": 5,
+      "thread": "PRRT_kwDOR2kdjc64OYht",
+      "url": "https://github.com/Naokiri5/naokiri/pull/5#discussion_r4594052414",
+      "path": "web/src/pages/Markets.tsx",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "useApi binds state to resource path, rejects obsolete responses and clears retained data on symbol/timeframe path changes; Markets consumes scoped data. Existing late instrument response tests retained."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64Q2uJ",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4595111224",
+      "path": "docs/SECURITY.md",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "Owner bootstrap always requires setup code in passphrase mode; Privy bootstrap is configuredowner-only. Container presence cannot bypass first-owner verification. Auth tests cover this."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64Q2uO",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4595111232",
+      "path": "server/src/api/routes.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "First-owner setup always requires console setup code, removing container/loopback-forwarder bypass. Auth setup tests reflect current contract."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64Q2uS",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4595111242",
+      "path": "server/src/core/ratelimit.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "failureGate permits globalbudget exemption only for directlocal recovery/risk-reducing step-up; local/forwarded client keys are separate in auth/routes. Per-client backoff remains."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64Q2uk",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4595111266",
+      "path": "server/src/ditas/service.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/ditas/service.ts:94-99 includes remainingQuarterBars in cohort and payload. Existing server/test/ditas-api.test.ts early-vs-late proposal cohort test passed in backtest-after.log."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64Q2uy",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4595111288",
+      "path": "server/src/exec/oms.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "FIXED",
+      "evidence": "OMS tracks actual filledQty per target, retains original plan fractions, requests only remaining demand, and atomically closes lot dust only when planned exits exhaust the physical position. Baseline tests fail; OMS/repair36pass; independent risk review found no blocking issue. Historical already-done targets are not reconstructed."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64W5IG",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4597653905",
+      "path": "server/src/knowledge/extract.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "extract.replaceElements and stripComments use bounded open-tag matching and indexOf scans, replacing repeated lazy untrusted-markup regex scans; knowledge tests cover malformed inputs."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64W5JI",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4597654006",
+      "path": "server/src/knowledge/routes.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": true,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "knowledgeRoutes registers application/octet-stream in an upload-only child plugin; auth routes retain small JSON body limits."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64W5J5",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4597654082",
+      "path": "server/test/repair.test.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "FIXED",
+      "evidence": "repair.test now freezes Date before each fixture/execution and restores real timers after each test; all36 OMS/repair tests passed after change."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64XNXO",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4597789452",
+      "path": "server/src/ditas/execution.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/exec/oms.ts:41-44 insertOrder accepts at; successful entry and applyExit callers supply the captured nowTs, matching fill/ledger timestamp. No result clamp was added; paperEntryForDecision timing aggregation remains unmodified."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64XNYN",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4597789550",
+      "path": "server/src/market/scanner.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "server/src/market/scanner.ts uses marketBreadth; market/bubbles.ts:9-13 filters to the current receivedAt batch, requires finite providerTs <= receivedAt+QUALITY_LIMITS.clockSkewMs and provider age <=QUALITY_LIMITS.maxQuoteAgeMs. Existing workers-effectiveness.test.ts covers stale/future breadth rows and ageing."
+    },
+    {
+      "pr": 7,
+      "thread": "PRRT_kwDOR2kdjc64XjkL",
+      "url": "https://github.com/Naokiri5/naokiri/pull/7#discussion_r4597936786",
+      "path": "server/src/knowledge/extract.ts",
+      "github_unresolved_at_collection": true,
+      "outdated_at_collection": false,
+      "disposition": "ALREADY_FIXED",
+      "evidence": "replaceElements folds ASCII[A-Z] only, retaining original Unicode string offsets, with knowledge extraction coverage."
+    }
+  ]
+}

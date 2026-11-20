@@ -56,8 +56,9 @@ test('a malformed /api/shell response never blanks the app (CodeRabbit PR #9)', 
   await page.route('**/api/shell', (r) => r.fulfill({ json: {} })); // HTTP 200 without control/dataHealth
   const shell = page.waitForResponse('**/api/shell');
   await page.goto('/');
-  await shell; await page.waitForLoadState('networkidle'); // the shell response arrived and was rendered
+  await shell;
   await expect(page.getByRole('group', { name: 'Autopilot status' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=engine] .v')).toHaveText('UNKNOWN');
   await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible(); // the whole shell is still mounted
   await expect(page.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=engine]')).not.toHaveAttribute('data-tone', 'ok');
   expect(errors.filter((e) => /Cannot read properties of undefined/.test(e))).toEqual([]);

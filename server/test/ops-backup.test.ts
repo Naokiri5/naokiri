@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, statSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -236,6 +236,46 @@ describe('database backups', () => {
     const { appendFileSync } = await import('node:fs');
     appendFileSync(file, Buffer.from('tampered')); // same name and manifest, different bytes
     expect(backupVerificationStatus(now).check).toMatchObject({ status: 'WARN', detail: expect.stringMatching(/changed since it was verified/) });
+  });
+  it('detects same-size backup corruption even when the modification time is preserved (CodeRabbit #14)', () => {
+    vi.stubEnv('MIA_BACKUP_DIR', dir);
+    const now = 1_800_000_000_000;
+    const m = createBackup({ dir, key: null, nowTs: now }); const file = join(dir, m.file);
+    utimesSync(file, now / 1000, now / 1000);
+    expect(verifyAndRecordBackup(file, null, now).ok).toBe(true);
+    const original = statSync(file); const bytes = readFileSync(file);
+    bytes[bytes.length - 1] ^= 1; writeFileSync(file, bytes);
+    utimesSync(file, now / 1000, now / 1000);
+    expect(statSync(file).size).toBe(original.size);
+    expect(statSync(file).mtimeMs).toBe(original.mtimeMs);
+    expect(backupVerificationStatus(now).check).toMatchObject({ status: 'WARN', detail: expect.stringMatching(/changed since it was verified/) });
+  });
+  it('does not use an off-site verification as a PASS for an identically named local copy (CodeRabbit #14)', () => {
+    vi.stubEnv('MIA_BACKUP_DIR', dir);
+    const now = 1_800_000_000_000;
+    const m = createBackup({ dir, key: null, nowTs: now }); const local = join(dir, m.file);
+    const offsite = join(dir, 'offsite'); mkdirSync(offsite);
+    const external = join(offsite, m.file);
+    copyFileSync(local, external); copyFileSync(`${local}.json`, `${external}.json`);
+    for (const path of [local, external]) utimesSync(path, now / 1000, now / 1000);
+    expect(verifyAndRecordBackup(external, null, now).ok).toBe(true);
+    expect(backupVerificationStatus(now).check).toMatchObject({ status: 'WARN', detail: expect.stringMatching(/directory/) });
+  });
+  it('returns a completed backup without pruning when recording its last-good status fails (CodeRabbit #14)', async () => {
+    vi.stubEnv('MIA_BACKUP_DIR', dir); vi.stubEnv('MIA_BACKUP_KEEP', '1');
+    const now = 1_800_000_000_000;
+    const previous = createBackup({ dir, key: null, nowTs: now - 3 * 86400_000 });
+    const save = settingsModule.setSetting;
+    vi.spyOn(settingsModule, 'setSetting').mockImplementation((key, value) => {
+      if (key === 'backup.lastGoodVerify') throw new Error('disk full');
+      return save(key, value);
+    });
+    const result = (await maybeScheduledBackup(now))!;
+    expect(result.verification.ok).toBe(true);
+    expect(result.verification.recordError).toMatch(/could not be recorded: disk full/);
+    expect(result.retentionWarning).toMatch(/skipped/i);
+    expect(existsSync(join(dir, previous.file))).toBe(true);
+    expect(existsSync(join(dir, result.file))).toBe(true);
   });
   it('a verification result is returned even when recording it fails (CodeRabbit #14)', () => {
     const m = createBackup({ dir, key: null }); const file = join(dir, m.file);

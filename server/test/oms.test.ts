@@ -204,6 +204,65 @@ describe('Order-book freshness and fill accounting', () => {
     expect(reconcile().ok).toBe(true);
     expect(all("SELECT id FROM orders WHERE purpose='PROTECTIVE_STOP' AND status='ACTIVE'")).toHaveLength(0);
   });
+  it('tracks partly lot-rounded targets without repeating their original allocation', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const entry = openPositions()[0]; const qty = entry.qty;
+    market.instruments.get(id)!.stepSize = qty / 11;
+    market.instruments.get(id)!.minQty = 0;
+    setBook(id, last * 1.05); monitorPositions();
+    let p = openPositions()[0]; let target = JSON.parse(p.targets).targets[0];
+    expect(sells()).toHaveLength(1);
+    expect(sells()[0].qty).toBeCloseTo(qty * 5 / 11, 10);
+    expect(target).toMatchObject({ done: false, fraction: 0.5 });
+    expect(target.filledQty).toBeCloseTo(qty * 5 / 11, 10);
+    monitorPositions(); monitorPositions();
+    expect(sells()).toHaveLength(1);
+    expect(openPositions()[0].qty).toBeCloseTo(qty * 6 / 11, 10);
+    setBook(id, last * 1.10); monitorPositions();
+    expect(openPositions()).toHaveLength(0);
+    expect(sells()).toHaveLength(2);
+    expect(sells()[1].qty).toBeCloseTo(qty * 6 / 11, 10);
+    expect(reconcile().ok).toBe(true);
+  });
+  it('sells only the unsold target demand when a smaller lot size becomes available', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const qty = openPositions()[0].qty;
+    market.instruments.get(id)!.stepSize = qty / 11;
+    market.instruments.get(id)!.minQty = 0;
+    setBook(id, last * 1.05); monitorPositions();
+    market.instruments.get(id)!.stepSize = qty / 22;
+    monitorPositions(); monitorPositions();
+    expect(sells()).toHaveLength(2);
+    expect(sells()[1].qty).toBeCloseTo(qty / 22, 10);
+    const pos = openPositions()[0]; const target = JSON.parse(pos.targets).targets[0];
+    expect(target).toMatchObject({ done: true, fraction: 0.5 });
+    expect(target.filledQty).toBeCloseTo(qty / 2, 10);
+    expect(pos.qty).toBeCloseTo(qty / 2, 10);
+    expect(reconcile().ok).toBe(true);
+  });
+  it('closes accumulated lot dust once when both targets trigger in one monitor pass', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const qty = openPositions()[0].qty;
+    market.instruments.get(id)!.stepSize = qty / 11;
+    market.instruments.get(id)!.minQty = 0;
+    setBook(id, last * 1.10); monitorPositions(); monitorPositions();
+    expect(openPositions()).toHaveLength(0);
+    expect(sells().reduce((sum, f) => sum + f.qty, 0)).toBeCloseTo(qty, 10);
+    expect(sells()).toHaveLength(2);
+    expect(reconcile().ok).toBe(true);
+  });
+  it('preserves an intentional residual when target fractions total less than one', () => {
+    const rep = report(id, last);
+    rep.takeProfit = rep.takeProfit.map(t => ({ ...t, fraction: 0.25 }));
+    expect(submitEntry(rep, 'bot').ok).toBe(true);
+    const qty = openPositions()[0].qty;
+    market.instruments.get(id)!.stepSize = qty / 11;
+    market.instruments.get(id)!.minQty = 0;
+    setBook(id, last * 1.10); monitorPositions(); monitorPositions();
+    expect(openPositions()).toHaveLength(1);
+    expect(openPositions()[0].qty).toBeGreaterThan(qty / 2);
+    expect(reconcile().ok).toBe(true);
+  });
   it('a target that closes a small position does not roll back with a TIME exit in the same pass (MIA-OMS-003)', () => {
     expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
     const pos = openPositions()[0];

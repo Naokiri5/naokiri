@@ -12,14 +12,21 @@ export async function searchNews(q: string): Promise<RssItem[]> {
   const xml = await fetchProvider('googlenews', `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`, { as: 'text' });
   return parseRss(xml);
 }
-export function parseRss(xml: string): RssItem[] {
+export function parseRss(xml: string, nowTs = Date.now()): RssItem[] {
   const doc = parser.parse(xml);
   const items = doc?.rss?.channel?.item ?? [];
-  return (Array.isArray(items) ? items : [items]).map((it: any) => ({
-    title: String(it.title ?? '').slice(0, 400),
-    link: String(it.link ?? ''),
-    source: typeof it.source === 'object' ? String(it.source['#text'] ?? '') : String(it.source ?? ''),
-    ts: Date.parse(it.pubDate ?? '') || Date.now(),
-    guid: typeof it.guid === 'object' ? String(it.guid['#text']) : String(it.guid ?? it.link),
-  }));
+  const text = (value: unknown) => value && typeof value === 'object' && '#text' in value
+    ? String(value['#text'] ?? '') : String(value ?? '');
+  const out: RssItem[] = [];
+  if (!Number.isFinite(nowTs) || nowTs < 0) return out;
+  for (const raw of Array.isArray(items) ? items : [items]) {
+    if (!raw || typeof raw !== 'object') continue;
+    const it = raw as Record<string, unknown>;
+    const ts = typeof it.pubDate === 'string' ? Date.parse(it.pubDate) : NaN;
+    // Publication time is evidence, not receipt time. An undated or future story cannot count as recent news.
+    if (!Number.isFinite(ts) || ts < 0 || ts > nowTs) continue;
+    out.push({ title: text(it.title).slice(0, 400), link: text(it.link), source: text(it.source), ts,
+      guid: text(it.guid ?? it.link) });
+  }
+  return out;
 }

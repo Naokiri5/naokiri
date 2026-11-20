@@ -71,10 +71,9 @@ test('collapsed rail keeps every destination one click away', async () => {
 });
 
 test('command palette understands plain-language synonyms', async () => {
-  const shellReady = page.waitForResponse(response => new URL(response.url()).pathname === '/api/shell' && response.ok());
   await page.goto('/');
-  await shellReady; // Shell effects and authenticated state must be ready before the shortcut.
   await expect(page.locator('h1')).toBeVisible();
+  // Readiness belongs to this document's rendered shell, never a poll finishing from the previous document.
   await expect(page.locator('.mode')).not.toHaveText(/^(…|CHECKING)$/);
   await page.keyboard.press('Control+k');
   const palette = page.getByRole('dialog', { name: 'Command palette' });

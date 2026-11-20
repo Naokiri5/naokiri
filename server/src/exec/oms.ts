@@ -315,17 +315,23 @@ export function monitorPositions(nowTs = Date.now()) {
     const px = market.price(p.instrument);
     if (!px || !quoteAgeOk(px.ts, nowTs)) { flagUnprotected(p, 'stale, future-dated or missing price — stop cannot be evaluated'); continue; }
     const meta = P<any>(p.targets);
-    const st: ExitState = { entry: p.entry_price, stop: p.stop_price, initialStop: p.initial_stop, qtyLeft: p.qty, qtyInit: meta.qtyInit, targets: meta.targets, trailAfterR: meta.trailAfterR, barsHeld: 0, maxHoldBars: Infinity, mfe: p.mfe, mae: p.mae };
+    const originalTargets = (meta.targets as { price: number; fraction: number; done: boolean; filledQty?: number }[]).map(t => ({ ...t }));
+    // Persist the original plan, but request only the part of each target not already sold after lot rounding.
+    const pendingTargets = originalTargets.map(t => ({ ...t, fraction: Math.max(0, meta.qtyInit * t.fraction - (t.filledQty ?? 0)) / meta.qtyInit }));
+    const st: ExitState = { entry: p.entry_price, stop: p.stop_price, initialStop: p.initial_stop, qtyLeft: p.qty, qtyInit: meta.qtyInit, targets: pendingTargets, trailAfterR: meta.trailAfterR, barsHeld: 0, maxHoldBars: Infinity, mfe: p.mfe, mae: p.mae };
     const last = meta.lastPx ?? p.entry_price; const bid = px.bid || px.price;
     const doneBefore = (meta.targets as { done: boolean }[]).map((t) => t.done);
     const fills = stepExit(st, { o: last, h: Math.max(last, bid), l: Math.min(last, bid), c: bid }, 0, false);
     if (st.qtyLeft > 1e-12 && p.max_hold_ms && nowTs - p.opened_at >= p.max_hold_ms) { fills.push({ reason: 'TIME', price: bid, qty: st.qtyLeft }); st.qtyLeft = 0; }
-    meta.targets = st.targets; meta.lastPx = bid;
+    meta.targets = st.targets.map((t, i) => ({ ...originalTargets[i], done: t.done })); meta.lastPx = bid;
+    // A final target that exhausts the planned state must also absorb dust from earlier lot-rounded fills.
+    // Merely reaching the last configured target is insufficient: fractions may intentionally total less than one.
+    const closingTarget = st.qtyLeft <= 1e-12 && fills.at(-1)?.reason === 'TARGET' ? fills.at(-1) : null;
     const after: Deferred = [];
     try {
       // Each applyExit walks the same book snapshot, so check that the book absorbs the COMBINED exit size first;
       // otherwise two targets hit in one pass could each "fill" against depth that exists only once.
-      const exitQty = fills.reduce((sum, f) => sum + f.qty, 0);
+      const exitQty = closingTarget ? p.qty : fills.reduce((sum, f) => sum + f.qty, 0);
       if (exitQty > 0) {
         const book = market.deep.get(p.instrument)?.book ?? null;
         if (!bookFreshForExecution(book, nowTs) || !walkBook(book!, 'sell', Math.min(exitQty, p.qty))?.filledFully) throw new ExitUnavailable();
@@ -342,18 +348,28 @@ export function monitorPositions(nowTs = Date.now()) {
         crashpoint('monitor.state');
         if (st.stop !== p.stop_price) { run("UPDATE orders SET stop_price=?, updated_at=? WHERE position_id=? AND account=? AND venue=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", st.stop, nowTs, p.id, PAPER_ACCOUNT, VENUE); crashpoint('monitor.stop'); journal('EXIT', `${p.instrument} stop tightened to ${st.stop.toPrecision(6)} (breakeven trail)`, p.id); }
         let consumed = 0; // depth already taken by earlier exits in this pass
-        // stepExit (shared with the backtester) marks a target done before lot rounding; a target whose slice rounds to
-        // zero sold nothing, so it is reopened here and stays eligible on later passes.
-        const newlyDone = st.targets.map((t, i) => (t.done && !doneBefore[i] ? i : -1)).filter((i) => i >= 0); let k = 0; let reopened = false;
+        // Match target completion to actual fills, including partly rounded slices. Shared exit semantics stay unchanged.
+        const newlyDone = st.targets.map((t, i) => (t.done && !doneBefore[i] ? i : -1)).filter((i) => i >= 0); let k = 0; let targetChanged = false;
         for (const f of fills) {
           // E-02: a TIME or STOP exit closes whatever is still open (re-read inside applyExit), never an unrounded estimate.
-          const r = applyExit(p.id, f.reason === 'TIME' || f.reason === 'STOP' ? Infinity : f.qty, f.reason, pol.feeRate, nowTs, after, consumed); if (!r) throw new ExitUnavailable(); consumed += r.qty;
-          if (f.reason === 'TARGET') { const idx = newlyDone[k++]; if (r.qty === 0 && idx != null) { meta.targets[idx].done = false; reopened = true; } }
+          const r = applyExit(p.id, f.reason === 'TIME' || f.reason === 'STOP' || f === closingTarget ? Infinity : f.qty, f.reason, pol.feeRate, nowTs, after, consumed); if (!r) throw new ExitUnavailable(); consumed += r.qty;
+          if (f.reason === 'TARGET') {
+            const idx = newlyDone[k++];
+            if (idx != null) {
+              meta.targets[idx].filledQty = (originalTargets[idx].filledQty ?? 0) + r.qty;
+              meta.targets[idx].done = r.qty + 1e-12 >= f.qty;
+              targetChanged = true;
+            }
+          }
           // MIA-OMS-003: a fill that closes the position (e.g. a sub-lot remainder snapped into it) ends this pass. The next
           // fill would find the position closed, return null and roll everything back — forever, on every pass.
-          if (r.closed) break;
+          if (r.closed) {
+            // Later targets staged by stepExit were never executed after this fill closed the position.
+            for (const idx of newlyDone.slice(k)) meta.targets[idx].done = false;
+            break;
+          }
         }
-        if (reopened) run('UPDATE positions SET targets=? WHERE id=?', J(meta), p.id);
+        if (targetChanged) run('UPDATE positions SET targets=? WHERE id=?', J(meta), p.id);
         crashpoint('monitor.precommit');
       });
       crashpoint('monitor.committed');

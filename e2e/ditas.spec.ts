@@ -110,12 +110,12 @@ test('execution quality displays paper fills and preserves unknown and stale sta
   await expect(rejected.getByRole('cell').nth(7)).toHaveText('n/a');
   await expect(page.getByText(/Fill delays are local recording delays/)).toBeVisible();
   response = 'error';
-  await page.getByRole('button', { name: 'Refresh' }).click();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('Execution records unavailable');
   await expect(page.getByText('Refresh failed; the previous records are shown.')).toBeVisible();
   await expect(filled).toBeVisible();
   response = 'empty';
-  await page.getByRole('button', { name: 'Refresh' }).click();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.getByText('No paper orders yet.')).toBeVisible();
   await expect(page.getByText('Refresh failed; the previous records are shown.')).toHaveCount(0);
 });

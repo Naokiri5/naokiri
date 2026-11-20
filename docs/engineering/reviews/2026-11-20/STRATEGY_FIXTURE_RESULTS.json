@@ -1,0 +1,364 @@
+{
+  "notice": "Deterministic synthetic correctness fixtures only. These are not historical market returns, certification or live trading evidence.",
+  "results": [
+    {
+      "scenario": "synthetic-mixed",
+      "seed": 21,
+      "strategy": "trend_pullback",
+      "bars": 4000,
+      "all": {
+        "trades": 65,
+        "winRate": 0.4307692307692308,
+        "avgR": 0.1544168748811613,
+        "expectancyR": 0.1544168748811613,
+        "profitFactor": 1.3015523136705756,
+        "maxDrawdownR": 7.759170921937207,
+        "totalR": 10.037096867275483,
+        "avgBars": 13.815384615384616
+      },
+      "inSample": {
+        "trades": 33,
+        "winRate": 0.3939393939393939,
+        "avgR": 0.11309654166208666,
+        "expectancyR": 0.11309654166208666,
+        "profitFactor": 1.2216499855158536,
+        "maxDrawdownR": 4.281008938056717,
+        "totalR": 3.73218587484886,
+        "avgBars": 13.181818181818182
+      },
+      "outOfSample": {
+        "trades": 32,
+        "winRate": 0.46875,
+        "avgR": 0.197028468513332,
+        "expectancyR": 0.197028468513332,
+        "profitFactor": 1.3833572982439857,
+        "maxDrawdownR": 6.783710523340111,
+        "totalR": 6.304910992426624,
+        "avgBars": 14.46875
+      },
+      "warnings": [
+        "parameters are fixed research defaults (not optimized); survivorship bias: universe is today's liquid listings"
+      ]
+    },
+    {
+      "scenario": "synthetic-mixed",
+      "seed": 21,
+      "strategy": "donchian_breakout",
+      "bars": 4000,
+      "all": {
+        "trades": 14,
+        "winRate": 0.5,
+        "avgR": 0.1647829730557584,
+        "expectancyR": 0.1647829730557584,
+        "profitFactor": 1.3546860456582355,
+        "maxDrawdownR": 3.3559208057541037,
+        "totalR": 2.3069616227806176,
+        "avgBars": 32.714285714285715
+      },
+      "inSample": {
+        "trades": 8,
+        "winRate": 0.625,
+        "avgR": 0.5927454766617087,
+        "expectancyR": 0.5927454766617087,
+        "profitFactor": 3.133980178396276,
+        "maxDrawdownR": 2.1571848741758677,
+        "totalR": 4.74196381329367,
+        "avgBars": 45.5
+      },
+      "outOfSample": {
+        "trades": 6,
+        "winRate": 0.3333333333333333,
+        "avgR": -0.4058336984188422,
+        "expectancyR": -0.4058336984188422,
+        "profitFactor": 0.4313551065586752,
+        "maxDrawdownR": 3.3559208057541046,
+        "totalR": -2.435002190513053,
+        "avgBars": 15.666666666666666
+      },
+      "warnings": [
+        "only 6 out-of-sample trades — not statistically meaningful",
+        "parameters are fixed research defaults (not optimized); survivorship bias: universe is today's liquid listings"
+      ]
+    },
+    {
+      "scenario": "synthetic-mixed",
+      "seed": 21,
+      "strategy": "range_reversion",
+      "bars": 4000,
+      "all": {
+        "trades": 1,
+        "winRate": 0,
+        "avgR": -1.1107439514102397,
+        "expectancyR": -1.1107439514102397,
+        "profitFactor": 0,
+        "maxDrawdownR": 1.1107439514102397,
+        "totalR": -1.1107439514102397,
+        "avgBars": 2
+      },
+      "inSample": {
+        "trades": 1,
+        "winRate": 0,
+        "avgR": -1.1107439514102397,
+        "expectancyR": -1.1107439514102397,
+        "profitFactor": 0,
+        "maxDrawdownR": 1.1107439514102397,
+        "totalR": -1.1107439514102397,
+        "avgBars": 2
+      },
+      "outOfSample": {
+        "trades": 0,
+        "winRate": 0,
+        "avgR": 0,
+        "expectancyR": 0,
+        "profitFactor": 0,
+        "maxDrawdownR": 0,
+        "totalR": 0,
+        "avgBars": 0
+      },
+      "warnings": [
+        "only 0 out-of-sample trades — not statistically meaningful",
+        "parameters are fixed research defaults (not optimized); survivorship bias: universe is today's liquid listings"
+      ]
+    },
+    {
+      "scenario": "synthetic-trend",
+      "seed": 9,
+      "strategy": "trend_pullback",
+      "bars": 4000,
+      "all": {
+        "trades": 82,
+        "winRate": 0.8048780487804879,
+        "avgR": 1.3796917212948776,
+        "expectancyR": 1.3796917212948776,
+        "profitFactor": 10.263964327481872,
+        "maxDrawdownR": 2.365090568957392,
+        "totalR": 113.13472114617997,
+        "avgBars": 23.317073170731707
+      },
+      "inSample": {
+        "trades": 47,
+        "winRate": 0.7872340425531915,
+        "avgR": 1.3559236900799123,
+        "expectancyR": 1.3559236900799123,
+        "profitFactor": 8.934382594179105,
+        "maxDrawdownR": 2.365090568957392,
+        "totalR": 63.728413433755875,
+        "avgBars": 24.4468085106383
+      },
+      "outOfSample": {
+        "trades": 35,
+        "winRate": 0.8285714285714286,
+        "avgR": 1.4116087917835456,
+        "expectancyR": 1.4116087917835456,
+        "profitFactor": 12.818522490005543,
+        "maxDrawdownR": 2.357674620056926,
+        "totalR": 49.406307712424095,
+        "avgBars": 21.8
+      },
+      "warnings": [
+        "parameters are fixed research defaults (not optimized); survivorship bias: universe is today's liquid listings"
+      ]
+    },
+    {
+      "scenario": "synthetic-trend",
+      "seed": 9,
+      "strategy": "donchian_breakout",
+      "bars": 4000,
+      "all": {
+        "trades": 32,
+        "winRate": 0.84375,
+        "avgR": 2.07916644205733,
+        "expectancyR": 2.07916644205733,
+        "profitFactor": 12.592201352170894,
+        "maxDrawdownR": 2.291346456040438,
+        "totalR": 66.53332614583456,
+        "avgBars": 50.21875
+      },
+      "inSample": {
+        "trades": 18,
+        "winRate": 0.7777777777777778,
+        "avgR": 1.7948044213459105,
+        "expectancyR": 1.7948044213459105,
+        "profitFactor": 8.041053638908142,
+        "maxDrawdownR": 2.291346456040438,
+        "totalR": 32.30647958422639,
+        "avgBars": 48.888888888888886
+      },
+      "outOfSample": {
+        "trades": 14,
+        "winRate": 0.9285714285714286,
+        "avgR": 2.444774754400584,
+        "expectancyR": 2.444774754400584,
+        "profitFactor": 30.73175237093533,
+        "maxDrawdownR": 1.151188336785257,
+        "totalR": 34.22684656160818,
+        "avgBars": 51.92857142857143
+      },
+      "warnings": [
+        "history ends with an open position; closed-trade statistics exclude its unrealized PnL and entry costs",
+        "only 14 out-of-sample trades — not statistically meaningful",
+        "parameters are fixed research defaults (not optimized); survivorship bias: universe is today's liquid listings"
+      ]
+    },
+    {
+      "scenario": "synthetic-trend",
+      "seed": 9,
+      "strategy": "range_reversion",
+      "bars": 4000,
+      "all": {
+        "trades": 0,
+        "winRate": 0,
+        "avgR": 0,
+        "expectancyR": 0,
+        "profitFactor": 0,
+        "maxDrawdownR": 0,
+        "totalR": 0,
+        "avgBars": 0
+      },
+      "inSample": {
+        "trades": 0,
+        "winRate": 0,
+        "avgR": 0,
+        "expectancyR": 0,
+        "profitFactor": 0,
+        "maxDrawdownR": 0,
+        "totalR": 0,
+        "avgBars": 0
+      },
+      "outOfSample": {
+        "trades": 0,
+        "winRate": 0,
+        "avgR": 0,
+        "expectancyR": 0,
+        "profitFactor": 0,
+        "maxDrawdownR": 0,
+        "totalR": 0,
+        "avgBars": 0
+      },
+      "warnings": [
+        "only 0 out-of-sample trades — not statistically meaningful",
+        "parameters are fixed research defaults (not optimized); survivorship bias: universe is today's liquid listings"
+      ]
+    },
+    {
+      "scenario": "synthetic-range",
+      "seed": 11,
+      "strategy": "trend_pullback",
+      "bars": 4000,
+      "all": {
+        "trades": 49,
+        "winRate": 0.3877551020408163,
+        "avgR": 0.03572392473874025,
+        "expectancyR": 0.03572392473874025,
+        "profitFactor": 1.0675667082871712,
+        "maxDrawdownR": 6.046349565868799,
+        "totalR": 1.750472312198272,
+        "avgBars": 16.489795918367346
+      },
+      "inSample": {
+        "trades": 18,
+        "winRate": 0.3888888888888889,
+        "avgR": 0.11730091925933205,
+        "expectancyR": 0.11730091925933205,
+        "profitFactor": 1.2505772689777885,
+        "maxDrawdownR": 6.046349565868799,
+        "totalR": 2.111416546667977,
+        "avgBars": 19.11111111111111
+      },
+      "outOfSample": {
+        "trades": 31,
+        "winRate": 0.3870967741935484,
+        "avgR": -0.011643362402248584,
+        "expectancyR": -0.011643362402248584,
+        "profitFactor": 0.9793523277967771,
+        "maxDrawdownR": 5.8462406488388865,
+        "totalR": -0.36094423446970614,
+        "avgBars": 14.96774193548387
+      },
+      "warnings": [
+        "history ends with an open position; closed-trade statistics exclude its unrealized PnL and entry costs",
+        "parameters are fixed research defaults (not optimized); survivorship bias: universe is today's liquid listings"
+      ]
+    },
+    {
+      "scenario": "synthetic-range",
+      "seed": 11,
+      "strategy": "donchian_breakout",
+      "bars": 4000,
+      "all": {
+        "trades": 13,
+        "winRate": 0.38461538461538464,
+        "avgR": 0.35302502089455806,
+        "expectancyR": 0.35302502089455806,
+        "profitFactor": 1.5844945850127767,
+        "maxDrawdownR": 3.3307139178890512,
+        "totalR": 4.589325271629255,
+        "avgBars": 21.53846153846154
+      },
+      "inSample": {
+        "trades": 4,
+        "winRate": 0.5,
+        "avgR": 0.6393312105552099,
+        "expectancyR": 0.6393312105552099,
+        "profitFactor": 3.1019379015499076,
+        "maxDrawdownR": 1.2166509963663261,
+        "totalR": 2.5573248422208397,
+        "avgBars": 24
+      },
+      "outOfSample": {
+        "trades": 9,
+        "winRate": 0.3333333333333333,
+        "avgR": 0.2257778254898238,
+        "expectancyR": 0.2257778254898238,
+        "profitFactor": 1.3062486323703346,
+        "maxDrawdownR": 3.3307139178890512,
+        "totalR": 2.032000429408414,
+        "avgBars": 20.444444444444443
+      },
+      "warnings": [
+        "only 9 out-of-sample trades — not statistically meaningful",
+        "parameters are fixed research defaults (not optimized); survivorship bias: universe is today's liquid listings"
+      ]
+    },
+    {
+      "scenario": "synthetic-range",
+      "seed": 11,
+      "strategy": "range_reversion",
+      "bars": 4000,
+      "all": {
+        "trades": 3,
+        "winRate": 0.3333333333333333,
+        "avgR": 0.27802432188016807,
+        "expectancyR": 0.27802432188016807,
+        "profitFactor": 1.5976904044521414,
+        "maxDrawdownR": 1.150796248888415,
+        "totalR": 0.8340729656405041,
+        "avgBars": 14
+      },
+      "inSample": {
+        "trades": 3,
+        "winRate": 0.3333333333333333,
+        "avgR": 0.27802432188016807,
+        "expectancyR": 0.27802432188016807,
+        "profitFactor": 1.5976904044521414,
+        "maxDrawdownR": 1.150796248888415,
+        "totalR": 0.8340729656405041,
+        "avgBars": 14
+      },
+      "outOfSample": {
+        "trades": 0,
+        "winRate": 0,
+        "avgR": 0,
+        "expectancyR": 0,
+        "profitFactor": 0,
+        "maxDrawdownR": 0,
+        "totalR": 0,
+        "avgBars": 0
+      },
+      "warnings": [
+        "only 0 out-of-sample trades — not statistically meaningful",
+        "parameters are fixed research defaults (not optimized); survivorship bias: universe is today's liquid listings"
+      ]
+    }
+  ]
+}

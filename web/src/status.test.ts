@@ -71,6 +71,16 @@ describe('status ribbon model', () => {
     expect(seg(later.segments, 'risk').tone).toBe('unknown');
   });
 
+  it('a future engine completion cannot become healthy merely because its snapshot ages (CodeRabbit PR #9)', () => {
+    for (const bot of [{ lastScanAt: NOW + 10_000 }, { lastTickerAt: NOW + 10_000 }, { lastMonitorAt: NOW + 10_000 }]) {
+      const snapshot = shell({ bot: { ...shell().bot, ...bot } });
+      for (const elapsed of [0, 6_000, 15_000]) {
+        const status = deriveStatus({ ...base, shell: snapshot, now: MONO + elapsed });
+        expect(seg(status.segments, 'engine')).toMatchObject({ value: 'CLOCK?', tone: 'unknown' });
+      }
+    }
+  });
+
   it('future ticker timestamps and zero live feeds are not healthy', () => {
     expect(seg(deriveStatus({ ...base, shell: shell({ dataHealth: { stale: false, tickersAt: NOW + 60_000, scanAt: 0, live: 7, degraded: 0 } }) }).segments, 'data')).toMatchObject({ value: 'CLOCK?', tone: 'unknown' });
     expect(seg(deriveStatus({ ...base, shell: shell({ dataHealth: { stale: false, tickersAt: NOW - 1_000, scanAt: 0, live: 0, degraded: 0 } }) }).segments, 'data').tone).toBe('unknown');

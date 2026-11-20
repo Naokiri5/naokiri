@@ -30,7 +30,7 @@ const PREFIX = 'mia-';
 export interface BackupManifest { file: string; createdAt: number; schema: number; bytes: number; sha256: string; encrypted: boolean; format: 'sqlite' | 'MIAB1-aes-256-gcm' }
 export interface VerifyResult { ok: boolean; file: string; createdAt: number | null; checks: { name: string; ok: boolean; detail: string }[]; sha256?: string }
 /** A recorded verification, bound to the exact bytes that were verified (CodeRabbit #14: a PASS must not survive a changed file). */
-export interface RecordedVerification extends Omit<VerifyResult, 'sha256'> { at: number; sha256: string | null; bytes: number | null; mtimeMs: number | null; recordError?: string }
+export interface RecordedVerification extends Omit<VerifyResult, 'sha256'> { at: number; directoryHash: string; sha256: string | null; bytes: number | null; mtimeMs: number | null; recordError?: string }
 const restoreWorkspace = () => mkdtempSync(join(tmpdir(), 'mia-verify-'));
 
 export const backupDir = () => process.env.MIA_BACKUP_DIR || join(config.dataDir, 'backups');
@@ -56,6 +56,8 @@ export function backupKey(value = process.env.MIA_BACKUP_KEY): Buffer | null {
   return k;
 }
 const sha256File = (f: string) => createHash('sha256').update(readFileSync(f)).digest('hex');
+// Bind to the verified directory without exposing an absolute filesystem path in the owner status response.
+const directoryHash = (dir: string) => createHash('sha256').update(resolve(dir)).digest('hex');
 const stamp = (t: number) => new Date(t).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 
 export function encrypt(plain: Buffer, key: Buffer): Buffer {
@@ -214,6 +216,7 @@ export async function maybeScheduledBackup(nowTs = Date.now()): Promise<(BackupM
   // Verify off the event loop (MA-14), record it (DATA-3), and only then prune, so the new backup is checked before
   // anything older is removed. A pruning error never hides the completed backup or its verification (CodeRabbit #14).
   const verification = recordVerification(file, await verifyBackupInWorker(file), nowTs);
+  if (verification.recordError) return { ...m, verification, retentionWarning: 'Backup retention skipped because the verification status could not be recorded.' };
   try { pruneBackups(); }
   catch { return { ...m, verification, retentionWarning: 'The new backup is stored, but older backups could not be pruned.' }; }
   return { ...m, verification };
@@ -227,7 +230,7 @@ export function recordVerification(file: string, result: VerifyResult, nowTs = D
   let sha256: string | null = null; let bytes: number | null = null; let mtimeMs: number | null = null;
   // Bind to the checksum the verification itself computed (no second read after the check), plus size and mtime.
   if (result.ok && result.sha256) { try { const st = statSync(file); sha256 = result.sha256; bytes = st.size; mtimeMs = st.mtimeMs; } catch { /* unreadable now: no binding, so status cannot PASS */ } }
-  const lastVerify: RecordedVerification = { ...result, at: nowTs, sha256, bytes, mtimeMs, checks: result.checks.map((c) => c.name === 'open' ? { ...c, detail: 'cannot read snapshot' } : c) };
+  const lastVerify: RecordedVerification = { ...result, at: nowTs, directoryHash: directoryHash(dirname(file)), sha256, bytes, mtimeMs, checks: result.checks.map((c) => c.name === 'open' ? { ...c, detail: 'cannot read snapshot' } : c) };
   try {
     setSetting('backup.lastVerify', lastVerify);
     if (lastVerify.ok && sha256 && resolve(dirname(file)) === resolve(backupDir())) setSetting('backup.lastGoodVerify', { file: lastVerify.file, createdAt: lastVerify.createdAt });
@@ -249,6 +252,9 @@ export function backupVerificationStatus(nowTs = Date.now()): { lastVerify: Reco
     lastVerify = getSetting<RecordedVerification | null>('backup.lastVerify', null);
     if (!lastVerify) return { lastVerify, check: { status: 'WARN', detail: 'No recorded backup verification' } };
     if (!lastVerify.ok) return { lastVerify, check: { status: 'FAIL', detail: `Backup verification failed: ${lastVerify.checks.filter((c) => !c.ok).map((c) => c.name).join(', ')}` } };
+    if (lastVerify.directoryHash !== directoryHash(backupDir())) {
+      return { lastVerify, check: { status: 'WARN', detail: 'The verification did not check the configured backup directory; verify a local backup again' } };
+    }
     const maxAge = Math.min(7 * 86400_000, 2 * (backupIntervalMs() || 86400_000));
     if (!Number.isFinite(lastVerify.at) || lastVerify.createdAt === null || !Number.isFinite(lastVerify.createdAt)
       || lastVerify.at > nowTs || lastVerify.createdAt > nowTs || nowTs - lastVerify.at > maxAge || nowTs - lastVerify.createdAt > maxAge) {
@@ -258,8 +264,11 @@ export function backupVerificationStatus(nowTs = Date.now()): { lastVerify: Reco
     if (!manifest) return { lastVerify, check: { status: 'WARN', detail: 'Verified backup is not present in the configured backup directory' } };
     let st: { size: number; mtimeMs: number } | null = null;
     try { st = statSync(join(backupDir(), manifest.file)); } catch { st = null; }
-    // Bound to the verified bytes: the manifest checksum, size and modification time must all still match.
+    // Metadata can stay unchanged after same-size corruption. Check the actual stored bytes as well as the manifest.
     if (!lastVerify.sha256 || manifest.sha256 !== lastVerify.sha256 || !st || st.size !== lastVerify.bytes || st.mtimeMs !== lastVerify.mtimeMs) {
+      return { lastVerify, check: { status: 'WARN', detail: 'The backup on disk changed since it was verified; verify it again' } };
+    }
+    if (sha256File(join(backupDir(), manifest.file)) !== lastVerify.sha256) {
       return { lastVerify, check: { status: 'WARN', detail: 'The backup on disk changed since it was verified; verify it again' } };
     }
     return { lastVerify, check: { status: 'PASS', detail: `${lastVerify.file} verified ${new Date(lastVerify.at).toISOString()}; ledger reconciliation passed` } };
