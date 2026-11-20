@@ -9,6 +9,7 @@ import { all, get } from '../db/db.js';
 import { iso, floorToStep } from '../core/util.js';
 import { getSetting } from '../core/settings.js';
 import { openIncidentFor } from '../exec/incidents.js';
+import { assessStoredMacroEntry } from './macroCalendar.js';
 
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
@@ -58,6 +59,12 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
 
   const inst = market.instruments.get(p.instrumentId);
   if (!inst) { deny.push('INSTRUMENT_UNKNOWN'); return out(); }
+  // Optional scheduled macro-event protection. OFF is explicit, never described as verified coverage.
+  // ENFORCE + stale/invalid source fails closed; the locked OMS re-evaluates this gate before entry.
+  const macro = assessStoredMacroEntry({ base: inst.base, quote: inst.quote }, nowTs);
+  ev.macroCalendar = macro.status;
+  ev.macroCalendarReason = macro.reasonCode;
+  if (macro.blocked) deny.push(`MACRO_CALENDAR:${macro.reasonCode}`);
   // An instrument where an open paper position cannot currently be exited must not receive new exposure.
   const incident = openIncidentFor(p.instrumentId);
   if (incident) deny.push(`PROTECTION_INCIDENT_OPEN:${incident.id}`);

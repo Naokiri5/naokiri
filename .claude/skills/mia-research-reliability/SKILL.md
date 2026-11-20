@@ -36,3 +36,12 @@ Use when adapting TradingAgents, Hummingbot, Freqtrade, skfolio, TA-Lib, Lightwe
 ## Definition of done
 
 Source evidence, license, duplicate decision, canonical owner, regression tests and actual CI results are documented on the exact commit. Run typecheck, unit tests, build, e2e, secret scan and dependency audit. Present NOT VERIFIED honestly. Only owner may approve merge/deployment; live execution requires a separately authorized, independently verified release.
+
+
+## Macro-veto and fractional-Kelly attachment reconciliation (Nov 2026)
+
+The owner's supplied \`MacroCalendarVetoSkill\` and \`CapitalAllocatorSkill\` examples are **not drop-in implementations** for this repository. The profit calendar is not a future macro schedule; the existing \`risk/gate.ts\` and \`exec/oms.ts\` remain the **sole** authorization/sizing authority, rechecked under the OMS write fence.
+
+Use the additive \`risk/macroCalendar.ts\` pure assessor and owner-configurable snapshot only with known currency/time coverage. No real provider is wired yet: \`NOT_CONFIGURED\` is not a proof of safety. ENFORCE with a stale/corrupt snapshot denies new paper entries; no automatic flattening or change to protective exits.
+
+\`risk/allocationResearch.ts\` is strictly shadow research. Never convert \`ReplayEvolutionSkill.confidenceScore\`, QCI confidence, or worker score into a win probability. Require real out-of-sample evidence before interpreting a lower probability bound; do not auto-size trades with the research output. No new risk governor or live adapter.
