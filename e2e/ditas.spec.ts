@@ -40,12 +40,32 @@ test('DITAS separates hypothetical results and exposes stored decision evidence'
     event: { id: 'event-fixture', payload: { reason: 'Rejected because the fixture spread was too wide.' } },
     snapshot: { id: 'snapshot-fixture', source: 'test-fixture' }, relatedEvents: []
   } }));
+  let behaviorUnavailable = false;
+  await page.route('**/api/ditas/events/event-fixture/behavior-evidence', route => behaviorUnavailable
+    ? route.fulfill({ status: 409, json: { error: 'frozen evidence integrity check failed' } })
+    : route.fulfill({ json: {
+      schemaVersion: 'bmind.evidence.v1', use: 'RESEARCH_ONLY', asOf: stamp, status: 'AVAILABLE', dataQuality: 'WARN',
+      evidence: [
+        { kind: 'TICKER', status: 'AVAILABLE', originId: 'a'.repeat(64), dependencyGroup: 'binance',
+          eventTimeMs: stamp - 1000, receivedTimeMs: stamp, requestStartedAtMs: null },
+        { kind: 'BOOK', status: 'STALE', reason: 'BOOK_EXPIRED_AT_CAPTURE' },
+      ],
+    } }));
   await page.goto('/ditas');
   await expect(page.getByText('$12.00', { exact: true })).toBeVisible();
   await page.getByRole('tab', { name: 'Decision ledger' }).click();
   await page.getByRole('button', { name: 'Inspect decision' }).click();
+  const behavior = page.getByRole('region', { name: 'B-MIND evidence' });
+  await expect(behavior).toContainText('Research only');
+  await expect(behavior).toContainText('binance');
+  await expect(behavior).toContainText('The order book was stale at capture.');
   await expect(page.getByRole('dialog')).toContainText('Rejected because the fixture spread was too wide.');
   await expect(page.getByRole('dialog')).toContainText('snapshot-fixture');
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  behaviorUnavailable = true;
+  await page.getByRole('button', { name: 'Inspect decision' }).click();
+  await expect(behavior.getByRole('alert')).toContainText('frozen evidence integrity check failed');
+  await expect(page.getByRole('dialog')).toContainText('Rejected because the fixture spread was too wide.');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
   await page.getByRole('tab', { name: 'Decision Twin' }).click();
   await expect(page.getByText('HYPOTHETICAL', { exact: true })).toBeVisible();

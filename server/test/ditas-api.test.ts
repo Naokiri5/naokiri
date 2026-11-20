@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/index.js';
 import { all, closeDb, get, J, run } from '../src/db/db.js';
 import { sha256 } from '../src/core/util.js';
+import { bus } from '../src/core/bus.js';
 import { market } from '../src/market/store.js';
 import { recordOpportunity, memoryDetail } from '../src/ditas/memory.js';
 import type { Candidate } from '../src/workers/types.js';
@@ -44,6 +45,73 @@ describe('DITAS authenticated API and persisted service integration', () => {
     expect(d.calibration).toMatchObject({ status: 'UNCALIBRATED', sample: 0, brierScore: null });
     expect(d.controls.mode).toBe('OBSERVE');
     expect((await app.inject({ url: '/api/ditas/events/absent', headers: headers() })).statusCode).toBe(404);
+  });
+
+  it('returns only the same frozen behavioral evidence to the owner, without writing trade state', async () => {
+    const event = createEvent();
+    const snapshot = memoryDetail(event.id)!.snapshot!;
+    const url = `/api/ditas/events/${event.id}/behavior-evidence`;
+    expect((await app.inject({ url })).statusCode).toBe(401);
+    const first = await app.inject({ url, headers: { cookie } });
+    expect(first.statusCode, first.body).toBe(200);
+    expect(first.headers['cache-control']).toBe('no-store');
+    expect(first.json()).toMatchObject({
+      eventId: event.id, instrumentId: event.instrumentId, snapshotId: snapshot.id,
+      asOf: snapshot.asOf, status: 'AVAILABLE', use: 'RESEARCH_ONLY',
+      evidence: [
+        { kind: 'TICKER', status: 'AVAILABLE', dependencyGroup: 'binance', eventTimeMs: T, receivedTimeMs: T },
+        { kind: 'BOOK', status: 'AVAILABLE', dependencyGroup: 'binance', eventTimeMs: null, receivedTimeMs: null },
+      ],
+    });
+    const retry = recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: event.instrumentId, dedupeKey: 'behavior:reuse-source', reason: 'fixture' });
+    const repeated = await app.inject({ url: `/api/ditas/events/${retry.id}/behavior-evidence`, headers: headers() });
+    expect(repeated.json().evidence.map((e: { originId: string }) => e.originId)).toEqual(
+      first.json().evidence.map((e: { originId: string }) => e.originId),
+    );
+    market.reset();
+    vi.setSystemTime(T + HOUR);
+    const tables = ['ditas_events', 'ditas_snapshots', 'ditas_twin_runs', 'ditas_forecasts', 'ditas_outcomes',
+      'decisions', 'orders', 'fills', 'positions', 'ledger_entries', 'settings', 'audit_log'];
+    const rows = () => tables.map(table => all(`SELECT * FROM ${table}`));
+    const before = rows();
+    const publish = vi.spyOn(bus, 'publish');
+    try {
+      expect((await app.inject({ url, headers: { cookie } })).json()).toEqual(first.json());
+      expect(rows()).toEqual(before);
+      expect(publish).not.toHaveBeenCalled();
+    } finally {
+      publish.mockRestore();
+    }
+  });
+
+  it('limits archived evidence reads per session and leaves ordinary decision details available', async () => {
+    const event = createEvent();
+    const url = `/api/ditas/events/${event.id}/behavior-evidence`;
+    for (let read = 0; read < 20; read++) {
+      expect((await app.inject({ url, headers: { cookie } })).statusCode).toBe(200);
+    }
+    const limited = await app.inject({ url, headers: { cookie } });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.headers['retry-after']).toBe('1');
+    expect((await app.inject({ url: `/api/ditas/events/${event.id}`, headers: { cookie } })).statusCode).toBe(200);
+    vi.setSystemTime(T + 1_000);
+    expect((await app.inject({ url, headers: { cookie } })).statusCode).toBe(200);
+  });
+
+  it('reports missing evidence and rejects corrupted snapshot bytes', async () => {
+    const missing = recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: 'crypto:binance:MISSINGUSDT', dedupeKey: 'behavior:missing', reason: 'fixture' });
+    const url = `/api/ditas/events/${missing.id}/behavior-evidence`;
+    expect((await app.inject({ url, headers: headers() })).json()).toMatchObject({
+      status: 'UNKNOWN', evidence: [{ kind: 'TICKER', status: 'UNKNOWN' }, { kind: 'BOOK', status: 'UNKNOWN' }],
+    });
+    const hash = sha256('original bytes'), snapshotId = `snap_${hash}`;
+    run('INSERT INTO ditas_snapshots(id,created_at,instrument,payload,hash) VALUES (?,?,?,?,?)',
+      snapshotId, T, missing.instrumentId, '{}', hash);
+    const corrupt = recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: missing.instrumentId, snapshotId,
+      dedupeKey: 'behavior:corrupt', reason: 'fixture with mismatched snapshot bytes' });
+    const rejected = await app.inject({ url: `/api/ditas/events/${corrupt.id}/behavior-evidence`, headers: headers() });
+    expect(rejected.statusCode).toBe(409);
+    expect((await app.inject({ url: '/api/ditas/events/absent/behavior-evidence', headers: headers() })).statusCode).toBe(404);
   });
 
   it('uses frozen depth, stores hashed provenance, and cannot write actual execution ledgers', async () => {
