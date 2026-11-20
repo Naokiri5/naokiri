@@ -8,7 +8,7 @@ export interface NavGroup { id: string; label: string; icon: string; desc: strin
 
 export const NAV_GROUPS: NavGroup[] = [
   { id: 'home', label: 'Home', icon: '⌂', desc: 'Account, risk and market overview', pages: [
-    { to: '/', icon: '◎', label: 'Overview', desc: 'Paper account, risk monitor, opportunities and activity', keywords: ['dashboard', 'home', 'summary', 'start'] },
+    { to: '/app', icon: '◎', label: 'Overview', desc: 'Paper account, risk monitor, opportunities and activity', keywords: ['dashboard', 'home', 'summary', 'start'] },
   ] },
   { id: 'markets', label: 'Markets', icon: '▥', desc: 'Prices, charts, scanners and market news', also: ['/terminal/'], pages: [
     { to: '/terminal', icon: '▤', label: 'Market Terminal', desc: 'Candlestick chart, indicators and order book', keywords: ['chart', 'candles', 'price', 'order book', 'indicators'] },
