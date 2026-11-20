@@ -41,8 +41,13 @@ const defaultFactory: Factory = async (id) => {
   return new ccxt[id]({ enableRateLimit: true, timeout: 10_000 }); // no credentials, by design
 };
 let factory: Factory = defaultFactory;
+const initializedRateLimits = new Set<CcxtExchangeId>();
 /** Test hook: substitute a fake exchange factory (no network). */
-export function _setCcxtFactoryForTests(f: Factory | null) { factory = f ?? defaultFactory; cache.clear(); }
+export function _setCcxtFactoryForTests(f: Factory | null) {
+  factory = f ?? defaultFactory;
+  cache.clear();
+  initializedRateLimits.clear();
+}
 
 const providerId = (id: CcxtExchangeId) => `ccxt-${id}`;
 for (const id of CCXT_EXCHANGES) {
@@ -113,7 +118,11 @@ async function exchange(id: string): Promise<CcxtLike> {
         ex.setSandboxMode(true);
       }
       installTransport(ex, eid);
-      setRateLimit(providerId(eid), Math.max(10, Math.floor((60_000 / Math.max(ex.rateLimit, 50)) / 2))); // half of CCXT's documented pace
+      // An exchange can be rebuilt after a failed load, but requests still spend the same provider budget.
+      if (!initializedRateLimits.has(eid)) {
+        setRateLimit(providerId(eid), Math.max(10, Math.floor((60_000 / Math.max(ex.rateLimit, 50)) / 2)));
+        initializedRateLimits.add(eid);
+      }
       return ex;
     })();
     cache.set(key, p);

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
@@ -82,6 +82,30 @@ describe('CCXT research adapter', () => {
     expect(built).toBe(2);
     await cx.ccxtMarkets('kraken');
     expect(built).toBe(2); // a working instance is reused
+  });
+  it('keeps the same provider request budget across failed exchange instances', async () => {
+    vi.useFakeTimers();
+    try {
+      Object.assign(config, { offline: false });
+      stubFetch({}, 500);
+      const factory = vi.fn(async (id: cx.CcxtExchangeId) => fakeExchange(id, { rateLimit: 60_000 }));
+      cx._setCcxtFactoryForTests(factory);
+      for (let i = 0; i < 10; i++) {
+        await expect(cx.ccxtMarkets('kraken')).rejects.toMatchObject({ status: 500 });
+      }
+      expect(calls).toHaveLength(10);
+
+      const retry = expect(cx.ccxtMarkets('kraken')).rejects.toMatchObject({ status: 500 });
+      try {
+        await vi.advanceTimersByTimeAsync(5_999);
+        expect(factory).toHaveBeenCalledTimes(11);
+        expect(calls).toHaveLength(10);
+      } finally {
+        await vi.advanceTimersByTimeAsync(1);
+        await retry;
+      }
+      expect(calls).toHaveLength(11);
+    } finally { vi.useRealTimers(); }
   });
   it('refuses an exchange instance that carries any credential', async () => {
     cx._setCcxtFactoryForTests(async (id) => fakeExchange(id, { apiKey: 'k' }));

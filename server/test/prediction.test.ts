@@ -165,6 +165,16 @@ describe('venue parsing (untrusted replies)', () => {
     const old = v.normaliseKalshiBook({ orderbook: { yes: [[40, 100]], no: [[55, 80]] } });
     for (const b of [cur, old]) { expect(b.bids[0]).toEqual({ price: 0.4, size: 100 }); expect(b.asks[0]).toEqual({ price: 0.45, size: 80 }); }
   });
+  it('keeps the best 200 levels on both sides of an ascending Kalshi fixed-point ladder', () => {
+    const ladder = (start: number) => Array.from({ length: 300 }, (_, i) => [((start + i) / 1000).toFixed(3), '1']);
+    const book = v.normaliseKalshiBook({ orderbook_fp: { yes_dollars: ladder(1), no_dollars: ladder(301) } });
+    expect(book.bids).toHaveLength(200);
+    expect(book.asks).toHaveLength(200);
+    expect(book.bids[0]).toEqual({ price: 0.3, size: 1 });
+    expect(book.asks[0]).toEqual({ price: 0.4, size: 1 });
+    expect(book.bids.at(-1)?.price).toBe(0.101);
+    expect(book.asks.at(-1)?.price).toBe(0.599);
+  });
 });
 
 describe('prediction routes', () => {

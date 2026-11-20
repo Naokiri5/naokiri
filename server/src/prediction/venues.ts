@@ -140,9 +140,8 @@ export async function kalshiMarkets(o: { query?: string; limit?: number } = {}):
 export function normaliseKalshiBook(raw: unknown): Book {
   const root = (raw ?? {}) as Record<string, unknown>;
   const fp = root.orderbook_fp as Record<string, unknown> | undefined; const ob = root.orderbook as Record<string, unknown> | undefined;
-  // Kalshi lists bids in ascending price order (best last), so the 50-entry metadata bound in `arr` would drop the best
-  // levels. A price ladder has at most 99 levels per side; parse up to 200, then normaliseBook sorts (CodeRabbit #45).
-  const levels = (v: unknown): unknown[] => (Array.isArray(v) ? v.slice(0, 200) : []);
+  // Kalshi lists bids in ascending price order. Keep the highest 200 on each side before mirroring the NO bids.
+  const levels = (v: unknown): unknown[] => (Array.isArray(v) ? v.slice(-200) : []);
   const pairs = (v: unknown, cents: boolean): Level[] => levels(v).map((p) => {
     const [a, b] = Array.isArray(p) ? p : [];
     const price = num(a); return { price: price === null ? NaN : cents ? price / 100 : price, size: num(b) ?? NaN };
