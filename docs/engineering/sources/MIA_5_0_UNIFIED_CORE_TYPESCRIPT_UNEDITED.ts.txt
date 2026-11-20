@@ -1,0 +1,2067 @@
+    takeProfitPrice: number;​
+    regimeAtEntry: MarketRegime;​
+    riskUsd: number;​
+    approvedAtMs: number;TypeScript
+   /**​
+    *
+   ============================================================================​
+    * MIA 5.0 — UNIFIED UNIDIRECTIONAL TRADING CORE (Naokiri5/naokiri)​
+    *
+   ============================================================================​
+    * @package @mia/server​
+    * @version 5.0.0​
+    *​
+    * PIPELINE TOPOLOGY (STRICT ONE-WAY DAG):​
+    * [MarketIngress] -> [NexusFabricRouter] -> [Strategy Workers: Reflex / Confluence]​
+
+*    -> [UnifiedRiskGovernor (Hard Veto + Sizing)] -> [Paper/Live OMS Adapter]​
+*    -> [CanonicalPositionLedger (SQLite WAL)] -> [ExitSupervisor + SSE Telemetry]​
+*
+============================================================================​
+*/​
+​
+import Database from 'better-sqlite3';​
+import { createHmac, randomUUID } from 'node:crypto';​
+import { EventEmitter } from 'node:events';​
+import type { Request, Response } from 'express';​
+import { MessagePort, Worker } from 'node:worker_threads';​
+import WebSocket from 'ws';​
+​
+/*
+============================================================================​
+ * @module MIA-CORE-01: FABRIC TYPES & UNIDIRECTIONAL NEXUS ROUTER​
+ * ==========================================================================
+*/​
+​
+export type EngineSource = 'FAST_REFLEX' | 'DEEP_CONFLUENCE' | 'EXIT_SUPERVISOR';​
+export type TradeSide = 'BUY' | 'SELL';​
+export type WorkerRole = 'INGRESS' | 'STRATEGY' | 'RISK' | 'OMS' | 'LEDGER' | 'TELEMETRY';​
+​
+export type MarketRegime =​
+    | 'LOW_VOL_CHOP'​
+    | 'TRENDING'​
+    | 'HIGH_VOL_EXPANSION'​
+    | 'LIQUIDATION_CASCADE';​
+​
+export interface MarketFrame {​
+    symbol: string;​
+  tsNs: bigint;​
+  bestBid: number;​
+  bestAsk: number;​
+  bidDepthTop3: number;​
+  askDepthTop3: number;​
+  ofiL5: number; // Order Flow Imbalance across top 5 L2 levels [-1, 1]​
+  vpin: number; // Volume-Synchronized Probability of Informed Trading [0, 1]​
+  atr14: number;​
+}​
+​
+export interface RegimeSnapshot {​
+  symbol: string;​
+  regime: MarketRegime;​
+
+  confidence: number; // [0, 1]​
+  htfBias: TradeSide | 'NEUTRAL';​
+  fundingRate: number;​
+  updatedAtMs: number;​
+}​
+​
+export interface CandidateSignal {​
+  signalId: string;​
+  engine: Exclude<EngineSource, 'EXIT_SUPERVISOR'>;​
+  symbol: string;​
+  side: TradeSide;​
+  entryPrice: number;​
+  stopLossPrice: number;​
+  takeProfitPrice: number;​
+  l2ImbalanceRatio: number;​
+  confidence: number;​
+  tsMs: number;​
+}​
+​
+export interface ExitOrderIntent {​
+  intentId: string;​
+  positionId: string;​
+  symbol: string;​
+  side: TradeSide;​
+  qty: number;​
+  stage: 1 | 2 | 3 | 4 | 5;​
+  reason: string;​
+  urgentMarket: boolean;​
+  tsMs: number;​
+}​
+​
+export interface ApprovedOrderIntent {​
+  clientOrderId: string;​
+  signalId: string;​
+  engine: EngineSource;​
+  symbol: string;​
+  side: TradeSide;​
+  orderType: 'LIMIT_POST_ONLY' | 'LIMIT_IOC' | 'MARKET';​
+  limitPrice: number;​
+  qty: number;​
+  notionalUsd: number;​
+  stopLossPrice: number;​
+​
+
+}​
+​
+export interface RiskVetoEvent {​
+ signalId: string;​
+  engine: EngineSource;​
+  symbol: string;​
+  reasonCode:​
+    | 'CIRCUIT_BREAKER_DRAWDOWN'​
+    | 'MACRO_CALENDAR_VETO'​
+    | 'TOXICITY_VPIN_HALT'​
+    | 'SPREAD_OR_DEPTH_GUARD'​
+    | 'CORRELATED_DELTA_CAP'​
+    | 'REGIME_BLOCKED'​
+    | 'MIN_NOTIONAL_OR_ZERO_SIZE';​
+  detail: string;​
+  tsMs: number;​
+}​
+​
+export interface FillEvent {​
+  clientOrderId: string;​
+  positionId: string;​
+  symbol: string;​
+  side: TradeSide;​
+  filledQty: number;​
+  avgFillPrice: number;​
+  feeUsd: number;​
+  midPriceAtFill: number;​
+  tsMs: number;​
+}​
+​
+export interface MarkoutSample {​
+  clientOrderId: string;​
+  symbol: string;​
+  engine: EngineSource;​
+  side: TradeSide;​
+  fillPrice: number;​
+  midPrice5sLater: number;​
+  markoutBps: number;​
+  tsMs: number;​
+}​
+​
+export interface CanonicalPosition {​
+  positionId: string;​
+
+  symbol: string;​
+  side: TradeSide;​
+  qty: number;​
+  entryPrice: number;​
+  unrealizedPnlUsd: number;​
+  realizedPnlUsd: number;​
+  stopLossPrice: number;​
+  updatedAtMs: number;​
+}​
+​
+export interface FabricTopicMap {​
+  'market:frame': (frame: MarketFrame) => void;​
+  'regime:update': (regime: RegimeSnapshot) => void;​
+  'signal:candidate': (signal: CandidateSignal) => void;​
+  'exit:intent': (exit: ExitOrderIntent) => void;​
+  'order:approved': (intent: ApprovedOrderIntent) => void;​
+  'risk:veto': (veto: RiskVetoEvent) => void;​
+  'oms:fill': (fill: FillEvent) => void;​
+  'tca:markout': (markout: MarkoutSample) => void;​
+  'ledger:position': (pos: CanonicalPosition) => void;​
+  'fabric:error': (err: { source: string; error: unknown; tsMs: number }) => void;​
+}​
+​
+const ALLOWED_PUBLISHERS: Record<keyof FabricTopicMap,
+ReadonlyArray<WorkerRole>> = {​
+  'market:frame': ['INGRESS'],​
+  'regime:update': ['STRATEGY'],​
+  'signal:candidate': ['STRATEGY'],​
+  'exit:intent': ['LEDGER'],​
+  'order:approved': ['RISK'],​
+  'risk:veto': ['RISK'],​
+  'oms:fill': ['OMS'],​
+  'tca:markout': ['LEDGER', 'TELEMETRY'],​
+  'ledger:position': ['LEDGER'],​
+  'fabric:error': ['INGRESS', 'STRATEGY', 'RISK', 'OMS', 'LEDGER', 'TELEMETRY'],​
+};​
+​
+interface RegisteredPort {​
+  name: string;​
+  role: WorkerRole;​
+  port: MessagePort | Worker;​
+}​
+​
+
+/**​
+ * @id MIA-CORE-01​
+ * @description Single typed event bus enforcing unidirectional DAG permissions and 5s TCA
+markout sampling.​
+ */​
+export class NexusFabricRouter extends EventEmitter {​
+    private readonly ports = new Map<string, RegisteredPort>();​
+    private readonly latestFrames = new Map<string, MarketFrame>();​
+    private readonly latestRegimes = new Map<string, RegimeSnapshot>();​
+    private readonly pendingMarkouts = new Map<string, NodeJS.Timeout>();​
+    private isHalted = false;​
+​
+    public registerWorkerPort(name: string, role: WorkerRole, port: MessagePort | Worker): void
+{​
+     if (this.ports.has(name)) {​
+      throw new Error(`[MIA-CORE-01] Duplicate worker registration: "${name}"`);​
+     }​
+​
+     this.ports.set(name, { name, role, port });​
+​
+     port.on('message', (envelope: { topic?: keyof FabricTopicMap; payload?: unknown }) => {​
+       if (!envelope || typeof envelope.topic !== 'string') return;​
+       this.publishFromRole(role, name, envelope.topic, envelope.payload as never);​
+     });​
+​
+      port.on('error', (error) => {​
+        this.emitTyped('fabric:error', { source: name, error, tsMs: Date.now() });​
+      });​
+    }​
+​
+    public publishFromRole<K extends keyof FabricTopicMap>(​
+      role: WorkerRole,​
+      sourceName: string,​
+      topic: K,​
+      payload: Parameters<FabricTopicMap[K]>[0]​
+    ): boolean {​
+      const allowed = ALLOWED_PUBLISHERS[topic];​
+      if (!allowed.includes(role)) {​
+        this.emitTyped('fabric:error', {​
+          source: sourceName,​
+          error: new Error(​
+       `[MIA-CORE-01] UNIDIRECTIONAL_VIOLATION: Role "${role}" (${sourceName}) cannot
+publish "${topic}"`​
+
+          ),​
+          tsMs: Date.now(),​
+         });​
+         return false;​
+     }​
+​
+     if (this.isHalted && topic === 'signal:candidate') {​
+         return false;​
+     }​
+​
+     if (topic === 'market:frame') {​
+         const frame = payload as MarketFrame;​
+         this.latestFrames.set(frame.symbol, frame);​
+     } else if (topic === 'regime:update') {​
+       const regime = payload as RegimeSnapshot;​
+       this.latestRegimes.set(regime.symbol, regime);​
+     } else if (topic === 'oms:fill') {​
+       this.schedulePostFillMarkout(payload as FillEvent);​
+     }​
+​
+     this.emitTyped(topic, payload);​
+     this.fanOutToPorts(topic, payload, sourceName);​
+     return true;​
+    }​
+​
+    public emitTyped<K extends keyof FabricTopicMap>(​
+      topic: K,​
+      payload: Parameters<FabricTopicMap[K]>[0]​
+    ): void {​
+      super.emit(topic, payload);​
+    }​
+​
+    public onTyped<K extends keyof FabricTopicMap>(topic: K, listener: FabricTopicMap[K]):
+this {​
+     super.on(topic, listener);​
+     return this;​
+    }​
+​
+    public getLatestFrame(symbol: string): MarketFrame | undefined {​
+     return this.latestFrames.get(symbol);​
+    }​
+​
+    public getLatestRegime(symbol: string): RegimeSnapshot | undefined {​
+
+     return this.latestRegimes.get(symbol);​
+    }​
+​
+    public setGlobalHalt(halted: boolean): void {​
+     this.isHalted = halted;​
+    }​
+​
+    private fanOutToPorts<K extends keyof FabricTopicMap>(​
+    topic: K,​
+    payload: Parameters<FabricTopicMap[K]>[0],​
+    originName: string​
+  ): void {​
+    for (const [name, entry] of this.ports.entries()) {​
+      if (name === originName) continue;​
+      if (entry.role === 'STRATEGY' && topic !== 'market:frame' && topic !== 'regime:update')
+continue;​
+      if (entry.role === 'OMS' && topic !== 'order:approved') continue;​
+      entry.port.postMessage({ topic, payload });​
+    }​
+  }​
+​
+  private schedulePostFillMarkout(fill: FillEvent): void {​
+    const timer = setTimeout(() => {​
+      this.pendingMarkouts.delete(fill.clientOrderId);​
+      const frame = this.latestFrames.get(fill.symbol);​
+      if (!frame) return;​
+​
+      const mid5s = (frame.bestBid + frame.bestAsk) / 2;​
+      const direction = fill.side === 'BUY' ? 1 : -1;​
+      const markoutBps = ((mid5s - fill.avgFillPrice) / fill.avgFillPrice) * 10_000 * direction;​
+​
+      const engine: EngineSource = fill.clientOrderId.startsWith('EX_')​
+        ? 'EXIT_SUPERVISOR'​
+        : fill.clientOrderId.startsWith('FR_')​
+          ? 'FAST_REFLEX'​
+          : 'DEEP_CONFLUENCE';​
+​
+      const sample: MarkoutSample = {​
+        clientOrderId: fill.clientOrderId,​
+        symbol: fill.symbol,​
+        engine,​
+        side: fill.side,​
+        fillPrice: fill.avgFillPrice,​
+
+          midPrice5sLater: mid5s,​
+         markoutBps,​
+         tsMs: Date.now(),​
+       };​
+​
+       this.publishFromRole('LEDGER', 'MarkoutSampler', 'tca:markout', sample);​
+     }, 5_000);​
+​
+      timer.unref();​
+      this.pendingMarkouts.set(fill.clientOrderId, timer);​
+    }​
+​
+    public shutdown(): void {​
+     for (const timer of this.pendingMarkouts.values()) {​
+       clearTimeout(timer);​
+     }​
+     this.pendingMarkouts.clear();​
+  }​
+}​
+​
+/*
+============================================================================​
+ * @module MIA-CORE-02: CANONICAL POSITION LEDGER (SQLITE WAL SINGLE SOURCE
+OF TRUTH)​
+ * ==========================================================================
+*/​
+​
+export interface ExchangePositionSnapshot {​
+    symbol: string;​
+  side: TradeSide;​
+  qty: number;​
+  entryPrice: number;​
+  unrealizedPnlUsd: number;​
+}​
+​
+interface ActivePositionRecord extends CanonicalPosition {​
+  engine: string;​
+  openedAtMs: number;​
+}​
+​
+/**​
+ * @id MIA-CORE-02​
+ * @description Atomic SQLite WAL position ledger with fill deduplication and exchange drift healing.​
+ */​
+
+export class CanonicalPositionLedger {​
+    private readonly db: Database.Database;​
+    private readonly positionsBySymbol = new Map<string, ActivePositionRecord>();​
+    private readonly orderMetaByClientId = new Map<string, ApprovedOrderIntent>();​
+    private equityUsd: number;​
+​
+    constructor(​
+      private readonly router: NexusFabricRouter,​
+      sqlitePath: string,​
+      initialEquityUsd: number​
+    ) {​
+     this.equityUsd = initialEquityUsd;​
+     this.db = new Database(sqlitePath);​
+     this.db.pragma('journal_mode = WAL');​
+     this.db.pragma('synchronous = NORMAL');​
+     this.initSchema();​
+     this.loadOpenPositionsFromDisk();​
+     this.bindFabricListeners();​
+    }​
+​
+    private initSchema(): void {​
+     this.db.exec(`​
+      CREATE TABLE IF NOT EXISTS canonical_positions (​
+        position_id TEXT PRIMARY KEY,​
+        symbol TEXT NOT NULL UNIQUE,​
+        side TEXT NOT NULL,​
+        qty REAL NOT NULL,​
+        entry_price REAL NOT NULL,​
+        stop_loss_price REAL NOT NULL,​
+        realized_pnl_usd REAL NOT NULL DEFAULT 0,​
+        engine TEXT NOT NULL,​
+        opened_at_ms INTEGER NOT NULL,​
+        updated_at_ms INTEGER NOT NULL​
+      );​
+​
+         CREATE TABLE IF NOT EXISTS processed_fills (​
+          fill_key TEXT PRIMARY KEY,​
+          client_order_id TEXT NOT NULL,​
+          position_id TEXT NOT NULL,​
+          symbol TEXT NOT NULL,​
+          side TEXT NOT NULL,​
+          filled_qty REAL NOT NULL,​
+          avg_fill_price REAL NOT NULL,​
+          fee_usd REAL NOT NULL,​
+          realized_pnl_delta REAL NOT NULL,​
+
+        ts_ms INTEGER NOT NULL​
+      );​
+​
+      CREATE TABLE IF NOT EXISTS account_state (​
+        id INTEGER PRIMARY KEY CHECK (id = 1),​
+        equity_usd REAL NOT NULL,​
+        updated_at_ms INTEGER NOT NULL​
+      );​
+     `);​
+​
+   const row = this.db.prepare('SELECT equity_usd FROM account_state WHERE id = 1').get()
+as​
+    | { equity_usd: number }​
+       | undefined;​
+​
+     if (row) {​
+       this.equityUsd = row.equity_usd;​
+      } else {​
+        this.db​
+          .prepare('INSERT INTO account_state (id, equity_usd, updated_at_ms) VALUES (1, ?, ?)')​
+          .run(this.equityUsd, Date.now());​
+      }​
+    }​
+​
+    private loadOpenPositionsFromDisk(): void {​
+     const rows = this.db.prepare('SELECT * FROM canonical_positions WHERE qty > 0').all() as
+Array<{​
+       position_id: string;​
+      symbol: string;​
+      side: TradeSide;​
+      qty: number;​
+      entry_price: number;​
+      stop_loss_price: number;​
+      realized_pnl_usd: number;​
+      engine: string;​
+      opened_at_ms: number;​
+      updated_at_ms: number;​
+     }>;​
+​
+     for (const r of rows) {​
+       this.positionsBySymbol.set(r.symbol, {​
+            positionId: r.position_id,​
+            symbol: r.symbol,​
+            side: r.side,​
+
+          qty: r.qty,​
+          entryPrice: r.entry_price,​
+          stopLossPrice: r.stop_loss_price,​
+          unrealizedPnlUsd: 0,​
+          realizedPnlUsd: r.realized_pnl_usd,​
+          engine: r.engine,​
+          openedAtMs: r.opened_at_ms,​
+          updatedAtMs: r.updated_at_ms,​
+        });​
+      }​
+    }​
+​
+    private bindFabricListeners(): void {​
+     this.router.onTyped('order:approved', (intent) => {​
+         this.orderMetaByClientId.set(intent.clientOrderId, intent);​
+         if (this.orderMetaByClientId.size > 1_000) {​
+          const oldest = this.orderMetaByClientId.keys().next().value;​
+          if (oldest) this.orderMetaByClientId.delete(oldest);​
+       }​
+     });​
+​
+     this.router.onTyped('oms:fill', (fill) => this.applyFillIdempotent(fill));​
+     this.router.onTyped('market:frame', (frame) => this.updateUnrealizedPnl(frame));​
+    }​
+​
+    public getEquity(): number {​
+     return this.equityUsd;​
+    }​
+​
+    public getTodayRealizedPnl(): number {​
+     const startOfDayUtc = new Date();​
+    startOfDayUtc.setUTCHours(0, 0, 0, 0);​
+    const row = this.db​
+      .prepare('SELECT COALESCE(SUM(realized_pnl_delta), 0) AS pnl FROM processed_fills
+WHERE ts_ms >= ?')​
+      .get(startOfDayUtc.getTime()) as { pnl: number };​
+    return row.pnl;​
+  }​
+​
+  public getOpenPositions(): CanonicalPosition[] {​
+    return Array.from(this.positionsBySymbol.values()).map(​
+      ({ engine: _e, openedAtMs: _o, ...pos }) => pos​
+    );​
+
+    }​
+​
+    public broadcastStartupPositions(): void {​
+     for (const pos of this.getOpenPositions()) {​
+         this.router.publishFromRole('LEDGER', 'CanonicalPositionLedger', 'ledger:position', pos);​
+      }​
+    }​
+​
+    public applyFillIdempotent(fill: FillEvent): void {​
+     const fillKey = `${fill.clientOrderId}:${fill.tsMs}:${fill.filledQty}:${fill.avgFillPrice}`;​
+​
+     const applyTx = this.db.transaction((): CanonicalPosition | null => {​
+         const seen = this.db.prepare('SELECT 1 FROM processed_fills WHERE fill_key =
+?').get(fillKey);​
+         if (seen) return null;​
+​
+         const meta = this.orderMetaByClientId.get(fill.clientOrderId);​
+         const existing = this.positionsBySymbol.get(fill.symbol);​
+         const nowMs = fill.tsMs || Date.now();​
+         let realizedDelta = -fill.feeUsd;​
+         let updatedRecord: ActivePositionRecord;​
+​
+         if (!existing) {​
+           updatedRecord = {​
+             positionId: fill.positionId || `POS_${fill.symbol}_${nowMs}`,​
+             symbol: fill.symbol,​
+             side: fill.side,​
+             qty: fill.filledQty,​
+             entryPrice: fill.avgFillPrice,​
+             stopLossPrice:​
+               meta?.stopLossPrice ??​
+               (fill.side === 'BUY' ? fill.avgFillPrice * 0.99 : fill.avgFillPrice * 1.01),​
+             unrealizedPnlUsd: 0,​
+             realizedPnlUsd: realizedDelta,​
+             engine: meta?.engine ?? 'DEEP_CONFLUENCE',​
+             openedAtMs: nowMs,​
+             updatedAtMs: nowMs,​
+           };​
+         } else if (existing.side === fill.side) {​
+           const totalQty = existing.qty + fill.filledQty;​
+           const weightedEntry =​
+             (existing.entryPrice * existing.qty + fill.avgFillPrice * fill.filledQty) / totalQty;​
+​
+
+      updatedRecord = {​
+        ...existing,​
+        qty: Number(totalQty.toFixed(6)),​
+        entryPrice: weightedEntry,​
+        stopLossPrice:​
+          meta?.stopLossPrice && meta.stopLossPrice > 0​
+           ? meta.stopLossPrice​
+           : existing.stopLossPrice,​
+        realizedPnlUsd: existing.realizedPnlUsd + realizedDelta,​
+        updatedAtMs: nowMs,​
+      };​
+    } else {​
+      const closeQty = Math.min(existing.qty, fill.filledQty);​
+      const direction = existing.side === 'BUY' ? 1 : -1;​
+      realizedDelta += (fill.avgFillPrice - existing.entryPrice) * closeQty * direction;​
+​
+     const remainingQty = Number(Math.max(0, existing.qty - closeQty).toFixed(6));​
+      updatedRecord = {​
+        ...existing,​
+        qty: remainingQty,​
+        realizedPnlUsd: existing.realizedPnlUsd + realizedDelta,​
+        unrealizedPnlUsd: remainingQty === 0 ? 0 : existing.unrealizedPnlUsd,​
+        updatedAtMs: nowMs,​
+      };​
+    }​
+​
+    this.equityUsd += realizedDelta;​
+​
+    this.db​
+     .prepare(​
+       `INSERT INTO processed_fills (​
+        fill_key, client_order_id, position_id, symbol, side,​
+        filled_qty, avg_fill_price, fee_usd, realized_pnl_delta, ts_ms​
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`​
+     )​
+     .run(​
+       fillKey,​
+       fill.clientOrderId,​
+       updatedRecord.positionId,​
+       fill.symbol,​
+       fill.side,​
+       fill.filledQty,​
+       fill.avgFillPrice,​
+
+         fill.feeUsd,​
+         realizedDelta,​
+         nowMs​
+       );​
+​
+     this.db​
+       .prepare('UPDATE account_state SET equity_usd = ?, updated_at_ms = ? WHERE id = 1')​
+       .run(this.equityUsd, nowMs);​
+​
+     if (updatedRecord.qty <= 0) {​
+       this.db.prepare('DELETE FROM canonical_positions WHERE symbol = ?').run(fill.symbol);​
+       this.positionsBySymbol.delete(fill.symbol);​
+     } else {​
+       this.db​
+         .prepare(​
+            `INSERT INTO canonical_positions (​
+             position_id, symbol, side, qty, entry_price, stop_loss_price,​
+             realized_pnl_usd, engine, opened_at_ms, updated_at_ms​
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)​
+           ON CONFLICT(symbol) DO UPDATE SET​
+             qty = excluded.qty,​
+             entry_price = excluded.entry_price,​
+             stop_loss_price = excluded.stop_loss_price,​
+             realized_pnl_usd = excluded.realized_pnl_usd,​
+             updated_at_ms = excluded.updated_at_ms`​
+         )​
+         .run(​
+           updatedRecord.positionId,​
+           updatedRecord.symbol,​
+           updatedRecord.side,​
+           updatedRecord.qty,​
+           updatedRecord.entryPrice,​
+           updatedRecord.stopLossPrice,​
+           updatedRecord.realizedPnlUsd,​
+           updatedRecord.engine,​
+           updatedRecord.openedAtMs,​
+           updatedRecord.updatedAtMs​
+         );​
+       this.positionsBySymbol.set(fill.symbol, updatedRecord);​
+     }​
+​
+     const { engine: _e, openedAtMs: _o, ...canonical } = updatedRecord;​
+     return canonical;​
+    });​
+
+​
+    const canonicalPos = applyTx();​
+    if (canonicalPos) {​
+     this.router.publishFromRole('LEDGER', 'CanonicalPositionLedger', 'ledger:position',
+canonicalPos);​
+    }​
+  }​
+​
+  public reconcileExchangeSnapshot(snapshots: ExchangePositionSnapshot[]): void {​
+    const exchangeMap = new Map(snapshots.filter((s) => s.qty > 0).map((s) => [s.symbol,
+s]));​
+    const nowMs = Date.now();​
+​
+    for (const [symbol, localPos] of this.positionsBySymbol.entries()) {​
+      if (!exchangeMap.has(symbol)) {​
+        this.db.prepare('DELETE FROM canonical_positions WHERE symbol = ?').run(symbol);​
+        this.positionsBySymbol.delete(symbol);​
+        this.router.publishFromRole('LEDGER', 'CanonicalPositionLedger', 'ledger:position', {​
+          positionId: localPos.positionId,​
+          symbol,​
+          side: localPos.side,​
+          qty: 0,​
+          entryPrice: localPos.entryPrice,​
+          unrealizedPnlUsd: 0,​
+          realizedPnlUsd: localPos.realizedPnlUsd,​
+          stopLossPrice: localPos.stopLossPrice,​
+          updatedAtMs: nowMs,​
+        });​
+      }​
+    }​
+​
+    for (const [symbol, remote] of exchangeMap.entries()) {​
+      const localPos = this.positionsBySymbol.get(symbol);​
+      const drift =​
+        !localPos || Math.abs(localPos.qty - remote.qty) > 1e-6 || localPos.side !== remote.side;​
+      if (!drift) continue;​
+​
+      const reconciled: ActivePositionRecord = {​
+        positionId: localPos?.positionId ?? `RECON_${symbol}_${nowMs}`,​
+        symbol,​
+        side: remote.side,​
+        qty: remote.qty,​
+        entryPrice: remote.entryPrice,​
+
+     stopLossPrice:​
+        localPos?.stopLossPrice ??​
+        (remote.side === 'BUY' ? remote.entryPrice * 0.99 : remote.entryPrice * 1.01),​
+      unrealizedPnlUsd: remote.unrealizedPnlUsd,​
+      realizedPnlUsd: localPos?.realizedPnlUsd ?? 0,​
+      engine: localPos?.engine ?? 'RECONCILED',​
+      openedAtMs: localPos?.openedAtMs ?? nowMs,​
+      updatedAtMs: nowMs,​
+    };​
+​
+    this.positionsBySymbol.set(symbol, reconciled);​
+    this.db​
+     .prepare(​
+       `INSERT INTO canonical_positions (​
+        position_id, symbol, side, qty, entry_price, stop_loss_price,​
+        realized_pnl_usd, engine, opened_at_ms, updated_at_ms​
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)​
+      ON CONFLICT(symbol) DO UPDATE SET​
+        side = excluded.side,​
+        qty = excluded.qty,​
+        entry_price = excluded.entry_price,​
+        updated_at_ms = excluded.updated_at_ms`​
+     )​
+     .run(​
+       reconciled.positionId,​
+       reconciled.symbol,​
+       reconciled.side,​
+       reconciled.qty,​
+       reconciled.entryPrice,​
+       reconciled.stopLossPrice,​
+       reconciled.realizedPnlUsd,​
+       reconciled.engine,​
+       reconciled.openedAtMs,​
+       reconciled.updatedAtMs​
+     );​
+​
+    const { engine: _e, openedAtMs: _o, ...canonical } = reconciled;​
+    this.router.publishFromRole('LEDGER', 'CanonicalPositionLedger', 'ledger:position',
+canonical);​
+    }​
+  }​
+​
+  private updateUnrealizedPnl(frame: MarketFrame): void {​
+    const pos = this.positionsBySymbol.get(frame.symbol);​
+
+    if (!pos || pos.qty <= 0) return;​
+​
+    const markPrice = pos.side === 'BUY' ? frame.bestBid : frame.bestAsk;​
+    if (markPrice <= 0) return;​
+​
+    const direction = pos.side === 'BUY' ? 1 : -1;​
+    const unrealized = (markPrice - pos.entryPrice) * pos.qty * direction;​
+​
+    if (Math.abs(unrealized - pos.unrealizedPnlUsd) >= 0.05) {​
+      pos.unrealizedPnlUsd = unrealized;​
+      pos.updatedAtMs = Date.now();​
+      const { engine: _e, openedAtMs: _o, ...canonical } = pos;​
+      this.router.publishFromRole('LEDGER', 'CanonicalPositionLedger', 'ledger:position',
+canonical);​
+    }​
+  }​
+​
+  public close(): void {​
+    this.db.close();​
+  }​
+}​
+​
+/*
+============================================================================​
+ * @module MIA-CORE-03: UNIFIED RISK GOVERNOR (PRE-TRADE VETO & REGIME KELLY
+SIZING)​
+ * ==========================================================================
+*/​
+​
+export interface MacroCalendarGate {​
+  isEventVetoActive(symbol: string, nowMs: number): { blocked: boolean; reason?: string };​
+}​
+​
+export interface StrategyExpectancyProvider {​
+  getRollingExpectancy(​
+    engine: EngineSource,​
+    regime: MarketRegime​
+  ): { winRate: number; payoffRatio: number; sampleCount: number };​
+}​
+​
+export interface RiskGovernorConfig {​
+  initialEquityUsd: number;​
+  baseRiskPerTradePct: number;​
+
+  maxDailyDrawdownPct: number;​
+  hardFlattenDrawdownPct: number;​
+  maxCorrelatedDeltaMultiplier: number;​
+  maxTotalNotionalMultiplier: number;​
+  maxSpreadToAtrRatio: number;​
+  minBookDepthMultiple: number;​
+  vpinHaltThreshold: number;​
+  markoutToxicityThresholdBps: number;​
+  toxicityCooldownMs: number;​
+}​
+​
+const CORRELATION_BUCKETS: Record<string, string> = {​
+  BTCUSDT: 'BTC_BETA',​
+  ETHUSDT: 'BTC_BETA',​
+  SOLUSDT: 'L1_ALT',​
+  AVAXUSDT: 'L1_ALT',​
+  SUIUSDT: 'L1_ALT',​
+  DOGEUSDT: 'MEME_BETA',​
+  PEPEUSDT: 'MEME_BETA',​
+};​
+​
+const REGIME_SIZE_MULTIPLIERS: Record<​
+  Exclude<EngineSource, 'EXIT_SUPERVISOR'>,​
+  Record<MarketRegime, number>​
+> = {​
+  FAST_REFLEX: {​
+    LOW_VOL_CHOP: 1.0,​
+    TRENDING: 0.75,​
+    HIGH_VOL_EXPANSION: 0.4,​
+    LIQUIDATION_CASCADE: 0.0,​
+  },​
+  DEEP_CONFLUENCE: {​
+    LOW_VOL_CHOP: 0.5,​
+    TRENDING: 1.25,​
+    HIGH_VOL_EXPANSION: 0.85,​
+    LIQUIDATION_CASCADE: 0.35,​
+  },​
+};​
+​
+/**​
+ * @id MIA-CORE-03​
+ * @description Sole authority permitted to mint ApprovedOrderIntent; enforces drawdown, VPIN,
+correlation, and Kelly sizing.​
+
+*/​
+export class UnifiedRiskGovernor {​
+    private equityUsd: number;​
+    private dayStartEquityUsd: number;​
+    private realizedDailyPnlUsd = 0;​
+    private isDrawdownHalted = false;​
+​
+    private readonly openPositions = new Map<string, CanonicalPosition>();​
+    private readonly markoutHistory = new Map<string, MarkoutSample[]>();​
+    private readonly toxicityCooldownUntil = new Map<string, number>();​
+​
+    constructor(​
+      private readonly router: NexusFabricRouter,​
+      private readonly config: RiskGovernorConfig,​
+      private readonly macroGate: MacroCalendarGate,​
+      private readonly expectancyProvider: StrategyExpectancyProvider​
+    ) {​
+     this.equityUsd = config.initialEquityUsd;​
+     this.dayStartEquityUsd = config.initialEquityUsd;​
+     this.bindRouterSubscriptions();​
+    }​
+​
+    private bindRouterSubscriptions(): void {​
+     this.router.onTyped('signal:candidate', (signal) => this.evaluateCandidate(signal));​
+     this.router.onTyped('exit:intent', (exitIntent) => this.approveExitIntent(exitIntent));​
+     this.router.onTyped('ledger:position', (pos) => this.onPositionUpdate(pos));​
+     this.router.onTyped('tca:markout', (sample) => this.onMarkoutSample(sample));​
+    }​
+​
+    public reconcileStartupState(equityUsd: number, realizedDailyPnlUsd: number): void {​
+     this.equityUsd = equityUsd;​
+     this.dayStartEquityUsd = equityUsd - realizedDailyPnlUsd;​
+     this.realizedDailyPnlUsd = realizedDailyPnlUsd;​
+     this.checkDrawdownBreakers();​
+    }​
+​
+    public resetDailyAnchor(): void {​
+     const unrealized = this.computeTotalUnrealizedPnl();​
+     this.dayStartEquityUsd = this.equityUsd + unrealized;​
+     this.realizedDailyPnlUsd = 0;​
+     this.isDrawdownHalted = false;​
+     this.router.setGlobalHalt(false);​
+    }​
+
+​
+    private onPositionUpdate(pos: CanonicalPosition): void {​
+     if (pos.qty <= 0) {​
+       const prev = this.openPositions.get(pos.positionId);​
+       if (prev) {​
+          const deltaRealized = pos.realizedPnlUsd - prev.realizedPnlUsd;​
+          this.realizedDailyPnlUsd += deltaRealized;​
+          this.equityUsd += deltaRealized;​
+       }​
+       this.openPositions.delete(pos.positionId);​
+      } else {​
+        this.openPositions.set(pos.positionId, pos);​
+      }​
+      this.checkDrawdownBreakers();​
+    }​
+​
+    private onMarkoutSample(sample: MarkoutSample): void {​
+     const key = `${sample.engine}:${sample.symbol}`;​
+     const list = this.markoutHistory.get(key) ?? [];​
+     list.push(sample);​
+     if (list.length > 10) list.shift();​
+     this.markoutHistory.set(key, list);​
+​
+     if (list.length >= 5) {​
+       const avgMarkoutBps = list.reduce((acc, s) => acc + s.markoutBps, 0) / list.length;​
+       if (avgMarkoutBps <= this.config.markoutToxicityThresholdBps) {​
+          this.toxicityCooldownUntil.set(key, Date.now() + this.config.toxicityCooldownMs);​
+        }​
+      }​
+    }​
+​
+    private evaluateCandidate(signal: CandidateSignal): void {​
+     const nowMs = Date.now();​
+​
+     if (this.isDrawdownHalted) {​
+       return this.veto(signal, 'CIRCUIT_BREAKER_DRAWDOWN', 'Daily drawdown limit breached');​
+     }​
+​
+     const macroStatus = this.macroGate.isEventVetoActive(signal.symbol, nowMs);​
+     if (macroStatus.blocked) {​
+       return this.veto(signal, 'MACRO_CALENDAR_VETO', macroStatus.reason ?? 'High-impact
+macro event');​
+     }​
+
+​
+    const frame = this.router.getLatestFrame(signal.symbol);​
+    if (!frame || frame.bestAsk <= frame.bestBid) {​
+     return this.veto(signal, 'SPREAD_OR_DEPTH_GUARD', 'Missing or crossed L1 market
+frame');​
+    }​
+​
+    const spread = frame.bestAsk - frame.bestBid;​
+    if (frame.atr14 > 0 && spread / frame.atr14 > this.config.maxSpreadToAtrRatio) {​
+     return this.veto(​
+         signal,​
+         'SPREAD_OR_DEPTH_GUARD',​
+         `Spread/ATR ratio ${(spread / frame.atr14).toFixed(3)} exceeds cap`​
+      );​
+    }​
+​
+    const toxicityKey = `${signal.engine}:${signal.symbol}`;​
+    const cooldownUntil = this.toxicityCooldownUntil.get(toxicityKey) ?? 0;​
+    if (nowMs < cooldownUntil) {​
+     return this.veto(​
+         signal,​
+         'TOXICITY_VPIN_HALT',​
+         `Adverse selection cooldown active until ${new Date(cooldownUntil).toISOString()}`​
+      );​
+    }​
+​
+    if (signal.engine === 'FAST_REFLEX' && frame.vpin >= this.config.vpinHaltThreshold) {​
+     return this.veto(​
+         signal,​
+         'TOXICITY_VPIN_HALT',​
+         `Live VPIN ${frame.vpin.toFixed(2)} >= ${this.config.vpinHaltThreshold}`​
+      );​
+    }​
+​
+    const activeRegime: MarketRegime =​
+     this.router.getLatestRegime(signal.symbol)?.regime ?? 'LOW_VOL_CHOP';​
+    const regimeMultiplier = REGIME_SIZE_MULTIPLIERS[signal.engine][activeRegime];​
+​
+    if (regimeMultiplier <= 0) {​
+     return this.veto(signal, 'REGIME_BLOCKED', `Engine ${signal.engine} disabled in
+${activeRegime}`);​
+    }​
+​
+
+    const stopDistance = Math.abs(signal.entryPrice - signal.stopLossPrice);​
+    if (stopDistance <= 0) {​
+     return this.veto(signal, 'MIN_NOTIONAL_OR_ZERO_SIZE', 'Invalid zero stop-loss distance');​
+    }​
+​
+    const kellyScale = this.computeFractionalKellyScale(signal.engine, activeRegime);​
+    const effectiveRiskPct =​
+     this.config.baseRiskPerTradePct * regimeMultiplier * kellyScale * signal.confidence;​
+    const riskUsd = this.equityUsd * effectiveRiskPct;​
+​
+    let qty = riskUsd / stopDistance;​
+    let notionalUsd = qty * signal.entryPrice;​
+​
+    const relevantDepth = signal.side === 'BUY' ? frame.askDepthTop3 :
+frame.bidDepthTop3;​
+   const maxBookAllowedNotional =​
+     (relevantDepth * signal.entryPrice) / this.config.minBookDepthMultiple;​
+   if (notionalUsd > maxBookAllowedNotional) {​
+     notionalUsd = maxBookAllowedNotional;​
+     qty = notionalUsd / signal.entryPrice;​
+   }​
+​
+   const remainingBucketCapacityUsd = this.computeRemainingBucketCapacity(​
+     signal.symbol,​
+     signal.side​
+   );​
+   const remainingTotalCapacityUsd =​
+     this.equityUsd * this.config.maxTotalNotionalMultiplier -
+this.computeTotalGrossNotional();​
+​
+   const allowedNotionalUsd = Math.min(​
+     notionalUsd,​
+     remainingBucketCapacityUsd,​
+     remainingTotalCapacityUsd​
+   );​
+​
+   if (allowedNotionalUsd < 15) {​
+     return this.veto(​
+       signal,​
+       'CORRELATED_DELTA_CAP',​
+         `Remaining correlated/portfolio capacity ($${allowedNotionalUsd.toFixed(2)}) below minimum`​
+      );​
+    }​
+
+​
+     const finalQty = allowedNotionalUsd / signal.entryPrice;​
+     const prefix = signal.engine === 'FAST_REFLEX' ? 'FR' : 'DC';​
+​
+     const approved: ApprovedOrderIntent = {​
+         clientOrderId: `${prefix}_${signal.symbol}_${randomUUID().slice(0, 8)}`,​
+         signalId: signal.signalId,​
+         engine: signal.engine,​
+         symbol: signal.symbol,​
+         side: signal.side,​
+         orderType: signal.engine === 'FAST_REFLEX' ? 'LIMIT_IOC' : 'LIMIT_POST_ONLY',​
+         limitPrice: signal.entryPrice,​
+         qty: Number(finalQty.toFixed(6)),​
+         notionalUsd: allowedNotionalUsd,​
+         stopLossPrice: signal.stopLossPrice,​
+         takeProfitPrice: signal.takeProfitPrice,​
+         regimeAtEntry: activeRegime,​
+         riskUsd: finalQty * stopDistance,​
+         approvedAtMs: nowMs,​
+     };​
+​
+     this.router.publishFromRole('RISK', 'UnifiedRiskGovernor', 'order:approved', approved);​
+    }​
+​
+    private approveExitIntent(exit: ExitOrderIntent): void {​
+     const frame = this.router.getLatestFrame(exit.symbol);​
+     const refPrice = frame ? (exit.side === 'SELL' ? frame.bestBid : frame.bestAsk) : 0;​
+​
+     const approvedExit: ApprovedOrderIntent = {​
+         clientOrderId: `EX_S${exit.stage}_${exit.symbol}_${randomUUID().slice(0, 8)}`,​
+         signalId: exit.intentId,​
+         engine: 'EXIT_SUPERVISOR',​
+         symbol: exit.symbol,​
+         side: exit.side,​
+         orderType: exit.urgentMarket ? 'MARKET' : 'LIMIT_IOC',​
+         limitPrice: refPrice,​
+         qty: Number(exit.qty.toFixed(6)),​
+         notionalUsd: exit.qty * refPrice,​
+         stopLossPrice: 0,​
+         takeProfitPrice: 0,​
+         regimeAtEntry: this.router.getLatestRegime(exit.symbol)?.regime ?? 'LOW_VOL_CHOP',​
+         riskUsd: 0,​
+         approvedAtMs: Date.now(),​
+
+     };​
+​
+     this.router.publishFromRole('RISK', 'UnifiedRiskGovernor', 'order:approved', approvedExit);​
+    }​
+​
+    private computeFractionalKellyScale(engine: EngineSource, regime: MarketRegime):
+number {​
+     const stats = this.expectancyProvider.getRollingExpectancy(engine, regime);​
+     if (stats.sampleCount < 15 || stats.payoffRatio <= 0) return 0.75;​
+     const kellyFraction = stats.winRate - (1 - stats.winRate) / stats.payoffRatio;​
+     const quarterKelly = kellyFraction * 0.25;​
+     return Math.max(0.35, Math.min(1.35, quarterKelly / 0.02));​
+    }​
+​
+    private computeRemainingBucketCapacity(symbol: string, side: TradeSide): number {​
+     const targetBucket = CORRELATION_BUCKETS[symbol] ?? 'OTHER_ALT';​
+     const maxBucketDeltaUsd = this.equityUsd * this.config.maxCorrelatedDeltaMultiplier;​
+​
+     let signedBucketDeltaUsd = 0;​
+     for (const pos of this.openPositions.values()) {​
+         const posBucket = CORRELATION_BUCKETS[pos.symbol] ?? 'OTHER_ALT';​
+         if (posBucket !== targetBucket) continue;​
+         const sign = pos.side === 'BUY' ? 1 : -1;​
+       signedBucketDeltaUsd += sign * pos.qty * pos.entryPrice;​
+     }​
+​
+     const incomingSign = side === 'BUY' ? 1 : -1;​
+     const projectedDirectionalExposure = signedBucketDeltaUsd * incomingSign;​
+     return Math.max(0, maxBucketDeltaUsd - projectedDirectionalExposure);​
+    }​
+​
+    private computeTotalGrossNotional(): number {​
+     let gross = 0;​
+     for (const pos of this.openPositions.values()) {​
+        gross += pos.qty * pos.entryPrice;​
+      }​
+      return gross;​
+    }​
+​
+    private computeTotalUnrealizedPnl(): number {​
+     let unrealized = 0;​
+     for (const pos of this.openPositions.values()) {​
+         unrealized += pos.unrealizedPnlUsd;​
+
+     }​
+     return unrealized;​
+    }​
+​
+    private checkDrawdownBreakers(): void {​
+     const totalDailyPnl = this.realizedDailyPnlUsd + this.computeTotalUnrealizedPnl();​
+     const drawdownPct = -totalDailyPnl / Math.max(1, this.dayStartEquityUsd);​
+​
+     if (drawdownPct >= this.config.maxDailyDrawdownPct && !this.isDrawdownHalted) {​
+         this.isDrawdownHalted = true;​
+         this.router.setGlobalHalt(true);​
+     }​
+​
+     if (drawdownPct >= this.config.hardFlattenDrawdownPct) {​
+         for (const pos of this.openPositions.values()) {​
+          this.approveExitIntent({​
+           intentId: `EMERGENCY_DD_${pos.positionId}`,​
+           positionId: pos.positionId,​
+           symbol: pos.symbol,​
+           side: pos.side === 'BUY' ? 'SELL' : 'BUY',​
+           qty: pos.qty,​
+           stage: 1,​
+           reason: `Hard drawdown limit ${(drawdownPct * 100).toFixed(2)}% breached`,​
+           urgentMarket: true,​
+           tsMs: Date.now(),​
+          });​
+        }​
+      }​
+    }​
+​
+    private veto(​
+      signal: CandidateSignal,​
+      reasonCode: RiskVetoEvent['reasonCode'],​
+      detail: string​
+    ): void {​
+      this.router.publishFromRole('RISK', 'UnifiedRiskGovernor', 'risk:veto', {​
+        signalId: signal.signalId,​
+        engine: signal.engine,​
+        symbol: signal.symbol,​
+        reasonCode,​
+        detail,​
+        tsMs: Date.now(),​
+      });​
+
+  }​
+}​
+​
+/*
+============================================================================​
+ * @module MIA-CORE-04: REGIME-CONDITIONED 5-STAGE EXIT SUPERVISOR​
+ * ==========================================================================
+*/​
+​
+export interface ExitSupervisorConfig {​
+    feeBufferBps: number;​
+  inFlightTimeoutMs: number;​
+  ofiExhaustionThreshold: number;​
+  vpinEmergencyExitThreshold: number;​
+}​
+​
+interface RegimeExitProfile {​
+  partialTpR: number;​
+  partialCloseFraction: number;​
+  atrTrailMultiplier: number;​
+  maxHoldMs: number;​
+}​
+​
+const REGIME_EXIT_PROFILES: Record<MarketRegime, RegimeExitProfile> = {​
+  LOW_VOL_CHOP: { partialTpR: 0.85, partialCloseFraction: 0.6, atrTrailMultiplier: 1.8,
+maxHoldMs: 12 * 60_000 },​
+  TRENDING: { partialTpR: 1.5, partialCloseFraction: 0.4, atrTrailMultiplier: 2.6, maxHoldMs: 45 *
+60_000 },​
+  HIGH_VOL_EXPANSION: { partialTpR: 1.2, partialCloseFraction: 0.5, atrTrailMultiplier: 2.2,
+maxHoldMs: 25 * 60_000 },​
+  LIQUIDATION_CASCADE: { partialTpR: 0.75, partialCloseFraction: 0.75, atrTrailMultiplier: 1.2,
+maxHoldMs: 5 * 60_000 },​
+};​
+​
+interface ManagedPositionState {​
+  position: CanonicalPosition;​
+  initialStopPrice: number;​
+  initialRiskPerUnit: number;​
+  currentStopPrice: number;​
+  highestFavoredPrice: number;​
+  openedAtMs: number;​
+  stage2PartialTaken: boolean;​
+  breakevenLocked: boolean;​
+
+  inFlightExitUntilMs: number;​
+}​
+​
+/**​
+ * @id MIA-CORE-04​
+ * @description Non-greedy 5-stage exit waterfall driven exclusively by CanonicalPositionLedger
+updates.​
+ */​
+export class ExitSupervisor {​
+  private readonly managed = new Map<string, ManagedPositionState>();​
+​
+    constructor(​
+      private readonly router: NexusFabricRouter,​
+      private readonly config: ExitSupervisorConfig = {​
+        feeBufferBps: 12,​
+        inFlightTimeoutMs: 3_000,​
+        ofiExhaustionThreshold: 0.55,​
+        vpinEmergencyExitThreshold: 0.82,​
+      }​
+    ) {​
+     this.router.onTyped('ledger:position', (pos) => this.syncPositionFromLedger(pos));​
+     this.router.onTyped('oms:fill', (fill) => this.onFillConfirmed(fill));​
+     this.router.onTyped('market:frame', (frame) => this.evaluateMarketFrame(frame));​
+    }​
+​
+    private syncPositionFromLedger(pos: CanonicalPosition): void {​
+     if (pos.qty <= 0) {​
+         this.managed.delete(pos.positionId);​
+         return;​
+     }​
+​
+     const existing = this.managed.get(pos.positionId);​
+     if (!existing) {​
+         const initialRiskPerUnit = Math.abs(pos.entryPrice - pos.stopLossPrice);​
+         this.managed.set(pos.positionId, {​
+          position: pos,​
+          initialStopPrice: pos.stopLossPrice,​
+          initialRiskPerUnit: initialRiskPerUnit > 0 ? initialRiskPerUnit : pos.entryPrice * 0.005,​
+          currentStopPrice: pos.stopLossPrice,​
+          highestFavoredPrice: pos.entryPrice,​
+          openedAtMs: pos.updatedAtMs,​
+          stage2PartialTaken: false,​
+          breakevenLocked: false,​
+          inFlightExitUntilMs: 0,​
+
+      });​
+      return;​
+     }​
+​
+      existing.position = pos;​
+    }​
+​
+    private onFillConfirmed(fill: FillEvent): void {​
+     const state = this.managed.get(fill.positionId);​
+     if (!state) return;​
+​
+     state.inFlightExitUntilMs = 0;​
+​
+     if (fill.clientOrderId.startsWith('EX_S2_')) {​
+        state.stage2PartialTaken = true;​
+        state.breakevenLocked = true;​
+        const feeOffset = state.position.entryPrice * (this.config.feeBufferBps / 10_000);​
+        state.currentStopPrice =​
+         state.position.side === 'BUY'​
+           ? Math.max(state.currentStopPrice, state.position.entryPrice + feeOffset)​
+           : Math.min(state.currentStopPrice, state.position.entryPrice - feeOffset);​
+      }​
+    }​
+​
+    private evaluateMarketFrame(frame: MarketFrame): void {​
+     const nowMs = Date.now();​
+     const activeRegime: MarketRegime =​
+      this.router.getLatestRegime(frame.symbol)?.regime ?? 'LOW_VOL_CHOP';​
+     const profile = REGIME_EXIT_PROFILES[activeRegime];​
+​
+     for (const state of this.managed.values()) {​
+      if (state.position.symbol !== frame.symbol || nowMs < state.inFlightExitUntilMs)
+continue;​
+​
+      const { position } = state;​
+      const isLong = position.side === 'BUY';​
+      const exitSide: TradeSide = isLong ? 'SELL' : 'BUY';​
+      const markPrice = isLong ? frame.bestBid : frame.bestAsk;​
+      if (markPrice <= 0) continue;​
+​
+      if (isLong && markPrice > state.highestFavoredPrice) state.highestFavoredPrice =
+markPrice;​
+   else if (!isLong && markPrice < state.highestFavoredPrice) state.highestFavoredPrice =
+
+markPrice;​
+​
+    const favorableMove = isLong ? markPrice - position.entryPrice : position.entryPrice -
+markPrice;​
+    const currentR = favorableMove / state.initialRiskPerUnit;​
+​
+    // Stage 1: Hard Stop / Breakeven Stop​
+    const stopBreached = isLong​
+      ? markPrice <= state.currentStopPrice​
+      : markPrice >= state.currentStopPrice;​
+    if (stopBreached) {​
+      this.emitExitIntent(state, {​
+        stage: 1,​
+        side: exitSide,​
+        qty: position.qty,​
+        urgentMarket: true,​
+        reason: state.breakevenLocked​
+          ? `Stage 1 Breakeven Lock hit @ ${state.currentStopPrice.toFixed(4)}`​
+          : `Stage 1 Hard Stop hit @ ${state.currentStopPrice.toFixed(4)}`,​
+      });​
+      continue;​
+    }​
+​
+    // Stage 2: Regime-Scaled Partial TP + Breakeven Lock​
+    if (!state.stage2PartialTaken && currentR >= profile.partialTpR) {​
+      const partialQty = Number((position.qty * profile.partialCloseFraction).toFixed(6));​
+      if (partialQty > 0) {​
+        this.emitExitIntent(state, {​
+          stage: 2,​
+          side: exitSide,​
+          qty: partialQty,​
+          urgentMarket: false,​
+          reason: `Stage 2 Partial TP (${currentR.toFixed(2)}R >= ${profile.partialTpR}R in
+${activeRegime})`,​
+        });​
+        continue;​
+      }​
+    }​
+​
+    // Stage 3: Regime-Scaled ATR Chandelier Trailing Stop​
+    if (state.stage2PartialTaken && frame.atr14 > 0) {​
+      const trailOffset = frame.atr14 * profile.atrTrailMultiplier;​
+      const candidateTrailStop = isLong​
+
+      ? state.highestFavoredPrice - trailOffset​
+      : state.highestFavoredPrice + trailOffset;​
+​
+     if (isLong && candidateTrailStop > state.currentStopPrice) {​
+       state.currentStopPrice = candidateTrailStop;​
+     } else if (!isLong && candidateTrailStop < state.currentStopPrice) {​
+       state.currentStopPrice = candidateTrailStop;​
+     }​
+​
+     const trailHit = isLong​
+        ? markPrice <= state.currentStopPrice​
+        : markPrice >= state.currentStopPrice;​
+      if (trailHit) {​
+        this.emitExitIntent(state, {​
+          stage: 3,​
+          side: exitSide,​
+          qty: position.qty,​
+          urgentMarket: true,​
+          reason: `Stage 3 ATR Trail (${profile.atrTrailMultiplier}x ATR) hit @
+${state.currentStopPrice.toFixed(4)}`,​
+        });​
+        continue;​
+      }​
+    }​
+​
+    // Stage 4: L2 OFI Exhaustion & VPIN Toxicity Surge Exit​
+    if (currentR >= 0.35) {​
+      const opposingOfi = isLong​
+        ? frame.ofiL5 <= -this.config.ofiExhaustionThreshold​
+        : frame.ofiL5 >= this.config.ofiExhaustionThreshold;​
+      const extremeToxicity = frame.vpin >= this.config.vpinEmergencyExitThreshold;​
+​
+      if (opposingOfi || extremeToxicity) {​
+        this.emitExitIntent(state, {​
+          stage: 4,​
+          side: exitSide,​
+          qty: position.qty,​
+          urgentMarket: extremeToxicity,​
+          reason: extremeToxicity​
+            ? `Stage 4 VPIN Surge (${frame.vpin.toFixed(2)}) locking +${currentR.toFixed(2)}R`​
+            : `Stage 4 L5 OFI Exhaustion (${frame.ofiL5.toFixed(2)}) locking
++${currentR.toFixed(2)}R`,​
+        });​
+
+           continue;​
+         }​
+       }​
+​
+       // Stage 5: Regime-Conditioned Time Stop​
+       const holdDurationMs = nowMs - state.openedAtMs;​
+       if (holdDurationMs >= profile.maxHoldMs && currentR < 0.4) {​
+         this.emitExitIntent(state, {​
+           stage: 5,​
+           side: exitSide,​
+           qty: position.qty,​
+           urgentMarket: false,​
+           reason: `Stage 5 Time Stop (${Math.round(holdDurationMs / 60_000)}m in ${activeRegime},
+${currentR.toFixed(2)}R)`,​
+          });​
+        }​
+      }​
+    }​
+​
+    private emitExitIntent(​
+    state: ManagedPositionState,​
+    params: { stage: 1 | 2 | 3 | 4 | 5; side: TradeSide; qty: number; urgentMarket: boolean;
+reason: string }​
+  ): void {​
+    const nowMs = Date.now();​
+    state.inFlightExitUntilMs = nowMs + this.config.inFlightTimeoutMs;​
+​
+    this.router.publishFromRole('LEDGER', 'ExitSupervisor', 'exit:intent', {​
+      intentId: `EXIT_${state.position.positionId}_S${params.stage}_${randomUUID().slice(0, 6)}`,​
+      positionId: state.position.positionId,​
+      symbol: state.position.symbol,​
+      side: params.side,​
+      qty: params.qty,​
+      stage: params.stage,​
+      reason: params.reason,​
+      urgentMarket: params.urgentMarket,​
+      tsMs: nowMs,​
+    });​
+  }​
+}​
+​
+/*
+============================================================================​
+
+ * @module MIA-CORE-05: UNIFIED OMS ADAPTERS (PAPER & BYBIT V5 LIVE + DEAD-MAN
+SWITCH)​
+ * ==========================================================================
+*/​
+​
+export type OrderLifecycleState =​
+    | 'PENDING_NEW'​
+    | 'ACKED'​
+    | 'PARTIAL'​
+    | 'FILLED'​
+    | 'CANCELED'​
+    | 'REJECTED';​
+​
+export interface OmsAdapter {​
+  start(): Promise<void>;​
+  shutdown(): void;​
+}​
+​
+export interface PaperOmsConfig {​
+  makerFeeBps: number;​
+  takerFeeBps: number;​
+  simulatedLatencyMs: number;​
+  postOnlyTimeoutMs: number;​
+  partialFillThresholdRatio: number;​
+}​
+​
+interface PaperOrder {​
+  intent: ApprovedOrderIntent;​
+  state: OrderLifecycleState;​
+  filledQty: number;​
+  createdAtMs: number;​
+}​
+​
+/**​
+ * @id MIA-CORE-05A​
+ * @description L2 depth-aware Paper OMS sharing the identical OrderLifecycleState machine as
+LiveOmsAdapter.​
+ */​
+export class PaperOmsAdapter implements OmsAdapter {​
+    private readonly orders = new Map<string, PaperOrder>();​
+    private readonly restingPostOnlyOrders = new Map<string, PaperOrder>();​
+    private readonly timers = new Set<NodeJS.Timeout>();​
+​
+    constructor(​
+
+     private readonly router: NexusFabricRouter,​
+     private readonly config: PaperOmsConfig = {​
+       makerFeeBps: 2.0,​
+       takerFeeBps: 5.5,​
+       simulatedLatencyMs: 0,​
+       postOnlyTimeoutMs: 2_500,​
+       partialFillThresholdRatio: 0.35,​
+     }​
+    ) {​
+      this.router.onTyped('order:approved', (intent) => this.handleApprovedOrder(intent));​
+     this.router.onTyped('market:frame', (frame) => this.matchRestingPostOnlyOrders(frame));​
+    }​
+​
+    public async start(): Promise<void> {​
+     // Ready synchronously​
+    }​
+​
+    public handleApprovedOrder(intent: ApprovedOrderIntent): void {​
+     if (this.orders.has(intent.clientOrderId)) return;​
+​
+     const order: PaperOrder = {​
+       intent,​
+       state: 'PENDING_NEW',​
+       filledQty: 0,​
+       createdAtMs: Date.now(),​
+     };​
+     this.orders.set(intent.clientOrderId, order);​
+​
+     const execute = () => {​
+         const frame = this.router.getLatestFrame(intent.symbol);​
+         if (!frame || frame.bestAsk <= frame.bestBid) {​
+           order.state = 'REJECTED';​
+           return;​
+         }​
+​
+         if (intent.orderType === 'LIMIT_POST_ONLY') {​
+          const crossesSpread =​
+           (intent.side === 'BUY' && intent.limitPrice >= frame.bestAsk) ||​
+           (intent.side === 'SELL' && intent.limitPrice <= frame.bestBid);​
+​
+          if (crossesSpread) {​
+           order.intent = {​
+            ...intent,​
+            limitPrice: intent.side === 'BUY' ? frame.bestBid : frame.bestAsk,​
+
+             };​
+           }​
+​
+           order.state = 'ACKED';​
+           this.restingPostOnlyOrders.set(intent.clientOrderId, order);​
+​
+           const expiry = setTimeout(() => {​
+            this.timers.delete(expiry);​
+            const resting = this.restingPostOnlyOrders.get(intent.clientOrderId);​
+            if (resting && (resting.state === 'ACKED' || resting.state === 'PARTIAL')) {​
+            resting.state = 'CANCELED';​
+            this.restingPostOnlyOrders.delete(intent.clientOrderId);​
+          }​
+        }, this.config.postOnlyTimeoutMs);​
+        expiry.unref();​
+        this.timers.add(expiry);​
+        return;​
+      }​
+​
+      this.executeImmediateOrder(order, frame);​
+     };​
+​
+     if (this.config.simulatedLatencyMs > 0) {​
+      const timer = setTimeout(() => {​
+           this.timers.delete(timer);​
+          execute();​
+        }, this.config.simulatedLatencyMs);​
+        timer.unref();​
+        this.timers.add(timer);​
+      } else {​
+        execute();​
+      }​
+    }​
+​
+    private executeImmediateOrder(order: PaperOrder, frame: MarketFrame): void {​
+     const { intent } = order;​
+     const isBuy = intent.side === 'BUY';​
+     const topPrice = isBuy ? frame.bestAsk : frame.bestBid;​
+     const availableDepth = isBuy ? frame.askDepthTop3 : frame.bidDepthTop3;​
+​
+     if (intent.orderType === 'LIMIT_IOC' && intent.limitPrice > 0) {​
+      const outOfBounds = isBuy ? topPrice > intent.limitPrice : topPrice < intent.limitPrice;​
+      if (outOfBounds) {​
+
+        order.state = 'CANCELED';​
+        return;​
+      }​
+    }​
+​
+    const depthUtilization = availableDepth > 0 ? intent.qty / availableDepth : 1;​
+    const spread = frame.bestAsk - frame.bestBid;​
+    const slippage = spread * Math.min(2.5, depthUtilization * 0.85);​
+    const execPrice = isBuy ? topPrice + slippage : Math.max(0.0001, topPrice - slippage);​
+    const midPriceAtFill = (frame.bestBid + frame.bestAsk) / 2;​
+​
+    if (availableDepth > 0 && depthUtilization >= this.config.partialFillThresholdRatio) {​
+     const firstSlice = Number((intent.qty * 0.6).toFixed(6));​
+     const secondSlice = Number((intent.qty - firstSlice).toFixed(6));​
+     this.emitFill(order, firstSlice, execPrice, midPriceAtFill, this.config.takerFeeBps, false);​
+     if (secondSlice > 0) {​
+      const secondPrice = isBuy​
+          ? execPrice + spread * 0.25​
+          : Math.max(0.0001, execPrice - spread * 0.25);​
+        this.emitFill(order, secondSlice, secondPrice, midPriceAtFill, this.config.takerFeeBps,
+true);​
+      }​
+    } else {​
+      this.emitFill(order, intent.qty, execPrice, midPriceAtFill, this.config.takerFeeBps, true);​
+    }​
+  }​
+​
+  private matchRestingPostOnlyOrders(frame: MarketFrame): void {​
+    for (const [clientOrderId, order] of this.restingPostOnlyOrders.entries()) {​
+      if (order.intent.symbol !== frame.symbol) continue;​
+      const isBuy = order.intent.side === 'BUY';​
+      const touched = isBuy​
+        ? frame.bestAsk <= order.intent.limitPrice​
+        : frame.bestBid >= order.intent.limitPrice;​
+      if (!touched) continue;​
+​
+      const remainingQty = Number((order.intent.qty - order.filledQty).toFixed(6));​
+      if (remainingQty > 0) {​
+        const midPriceAtFill = (frame.bestBid + frame.bestAsk) / 2;​
+        this.emitFill(​
+          order,​
+          remainingQty,​
+          order.intent.limitPrice,​
+
+            midPriceAtFill,​
+            this.config.makerFeeBps,​
+            true​
+          );​
+        }​
+        this.restingPostOnlyOrders.delete(clientOrderId);​
+      }​
+    }​
+​
+    private emitFill(​
+      order: PaperOrder,​
+      sliceQty: number,​
+      fillPrice: number,​
+      midPriceAtFill: number,​
+      feeBps: number,​
+      isFinalSlice: boolean​
+    ): void {​
+      order.filledQty = Number((order.filledQty + sliceQty).toFixed(6));​
+      order.state = isFinalSlice || order.filledQty >= order.intent.qty - 1e-6 ? 'FILLED' : 'PARTIAL';​
+​
+     this.router.publishFromRole('OMS', 'PaperOmsAdapter', 'oms:fill', {​
+       clientOrderId: order.intent.clientOrderId,​
+       positionId: order.intent.signalId,​
+       symbol: order.intent.symbol,​
+       side: order.intent.side,​
+       filledQty: sliceQty,​
+       avgFillPrice: fillPrice,​
+       feeUsd: (sliceQty * fillPrice * feeBps) / 10_000,​
+        midPriceAtFill,​
+        tsMs: Date.now(),​
+      });​
+    }​
+​
+    public shutdown(): void {​
+     for (const timer of this.timers) clearTimeout(timer);​
+     this.timers.clear();​
+     this.restingPostOnlyOrders.clear();​
+  }​
+}​
+​
+export interface LiveOmsConfig {​
+    restBaseUrl: string;​
+    privateWsUrl: string;​
+
+  apiKey: string;​
+  apiSecret: string;​
+  recvWindowMs?: number;​
+  deadManTimeoutSec?: number;​
+  reconcileIntervalMs?: number;​
+  postOnlyFallbackMs?: number;​
+}​
+​
+interface TrackedLiveOrder {​
+  intent: ApprovedOrderIntent;​
+  state: OrderLifecycleState;​
+  exchangeOrderId?: string;​
+  cumFilledQty: number;​
+  cumFeeUsd: number;​
+  updatedAtMs: number;​
+}​
+​
+/**​
+ * @id MIA-CORE-05B​
+ * @description Bybit V5 Live OMS with idempotent orderLinkId, 10s Dead-Man's Switch, and
+WS/REST position reconciliation.​
+ */​
+export class LiveOmsAdapter implements OmsAdapter {​
+    private ws: WebSocket | null = null;​
+    private reconnectAttempts = 0;​
+    private isShuttingDown = false;​
+    private readonly orders = new Map<string, TrackedLiveOrder>();​
+    private deadManTimer: NodeJS.Timeout | null = null;​
+    private reconcileTimer: NodeJS.Timeout | null = null;​
+    private pingTimer: NodeJS.Timeout | null = null;​
+​
+    constructor(​
+      private readonly router: NexusFabricRouter,​
+      private readonly ledger: CanonicalPositionLedger,​
+      private readonly config: LiveOmsConfig​
+    ) {​
+     this.router.onTyped('order:approved', (intent) => {​
+       void this.submitApprovedOrder(intent);​
+      });​
+    }​
+​
+    public async start(): Promise<void> {​
+     this.isShuttingDown = false;​
+     await this.reconcilePositionsWithExchange();​
+
+     this.connectPrivateWebSocket();​
+​
+     const dmsIntervalMs = Math.max(2_000, ((this.config.deadManTimeoutSec ?? 10) *
+1_000) / 2.5);​
+     this.deadManTimer = setInterval(() => void this.refreshDeadMansSwitch(), dmsIntervalMs);​
+     this.deadManTimer.unref();​
+​
+     this.reconcileTimer = setInterval(​
+       () => void this.reconcilePositionsWithExchange(),​
+         this.config.reconcileIntervalMs ?? 15_000​
+     );​
+     this.reconcileTimer.unref();​
+    }​
+​
+    public async submitApprovedOrder(intent: ApprovedOrderIntent): Promise<void> {​
+     if (this.orders.has(intent.clientOrderId)) return;​
+​
+     const tracked: TrackedLiveOrder = {​
+       intent,​
+       state: 'PENDING_NEW',​
+       cumFilledQty: 0,​
+       cumFeeUsd: 0,​
+       updatedAtMs: Date.now(),​
+     };​
+     this.orders.set(intent.clientOrderId, tracked);​
+​
+     const isMarket = intent.orderType === 'MARKET';​
+     const body: Record<string, unknown> = {​
+         category: 'linear',​
+         symbol: intent.symbol,​
+         side: intent.side === 'BUY' ? 'Buy' : 'Sell',​
+         orderType: isMarket ? 'Market' : 'Limit',​
+         qty: String(intent.qty),​
+         orderLinkId: intent.clientOrderId,​
+         timeInForce: intent.orderType === 'LIMIT_POST_ONLY' ? 'PostOnly' : 'IOC',​
+         reduceOnly: intent.engine === 'EXIT_SUPERVISOR',​
+     };​
+​
+     if (!isMarket && intent.limitPrice > 0) {​
+       body.price = String(intent.limitPrice);​
+     }​
+​
+     try {​
+
+      const res = await this.signedRestRequest<{​
+        retCode: number;​
+       retMsg: string;​
+       result?: { orderId?: string };​
+      }>('POST', '/v5/order/create', body);​
+​
+      if (res.retCode !== 0) {​
+        tracked.state = 'REJECTED';​
+        this.router.publishFromRole('OMS', 'LiveOmsAdapter', 'fabric:error', {​
+          source: 'LiveOmsAdapter',​
+          error: new Error(`Order rejected (${res.retCode}): ${res.retMsg}`),​
+          tsMs: Date.now(),​
+        });​
+        return;​
+      }​
+​
+      if (tracked.state === 'PENDING_NEW') tracked.state = 'ACKED';​
+      tracked.exchangeOrderId = res.result?.orderId;​
+​
+      if (intent.orderType === 'LIMIT_POST_ONLY') {​
+        const timeout = setTimeout(​
+          () => void this.cancelIfOpen(intent.symbol, intent.clientOrderId),​
+            this.config.postOnlyFallbackMs ?? 2_500​
+          );​
+          timeout.unref();​
+        }​
+      } catch (error) {​
+        tracked.state = 'REJECTED';​
+        this.router.publishFromRole('OMS', 'LiveOmsAdapter', 'fabric:error', {​
+          source: 'LiveOmsAdapter',​
+          error,​
+          tsMs: Date.now(),​
+        });​
+      }​
+    }​
+​
+    private async cancelIfOpen(symbol: string, clientOrderId: string): Promise<void> {​
+     const tracked = this.orders.get(clientOrderId);​
+     if (!tracked || ['FILLED', 'CANCELED', 'REJECTED'].includes(tracked.state)) return;​
+​
+     try {​
+      await this.signedRestRequest('POST', '/v5/order/cancel', {​
+        category: 'linear',​
+
+           symbol,​
+           orderLinkId: clientOrderId,​
+       });​
+     } catch {​
+       // Resolved on next WS update or REST reconciliation​
+      }​
+    }​
+​
+    private async refreshDeadMansSwitch(): Promise<void> {​
+     try {​
+       await this.signedRestRequest('POST', '/v5/order/disconnected-cancel-all', {​
+           product: 'FUTURE',​
+           timeWindow: this.config.deadManTimeoutSec ?? 10,​
+       });​
+      } catch (error) {​
+        this.router.publishFromRole('OMS', 'LiveOmsAdapter', 'fabric:error', {​
+          source: 'LiveOmsAdapter:DeadManSwitch',​
+          error,​
+          tsMs: Date.now(),​
+        });​
+      }​
+    }​
+​
+    public async reconcilePositionsWithExchange(): Promise<void> {​
+     try {​
+       const res = await this.signedRestRequest<{​
+           retCode: number;​
+        result?: {​
+          list?: Array<{​
+            symbol: string;​
+            side: 'Buy' | 'Sell' | 'None';​
+            size: string;​
+            avgPrice: string;​
+            unrealisedPnl: string;​
+          }>;​
+        };​
+       }>('GET', '/v5/position/list?category=linear&settleCoin=USDT');​
+​
+       if (res.retCode !== 0 || !res.result?.list) return;​
+​
+       const snapshots: ExchangePositionSnapshot[] = res.result.list​
+           .filter((item) => item.side !== 'None' && Number(item.size) > 0)​
+           .map((item) => ({​
+
+         symbol: item.symbol,​
+         side: item.side === 'Buy' ? 'BUY' : 'SELL',​
+         qty: Number(item.size),​
+         entryPrice: Number(item.avgPrice),​
+         unrealizedPnlUsd: Number(item.unrealisedPnl || 0),​
+        }));​
+​
+       this.ledger.reconcileExchangeSnapshot(snapshots);​
+     } catch (error) {​
+      this.router.publishFromRole('OMS', 'LiveOmsAdapter', 'fabric:error', {​
+        source: 'LiveOmsAdapter:Reconcile',​
+          error,​
+          tsMs: Date.now(),​
+        });​
+      }​
+    }​
+​
+    private connectPrivateWebSocket(): void {​
+     if (this.isShuttingDown) return;​
+​
+     const ws = new WebSocket(this.config.privateWsUrl);​
+     this.ws = ws;​
+​
+     ws.on('open', () => {​
+      this.reconnectAttempts = 0;​
+      const expires = Date.now() + 10_000;​
+      const signature = createHmac('sha256', this.config.apiSecret)​
+        .update(`GET/realtime${expires}`)​
+        .digest('hex');​
+​
+      ws.send(JSON.stringify({ op: 'auth', args: [this.config.apiKey, expires, signature] }));​
+​
+      this.pingTimer = setInterval(() => {​
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ op: 'ping' }));​
+       }, 15_000);​
+       this.pingTimer.unref();​
+     });​
+​
+     ws.on('message', (raw) => {​
+      try {​
+        const msg = JSON.parse(raw.toString()) as {​
+         op?: string;​
+         success?: boolean;​
+
+      topic?: string;​
+      data?: Array<Record<string, string>>;​
+    };​
+​
+    if (msg.op === 'auth' && msg.success) {​
+      ws.send(JSON.stringify({ op: 'subscribe', args: ['order', 'execution'] }));​
+      void this.reconcilePositionsWithExchange();​
+      return;​
+    }​
+​
+    if (msg.topic === 'order' && Array.isArray(msg.data)) {​
+     for (const u of msg.data) {​
+      const tracked = u.orderLinkId ? this.orders.get(u.orderLinkId) : undefined;​
+      if (!tracked) continue;​
+      if (u.orderStatus === 'New') tracked.state = 'ACKED';​
+      else if (u.orderStatus === 'PartiallyFilled') tracked.state = 'PARTIAL';​
+      else if (u.orderStatus === 'Filled') tracked.state = 'FILLED';​
+      else if (u.orderStatus === 'Cancelled' || u.orderStatus === 'PartiallyFilledCanceled') {​
+          tracked.state = 'CANCELED';​
+        } else if (u.orderStatus === 'Rejected') tracked.state = 'REJECTED';​
+      }​
+    } else if (msg.topic === 'execution' && Array.isArray(msg.data)) {​
+      for (const ex of msg.data) {​
+        const clientOrderId = ex.orderLinkId;​
+        const execQty = Number(ex.execQty || 0);​
+        const execPrice = Number(ex.execPrice || 0);​
+        if (!clientOrderId || execQty <= 0 || execPrice <= 0) continue;​
+​
+      const tracked = this.orders.get(clientOrderId);​
+      if (tracked) {​
+        tracked.cumFilledQty += execQty;​
+        tracked.cumFeeUsd += Number(ex.execFee || 0);​
+        tracked.state =​
+          tracked.cumFilledQty >= tracked.intent.qty - 1e-6 ? 'FILLED' : 'PARTIAL';​
+      }​
+​
+      const frame = this.router.getLatestFrame(ex.symbol);​
+      const midPriceAtFill = frame ? (frame.bestBid + frame.bestAsk) / 2 : execPrice;​
+​
+      this.router.publishFromRole('OMS', 'LiveOmsAdapter', 'oms:fill', {​
+        clientOrderId,​
+        positionId: tracked?.intent.signalId ?? `POS_${ex.symbol}`,​
+        symbol: ex.symbol,​
+
+           side: ex.side === 'Buy' ? 'BUY' : 'SELL',​
+           filledQty: execQty,​
+           avgFillPrice: execPrice,​
+           feeUsd: Number(ex.execFee || 0),​
+               midPriceAtFill,​
+               tsMs: Number(ex.execTime || Date.now()),​
+             });​
+           }​
+         }​
+       } catch (error) {​
+         this.router.publishFromRole('OMS', 'LiveOmsAdapter', 'fabric:error', {​
+           source: 'LiveOmsAdapter:WSParse',​
+           error,​
+           tsMs: Date.now(),​
+         });​
+       }​
+     });​
+​
+      ws.on('close', () => {​
+        if (this.pingTimer) clearInterval(this.pingTimer);​
+        if (this.isShuttingDown) return;​
+        const backoffMs = Math.min(15_000, 500 * 2 ** this.reconnectAttempts++);​
+        const timer = setTimeout(() => this.connectPrivateWebSocket(), backoffMs);​
+        timer.unref();​
+      });​
+    }​
+​
+    private async signedRestRequest<T>(​
+      method: 'GET' | 'POST',​
+      pathWithQuery: string,​
+      body?: Record<string, unknown>​
+    ): Promise<T> {​
+      const timestamp = String(Date.now());​
+      const recvWindow = String(this.config.recvWindowMs ?? 5_000);​
+      const [path, query = ''] = pathWithQuery.split('?');​
+      const payloadStr = method === 'GET' ? query : JSON.stringify(body ?? {});​
+      const signature = createHmac('sha256', this.config.apiSecret)​
+       .update(`${timestamp}${this.config.apiKey}${recvWindow}${payloadStr}`)​
+       .digest('hex');​
+​
+     const response = await fetch(`${this.config.restBaseUrl}${pathWithQuery}`, {​
+      method,​
+      headers: {​
+
+          'Content-Type': 'application/json',​
+          'X-BAPI-API-KEY': this.config.apiKey,​
+          'X-BAPI-SIGN': signature,​
+          'X-BAPI-TIMESTAMP': timestamp,​
+          'X-BAPI-RECV-WINDOW': recvWindow,​
+         },​
+         body: method === 'POST' ? payloadStr : undefined,​
+     });​
+​
+     if (!response.ok) throw new Error(`HTTP ${response.status} on ${method} ${path}`);​
+     return (await response.json()) as T;​
+    }​
+​
+    public shutdown(): void {​
+     this.isShuttingDown = true;​
+     if (this.deadManTimer) clearInterval(this.deadManTimer);​
+     if (this.reconcileTimer) clearInterval(this.reconcileTimer);​
+     if (this.pingTimer) clearInterval(this.pingTimer);​
+     if (this.ws) {​
+         this.ws.close();​
+         this.ws = null;​
+    }​
+  }​
+}​
+​
+/*
+============================================================================​
+ * @module MIA-CORE-06: UNIFIED ORCHESTRATOR & UNBUFFERED SSE TELEMETRY
+BRIDGE​
+ * ==========================================================================
+*/​
+​
+export interface MiaRuntimeConfig {​
+    mode: 'PAPER' | 'LIVE';​
+  sqlitePath: string;​
+  initialEquityUsd: number;​
+  risk: RiskGovernorConfig;​
+  exit?: ExitSupervisorConfig;​
+  paperOms?: PaperOmsConfig;​
+  liveOms?: LiveOmsConfig;​
+}​
+​
+const STREAMED_TELEMETRY_TOPICS: ReadonlyArray<keyof FabricTopicMap> = [​
+
+    'order:approved',​
+    'oms:fill',​
+    'exit:intent',​
+    'risk:veto',​
+    'tca:markout',​
+    'regime:update',​
+    'ledger:position',​
+];​
+​
+/**​
+ * @id MIA-CORE-06​
+ * @description Master orchestrator binding all MIA 5.0 subsystems in strict fail-closed boot order.​
+ */​
+export class MiaUnifiedCore {​
+    public readonly router: NexusFabricRouter;​
+    public readonly ledger: CanonicalPositionLedger;​
+    public readonly riskGovernor: UnifiedRiskGovernor;​
+    public readonly exitSupervisor: ExitSupervisor;​
+    public readonly oms: OmsAdapter;​
+    private sseSeq = 0;​
+​
+    constructor(​
+      config: MiaRuntimeConfig,​
+      macroGate: MacroCalendarGate,​
+      expectancyProvider: StrategyExpectancyProvider​
+    ) {​
+      this.router = new NexusFabricRouter();​
+      this.ledger = new CanonicalPositionLedger(​
+       this.router,​
+        config.sqlitePath,​
+        config.initialEquityUsd​
+      );​
+      this.riskGovernor = new UnifiedRiskGovernor(​
+        this.router,​
+        config.risk,​
+        macroGate,​
+        expectancyProvider​
+      );​
+      this.exitSupervisor = new ExitSupervisor(this.router, config.exit);​
+​
+      if (config.mode === 'LIVE') {​
+       if (!config.liveOms) {​
+         throw new Error('[MIA-CORE-06] liveOms configuration is required when mode === "LIVE"');​
+
+         }​
+         this.oms = new LiveOmsAdapter(this.router, this.ledger, config.liveOms);​
+      } else {​
+        this.oms = new PaperOmsAdapter(this.router, config.paperOms);​
+      }​
+    }​
+​
+    /**​
+     * Fail-closed startup sequence:​
+     * 1. Hydrate SQLite WAL equity & daily PnL into UnifiedRiskGovernor​
+     * 2. Re-broadcast persisted open positions to ExitSupervisor & RiskGovernor​
+     * 3. Connect OMS & reconcile against live exchange snapshot before enabling strategy ingress​
+     */​
+    public async boot(): Promise<void> {​
+     this.riskGovernor.reconcileStartupState(​
+         this.ledger.getEquity(),​
+         this.ledger.getTodayRealizedPnl()​
+     );​
+     this.ledger.broadcastStartupPositions();​
+     await this.oms.start();​
+    }​
+​
+    /**​
+     * Express/Fastify-compatible unbuffered SSE endpoint handler for ExecutionTelemetryPanel.tsx.​
+     */​
+    public handleTelemetrySse = (req: Request, res: Response): void => {​
+     res.writeHead(200, {​
+       'Content-Type': 'text/event-stream',​
+       'Cache-Control': 'no-cache, no-transform',​
+       Connection: 'keep-alive',​
+       'X-Accel-Buffering': 'no',​
+     });​
+​
+     const listeners = STREAMED_TELEMETRY_TOPICS.map((topic) => {​
+         const fn = (payload: unknown) => {​
+           this.sseSeq += 1;​
+         res.write(`id: ${this.sseSeq}\nevent: ${topic}\ndata: ${JSON.stringify(payload)}\n\n`);​
+       };​
+       this.router.onTyped(topic, fn as never);​
+       return { topic, fn };​
+     });​
+​
+     const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 15_000);​
+
+   ​
+         req.on('close', () => {​
+           clearInterval(heartbeat);​
+           for (const { topic, fn } of listeners) {​
+             this.router.off(topic, fn);​
+           }​
+         });​
+       };​
+   ​
+       public async shutdown(): Promise<void> {​
+        this.oms.shutdown();​
+        this.router.shutdown();​
+        this.ledger.close();​
+     }​
+   }​
+
