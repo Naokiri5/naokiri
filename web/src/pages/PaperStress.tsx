@@ -16,6 +16,10 @@ interface StressReport {
     largestHolding?: { instrument: string; baselineEquityPct: number; stressedEquityPct: number } | null;
   }>;
   note: string;
+  tailRisk?: { status: 'ESTIMATED' | 'UNAVAILABLE' | 'NO_EXPOSURE'; horizon: '4H'; confidence: number;
+    observations: number; varLoss: number | null; expectedShortfallLoss: number | null;
+    worstObservedLoss: number | null; maxObservedLossPctEquity: number | null;
+    effectiveHoldings: number | null; reason: string | null; note: string; authority: 'RESEARCH_ONLY' };
 }
 
 export function PaperStress() {
@@ -38,6 +42,22 @@ export function PaperStress() {
           <td className="num">{s.equityLossPct === null ? '—' : fmt.num(s.equityLossPct) + '%'}</td>
         </tr>)}</tbody>
       </table></div>
+      {data.tailRisk && <section aria-label="Historical 4-hour tail-risk research">
+        <h3>Historical downside research (4 hours)</h3>
+        <p className="muted">Research only — not a loss limit, trade authorization, or daily forecast. {data.tailRisk.note}</p>
+        <p><Badge v={data.tailRisk.status.replaceAll('_', ' ')} />{' '}
+          {data.tailRisk.status === 'ESTIMATED'
+            ? `${Math.round(data.tailRisk.confidence * 100)}% empirical quantile from ${data.tailRisk.observations} aligned closed 4h returns`
+            : `No numeric estimate: ${data.tailRisk.reason ?? data.tailRisk.status}`}</p>
+        {data.tailRisk.status === 'ESTIMATED' && <div className="tablewrap"><table>
+          <thead><tr><th>Historical metric</th><th className="num">USDT</th></tr></thead>
+          <tbody>
+            <tr><td>Historical value-at-risk (4h)</td><td className="num">{data.tailRisk.varLoss == null ? '—' : fmt.num(data.tailRisk.varLoss)}</td></tr>
+            <tr><td>Expected shortfall (4h tail mean)</td><td className="num">{data.tailRisk.expectedShortfallLoss == null ? '—' : fmt.num(data.tailRisk.expectedShortfallLoss)}</td></tr>
+            <tr><td>Worst observed 4h loss</td><td className="num">{data.tailRisk.worstObservedLoss == null ? '—' : fmt.num(data.tailRisk.worstObservedLoss)}</td></tr>
+          </tbody>
+        </table></div>}
+      </section>}
     </> : <Empty>Loading paper stress estimates…</Empty>}
   </Card>;
 }
