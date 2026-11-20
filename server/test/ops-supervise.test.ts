@@ -16,7 +16,18 @@ function supervise(childSrc: string, env: Record<string, string> = {}, onStart?:
   });
 }
 // Each run appends one character to the counter file passed as argv[2].
-const COUNT = "import { appendFileSync } from 'node:fs'; appendFileSync(process.argv[2], 'x');";
+const IMPORT_COUNTER = "import { appendFileSync } from 'node:fs';";
+const RECORD_RUN = "appendFileSync(process.argv[2], 'x');";
+const COUNT = `${IMPORT_COUNTER} ${RECORD_RUN}`;
+
+function signalWhenReady(supervisor: ReturnType<typeof spawn>, dir: string) {
+  const wait = setInterval(() => {
+    if (!existsSync(join(dir, 'runs'))) return;
+    clearInterval(wait);
+    supervisor.kill('SIGTERM');
+  }, 10);
+  supervisor.once('exit', () => clearInterval(wait));
+}
 
 describe('supervisor', () => {
   it('restarts a crashing child with backoff and gives up after the crash-loop cap', async () => {
@@ -35,19 +46,18 @@ describe('supervisor', () => {
     expect(r.code).toBe(0); expect(r.runs).toBe(2);
   });
   it('forwards SIGTERM to the child and does not restart it', async () => {
-    const child = `${COUNT} process.on('SIGTERM', () => { appendFileSync(process.argv[2] + '.term', 't'); process.exit(0); }); setInterval(() => {}, 1000);`;
+    // The counter also signals readiness, so write it only after installing the handler.
+    const child = `${IMPORT_COUNTER} process.on('SIGTERM', () => { appendFileSync(process.argv[2] + '.term', 't'); process.exit(0); }); ${RECORD_RUN} setInterval(() => {}, 1000);`;
     let termSeen = false;
     const r = await supervise(child, {}, (p, dir) => {
-      const wait = setInterval(() => { if (existsSync(join(dir, 'runs'))) { clearInterval(wait); p.kill('SIGTERM'); } }, 10);
+      signalWhenReady(p, dir);
       p.on('exit', () => { termSeen = existsSync(join(dir, 'runs.term')); });
     });
     expect(r.code).toBe(0); expect(r.runs).toBe(1); expect(termSeen).toBe(true); expect(r.err).toMatch(/SIGTERM: stopping/);
   });
   it('a stop where the server fails to drain (exit 1 on SIGTERM) is reported to the service manager as a failure', async () => {
-    const child = `${COUNT} process.on('SIGTERM', () => process.exit(1)); setInterval(() => {}, 1000);`;
-    const r = await supervise(child, {}, (p, dir) => {
-      const wait = setInterval(() => { if (existsSync(join(dir, 'runs'))) { clearInterval(wait); p.kill('SIGTERM'); } }, 10);
-    });
+    const child = `${IMPORT_COUNTER} process.on('SIGTERM', () => process.exit(1)); ${RECORD_RUN} setInterval(() => {}, 1000);`;
+    const r = await supervise(child, {}, signalWhenReady);
     expect(r.code).toBe(1); // was 0: a failed drain looked like a clean stop (CodeRabbit #45)
     expect(r.runs).toBe(1); expect(r.err).toMatch(/did not shut down cleanly \(code 1/);
   });
