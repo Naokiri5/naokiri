@@ -34,7 +34,7 @@ npm start
 while you use MIA. Closing it stops the app.
 
 ## 4. First use (in the browser)
-1. Open **http://localhost:8787/**.
+1. Open **http://localhost:8787/app** to create your owner account and enter the protected terminal. The public landing page is at **http://localhost:8787/**.
 2. Create your **owner passphrase** (10+ characters). Store it in a password manager. There is no "forgot password" yet.
 3. Click **Risk Center** in the left menu → read the limits → type your passphrase in the box → **Accept policy**.
 4. Click **Strategy Lab** → run a backtest → read the *out-of-sample* numbers → only if you accept them, click
