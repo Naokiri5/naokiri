@@ -17,7 +17,7 @@ let page: Page; const errors: string[] = [];
 async function login(p: Page) {
   await p.context().route('https://fonts.googleapis.com/**', (r) => r.fulfill({ contentType: 'text/css', body: '' }));
   p.on('pageerror', (e) => errors.push(e.message)); p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-  await p.goto('/'); const pw = p.locator('input[type=password]');
+  await p.goto('/app'); const pw = p.locator('input[type=password]');
   if (await p.getByText('Owner setup').count()) { await pw.nth(0).fill(PW); await pw.nth(1).fill(PW); } else await pw.first().fill(PW);
   await p.locator('form button').first().click(); await expect(p.locator('h1')).toBeVisible();
 }
@@ -25,7 +25,7 @@ test.beforeAll(async ({ browser }) => { page = await browser.newPage(); await lo
 
 test('every original route is reachable from its destination and keeps its URL', async () => {
   const side = page.getByRole('navigation', { name: 'Main' });
-  await page.goto('/'); await expect(side.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
+  await page.goto('/app'); await expect(side.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('.mode')).not.toHaveText(/^(…|CHECKING)$/); const modeBefore = await page.locator('.mode').textContent();
   for (const [group, paths] of GROUPS) {
     const btn = side.getByRole('button', { name: group });
@@ -50,7 +50,7 @@ test('deep links still work and highlight their destination; sibling tabs link r
 });
 
 test('groups are keyboard operable', async () => {
-  await page.goto('/');
+  await page.goto('/app');
   const btn = page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Portfolio' });
   const before = await btn.getAttribute('aria-expanded');
   await btn.focus(); await page.keyboard.press('Enter');
@@ -59,7 +59,7 @@ test('groups are keyboard operable', async () => {
 });
 
 test('collapsed rail keeps every destination one click away', async () => {
-  await page.goto('/'); await page.getByRole('button', { name: 'Collapse menu' }).click();
+  await page.goto('/app'); await page.getByRole('button', { name: 'Collapse menu' }).click();
   const side = page.getByRole('navigation', { name: 'Main' });
   await side.getByRole('link', { name: 'Autopilot' }).click(); await expect(page).toHaveURL(/\/bot$/);
   await page.getByRole('button', { name: 'Expand menu' }).click();
@@ -67,7 +67,7 @@ test('collapsed rail keeps every destination one click away', async () => {
 });
 
 test('command palette understands plain-language synonyms', async () => {
-  await page.goto('/'); await expect(page.locator('h1')).toBeVisible(); await page.keyboard.press('Control+k');
+  await page.goto('/app'); await expect(page.locator('h1')).toBeVisible(); await page.keyboard.press('Control+k');
   const box = page.getByRole('textbox', { name: 'Command' }); const opts = page.getByRole('option');
   await box.fill('profit'); await expect(opts.filter({ hasText: 'Portfolio' }).first()).toBeVisible(); await expect(opts.filter({ hasText: 'Profit Calendar' })).toBeVisible();
   await box.fill('ai bots'); await expect(opts.filter({ hasText: 'AI Intelligence' })).toBeVisible();
