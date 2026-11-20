@@ -12,13 +12,13 @@ const EVENT = z.object({
   title: z.string().min(1).max(240),
   currency: z.string().regex(/^[A-Z0-9]{2,12}$/),
   impact: z.enum(['LOW', 'MEDIUM', 'HIGH']),
-  timestampMs: z.number().int().nonnegative().safe(),
+  timestampMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
 }).strict();
 export const MacroCalendarSnapshotSchema = z.object({
   mode: z.enum(['OFF', 'ENFORCE']),
   source: z.string().min(3).max(180),
-  fetchedAtMs: z.number().int().nonnegative().safe(),
-  validUntilMs: z.number().int().nonnegative().safe(),
+  fetchedAtMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  validUntilMs: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   coverageCurrencies: z.array(z.string().regex(/^[A-Z0-9]{2,12}$/)).min(1).max(60),
   preEventBufferMinutes: z.number().int().min(0).max(180),
   postEventBufferMinutes: z.number().int().min(0).max(180),
