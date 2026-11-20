@@ -46,7 +46,7 @@ PR #18 owns schema migrations v6–v7. PR #25 retains them and adds the reconcil
 
 Existing SENSE → THINK → DEFEND → ACT flow to preserve:
 
-\`\`\`text
+```text
 Existing market fabric / provider registry / quality checks
    -> existing Asset Discovery + cached Hunt research + verified optional social/on-chain evidence
    -> existing strategy scanner + workers + QCI + decision/certificates + DITAS
@@ -55,30 +55,30 @@ Existing market fabric / provider registry / quality checks
         PAPER: existing PaperExecutionAdapter -> exec/oms.ts -> paper ledger
         LIVE:  existing LockedLiveExecutionAdapter (no venue orders)
    -> existing account-specific history and read-only Trader Joe explanations
-\`\`\`
+```
 
-**NOTE:** \`LIVE_EXECUTION_AVAILABLE = false\` in \`server/src/core/mode.ts\`. The LIVE adapter remains locked because an isolated signer, venue connector, order/partial-fill reconciliation, confirmed protective stops and release certification are not implemented. Having shared research does *not* create live execution authority. Changing that boundary requires a separately reviewed live-execution project and explicit owner authorization.
+**NOTE:** `LIVE_EXECUTION_AVAILABLE = false` in `server/src/core/mode.ts`. The LIVE adapter remains locked because an isolated signer, venue connector, order/partial-fill reconciliation, confirmed protective stops and release certification are not implemented. Having shared research does *not* create live execution authority. Changing that boundary requires a separately reviewed live-execution project and explicit owner authorization.
 
 ### Eight requested improvements and existing owners
 
 | Track | Reuse/extend the current owner | Next planned change (not part of this document commit) |
 | --- | --- | --- |
 | 1. PR reconciliation | Unified PR #45 and original code owners | Inventory overlapping stacked PRs, CI and merge conflicts; preserve canonical implementations and choose one integration order |
-| 2. TITAN HUNTER + Hunt Radar | \`server/src/hunt/ranker.ts\`, \`market/discover.ts\`, \`market/store.ts\`, \`web/src/pages/Markets.tsx\` | Connect cached time-provenanced observations, extend existing Discover view with watch-only ranking and evidence; no second scanner |
-| 3. Solana token safety | \`providers/dexscreener.ts\`, \`safety/safety.ts\`, Solana PRs #46/#50/#51/#52 | Reconcile existing RPC, mint/freeze, Pump.fun and alert changes; add verified holder/LP/sellability evidence only where permitted; unknown means UNVERIFIED |
-| 4. Feed freshness & recovery | \`market/fabric.ts\`, \`market/quality.ts\`, \`market/depthStream.ts\` | Validate sequence gaps, snapshot resync, provider time/receive time, bounded backfill and position-feed priority |
-| 5. Social Calls Radar | Existing \`news/\`, source/provider registry and DITAS history | Add only licensed/authorized timestamped external call evidence and research attribution within current intake; no social-to-order route |
-| 6. Certificates & B-MIND | \`decision/certificate.ts\`, \`decision/profitLab.ts\`, \`ditas/\`, existing QCI, B-MIND PRs | Attach source-backed dissent and behavioral hypotheses as explainable evidence; no new veto/approval engine or LLM trading authority |
-| 7. Research & challengers | Existing \`lab/\`, \`ditas/\` and historical replay | Compare champion/challenger on frozen event-time data, failed/delisted assets, costs, exits, and independent holdouts; no silent strategy promotion |
-| 8. Trader Joe Live view | \`joe/\`, \`api/routes.ts\`, \`web/src/\`, PR #44 | Enhance current read-only assistant and UI using committed records; label PAPER vs LIVE truthfully; no fabricated live fills |
+| 2. TITAN HUNTER + Hunt Radar | `server/src/hunt/ranker.ts`, `market/discover.ts`, `market/store.ts`, `web/src/pages/Markets.tsx` | Connect cached time-provenanced observations, extend existing Discover view with watch-only ranking and evidence; no second scanner |
+| 3. Solana token safety | `providers/dexscreener.ts`, `safety/safety.ts`, Solana PRs #46/#50/#51/#52 | Reconcile existing RPC, mint/freeze, Pump.fun and alert changes; add verified holder/LP/sellability evidence only where permitted; unknown means UNVERIFIED |
+| 4. Feed freshness & recovery | `market/fabric.ts`, `market/quality.ts`, `market/depthStream.ts` | Validate sequence gaps, snapshot resync, provider time/receive time, bounded backfill and position-feed priority |
+| 5. Social Calls Radar | Existing `news/`, source/provider registry and DITAS history | Add only licensed/authorized timestamped external call evidence and research attribution within current intake; no social-to-order route |
+| 6. Certificates & B-MIND | `decision/certificate.ts`, `decision/profitLab.ts`, `ditas/`, existing QCI, B-MIND PRs | Attach source-backed dissent and behavioral hypotheses as explainable evidence; no new veto/approval engine or LLM trading authority |
+| 7. Research & challengers | Existing `lab/`, `ditas/` and historical replay | Compare champion/challenger on frozen event-time data, failed/delisted assets, costs, exits, and independent holdouts; no silent strategy promotion |
+| 8. Trader Joe Live view | `joe/`, `api/routes.ts`, `web/src/`, PR #44 | Enhance current read-only assistant and UI using committed records; label PAPER vs LIVE truthfully; no fabricated live fills |
 
 ### Mode parity acceptance criteria — required for each later code increment
 
 1. Shared source snapshots and strategy versions yield the same *account-independent research* on both surfaces. Every observation retains actual source, event time (if provided), receipt time, staleness, missing evidence, version and trace ID.
 2. Risk is always re-evaluated **per account and per venue** immediately before an order; differences in balances, holdings, policy, limits, costs, market permissions or mode must not leak between PAPER and LIVE.
-3. PAPER stays on the existing \`exec/oms.ts\` and \`portfolio/ledger.ts\`. Current protective monitoring, single leader lease, idempotency, approval expiry, safety exits and audit invariants remain in force.
+3. PAPER stays on the existing `exec/oms.ts` and `portfolio/ledger.ts`. Current protective monitoring, single leader lease, idempotency, approval expiry, safety exits and audit invariants remain in force.
 4. LIVE order entry, close, signer and withdrawal remain blocked until the separate isolated LIVE adapter and release gates are approved. The presence of an investment account, a paper win or an AI certificate cannot unlock LIVE.
-5. Source failures, reorgs, stale prices, missing contract checks, provider quota exhaustion and unverified social hype produce explicit \`WAIT\`, \`UNVERIFIED\` or research-only states. Rankings are never direct trade permissions.
+5. Source failures, reorgs, stale prices, missing contract checks, provider quota exhaustion and unverified social hype produce explicit `WAIT`, `UNVERIFIED` or research-only states. Rankings are never direct trade permissions.
 6. Every proposal must include an anti-duplication map, file-level minimal diff, paired PAPER/LIVE isolation tests, import-boundary checks, end-to-end regression, security/audit results, rollback and an owner review. Do not claim tests passed until CI executes them.
 
 **Release sequence:** audit the unified branch and stacked PRs → write targeted tests/specifications against current owners → implement and verify one incremental enhancement at a time → owner-review any merge. Do not implement these eight tracks at once or activate LIVE as a side effect.
