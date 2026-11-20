@@ -158,14 +158,14 @@ export class FeatureEngine {
     const cs = this.candles; const n = cs.length; const c = cs[n - 1];
     const win = (k: number) => cs.slice(Math.max(0, n - k));
     const closes20 = win(20).map((x) => x.c);
-    const mid = avg(closes20); const sd = sdev(closes20);
+    const mid = n >= 20 ? avg(closes20) : NaN; const sd = n >= 20 ? sdev(closes20) : NaN;
     const bbU = mid + 2 * sd, bbL = mid - 2 * sd;
     const hi = (k: number) => Math.max(...win(k).map((x) => x.h)); const lo = (k: number) => Math.min(...win(k).map((x) => x.l));
     const vols = win(21).slice(0, -1).map((x) => x.v);
     const vm = avg(vols), vs = sdev(vols);
     const back = (k: number) => (n > k ? cs[n - 1 - k].c : NaN);
     const logr = win(21).map((x, i, a) => (i ? Math.log(x.c / a[i - 1].c) : NaN)).slice(1);
-    const h14 = hi(14), l14 = lo(14);
+    const h14 = n >= 14 ? hi(14) : NaN, l14 = n >= 14 ? lo(14) : NaN;
     const tp = win(20).map((x) => (x.h + x.l + x.c) / 3); const tpm = avg(tp); const md = avg(tp.map((x) => Math.abs(x - tpm)));
     // MFI 14
     let pos = 0, neg = 0; const w15 = win(15);
@@ -184,12 +184,12 @@ export class FeatureEngine {
       donchHigh20: n > 20 ? Math.max(...cs.slice(n - 21, n - 1).map((x) => x.h)) : NaN, donchLow20: n > 20 ? Math.min(...cs.slice(n - 21, n - 1).map((x) => x.l)) : NaN,
       donchHigh55: n > 55 ? Math.max(...cs.slice(n - 56, n - 1).map((x) => x.h)) : NaN, donchLow55: n > 55 ? Math.min(...cs.slice(n - 56, n - 1).map((x) => x.l)) : NaN,
       obv: this.obv, obvSlope10: this.obvHist.length > 10 ? (this.obvHist[this.obvHist.length - 1] - this.obvHist[this.obvHist.length - 11]) / (Math.abs(vm) * 10 || 1) : NaN,
-      volZ20: vols.length >= 10 && vs > 0 ? (c.v - vm) / vs : NaN, relVol20: vm > 0 ? c.v / vm : NaN,
+      volZ20: vols.length >= 20 && vs > 0 ? (c.v - vm) / vs : NaN, relVol20: vols.length >= 20 && vm > 0 ? c.v / vm : NaN,
       takerBuyRatio: c.tbv != null && c.v > 0 ? c.tbv / c.v : NaN,
       ret1: back(1) ? c.c / back(1) - 1 : NaN, ret5: c.c / back(5) - 1, ret20: c.c / back(20) - 1, roc10: c.c / back(10) - 1,
-      realizedVol20: sdev(logr), stochK14: h14 === l14 ? 50 : (100 * (c.c - l14)) / (h14 - l14), williamsR14: h14 === l14 ? -50 : (-100 * (h14 - c.c)) / (h14 - l14),
-      cci20: md ? (tp[tp.length - 1] - tpm) / (0.015 * md) : NaN, mfi14: neg === 0 ? (pos ? 100 : 50) : 100 - 100 / (1 + pos / neg),
-      vwap20: candleVwap(win(20)), zscore20: sd ? (c.c - mid) / sd : NaN, swingHigh, swingLow,
+      realizedVol20: n >= 21 ? sdev(logr) : NaN, stochK14: n < 14 ? NaN : h14 === l14 ? 50 : (100 * (c.c - l14)) / (h14 - l14), williamsR14: n < 14 ? NaN : h14 === l14 ? -50 : (-100 * (h14 - c.c)) / (h14 - l14),
+      cci20: n >= 20 && md ? (tp[tp.length - 1] - tpm) / (0.015 * md) : NaN, mfi14: n < 15 ? NaN : neg === 0 ? (pos ? 100 : 50) : 100 - 100 / (1 + pos / neg),
+      vwap20: n >= 20 ? candleVwap(win(20)) : NaN, zscore20: n >= 20 && sd ? (c.c - mid) / sd : NaN, swingHigh, swingLow,
       ema20Slope5: this.ema20Hist.length >= 6 ? this.ema20Hist[5] / this.ema20Hist[0] - 1 : NaN,
       ema50Slope10: this.ema50Hist.length >= 11 ? this.ema50Hist[10] / this.ema50Hist[0] - 1 : NaN,
       bbWidthPctile100: NaN, efficiencyRatio10: er,
