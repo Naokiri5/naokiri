@@ -1,4 +1,6 @@
-import { all, get, run, J, P } from '../db/db.js';
+import { all, get, run, tx, J, P } from '../db/db.js';
+import { appendEvent } from '../fabric/outbox.js';
+import { buildEvent } from '../fabric/contracts.js';
 import { uid, sha256 } from '../core/util.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import { getControl } from '../core/mode.js';
@@ -6,7 +8,7 @@ import { market } from '../market/store.js';
 import { assessQuality } from '../market/quality.js';
 import { memoryDetail, memoryEvents } from './memory.js';
 import { strategyPassports } from './passports.js';
-import { compareFingerprints } from './fingerprint.js';
+import { compareFingerprints, type MarketFingerprint } from './fingerprint.js';
 import { calibrationReport } from './calibration.js';
 import { simulateTwin, type TwinAssumptions } from './twin.js';
 import { INTERVAL_MS, type Candle } from '../market/types.js';
@@ -60,10 +62,22 @@ export function runDecisionTwin(eventId: string, candles: Candle[], assumptions:
 }
 
 export function similarEnvironments(eventId: string) {
-  const d = memoryDetail(eventId), f = d?.snapshot?.fingerprint;
-  if (!f) throw new Error('event has no fingerprint');
-  return all<any>(`SELECT e.id,json_extract(s.payload,'$.fingerprint') fingerprint FROM ditas_events e JOIN ditas_snapshots s ON s.id=e.snapshot_id WHERE e.created_at<=? AND e.id<>? AND e.snapshot_id<>? AND json_extract(s.payload,'$.fingerprint') IS NOT NULL ORDER BY e.created_at DESC LIMIT 500`, d!.event.createdAt, eventId, d!.event.snapshotId).flatMap(r => {
-    const fp = P(r.fingerprint); const comparison = compareFingerprints(f, fp); return comparison.comparable ? [{ eventId: r.id, instrumentId: fp.instrumentId, asOf: fp.asOf, ...comparison }] : [];
+  const detail = memoryDetail(eventId);
+  const anchor: MarketFingerprint | undefined = detail?.snapshot?.fingerprint;
+  if (!detail || !anchor) throw new Error('event has no fingerprint');
+  if (!Number.isFinite(anchor.asOf) || anchor.asOf > detail.event.createdAt) return [];
+  return all<{ id: string; fingerprint: string }>(`
+    SELECT e.id, json_extract(s.payload, '$.fingerprint') AS fingerprint
+    FROM ditas_events e JOIN ditas_snapshots s ON s.id = e.snapshot_id
+    WHERE e.seq < (SELECT seq FROM ditas_events WHERE id = ?)
+      AND e.created_at <= ? AND e.snapshot_id <> ?
+      AND json_type(s.payload, '$.fingerprint.asOf') IN ('integer', 'real')
+      AND json_extract(s.payload, '$.fingerprint.asOf') <= ?
+    ORDER BY e.seq DESC LIMIT 500
+  `, eventId, detail.event.createdAt, detail.event.snapshotId, anchor.asOf).flatMap(r => {
+    const fp = P<MarketFingerprint>(r.fingerprint);
+    const comparison = compareFingerprints(anchor, fp);
+    return comparison.comparable ? [{ eventId: r.id, instrumentId: fp.instrumentId, asOf: fp.asOf, ...comparison }] : [];
   }).sort((a, b) => b.similarity! - a.similarity!).slice(0, 20);
 }
 
@@ -89,12 +103,23 @@ export function addForecast(eventId: string, probability: number, targetAt: numb
   return { id, eventId, createdAt: now, targetAt, probability, cohort, ...payload };
 }
 export function addOutcome(forecastId: string, observedPrice: number, observedAt: number, sourceReference: string) {
-  const f = get<any>('SELECT * FROM ditas_forecasts WHERE id=?', forecastId), now = Date.now();
-  if (!f) throw new Error('forecast not found');
-  if (!Number.isFinite(observedPrice) || observedPrice <= 0 || observedAt !== f.target_at || observedAt > now || observedAt <= f.created_at) throw new Error('outcome must match the forecast target time and follow its recorded forecast');
-  const prediction = P(f.payload), outcome = observedPrice > prediction.referencePrice ? 1 : 0, id = uid('outcome');
-  const payload = { observedPrice, observedAt, sourceReference, provenance: 'OWNER_REPORTED_UNVERIFIED', target: prediction.target, note: 'Operator-supplied observation, not independently verified exchange history.' };
-  if (get('SELECT 1 FROM ditas_outcomes WHERE forecast_id=?', forecastId)) throw new Error('duplicate outcome: this forecast is already settled');
-  run('INSERT INTO ditas_outcomes(id,forecast_id,created_at,outcome,payload) VALUES (?,?,?,?,?)', id, forecastId, now, outcome, J(payload));
-  return { id, forecastId, createdAt: now, outcome, ...payload };
+  // NEXUS N2: the outcome row and its fabric event commit together, or neither does.
+  return tx(() => {
+    const f = get<any>('SELECT * FROM ditas_forecasts WHERE id=?', forecastId), now = Date.now();
+    if (!f) throw new Error('forecast not found');
+    if (!Number.isFinite(observedPrice) || observedPrice <= 0 || observedAt !== f.target_at || observedAt > now || observedAt <= f.created_at) throw new Error('outcome must match the forecast target time and follow its recorded forecast');
+    const prediction = P(f.payload), outcome = observedPrice > prediction.referencePrice ? 1 : 0, id = uid('outcome');
+    const payload = { observedPrice, observedAt, sourceReference, provenance: 'OWNER_REPORTED_UNVERIFIED', target: prediction.target, note: 'Operator-supplied observation, not independently verified exchange history.' };
+    if (get('SELECT 1 FROM ditas_outcomes WHERE forecast_id=?', forecastId)) throw new Error('duplicate outcome: this forecast is already settled');
+    run('INSERT INTO ditas_outcomes(id,forecast_id,created_at,outcome,payload) VALUES (?,?,?,?,?)', id, forecastId, now, outcome, J(payload));
+    const origin = get<{ id: string; instrument: string; snapshot_id: string | null }>('SELECT id, instrument, snapshot_id FROM ditas_events WHERE id=?', f.event_id);
+    appendEvent(buildEvent({
+      eventId: `ditas.outcome.${id}`, eventType: 'ditas.outcome.recorded.v1', source: 'ditas:service', sourceClass: 'DITAS',
+      instrumentId: origin?.instrument, traceId: f.event_id, causationId: forecastId, occurredAt: new Date(observedAt).toISOString(),
+      snapshotId: origin?.snapshot_id ?? undefined, producerVersion: 'ditas-service@1', dataStatus: 'UNVERIFIED', accessClass: 'OWNER_PRIVATE',
+      // Owner-reported observation: labelled UNVERIFIED, never presented as exchange truth. No secrets, no free text.
+      payload: { outcomeId: id, forecastId, decisionEventId: f.event_id, outcome, observedPrice, observedAt, provenance: 'OWNER_REPORTED_UNVERIFIED' },
+    }, now), now);
+    return { id, forecastId, createdAt: now, outcome, ...payload };
+  });
 }

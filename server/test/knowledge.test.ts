@@ -348,3 +348,16 @@ describe('authority boundaries', () => {
     expect(listConcepts().every((c: any) => c.sources === 0)).toBe(true);
   });
 });
+
+describe('EPUB spine amplification (MIA-KB-001)', () => {
+  it('reads a chapter listed many times in the spine only once', async () => {
+    const { zip } = await import('./kb-fixtures.js'); const { extract } = await import('../src/knowledge/extract.js');
+    const chapter = `<html><body><p>${'market structure liquidity '.repeat(20_000)}</p></body></html>`;
+    const opf = `<?xml version="1.0"?><package><metadata><dc:title>t</dc:title></metadata><manifest><item id="a" href="a.xhtml"/></manifest><spine>${'<itemref idref="a"/>'.repeat(120)}</spine></package>`;
+    const book = zip({ mimetype: 'application/epub+zip', 'META-INF/container.xml': '<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>', 'OEBPS/content.opf': opf, 'OEBPS/a.xhtml': chapter });
+    expect(book.length).toBeLessThan(5_000);
+    const r = await extract(book, 'repeat.epub');
+    expect(r.units).toHaveLength(1);
+    expect(r.units[0].text.length).toBeLessThan(600_000); // was ~65 MB of duplicated text before the fix
+  });
+});

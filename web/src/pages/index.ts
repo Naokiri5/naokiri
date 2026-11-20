@@ -7,3 +7,4 @@ export { JoePage } from './Joe';
 export { Discover, Qhef, SecurityCenter, CopyTrading, History } from './Phase1';
 export { Ditas } from './Ditas';
 export { Academy } from './Academy';
+export { Prediction } from './Prediction';

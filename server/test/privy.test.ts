@@ -1,0 +1,180 @@
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { generateKeyPair, exportJWK, exportSPKI, SignJWT, type JSONWebKeySet } from 'jose';
+import { freshDb, ownerSetupPayload } from './helpers.js';
+import { buildApp } from '../src/index.js';
+import { failureGate } from '../src/core/ratelimit.js';
+import { _setPrivyKeyForTests, contentSecurityPolicy, verifyPrivyAccessToken } from '../src/security/privy.js';
+
+/**
+ * Privy sign-in, offline: tokens are signed with a locally generated ES256 key served through a local JWKS, exactly
+ * the checks the server applies to real Privy tokens (signature, issuer, audience, expiry, subject format).
+ */
+const APP = 'cmtestprivyapp00000000001'; // 25 chars, like a real Privy app id
+const OWNER = 'did:privy:owner0000000001';
+const PW = 'privy route owner';
+const NOW_SECONDS = Date.parse('2026-11-10T00:00:00Z') / 1000;
+const json = { 'content-type': 'application/json', 'x-mia-csrf': '1' };
+let priv: CryptoKey; let otherPriv: CryptoKey;
+const token = (o: { sub?: string; aud?: string; iss?: string; exp?: number; key?: CryptoKey } = {}) =>
+  new SignJWT({ sid: 'sess_1' }).setProtectedHeader({ alg: 'ES256', kid: 'k1' }).setSubject(o.sub ?? OWNER)
+    .setIssuer(o.iss ?? 'privy.io').setAudience(o.aud ?? APP).setIssuedAt(NOW_SECONDS).setExpirationTime(o.exp ?? NOW_SECONDS + 3600)
+    .sign(o.key ?? priv);
+
+describe('Privy sign-in', () => {
+  let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
+  let jwks: JSONWebKeySet;
+  let verificationKey: string;
+  const post = (url: string, payload: unknown, withCookie = false) => app.inject({ method: 'POST', url, headers: withCookie ? { ...json, cookie } : json, payload: payload as any });
+  const linkOwner = async () => {
+    const result = await post('/api/security/privy/link', { accessToken: await token(), password: PW }, true);
+    expect(result.statusCode).toBe(200);
+  };
+  beforeAll(async () => {
+    process.env.MIA_PRIVY_APP_ID = APP;
+    const k = await generateKeyPair('ES256'); priv = k.privateKey as CryptoKey;
+    otherPriv = (await generateKeyPair('ES256')).privateKey as CryptoKey;
+    jwks = { keys: [{ ...(await exportJWK(k.publicKey)), kid: 'k1', alg: 'ES256', use: 'sig' }] };
+    verificationKey = await exportSPKI(k.publicKey);
+    _setPrivyKeyForTests(jwks);
+  });
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW_SECONDS * 1000);
+    freshDb(); failureGate.reset(); app = await buildApp();
+    const setup = await post('/api/auth/setup', ownerSetupPayload(PW));
+    expect(setup.statusCode).toBe(200);
+    cookie = String(setup.headers['set-cookie']).split(';')[0];
+  });
+  afterEach(async () => {
+    vi.useRealTimers();
+    await app.close();
+  });
+  afterAll(() => { delete process.env.MIA_PRIVY_APP_ID; _setPrivyKeyForTests(null); });
+
+  it('public config exposes only the app id and state; wallet actions are LOCKED', async () => {
+    const r = (await app.inject({ url: '/api/auth/privy/config' })).json();
+    expect(r).toEqual({ enabled: true, appId: APP, linked: false, ownerConfigured: false, embeddedWallets: false, walletActions: 'LOCKED' });
+  });
+  it('embedded-wallet intent needs the flag, a session and a passphrase step-up', async () => {
+    const url = '/api/security/privy/embedded-wallet-intent';
+    expect((await post(url, { password: PW }, true)).statusCode).toBe(403); // flag off
+    process.env.MIA_PRIVY_EMBEDDED_WALLETS = '1';
+    try {
+      expect((await post(url, { password: PW })).statusCode).toBe(401);       // no session
+      expect((await post(url, {}, true)).statusCode).toBe(403);               // no step-up
+      const ok = await post(url, { password: PW }, true);
+      expect(ok.statusCode).toBe(200); expect(ok.json()).toMatchObject({ ok: true });
+    } finally { delete process.env.MIA_PRIVY_EMBEDDED_WALLETS; }
+  });
+  it('embedded wallets are opt-in and never unlock wallet actions', async () => {
+    process.env.MIA_PRIVY_EMBEDDED_WALLETS = '1';
+    expect((await app.inject({ url: '/api/auth/privy/config' })).json()).toMatchObject({ embeddedWallets: true, walletActions: 'LOCKED' });
+    process.env.MIA_PRIVY_EMBEDDED_WALLETS = 'true'; // only the exact value 1 enables it
+    expect((await app.inject({ url: '/api/auth/privy/config' })).json()).toMatchObject({ embeddedWallets: false });
+    delete process.env.MIA_PRIVY_EMBEDDED_WALLETS;
+  });
+  it('refuses Privy login before the owner links an identity', async () => {
+    const r = await post('/api/auth/privy/login', { accessToken: await token() });
+    // Verified identity, but no owner bound and no MIA_PRIVY_OWNER_ID: refused, with the id the administrator would configure.
+    expect(r.statusCode).toBe(401); expect(r.json().error).toMatch(/no MIA owner has been set up yet.*MIA_PRIVY_OWNER_ID=did:privy:owner0000000001/); expect(r.headers['set-cookie']).toBeUndefined();
+  });
+  it('linking needs a MIA session and a passphrase step-up', async () => {
+    expect((await post('/api/security/privy/link', { accessToken: await token(), password: PW })).statusCode).toBe(401); // no session
+    expect((await post('/api/security/privy/link', { accessToken: await token() }, true)).statusCode).toBe(403); // no step-up
+    expect((await post('/api/security/privy/link', { accessToken: await token({ key: otherPriv }), password: PW }, true)).statusCode).toBe(401); // forged token
+    const ok = await post('/api/security/privy/link', { accessToken: await token(), password: PW }, true);
+    expect(ok.statusCode).toBe(200); expect(ok.json()).toEqual({ linked: true, userId: OWNER });
+  });
+  it('the linked owner signs in with a valid Privy token and gets a working session', async () => {
+    await linkOwner();
+    const r = await post('/api/auth/privy/login', { accessToken: await token() });
+    expect(r.statusCode).toBe(200);
+    const c = String(r.headers['set-cookie']); expect(c).toMatch(/HttpOnly/); expect(c).toMatch(/SameSite=Strict/);
+    const s = await app.inject({ url: '/api/auth/state', headers: { cookie: c.split(';')[0] } });
+    expect(s.json().authenticated).toBe(true);
+  });
+  it('verifies a token with the configured PEM public key', async () => {
+    vi.stubEnv('MIA_PRIVY_VERIFICATION_KEY', verificationKey);
+    _setPrivyKeyForTests(null);
+    try {
+      expect(await verifyPrivyAccessToken(await token())).toBe(OWNER);
+    } finally {
+      _setPrivyKeyForTests(jwks);
+      vi.unstubAllEnvs();
+    }
+  });
+  it.each([
+    ['another Privy user', () => token({ sub: 'did:privy:someoneelse0001' })],
+    ['a token for another app', () => token({ aud: 'cmanotherprivyapp00000001' })],
+    ['a token from another issuer', () => token({ iss: 'evil.example' })],
+    ['an expired token', () => token({ exp: NOW_SECONDS - 60 })],
+    ['a token signed with a different key', () => token({ key: otherPriv })],
+    ['a non-Privy subject', () => token({ sub: 'owner' })],
+  ])('refuses %s', async (_name, make) => {
+    await linkOwner();
+    const r = await post('/api/auth/privy/login', { accessToken: await make() });
+    expect(r.statusCode).toBe(401); expect(r.headers['set-cookie']).toBeUndefined();
+  });
+  it('failed Privy logins hit the shared brute-force limiter', async () => {
+    await linkOwner();
+    let last = 0;
+    for (let i = 0; i < 12; i++) last = (await post('/api/auth/privy/login', { accessToken: await token({ sub: 'did:privy:attacker000001' }) })).statusCode;
+    expect(last).toBe(429);
+  });
+  it('rejects malformed bodies', async () => {
+    expect((await post('/api/auth/privy/login', { accessToken: 'short' })).statusCode).toBe(400);
+    expect((await post('/api/auth/privy/login', { accessToken: await token(), extra: 1 })).statusCode).toBe(400);
+  });
+  it('unlink needs step-up, and afterwards Privy login is refused again', async () => {
+    await linkOwner();
+    expect((await post('/api/security/privy/unlink', {}, true)).statusCode).toBe(403);
+    expect((await post('/api/security/privy/unlink', { password: PW }, true)).json()).toEqual({ linked: false });
+    expect((await post('/api/auth/privy/login', { accessToken: await token() })).statusCode).toBe(401);
+  });
+  it('CSP opens only Privy/WalletConnect hosts when enabled, and stays strict when disabled', () => {
+    const on = contentSecurityPolicy();
+    expect(on).toContain('frame-src https://auth.privy.io'); expect(on).toContain("frame-ancestors 'none'"); expect(on).not.toMatch(/unsafe-eval|\*/);
+    delete process.env.MIA_PRIVY_APP_ID;
+    expect(contentSecurityPolicy()).toContain("connect-src 'self';"); expect(contentSecurityPolicy()).not.toContain('privy');
+    process.env.MIA_PRIVY_APP_ID = APP;
+  });
+});
+
+describe('Privy disabled', () => {
+  it('an app id that is not 25 characters leaves Privy off and explains why', async () => {
+    const { privyConfigProblem, privyEnabled } = await import('../src/security/privy.js');
+    process.env.MIA_PRIVY_APP_ID = 'tooshort123';
+    expect(privyEnabled()).toBe(false); expect(privyConfigProblem()).toMatch(/25-character/);
+    delete process.env.MIA_PRIVY_APP_ID; expect(privyConfigProblem()).toBeNull();
+  });
+  it('config reports disabled and login is 404', async () => {
+    delete process.env.MIA_PRIVY_APP_ID; freshDb(); failureGate.reset();
+    const app = await buildApp();
+    expect((await app.inject({ url: '/api/auth/privy/config' })).json()).toMatchObject({ enabled: false, appId: null });
+    expect((await app.inject({ method: 'POST', url: '/api/auth/privy/login', headers: json, payload: { accessToken: 'x'.repeat(40) } })).statusCode).toBe(404);
+    await app.close();
+  });
+});
+
+describe('Privy imports are confined to web/src/privy (static guard)', () => {
+  it('no other web file imports @privy-io directly', async () => {
+    const { readdirSync, readFileSync, statSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const root = new URL('../../web/src/', import.meta.url).pathname;
+    const walk = (d: string): string[] => readdirSync(d).flatMap((n) => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : /\.(t|j)sx?$/.test(n) ? [p] : []; });
+    const offenders = walk(root).filter((f) => !f.includes('/privy/') && /from ['"]@privy-io\//.test(readFileSync(f, 'utf8')));
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe('Privy client code cannot move funds (static guard, runs in CI)', () => {
+  it('the web Privy panels use no signing, sending, funding, export or delegation API', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const dir = new URL('../../web/src/privy/', import.meta.url);
+    const src = readdirSync(dir).filter((f) => /\.(t|j)sx?$/.test(f)).map((f) => readFileSync(new URL(f, dir), 'utf8')).join('\n');
+    expect(src.length).toBeGreaterThan(1000);
+    const forbidden = /\b(useSendTransaction|useSignTransaction|useSignMessage|useSignTypedData|useSign7702Authorization|useFundWallet|useExportWallet|useDelegatedActions|useHeadlessDelegatedActions|useSessionSigners|useSigners|useWallets|useSolanaWallets|getEthereumProvider|getProvider|sendTransaction|signTransaction|signMessage|signTypedData|exportWallet|fundWallet|delegateWallet|addSessionSigners|eth_sendTransaction|eth_sign|personal_sign|eth_signTypedData_v4)\b|\.request\(/;
+    expect(src.match(forbidden)?.[0] ?? null).toBeNull();
+    expect(src).toMatch(/createOnLogin: 'off'/);
+  });
+});

@@ -4,6 +4,7 @@
  * a child runs.
  */
 import { spawn } from 'node:child_process';
+import { modeGate } from '../../src/qa/gates.js';
 import { copyFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -66,7 +67,7 @@ export function buildStage(stage: Stage) {
   writeFileSync(join(dir, 'report.json'), J(rep));
   withDb(db, () => {
     seedStrategies(); run("UPDATE strategies SET status='PAPER'");
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: stage === 'pending' ? 'APPROVAL' : 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', DEPOSIT);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: stage === 'pending' ? 'APPROVAL' : 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', DEPOSIT);
     run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', rep.id, rep.candidateId, inst.id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
     if (stage === 'pending' && !queueForApproval(rep)) throw new Error('approval was not queued');
     if (stage === 'open' || stage === 'aged') { const r = submitEntry(rep, 'bot'); if (!r.ok) throw new Error(`stage entry failed: ${r.reason}`); }

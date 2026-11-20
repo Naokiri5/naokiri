@@ -36,15 +36,17 @@ export function ago(ms: number) {
 
 const fin = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const bool = (x: unknown): x is boolean => typeof x === 'boolean';
+/** Counts must be nonnegative integers: live=-1 used to pass and show green DATA LIVE (CodeRabbit PR #9). */
+const count = (x: unknown): x is number => fin(x) && Number.isInteger(x) && x >= 0;
 /** Runtime check of every field the model reads: a TypeScript cast is not validation. */
 export function isShellDto(x: any): x is ShellDto {
   if (!x || typeof x !== 'object' || typeof x.display !== 'string' || typeof x.mode !== 'string' || typeof x.gates !== 'string') return false;
   const { control: c, bot: b, account: a, dataHealth: d, riskLimits: l } = x;
   return !!c && bool(c.emergency) && bool(c.pausedNewOrders)
-    && !!b && bool(b.running) && fin(b.cycles) && fin(b.lastScanAt) && fin(b.lastTickerAt)
+    && !!b && bool(b.running) && count(b.cycles) && fin(b.lastScanAt) && fin(b.lastTickerAt)
     && (b.lastMonitorAt === undefined || fin(b.lastMonitorAt)) && (b.monitorFailing === undefined || bool(b.monitorFailing))
-    && !!a && [a.dailyPnlPct, a.weeklyPnlPct, a.drawdownPct, a.openRiskPct, a.consecutiveLosses, a.marksMissing].every(fin)
-    && !!d && bool(d.stale) && fin(d.tickersAt) && fin(d.live) && fin(d.degraded)
+    && !!a && [a.dailyPnlPct, a.weeklyPnlPct, a.drawdownPct, a.openRiskPct].every(fin) && count(a.consecutiveLosses) && count(a.marksMissing)
+    && !!d && bool(d.stale) && fin(d.tickersAt) && count(d.live) && count(d.degraded)
     && bool(x.policyAccepted) && bool(x.liveAllowed) && bool(x.offline)
     && fin(x.serverTime) && fin(x.scanIntervalMs) && x.scanIntervalMs > 0 && fin(x.tickerIntervalMs) && x.tickerIntervalMs > 0
     && (l === null || (!!l && [l.dailyLossPct, l.weeklyLossPct, l.drawdownWarnPct, l.drawdownHaltPct, l.maxOpenRiskPct, l.maxConsecutiveLosses].every(fin)));
@@ -100,6 +102,8 @@ export function deriveStatus({ shell: raw, requestedAt, error, streamConnected, 
   const scanStall = Math.max(180_000, LANE_STALL_FACTOR * shell.scanIntervalMs); const monStall = Math.max(180_000, LANE_STALL_FACTOR * shell.tickerIntervalMs);
   if (stale) segs.push(unknown('engine', 'Engine', 'STALE', `Engine state ${staleNote}`, '/bot'));
   else if (!b.running) segs.push({ id: 'engine', label: 'Engine', value: shell.offline ? 'OFF (OFFLINE)' : 'STOPPED', tone: 'bad', detail: `The headless scan/monitor loop is not running, so open paper positions are not being monitored.${errNote}`, to: '/bot' });
+  // A completion time in the future cannot prove the engine is healthy (CodeRabbit PR #9): same 5 s tolerance as the ticker.
+  else if (monAt > serverNow + 5_000 || b.lastScanAt > serverNow + 5_000) segs.push(unknown('engine', 'Engine', 'CLOCK?', `An engine completion time is in the future relative to the server clock.${errNote}`, '/bot'));
   else if (b.monitorFailing) segs.push({ id: 'engine', label: 'Engine', value: 'MONITOR FAILING', tone: 'bad', detail: `The last position-monitor pass failed; open paper positions are not being evaluated.${errNote}`, to: '/bot' });
   else if (!monAt) segs.push(unknown('engine', 'Engine', 'STARTING', `Engine started; position monitor has not completed a pass yet.${errNote}`, '/bot'));
   else if (monAge > monStall) segs.push({ id: 'engine', label: 'Engine', value: `MONITOR STALLED · ${ago(monAge)}`, tone: 'bad', detail: `Position monitoring has not completed for ${ago(monAge)} (expected every ${ago(shell.tickerIntervalMs)}).${errNote}`, to: '/bot' });

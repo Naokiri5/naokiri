@@ -3,8 +3,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChartApi, type UTCTimestamp } from 'lightweight-charts';
 import { hierarchy, pack } from 'd3-hierarchy';
 import { api, fmt, useApi } from '../api';
-import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Modal, Page, Tabs, useSort } from '../ui';
+import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Modal, Page, Tabs, useSort , rowProps} from '../ui';
 import { DecisionView, IndicatorGrid } from './Intel';
+import { CexActivity } from './CexActivity';
+import { AdvancedIndicators } from './AdvancedIndicators';
 
 export function Terminal() {
   const { symbol = 'BTCUSDT' } = useParams(); const [iv, setIv] = useState<'15m' | '1h' | '4h'>('1h'); const nav = useNavigate();
@@ -41,23 +43,44 @@ export function Terminal() {
             <div className="row"><Badge v={data.chartIntelligence.status} /><Badge v={data.chartIntelligence.trend} /><Badge v="NO TRADE" /></div>
             <div className="hint">{data.chartIntelligence.note}</div>
             {data.chartIntelligence.issues.length > 0 && <div className="hint warn">{data.chartIntelligence.issues.join('; ')}</div>}
+            {data.timeframeAgreement && <div className="tablewrap">
+              <table>
+                <caption>Timeframe agreement · {data.timeframeAgreement.state.replaceAll('_', ' ')}</caption>
+                <thead><tr><th>Timeframe</th><th>Structure</th><th>Candle closed</th></tr></thead>
+                <tbody>{data.timeframeAgreement.readings.map((r: { timeframe: string; trend: string; status: string; closedAt: number | null; issues: string[] }) => (
+                  <tr key={r.timeframe}><td>{r.timeframe}</td>
+                    <td><Badge v={r.status === 'VALID' ? r.trend : r.status} />{r.issues.map(issue => <div className="hint" key={issue}>{issue}</div>)}</td>
+                    <td>{fmt.time(r.closedAt)}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>}
+            {!!data.chartIntelligence.anchoredVwap?.length && <div className="tablewrap">
+              <table><thead><tr><th>VWAP anchor</th><th>Anchor time (UTC)</th><th>Estimated VWAP</th><th>Close vs. VWAP</th></tr></thead>
+                <tbody>{data.chartIntelligence.anchoredVwap.map((v: { anchor: string; anchorAt: number; price: number | null; deviationPct: number | null }) => (
+                  <tr key={v.anchor}><td>{v.anchor.replaceAll('_', ' ')}</td><td>{new Date(v.anchorAt).toISOString()}</td>
+                    <td>{v.price === null ? 'Unavailable' : fmt.px(v.price)}</td><td>{v.deviationPct === null ? '—' : fmt.pct(v.deviationPct, 2)}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>}
             <div className="tablewrap"><table><thead><tr><th>Detection</th><th>Boundaries</th><th>Evidence</th><th>Invalidation</th></tr></thead><tbody>
               {data.chartIntelligence.detections.map((d: any) => <tr key={d.kind}><td>{d.kind}<div className="hint">{Math.round(d.confidence * 100)}% rule strength · {d.calibration}</div></td><td>{fmt.px(d.boundaries.low)}–{fmt.px(d.boundaries.high)}</td><td>{d.evidence.join('; ')}<div className="hint">{d.method}</div></td><td>{d.invalidation}<div className="hint">Expires {fmt.time(d.expiresAt)}</div></td></tr>)}
             </tbody></table></div>
           </div>}
         </Card>
+        <CexActivity report={data?.cexActivity} />
+        <AdvancedIndicators snapshot={data?.featuresResearch} />
         <Card title="50 indicator specialists"><IndicatorGrid list={data?.indicators ?? []} /></Card>
       </div>
       <div className="col" style={{ gap: 14 }}>
         <Card title="Order book (top 20)" right={<Freshness at={data?.book?.ts} />} flush>{data?.book ? <Book book={data.book} /> : <Empty>No book</Empty>}</Card>
         <Card title="Large prints" flush><div className="tablewrap" style={{ maxHeight: 220 }}><table><tbody>{(data?.prints ?? []).map((p: any, i: number) => <tr key={i}><td className="faint">{fmt.ago(p.ts)}</td><td><Badge v={p.side} /></td><td className="num">{fmt.usd(p.notional, 0)}</td></tr>)}</tbody></table>{!data?.prints?.length && <Empty>No prints above threshold recently.</Empty>}</div></Card>
-        <Card title="Watchlist" flush><div className="tablewrap" style={{ maxHeight: 360 }}><table><tbody>{(watch.data?.tickers ?? []).slice(0, 40).map((w: any) => <tr key={w.symbol} className="click" onClick={() => nav(`/terminal/${w.symbol}`)}><td><b>{w.base}</b></td><td className="num">{fmt.px(w.last)}</td><td className="num"><Chg v={w.changePct} /></td></tr>)}</tbody></table></div></Card>
+        <Card title="Watchlist" flush><div className="tablewrap" style={{ maxHeight: 360 }}><table><tbody>{(watch.data?.tickers ?? []).slice(0, 40).map((w: any) => <tr key={w.symbol} {...rowProps(() => nav(`/terminal/${w.symbol}`), `Open ${w.symbol} in the terminal`)}><td><b>{w.base}</b></td><td className="num">{fmt.px(w.last)}</td><td className="num"><Chg v={w.changePct} /></td></tr>)}</tbody></table></div></Card>
       </div>
     </div>}
     {ana && <Modal title="Full pipeline analysis" onClose={() => setAna(null)}>{ana.decision ? <DecisionView report={ana} /> : <div className="banner info">{ana.reason}</div>}</Modal>}
   </Page>;
 }
-function CandleChart({ candles, features }: { candles: any[]; features: any }) {
+export function CandleChart({ candles, features }: { candles: any[]; features: any }) {
   const ref = useRef<HTMLDivElement>(null); const chart = useRef<IChartApi | null>(null); const series = useRef<any>({});
   useEffect(() => {
     if (!ref.current) return;
@@ -81,6 +104,8 @@ function CandleChart({ candles, features }: { candles: any[]; features: any }) {
   return <div ref={ref} className="chart" role="img" aria-label="Candlestick price chart" />;
 }
 function Book({ book }: { book: any }) {
+  // MIA-WEB-014: a one-sided or empty book used to throw (book.bids[0][0]) and blank the whole app.
+  if (!book?.bids?.length || !book?.asks?.length) return <div className="hint">Order book unavailable (one side is empty). Entries and exits wait for a two-sided book.</div>;
   const max = Math.max(...[...book.bids, ...book.asks].map((x: any) => x[0] * x[1]));
   const row = (x: any, side: 'b' | 'a') => <tr key={side + x[0]}><td className={`num ${side === 'b' ? 'up' : 'down'}`} style={{ background: `linear-gradient(to left, ${side === 'b' ? 'rgba(34,195,142,.12)' : 'rgba(240,80,90,.12)'} ${(x[0] * x[1] / max) * 100}%, transparent 0)` }}>{fmt.px(x[0])}</td><td className="num">{fmt.num(x[1], 4)}</td></tr>;
   return <div className="tablewrap" style={{ maxHeight: 420 }}><table><tbody>{[...book.asks.slice(0, 12)].reverse().map((x: any) => row(x, 'a'))}<tr><td colSpan={2} className="hint" style={{ textAlign: 'center' }}>spread {fmt.num(((book.asks[0][0] - book.bids[0][0]) / book.bids[0][0]) * 1e4, 2)} bps</td></tr>{book.bids.slice(0, 12).map((x: any) => row(x, 'b'))}</tbody></table></div>;
@@ -107,7 +132,7 @@ export function Bubbles() {
         <circle r={n.r} fill={color(n.data.changePct)} stroke="var(--line2)" />
         {n.r > 16 && <><text textAnchor="middle" dy="-0.1em" fontSize={Math.min(16, n.r / 2.6)} fill="var(--text)" fontWeight={600}>{n.data.symbol}</text><text textAnchor="middle" dy="1.1em" fontSize={Math.min(12, n.r / 3.4)} fill="var(--text)" fontFamily="var(--mono)">{fmt.pct(n.data.changePct, 1)}</text></>}
       </g>)}</svg> : <Empty>Loading…</Empty>}</Card>}
-    {view === 'Table' && <Card flush><div className="tablewrap"><table><thead><tr>{th('symbol', 'Asset')}{th('price', 'Price', true)}{th('changePct', '24h', true)}{th('quoteVolume', 'Volume', true)}{th('marketCap', 'Mkt cap', true)}<th>Tags</th><th>Safety</th></tr></thead><tbody>{sorted.map((r: any) => <tr key={r.id} className="click" onClick={() => nav(`/terminal/${r.symbol}USDT`)}><td><b>{r.symbol}</b></td><td className="num">{fmt.px(r.price)}</td><td className="num"><Chg v={r.changePct} /></td><td className="num">{fmt.big(r.quoteVolume)}</td><td className="num">{fmt.big(r.marketCap)}</td><td>{r.tags.map((t: string) => <Badge key={t} v={t} />)}</td><td>{r.safety ? <Badge v={r.safety} /> : <span className="faint">not deep-scanned</span>}</td></tr>)}</tbody></table></div></Card>}
+    {view === 'Table' && <Card flush><div className="tablewrap"><table><thead><tr>{th('symbol', 'Asset')}{th('price', 'Price', true)}{th('changePct', '24h', true)}{th('quoteVolume', 'Volume', true)}{th('marketCap', 'Mkt cap', true)}<th>Tags</th><th>Safety</th></tr></thead><tbody>{sorted.map((r: any) => <tr key={r.id} {...rowProps(() => nav(`/terminal/${r.symbol}USDT`), `Open ${r.symbol} in the terminal`)}><td><b>{r.symbol}</b></td><td className="num">{fmt.px(r.price)}</td><td className="num"><Chg v={r.changePct} /></td><td className="num">{fmt.big(r.quoteVolume)}</td><td className="num">{fmt.big(r.marketCap)}</td><td>{r.tags.map((t: string) => <Badge key={t} v={t} />)}</td><td>{r.safety ? <Badge v={r.safety} /> : <span className="faint">not deep-scanned</span>}</td></tr>)}</tbody></table></div></Card>}
     {view.startsWith('Forex') && <Card flush title={`ECB reference fixing ${data?.fxAsOf ?? ''} — daily, not tradeable`}><table><thead><tr><th>Pair</th><th className="num">Rate</th><th className="num">Δ vs prior fixing</th></tr></thead><tbody>{(data?.forex ?? []).map((f: any) => <tr key={f.id}><td><b>{f.symbol}</b></td><td className="num">{f.price.toFixed(5)}</td><td className="num"><Chg v={f.changePct} dp={3} /></td></tr>)}</tbody></table></Card>}
   </Page>;
 }
@@ -122,7 +147,7 @@ export function Whales() {
     {tab === 'CEX large prints' && <div className="grid g-2-1"><Card flush title={`${w.data?.prints.length ?? 0} prints (6h window)`}><div className="tablewrap"><table><thead><tr><th>When</th><th>Pair</th><th>Side</th><th className="num">Price</th><th className="num">Notional</th></tr></thead><tbody>{(w.data?.prints ?? []).map((p: any, i: number) => <tr key={i}><td className="faint">{fmt.ago(p.ts)}</td><td><Link to={`/terminal/${p.symbol}`}>{p.symbol}</Link></td><td><Badge v={p.side} /></td><td className="num">{fmt.px(p.price)}</td><td className="num">{fmt.usd(p.notional, 0)}</td></tr>)}</tbody></table>{!w.data?.prints.length && <Empty>No prints above threshold yet.</Empty>}</div></Card>
       <Card title="Thresholds" flush><table><tbody>{(w.data?.thresholds ?? []).map((t: any) => <tr key={t.symbol}><td>{t.symbol}</td><td className="num">{fmt.usd(t.threshold, 0)}</td></tr>)}</tbody></table></Card></div>}
     {tab === 'DEX launches' && <Card flush title="Latest DEX token profiles" right={<Freshness at={d.data?.asOf} />}><div className="banner info" style={{ margin: 12 }}>{d.data?.note}</div><div className="tablewrap"><table><thead><tr><th>Token</th><th>Chain / DEX</th><th className="num">Liquidity</th><th className="num">Vol 24h</th><th className="num">24h</th><th className="num">Buys/Sells</th><th>Safety</th></tr></thead>
-      <tbody>{(d.data?.pairs ?? []).map((p: any) => <tr key={p.pairAddress} className="click" onClick={() => setSel(p)}><td><b>{p.baseSymbol}</b> <span className="faint">{p.baseName}</span></td><td>{p.chainId} · {p.dexId}</td><td className="num">{fmt.usd(p.liquidityUsd, 0)}</td><td className="num">{fmt.big(p.volume24h)}</td><td className="num"><Chg v={p.change24h} /></td><td className="num">{p.buys24h}/{p.sells24h}</td><td><Badge v={p.safety.status} /></td></tr>)}</tbody></table>{!d.data?.pairs?.length && <Empty>Loading DEX listings…</Empty>}</div></Card>}
+      <tbody>{(d.data?.pairs ?? []).map((p: any) => <tr key={p.pairAddress} {...rowProps(() => setSel(p), `Open ${p.baseSymbol} pair details`)}><td><b>{p.baseSymbol}</b> <span className="faint">{p.baseName}</span></td><td>{p.chainId} · {p.dexId}</td><td className="num">{fmt.usd(p.liquidityUsd, 0)}</td><td className="num">{fmt.big(p.volume24h)}</td><td className="num"><Chg v={p.change24h} /></td><td className="num">{p.buys24h}/{p.sells24h}</td><td><Badge v={p.safety.status} /></td></tr>)}</tbody></table>{!d.data?.pairs?.length && <Empty>Loading DEX listings…</Empty>}</div></Card>}
     {tab === 'Copy trading' && <Card title="Copy trading (Part 4.4)"><div className="col"><Badge v="PENDING_CREDENTIALS" /><p className="muted">Copy trading mirrors identified wallets. It needs an on-chain indexer (EVM/Solana RPC + explorer API) to discover, rank and validate whale wallets. No wallet data is simulated. When configured, copied trades will still pass the full QCI → decision → risk pipeline and never bypass your limits.</p><Link to="/connections">Configure providers in the Connections Hub →</Link></div></Card>}
     {sel && <Modal title={`${sel.baseSymbol} · ${sel.chainId}`} onClose={() => setSel(null)}><div className="col"><div className="row"><Badge v={sel.safety.status} /><span className="muted">Automation-eligible: no</span><a href={sel.url} target="_blank" rel="noreferrer noopener">DEX Screener ↗</a></div><table><tbody>{sel.safety.checks.map((c: any) => <tr key={c.name}><td>{c.name}</td><td><Badge v={c.result} /></td><td className="muted">{c.detail}</td></tr>)}</tbody></table><div className="hint">Token names and descriptions are untrusted external content.</div></div></Modal>}
   </Page>;

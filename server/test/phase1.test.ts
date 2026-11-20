@@ -3,7 +3,7 @@ import { closeDb, openDb, run } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { config } from '../src/config.js';
 import { market } from '../src/market/store.js';
-import { seedInstrument } from './helpers.js';
+import { seedInstrument, ownerSetupPayload } from './helpers.js';
 import { toCsv } from '../src/journal/history.js';
 import { record } from '../src/core/latency.js';
 
@@ -13,7 +13,7 @@ describe('Phase 1 workspaces API', () => {
   beforeAll(async () => {
     closeDb(); openDb(':memory:'); market.reset(); seedInstrument('BTCUSDT'); seedInstrument('ETHUSDT', { seed: 7 });
     app = await buildApp();
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: PW } }); cookie = String(r.headers['set-cookie']).split(';')[0];
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload(PW) }); cookie = String(r.headers['set-cookie']).split(';')[0];
   });
   it('every response carries a request id (and honours a safe incoming one)', async () => {
     const a = await app.inject({ url: '/api/health' }); expect(a.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
