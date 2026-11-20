@@ -6,7 +6,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
  * Runs against an OFFLINE server (no live data), so pages must show honest empty/stale states, not crash.
  */
 const PW = 'e2e owner passphrase';
-const ROUTES = ['/', '/terminal/BTCUSDT', '/scanner', '/discover', '/intelligence', '/qhef', '/joe', '/bubbles', '/whales', '/copy', '/holders', '/news',
+const ROUTES = ['/app', '/terminal/BTCUSDT', '/scanner', '/discover', '/intelligence', '/qhef', '/joe', '/bubbles', '/whales', '/copy', '/holders', '/news',
   '/bot', '/risk', '/portfolio', '/history', '/journal', '/calendar', '/lab', '/wallet', '/security', '/connections', '/notifications', '/qa', '/settings', '/academy'];
 const errors: string[] = [];
 function watch(page: Page) {
@@ -32,7 +32,7 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test('owner setup and sign-in', async () => {
-  await page.goto('/');
+  await page.goto('/app');
   const pws = page.locator('input[type=password]'); await pws.nth(0).fill(PW); await pws.nth(1).fill(PW);
   await page.getByRole('button', { name: 'Create owner' }).click();
   await expect(page.locator('.mode')).toHaveText('READ-ONLY');
@@ -77,7 +77,7 @@ test('status ribbon goes STALE (never green) when the server stops answering, th
   const ctx = await browser.newContext({ storageState: await page.context().storageState() }); // own tab: aborted requests are expected noise here
   const p = await ctx.newPage();
   await p.clock.install();
-  await p.goto('/');
+  await p.goto('/app');
   const ribbon = p.getByRole('group', { name: 'Autopilot status' });
   await expect(ribbon.locator('[data-seg=mode] .mode')).toHaveText('PAPER');
   await p.route('**/api/shell', (r) => r.abort());
@@ -101,7 +101,7 @@ for (const r of ROUTES) {
 }
 
 test('command palette navigates and runs a risk-reducing action', async () => {
-  await page.goto('/'); await expect(page.locator('h1')).toBeVisible(); await page.keyboard.press('Control+k');
+  await page.goto('/app'); await expect(page.locator('h1')).toBeVisible(); await page.keyboard.press('Control+k');
   const box = page.getByRole('dialog', { name: 'Command palette' }); await expect(box).toBeVisible();
   await box.getByRole('textbox', { name: 'Command', exact: true }).fill('security'); await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/\/security$/); await expect(page.locator('h1')).toHaveText('Security Center');
@@ -201,7 +201,7 @@ test('academy: upload a document, see it indexed, search it with a cited source'
 });
 
 test('overview dashboard shows account, market intelligence, risk monitor, data sources and activity from the backend', async () => {
-  await page.goto('/');
+  await page.goto('/app');
   for (const t of ['Paper account', 'Market intelligence', 'Risk monitor', 'Data sources', 'Activity', 'Trader Joe daily briefing']) await expect(page.getByText(t, { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Equity', { exact: true })).toBeVisible();
   await expect(page.getByRole('meter', { name: 'Daily loss' })).toBeVisible(); // policy accepted earlier in this suite
