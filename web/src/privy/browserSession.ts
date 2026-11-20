@@ -1,5 +1,4 @@
 const SIGN_IN_WINDOW_MS = 5 * 60_000;
-const LEGACY_LOGOUT_FLAG = 'mia:privy-logout';
 const memory = new Map<string, string | null>();
 const signInKey = (appId: string) => `mia:privy-sign-in:${appId}`;
 const logoutKey = (appId: string) => `mia:privy-logout:${appId}`;
@@ -19,7 +18,7 @@ function write(key: string, value?: string) {
 }
 
 export function privyLogoutPending(appId: string) {
-  return read(logoutKey(appId)) === '1' || read(LEGACY_LOGOUT_FLAG) === '1';
+  return read(logoutKey(appId)) === '1';
 }
 
 /** Only an explicit sign-in can authorize exchanging the SDK token after an OAuth redirect. */
@@ -48,5 +47,4 @@ export function requirePrivyLogout(appId: string) {
 
 export function completePrivyLogout(appId: string) {
   write(logoutKey(appId));
-  write(LEGACY_LOGOUT_FLAG);
 }

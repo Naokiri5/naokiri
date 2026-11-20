@@ -16,7 +16,7 @@
  * Verification key: MIA_PRIVY_VERIFICATION_KEY (the PEM public key from the Privy dashboard) is preferred; otherwise
  * the app's public JWKS is fetched from auth.privy.io. Neither is a secret. No Privy app secret is needed or used.
  */
-import { createLocalJWKSet, createRemoteJWKSet, errors, importSPKI, jwtVerify, type JSONWebKeySet, type JWTVerifyGetKey } from 'jose';
+import { createLocalJWKSet, createRemoteJWKSet, errors, exportJWK, importSPKI, jwtVerify, type JSONWebKeySet, type JWTVerifyGetKey } from 'jose';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { failureGate } from '../core/ratelimit.js';
@@ -87,6 +87,8 @@ async function verificationKey(appId: string): Promise<JWTVerifyGetKey> {
   if (pem) {
     try {
       const publicKey = await importSPKI(pem, 'ES256');
+      const { kty, crv } = await exportJWK(publicKey);
+      if (kty !== 'EC' || crv !== 'P-256') throw new Error('expected an ES256 verification key');
       key = () => publicKey;
     } catch {
       throw new PrivyVerificationUnavailable('MIA could not load its configured Privy verification key. Ask the server administrator to check the public key.');

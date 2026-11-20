@@ -50,6 +50,17 @@ describe('Privy browser sign-in intent', () => {
     expect(reloaded.takePrivySignIn(APP)).toBe(true);
   });
 
+  it('keeps logout and sign-in intent independent for each Privy app', () => {
+    sessionStorage.setItem('mia:privy-logout', '1');
+    session.requirePrivyLogout(APP);
+    expect(session.privyLogoutPending(APP)).toBe(true);
+    expect(session.privyLogoutPending(OTHER_APP)).toBe(false);
+    expect(session.requestPrivySignIn(OTHER_APP)).toBe(true);
+    session.completePrivyLogout(OTHER_APP);
+    expect(session.privyLogoutPending(APP)).toBe(true);
+    expect(session.takePrivySignIn(OTHER_APP)).toBe(true);
+  });
+
   it('consumes the sign-in intent only once even if clearing browser storage fails', () => {
     expect(session.requestPrivySignIn(APP)).toBe(true);
     vi.spyOn(sessionStorage, 'removeItem').mockImplementation(() => { throw new Error('storage blocked'); });

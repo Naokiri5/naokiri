@@ -28,6 +28,7 @@ describe('Privy sign-in', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
   let jwks: jose.JSONWebKeySet;
   let verificationKey: string;
+  let incompatibleKey: string;
   const post = (url: string, payload: unknown, withCookie = false) => app.inject({ method: 'POST', url, headers: withCookie ? { ...json, cookie } : json, payload: payload as any });
   const linkOwner = async () => {
     const result = await post('/api/security/privy/link', { accessToken: await token(), password: PW }, true);
@@ -39,6 +40,7 @@ describe('Privy sign-in', () => {
     otherPriv = (await jose.generateKeyPair('ES256')).privateKey as CryptoKey;
     jwks = { keys: [{ ...(await jose.exportJWK(k.publicKey)), kid: 'k1', alg: 'ES256', use: 'sig' }] };
     verificationKey = await jose.exportSPKI(k.publicKey);
+    incompatibleKey = await jose.exportSPKI((await jose.generateKeyPair('ES384')).publicKey);
     _setPrivyKeyForTests(jwks);
   });
   beforeEach(async () => {
@@ -131,9 +133,12 @@ describe('Privy sign-in', () => {
       vi.unstubAllEnvs();
     }
   });
-  it('reports a malformed configured verification key as a service error', async () => {
+  it.each([
+    ['malformed', () => 'invalid-pem-fixture'],
+    ['incompatible', () => incompatibleKey],
+  ])('reports a %s configured verification key as a service error', async (_name, makeKey) => {
     await linkOwner();
-    vi.stubEnv('MIA_PRIVY_VERIFICATION_KEY', 'invalid-pem-fixture');
+    vi.stubEnv('MIA_PRIVY_VERIFICATION_KEY', makeKey());
     _setPrivyKeyForTests(null);
     try {
       const r = await post('/api/auth/privy/login', { accessToken: await token() });

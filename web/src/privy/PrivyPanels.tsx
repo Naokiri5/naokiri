@@ -19,7 +19,7 @@ import { completePrivyLogout, privyLogoutPending, requestPrivySignIn, requirePri
 export type PrivyClientConfig = AuthState['privy'];
 
 function PrivyRoot({ appId, children }: { appId: string; children: ReactNode }) {
-  return <PrivyProvider appId={appId} config={{
+  return <PrivyProvider key={appId} appId={appId} config={{
     appearance: { theme: 'dark', accentColor: '#4f8cff', showWalletLoginFirst: false },
     // Never create embedded wallets automatically. Optional owner-initiated creation (MIA_PRIVY_EMBEDDED_WALLETS=1, server
     // step-up) is handled in AccountInner; MIA never holds, signs with, funds or exports any key.
@@ -114,7 +114,7 @@ function SignInInner({ appId, onDone }: { appId: string; onDone: () => void }) {
 }
 export function PrivySignIn({ config, onDone }: { config: PrivyClientConfig; onDone: () => void }) {
   if (!config.appId) return null;
-  return <PageErrorBoundary label="Privy sign-in"><PrivyRoot appId={config.appId}><SignInInner key={config.appId} appId={config.appId} onDone={onDone} /></PrivyRoot></PageErrorBoundary>;
+  return <PageErrorBoundary label="Privy sign-in"><PrivyRoot appId={config.appId}><SignInInner appId={config.appId} onDone={onDone} /></PrivyRoot></PageErrorBoundary>;
 }
 
 // ---- Security Center ------------------------------------------------------------------------------------------------
