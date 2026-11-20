@@ -1,9 +1,24 @@
-# MIA 5.0 — Unified PDF TypeScript source preservation and manual integration review
+# MIA 5.0 — Unified PDF-to-Repository Feature Enhancement Master Document
 
 **Status: DOCUMENTATION ONLY. No production code, dependencies, database, trading mode, orders, exchange credentials or LIVE authority changed.**
 **Review:** 2026-11-21 | **Repo:** [Naokiri5/naokiri](https://github.com/Naokiri5/naokiri) | **Baseline:** [unmerged PR #45](https://github.com/Naokiri5/naokiri/pull/45), branch `claude/mia-unified-01`.
 
 This review uses the owner's complete uploaded **49-page PDF**, not a guessed feature list. It separates **unaltered source evidence** from **new review conclusions**. The PDF claims to be `server/src/mia-unified-core.ts` and proposes six core modules; that claim is not proof the implementation already runs in GitHub.
+
+## One unified decision: what the PDF changes — and what it does not
+
+The uploaded PDF is a **source-preserved technical proposal**, **not an installed MIA 5.0 engine**. Its six proposed modules must be assessed against the current MIA source of truth *before* any code is introduced. MIA already has NEXUS event contracts, a risk gate, paper OMS/ledger, monitored exits, supervised bot and owner-authenticated telemetry. The PDF cannot be pasted in as a second trading core.
+
+This page is the **single canonical PDF-to-MIA enhancement specification**. It incorporates the PDF module audit, fifteen concrete risks, a nonduplicating implementation register, the user's eight selected priorities, PAPER/LIVE parity requirements, and acceptance gates. The pre-existing [eight-priority SENSE/THINK/DEFEND/ACT traceability](MIA_OMEGA_FOUR_LAYER_TRACEABILITY.md) remains the linked engineering owner inventory; do not duplicate the code or maintain conflicting plans.
+
+| Decision | Modules / areas | Exact interpretation |
+| --- | --- | --- |
+| **REUSE — no replacement** | MIA-CORE-01 event fabric; CORE-02 financial ledger; CORE-03 risk authority; CORE-04 protective exits; CORE-05A paper OMS; CORE-06 boot/SSE | Canonical implementations already exist on unmerged PR #45. Change their existing owners only for verified gaps |
+| **EVALUATE IN RESEARCH FIRST** | 5-second markout, VPIN/OFI context, regime sizing, five-stage exit challenger, queue/partial-fill modeling, operator telemetry | Treat PDF formulas/thresholds as unvalidated hypotheses. Require event-time data, backtesting, negative cases and reproducible evidence |
+| **BLOCK UNCONDITIONALLY IN THIS BUILD** | MIA-CORE-05B signed Bybit LIVE orders, replacement ledger, second risk governor, automatic exchange-state overwrites, separate orchestration | No live-money trading or new order authority; MIA's `LIVE_EXECUTION_AVAILABLE=false` is unchanged |
+| **OUTSIDE PDF SCOPE** | Hunt Radar, Solana safety completion, Social Calls Radar, B-MIND integration, full Trader Joe UI | Follow the separate existing/stacked code owners; PDF does not implement these features |
+
+**Source-preservation rule:** Original PDF text and the unedited TypeScript are archived separately under `docs/engineering/sources/` and are not changed by updates to this review. Original words and line wrapping remain intact, including known extraction defects; this document contains *new analysis*, clearly separated from source material.
 
 ## 1. Original source preservation — no words silently removed or edited
 
@@ -142,3 +157,55 @@ Detailed ownership, PR graph and acceptance tests are in [MIA Ω four-layer trac
 **Required tests before any later coding merge:** event publisher/import boundaries, source clock/replay, unique exchange execution IDs, partial/unknown fill and duplicate delivery, snapshot incompleteness, account/venue separation, crash/restart while a stop or partial exit is in flight, active halt over UTC reset, markout stale-quote abstention, risk vetoes, strategy champion/challenger cost and OOS, Joe privacy and load/fault tests, plus full repository CI and owner review. Preserve current `risk.test.ts`, `oms.test.ts`, `import-boundaries.test.ts`, `lab.test.ts`, `think-replay.test.ts`, `depth-stream.test.ts` and `joe-live.test.ts`.
 
 **Final manual judgment:** Copy the entire proposed TypeScript **as a source reference**, **not as runnable code**. Most modules would duplicate your existing MIA engine and some introduce critical real-money risks. The defensible new work is narrowly scoped, research-first markout/TCA, flow context, challenger rules and read-only operational evidence through current modules. No production files were touched by this documentation effort.
+
+## 9. Unified implementation register — exact work, existing owner, no duplicates
+
+This register turns the PDF's six modules and the eight priority areas into **reviewable development candidates**, not permission to add a new trading engine. `PENDING` means **not delivered** by the documentation effort. Earlier code in PR #45 or stacked PRs must be reconciled first.
+
+| ID / source | Minimal enhancement, not replacement | Extend existing code | Current reality / review gate |
+| --- | --- | --- | --- |
+| **UNI-01 — CORE-01** | Research-only five-second post-fill markout; return `UNAVAILABLE` if source time, 5s window or quote freshness cannot be verified | `ditas/execution.ts`, `market/quality.ts`, `fabric/catalog.ts`, existing read models | **PENDING.** Source/receipt clocks, actual committed PAPER fill IDs, replay stability, zero trading imports |
+| **UNI-02 — CORE-01** | Enforce registered producer identity and event direction with existing NEXUS contract and static boundaries | `fabric/contracts.ts`, `fabric/catalog.ts`, `fabric/relay.ts`, `test/import-boundaries.test.ts` | **PARTIAL in #45.** Reject caller-asserted roles, duplicate event IDs, malformed provenance and unauthorized mutator imports |
+| **UNI-03 — CORE-02** | Add read-only, account-scoped discrepancy classifications for position/order snapshots; never delete a position because an exchange response omitted it | `exec/environment.ts`, future verified venue read model, `ops/readiness.ts`; reconcile PR #64 | **PENDING.** Partial snapshot must yield `INCOMPLETE`; execution IDs, venue/account scope and epoch required |
+| **UNI-04 — CORE-03** | Observe VPIN, OFI and post-fill adverse selection as *uncalibrated research*, without new risk approval authority | `market/cexActivity.ts`, `features/`, `ditas/`, `decision/certificate.ts` | **PENDING.** Data gaps and ambiguous samples abstain; OOS reliability before policy changes |
+| **UNI-05 — CORE-03** | Assess macro veto and correlation-bucket ideas against existing policy using shadow outcomes | `risk/gate.ts`, `risk/policy.ts`, `portfolio/stress.ts`; reconcile PR #67 | **PARTIAL/STACKED.** Existing gate is sole authority; no synthetic policy bypass |
+| **UNI-06 — CORE-03** | Compare regime-specific fractional-Kelly sizing with current sizing using independent validation | `lab/`, `ditas/calibration.ts`, `risk/policy.ts` | **PENDING research.** PDF multipliers are hypotheses, never auto-applied |
+| **UNI-07 — CORE-04** | Test five-stage exit logic as a Strategy Lab challenger against current exit capsule | `lab/exits.ts`, `lab/backtest.ts`, `ditas/twin.ts` | **PENDING research.** Keep existing OMS stop/incident controls; simulate gaps, fees, slippage, insufficient depth and restarts |
+| **UNI-08 — CORE-05A** | Investigate explicit queue, IOC/post-only and partial-fill models in *hypothetical* execution studies | `lab/backtest.ts`, `ditas/twin.ts`, `ditas/execution.ts` | **PENDING research.** Do not insert invented 60/40 fills into real PAPER order history |
+| **UNI-09 — CORE-05B** | Review future LIVE venue lifecycle and credential/isolation requirements, **without** adding a signer | `exec/environment.ts`, `core/mode.ts`, review PR #64 | **LIVE LOCKED.** Unknown order outcomes, idempotency, real protected stops, reconciliation and owner authorization required before any future build |
+| **UNI-10 — CORE-06** | Display truthful process/stream/recovery state and linked event evidence in existing operator UI | `ops/readiness.ts`, `api/sse.ts`, `joe/live/`, `web/src/` | **PARTIAL in #45.** Fastify owner authentication, redaction, bounded reconnect/replay and PAPER labels |
+| **UNI-11 — Priority 2** | Connect existing cached TITAN HUNTER ranker to authenticated Asset Discovery watch-only results | `hunt/ranker.ts`, `market/discover.ts`, `market/store.ts`, existing Markets view | **PARTIAL in #45.** Authoritative provider timestamp required; no DEX timestamp fabrication or auto-order routing |
+| **UNI-12 — Priority 3** | Integrate already-written Solana launch/mint/watch evidence into the existing safety model; add missing holder/LP/exit checks only after source verification | `safety/safety.ts`, `providers/dexscreener.ts`, `market/discover.ts`; reconcile #46/#50/#51/#52 | **STACKED OPEN.** Keep token vs pool identities distinct, unknown = unverified; no trade permissions |
+| **UNI-13 — Priority 4** | Certify feed freshness, sequence recovery, failover and open-position priority under adverse conditions | `market/depthStream.ts`, `market/fabric.ts`, `market/quality.ts`, `bot/bot.ts` | **PARTIAL in #45.** Existing snapshot/gap resync already present; require outage and protection-lag tests |
+| **UNI-14 — Priority 5** | Add historically attributable Social Calls Radar observations and retrospective outcomes **without social-to-OMS wiring** | Existing `news/`, source/provider registry and `ditas/` | **MISSING/UNVERIFIED.** Permissioned sources, original call time, deduplication, bias flags and cost-aware outcomes |
+| **UNI-15 — Priority 6** | Connect source-validated B-MIND context as *optional frozen evidence* within the existing certificate/DITAS record | `decision/certificate.ts`, `ditas/`; reconcile #56/#61 | **STACKED OPEN.** Evidence absent = UNKNOWN, not zero or certainty; QCI/risk vetoes remain authoritative |
+| **UNI-16 — Priority 7** | Test champion/challenger historical outcomes on matched event-time universes, including rejected and delisted assets | `lab/`, `ditas/twin.ts`, `ditas/replay.ts` | **PARTIAL in #45.** OOS, leakage checks, real costs, no silent promotion |
+| **UNI-17 — Priority 8** | Complete existing Trader Joe event timeline, status panels and safe reconnect UX without fictitious LIVE records | `joe/live/`, `api/routes.ts`, `api/sse.ts`, `web/src/pages/Joe.tsx`; review #44/#71 | **PARTIAL in #45.** Committed PAPER state only, owner permissions, idempotent cursor, accessible UI |
+
+### Standard acceptance record for every UNI ticket
+
+Before implementing any UNI ticket, its owner shall record: **(a)** existing file/function and checked commit SHA, **(b)** why the requested behavior is not already available, **(c)** conflicts with open PRs and schema/version dependencies, **(d)** narrow code diff against the canonical owner, **(e)** negative and account-isolation tests, **(f)** performance/replay/fault evidence, **(g)** rollout/rollback and observability, and **(h)** explicit owner review. A PR having a name or code snippets is not evidence of runtime integration. **Do not mark a ticket complete because this document was committed.**
+
+## 10. Manual code integration order — preserve PAPER and lock LIVE
+
+1. **R0 — reconcile PR #45 and relevant stacked PRs first.** At a minimum review the actual heads and overlapping changed files for #19 (Hunter), #44 (Joe), #46/#50/#51/#52 (Solana), #56/#61 (B-MIND), #64 (venue read model), #66/#67 (risk), #71 (environment UI), and #75/#76 (security). Assign every candidate one actual owner: `EXISTING`, `ENHANCE`, `STACKED_AWAITING_RECONCILIATION`, `DUPLICATE_SKIP` or `LIVE_BLOCKED`.
+2. **Research-first changes:** prioritize UNI-01/02 and UNI-04/06/07/08 as source-verified, deterministic and read-only calculations using the existing fabric, DITAS and lab. Never use PDF constants as production risk thresholds without independent evidence.
+3. **Complete existing feature surfaces:** UNI-11 Hunter Radar, UNI-12 Solana safety and UNI-13 feed resilience. The currently scheduled paper bot and scanner remain canonical; research rankings never create orders themselves.
+4. **Attach missing intelligence without authority:** UNI-14 social historical evidence and UNI-15 B-MIND source-backed hypotheses, then UNI-16 matched challenger evaluation. No replacement decision engine or risk gate.
+5. **Complete truth-based operator reporting:** UNI-10/17 use the existing Fastify/SSE/Joe pages and committed PAPER records with live environment capability displayed honestly as `LOCKED`.
+6. **Future, separately scoped LIVE work:** UNI-03/09 are *design/reconciliation tasks only* in this plan. LIVE execution is not enabled by paper tests, PDF source code, an approval score or a deposit. A signer, venue client, order recovery and account-specific financial ledger would require a separately approved release and safety certification.
+
+## 11. Mandatory preservation and regression matrix
+
+| Test family | What must remain true |
+| --- | --- |
+| **Canonical architecture** | One `market/scanner.ts`, one `qci/coordinator.ts`, one `risk/gate.ts`, one `exec/oms.ts` for PAPER, one `portfolio/ledger.ts`, current bot lease fence and current mode gate |
+| **Source trust** | Untrusted social/on-chain strings, malformed timestamps, missing event clocks, stale books, duplicate IDs, inconsistent quote depths and provider gaps fail closed or become research-only |
+| **Account boundaries** | PAPER writes may touch only the PAPER account; research in a LIVE screen never inherits PAPER balances, ledger entries, fill IDs, protected positions or authorization |
+| **Order finality** | Lost acknowledgements are `UNKNOWN` until reconciled; replayed fills use venue execution identity, not wall-clock coincidence; incomplete position snapshots cannot erase an open position |
+| **Exit safety** | Protective monitoring and incident reporting still work after restart/disconnect; local PDF timers are not a substitute for persisted order/protection state |
+| **Quality and evaluation** | Backtests include fees/spread/slippage, missing data, walk-forward/holdout, survivorship/delistings, rejected opportunities, adverse market regimes and counterfactual assumptions |
+| **UI truth** | Joe explains only committed PAPER activity; LIVE is displayed as unavailable/locked until certified; no synthetic wallet amounts, exchange fills, guaranteed return or implied endorsement |
+| **Release** | Existing unit/integration/E2E/security CI passes on the actual target head, negative tests are included, owner signs off, no automatic PR merge or production deployment |
+
+**Final boundary:** This entire master document and the accompanying source copies are documentation artifacts. Nothing here is a claim that the six PDF modules or all eight MIA priorities have been integrated, or that the PDF source is deployable, compiled, production-safe or trading-eligible.
