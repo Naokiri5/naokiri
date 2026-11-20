@@ -2,7 +2,8 @@ import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBoo
 import { relayOnce } from '../fabric/relay.js';
 import { market } from '../market/store.js';
 import { scanOnce } from '../market/scanner.js';
-import { monitorPositions, expireApprovals, submitEntry, queueForApproval } from '../exec/oms.js';
+import { monitorPositions, expireApprovals, queueForApproval } from '../exec/oms.js';
+import { executionAdapter } from '../exec/environment.js';
 import { refreshNews } from '../news/news.js';
 import { scanPrints } from '../whales/prints.js';
 import { checkStrategyHealth } from '../lab/lab.js';
@@ -88,7 +89,9 @@ function onDecision(r: DecisionReport) {
   botStatus.decisionsTotal++;
   const ctl = getControl();
   // Bot writes are fenced: the lease is re-checked inside each write transaction (CodeRabbit PR #12).
-  if (r.decision === 'PAPER_TRADE' && ctl.mode === 'PAPER') { const res = fenced(() => submitEntry(r, 'bot')); if (res.ok) botStatus.entriesToday++; }
+  // PAPER and future LIVE share decision research, but the account-specific adapter owns the final execution boundary.
+  // LIVE is still locked, and must never reinterpret a PAPER_TRADE decision as a live authorization.
+  if (r.decision === 'PAPER_TRADE' && ctl.mode === 'PAPER') { const res = fenced(() => executionAdapter('PAPER').submitEntry(r, 'bot')); if (res.ok) botStatus.entriesToday++; }
   else if (r.decision === 'APPROVED_FOR_USER_CONFIRMATION' && ctl.mode !== 'OBSERVE') fenced(() => queueForApproval(r));
 }
 
