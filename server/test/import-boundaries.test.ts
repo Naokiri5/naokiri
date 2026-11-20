@@ -126,3 +126,23 @@ describe('Import boundaries (static, runtime imports only)', () => {
     } finally { GRAPH.delete('workers/__probe__.ts'); }
   });
 });
+
+describe('B-MIND boundaries (MIA 5.0 M5-U03a, JDR-001 D-11)', () => {
+  const inBmind = (p: string) => p.startsWith('bmind/');
+  it('bmind/ reaches nothing outside bmind/ at runtime (static, dynamic and side-effect imports; types are erased)', () => {
+    const files = [...GRAPH.keys()].filter(inBmind);
+    expect(files).toContain('bmind/observation.ts'); // the guard is looking at real files
+    const outside = files.flatMap((f) => [...reachable(f)].filter((t) => !inBmind(t)).map((t) => `${f} -> ${t}`));
+    expect(outside).toEqual([]);
+  });
+  it('nothing outside bmind/ imports it yet: B-MIND has no effect on decisions (M5-U05/U06 must change this test through review)', () => {
+    const users = [...GRAPH.entries()].filter(([f, imps]) => !inBmind(f) && imps.some((i) => inBmind(i.target))).map(([f]) => f);
+    expect(users).toEqual([]);
+  });
+  it('the order, exit, risk and portfolio code can never reach bmind/: a behavioral signal never touches an exit or a size', () => {
+    const roots = [...GRAPH.keys()].filter((f) => /^(exec|risk|portfolio|wallet)\//.test(f) || f === 'lab/exits.ts');
+    expect(roots).toEqual(expect.arrayContaining(['exec/oms.ts', 'lab/exits.ts', 'risk/gate.ts']));
+    const hits = roots.flatMap((r) => [...reachable(r)].filter(inBmind).map((t) => `${r} -> ${t}`));
+    expect(hits).toEqual([]);
+  });
+});
