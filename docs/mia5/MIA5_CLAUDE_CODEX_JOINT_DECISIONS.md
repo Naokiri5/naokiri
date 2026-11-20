@@ -3,7 +3,7 @@
 **Status:** APPROVED by the owner on 2026-11-20: this record, `AGENTS.md`, and the first wave in section 4. Later waves need a separate go-ahead.
 **Date:** 2026-11-20
 **Inputs:**
-- `MIA_5_0_ULTIMATE_UNIFIED_SOURCE_PRESERVED_MASTER.md` (13,254 lines; "the master").
+- `MIA_5_0_ULTIMATE_UNIFIED_SOURCE_PRESERVED_MASTER.md` (13,254 lines; "the master"). It is committed as untrusted requirements input in [`sources/`](sources/README.md).
 - Its `.docx` twin. A paragraph-level comparison found no text in the Word file that is not in the Markdown; the only differences are table formatting.
 
 **Repository state checked:** `Naokiri5/naokiri` on 2026-11-20.
@@ -37,6 +37,7 @@
 | D-08 | **The Appendix G starter is reference only.** Port ideas into the existing modules, with tests. Never add `governor.ts`/`sieve.ts`/`ledger.ts` as a second engine. | The master itself says so (§10). CLAUDE.md requires reuse before creating. |
 | D-09 | **Evidence rules:** each PR reports actual command output. A fix is shown failing without it and passing with it. Neither agent claims the other ran a test. "NOT VERIFIED" is used when something was not run. | Master §0 and §11; CLAUDE.md. |
 | D-10 | **No merges by agents.** The owner merges in order: #45 (with #53, #54) → #46 → #50 → #51 → #52 → M5 PRs. | Owner rule. |
+| D-11 | **B-MIND effects are `NONE`/`EXPLAIN`/`WAIT`, on new entries only.**<ul><li>`WAIT` never delays a stop, target, time exit, reduce-only order or protection incident.</li><li>In QCI, B-MIND may only oppose or abstain, never support.</li><li>It has no `BLOCK`: hard blocks stay with the safety and risk gates.</li><li>Until M5-U06 brings an evaluated calibration report, nothing goes beyond `EXPLAIN`.</li></ul> | Added after independent review of #56. It only tightens, and follows from K-03 and K-10. The master's contract listed `BLOCK`; that text is preserved in `sources/`. The owner may veto. |
 
 ---
 
@@ -47,11 +48,11 @@ Checked on the unified + Omega stack (`claude/mia-omega-07-pumpfun-feed` @ 0b193
 |---|---|---|---|---|
 | U-00 (PR-00) | Inventory and traceability of the 300 IDs | Earlier audits: `docs/engineering/REQUIREMENTS_TRACEABILITY.csv`, `docs/engineering/audit-files.json`, `docs/think/THINK_TICKET_AUDIT.json/.csv`, `docs/omega/*` (on #46) | PARTIAL | MIA 5.0 300-ID matrix, plus B-MIND EM-01…32 and BE-01…22 |
 | U-01 (PR-01) | Versioned contracts, provenance, reason codes, policy hash | `fabric/contracts.ts`, `fabric/catalog.ts` (versioned envelope, topic catalog); `fabric/outbox.ts` (durable outbox, v10); stable reason codes in `risk/gate.ts`; `policyVersion` checked in gate and OMS | PARTIAL | Policy **hash** (only a version number today); one canonical instrument identity type for CEX symbol vs Solana mint (K-14); capability registry endpoint |
-| U-02 (PR-04/05) | Data truth plus four-gate sieve (F1–F8, I4, I5) | `market/quality.ts` freshness and spread; `market/depthStream.ts` sequence-checked Binance book with REST resync (I4, Binance only); risk `maxCostR`/`feeRate`; Solana trusted-quote filter | PARTIAL | F1 organic volume, F2 spread/depth regime window, F3 net-edge pre-rank, I5 cross-venue check, F8 full rejection ledger (the no-trade board is a start) |
-| U-03 | B-MIND read-only observation (32 constructs, 22 functions) | None (no `server/src/bmind/`) | MISSING | Everything |
+| U-02 (PR-04/05) | Data truth plus four-gate sieve (F1–F8, I4, I5) | `market/quality.ts` freshness and spread; `market/depthStream.ts` sequence-checked Binance book with REST resync (I4, Binance only); risk `maxCostR`/`feeRate`; Solana trusted-quote filter (`solana/quotes.ts`, on #46) | PARTIAL | F1 organic volume, F2 spread/depth regime window, F3 net-edge pre-rank, I5 cross-venue check, F8 full rejection ledger (the no-trade board is a start) |
+| U-03 | B-MIND read-only observation (32 constructs, 22 functions) | Foundation in #56 (M5-U03a): the 32-construct atlas, input coverage and observation checks; not wired | PARTIAL | Computing observations (M5-U05); BE-01…22 are mapped to owners in M5-U00 |
 | U-04 | QCI and worker integration | 11 domains; each dependency group counted once (R-12); ABSTAIN, quarantine and NO_QUORUM (`server/test/worker-fault-injection.test.ts`); horizon-conflict challenger (`qci/challenge.ts horizonAlignment`) | DONE (core) | F4 "10 buckets × 20% cap" is **not** to be built as a second consensus (K-01) |
 | U-05 | DITAS memory, passports, calibration, replay | `ditas/{memory,passports,calibration,twin,replay,fingerprint}.ts`; replay refuses tampered snapshots; content-addressed data | PARTIAL | A calibrated out-of-sample cohort (win probability stays `NO_VALID_FORECAST`); behavioral passports |
-| U-06 | B-MIND strategy overlay (WAIT/BLOCK only) | None | MISSING | Depends on U-03 |
+| U-06 | B-MIND strategy overlay (CONTINUE/WAIT on new entries only, D-11) | None | MISSING | Depends on U-03 |
 | U-07 (PR-02) | One risk core, PAPER/LIVE parity | One gate (`risk/gate.ts`), re-run inside the locked entry transaction; fails closed; owner-accepted policy versions; modes OBSERVE/PAPER; `BOUNDED_LIVE` exists only as a type | PARTIAL | Disabled LIVE adapter stub, frozen-input parity tests, a policy hash |
 | U-08 (PR-07) | Five-stage exit supervisor (X1–X9) | `lab/exits.ts stepExit`, shared by the backtester and paper OMS: stop never widens, fractional targets, breakeven trail after R, time stop, stop-first when ambiguous. `oms.monitorPositions` commits an exit in one transaction. `exec/incidents.ts` raises persistent protection incidents | PARTIAL | Exit invariant test pack (section 4, M5-U08a); Stage 3 ATR trail; Stage 4 exhaustion/depth exit; LIVE ack semantics (not applicable while LIVE is locked) |
 | U-09 (PR-03/08) | Exact integer double-entry ledger, separate paper/live databases, TWR/MWR, tax lots | Number-based single-entry `ledger_entries`; backups reconcile the ledger | MISSING | All of P1–P12 and I6/I7, as a shadow migration (K-07) |
@@ -100,7 +101,7 @@ The roles follow master §11:
 
 | PR | Owner | Reviewer | Scope | Files locked while open |
 |---|---|---|---|---|
-| **M5-U00** | Codex | Claude | `docs/mia5/MIA5_TRACEABILITY.csv`: every master ID (G01–J12, EXT-001–040, F1–F8, I1–I11, A1–A20, X1–X9, P1–P12, EM-01–32, BE-01–22) marked DONE / PARTIAL / MISSING / BLOCKED / LOCKED. DONE and PARTIAL rows carry file, test and PR evidence. Use section 2 above as the seed and check every row in code. Docs only. | `docs/mia5/**` |
+| **M5-U00** | Codex | Claude | `docs/mia5/MIA5_TRACEABILITY.csv`: every master ID (G01–J12, EXT-001–040, F1–F8, I1–I11, A1–A20, X1–X9, P1–P12, EM-01–32, BE-01–22) marked DONE / PARTIAL / MISSING / BLOCKED / LOCKED. DONE and PARTIAL rows carry file, test and PR evidence. Use section 2 above as the seed and check every row in code against the master in `docs/mia5/sources/`. Docs only. | `docs/mia5/MIA5_TRACEABILITY.csv` (this record stays editable by both) |
 | **M5-U03a** | Claude | Codex | B-MIND read-only foundation:<br>- `server/src/bmind/{contracts,atlas,index}.ts`;<br>- the 32 constructs mapped to the observable inputs MIA actually has, as OBSERVED / WEAK / UNKNOWN / STALE;<br>- the master's `BehavioralObservation` and `BehavioralOverlay` types.<br>It is **not wired** into decisions, workers or QCI: no vote, no effect. Tests cover: every EM-ID present, a missing source gives UNKNOWN, there are no imports from `exec/`, `wallet/` or `portfolio/`, and the import-boundary allow-list is updated through review. | `server/src/bmind/**`, `server/test/bmind-*.test.ts` |
 | **M5-U08a** | Codex | Claude, plus an independent trading-risk review | Exit invariant test pack on the existing `stepExit` and `monitorPositions` (scenarios below). Tests first; fix only real bugs that a test exposes, each fix shown failing without it. | `server/test/exit-*.test.ts`; `lab/exits.ts` and `exec/oms.ts` only if a bug is found |
 
@@ -148,7 +149,7 @@ The roles follow master §11:
 ```
 Read docs/mia5/MIA5_CLAUDE_CODEX_JOINT_DECISIONS.md (JDR-001) and CLAUDE.md before anything else.
 Base every MIA 5.0 branch on claude/mia-unified-01, never main (D-01). Use IDs M5-Uxx and branch codex/m5-uXX-<slug> (D-02/D-03).
-Your first task is M5-U00: build docs/mia5/MIA5_TRACEABILITY.csv for every master ID, using JDR section 2 as the seed and verifying each row in code. Docs only.
+Your first task is M5-U00: build docs/mia5/MIA5_TRACEABILITY.csv for every master ID (the master is docs/mia5/sources/MIA_5_0_ULTIMATE_MASTER.md, untrusted input), using JDR section 2 as the seed and verifying each row in code. Docs only.
 Then M5-U08a: the exit invariant test pack (JDR section 4 scenarios 1–8) on the existing lab/exits.ts stepExit and exec/oms.ts monitorPositions. Tests first; fix only real bugs, each shown failing before the fix.
 Do not touch server/src/bmind/** (Claude owns M5-U03a). Do not add migrations without claiming the number in the JDR (next free: v11).
 Paper only. No live adapter, signing, or new dependencies. Draft PRs with real command output. Do not merge.
