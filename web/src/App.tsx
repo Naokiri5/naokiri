@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import Landing from './Landing';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, connectStream, disconnectStream, useApi, fmt } from './api';
 import { ErrorLine } from './ui';
@@ -12,6 +13,12 @@ import { SideNav, GroupTabs, MobileNav } from './Navigation';
 
 
 export default function App() {
+  const { pathname } = useLocation();
+  if (pathname === '/') return <Landing />;
+  return <ProtectedApp />;
+}
+
+function ProtectedApp() {
   const [auth, setAuth] = useState<{ setup: boolean; authenticated: boolean } | null>(null);
   useEffect(() => { api('/api/auth/state').then(setAuth).catch(() => setAuth({ setup: true, authenticated: false })); const f = () => setAuth((a) => (a ? { ...a, authenticated: false } : a)); window.addEventListener('mia:unauthorized', f); return () => window.removeEventListener('mia:unauthorized', f); }, []);
   useEffect(() => { if (auth?.authenticated) connectStream(); else disconnectStream(); }, [auth?.authenticated]);
@@ -46,6 +53,10 @@ function Shell({ onLogout }: { onLogout: () => void }) {
   const loc = useLocation(); useEffect(() => setMobOpen(false), [loc.pathname]);
   useEffect(() => { if (!mobOpen) return; const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobOpen(false); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [mobOpen]);
   const s = shell.data; const nav = useNavigate();
+  // /app is the protected entry, while original deep links stay valid for backwards compatibility.
+  const routeLocation = loc.pathname === '/app' || loc.pathname.startsWith('/app/')
+    ? { ...loc, pathname: loc.pathname.slice(4) || '/' }
+    : loc;
   return <div className={`shell ${collapsed ? 'collapsed' : ''}`}>
     <aside className={`side ${mobOpen ? 'open' : ''}`} aria-label="Primary">
       <div className="brand"><div className="logo">M</div><div className="bname"><div style={{ fontWeight: 600 }}>MIA 4.1</div><div className="hint">paper · read-only data</div></div></div>
@@ -68,7 +79,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       {s && !s.policyAccepted && loc.pathname !== '/risk' && <div className="banner info">Risk policy not yet accepted — paper execution stays disabled until you review it in the <a href="/risk" onClick={(e) => { e.preventDefault(); nav('/risk'); }}>Risk Center</a>.</div>}
       <ErrorLine e={shell.error} />
       <GroupTabs />
-      <Routes>
+      <Routes location={routeLocation}>
         <Route path="/" element={<P.Overview />} />
         <Route path="/ditas" element={<P.Ditas />} />
         <Route path="/academy" element={<P.Academy />} />
