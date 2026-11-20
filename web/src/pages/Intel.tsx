@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Chg, Empty, ErrorLine, Page, Tabs, useSort, Action, Freshness, Modal } from '../ui';
+import { NoTradeBoard } from './NoTradeBoard';
 import { StepUp } from './Trading';
 
 export function Scanner() {
@@ -13,7 +14,7 @@ export function Scanner() {
   return <Page title="AI Scanner" sub="Deep-tier universe (most liquid Binance spot pairs) evaluated on every closed 1h candle by 3 versioned strategies → 100-worker QCI → decision engine → risk gate. Scores are evidence summaries, never win probabilities."
     right={<><Freshness at={data?.lastScanAt} label="last scan" /><input placeholder="Analyze symbol…" value={sym} onChange={(e) => setSym(e.target.value)} style={{ width: 150 }} /><Action label="Analyze now" className="primary" disabled={!sym} run={async () => setAna(await api('/api/analyze', { body: { symbol: sym } }))} /></>}>
     <ErrorLine e={error} />
-    <Tabs tabs={['Market board', `Decisions (${data?.decisions.length ?? 0})`, `Rejected (${data?.rejections.length ?? 0})`, 'Strategies']} value={tab.startsWith('Decisions') ? `Decisions (${data?.decisions.length ?? 0})` : tab.startsWith('Rejected') ? `Rejected (${data?.rejections.length ?? 0})` : tab} onChange={setTab} />
+    <Tabs tabs={['Market board', `Decisions (${data?.decisions.length ?? 0})`, `Rejected (${data?.rejections.length ?? 0})`, 'Why not trading', 'Strategies']} value={tab.startsWith('Decisions') ? `Decisions (${data?.decisions.length ?? 0})` : tab.startsWith('Rejected') ? `Rejected (${data?.rejections.length ?? 0})` : tab} onChange={setTab} />
     {tab === 'Market board' && <Card title={`${board.length} instruments`} right={<input placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />} flush>
       <div className="tablewrap"><table><thead><tr>{th('symbol', 'Asset')}{th('price', 'Price', true)}{th('changePct', '24h', true)}{th('quoteVolume', 'Volume', true)}{th('regime', 'Regime')}<th>Safety</th><th>Data</th>{th('spreadBps', 'Spread', true)}{th('rsi1h', 'RSI 1h', true)}<th>Indicators</th><th>Signals / last decision</th></tr></thead>
         <tbody>{sorted.map((r: any) => <tr key={r.instrumentId} className="click" onClick={() => nav(`/terminal/${r.symbol}`)}>
@@ -24,6 +25,7 @@ export function Scanner() {
         {!sorted.length && <Empty>Waiting for the first scan cycle (market data loading)…</Empty>}</div></Card>}
     {tab.startsWith('Decisions') && <DecisionTable rows={data?.decisions ?? []} />}
     {tab.startsWith('Rejected') && <Card title="Rejection intelligence (Part 16.8)" flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Asset</th><th>Stage</th><th>Reason</th></tr></thead><tbody>{(data?.rejections ?? []).map((r: any, i: number) => <tr key={i}><td className="faint">{fmt.ago(r.at)}</td><td><b>{r.symbol}</b></td><td><Badge v={r.stage} /></td><td>{r.reason}</td></tr>)}</tbody></table>{!data?.rejections.length && <Empty>No rejected candidates yet.</Empty>}</div></Card>}
+    {tab === 'Why not trading' && <NoTradeBoard />}
     {tab === 'Strategies' && <div className="grid g3">{(data?.strategies ?? []).map((s: any) => <Card key={s.id} title={`${s.name} v${s.version}`}><div className="col"><div className="muted">{s.description}</div><div className="kv"><span>Interval</span><span>{s.interval}</span><span>Regimes</span><span>{s.regimes.map((r: string) => <Badge key={r} v={r} />)}</span></div></div></Card>)}</div>}
     {ana && <Modal title="On-demand analysis" onClose={() => setAna(null)}>{ana.decision ? <DecisionView report={ana} /> : <AnalysisNoSignal a={ana} />}</Modal>}
   </Page>;

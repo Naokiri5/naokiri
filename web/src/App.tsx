@@ -9,6 +9,7 @@ import { CommandPalette } from './palette';
 import { StaleBanner, StatusRibbon } from './StatusRibbon';
 import type { ShellDto } from './status';
 import { ALL_PAGES } from './nav';
+import { CriticalStrip } from './CriticalStrip';
 import { SideNav, GroupTabs, MobileNav } from './Navigation';
 
 
@@ -78,6 +79,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}
       {s && !s.policyAccepted && loc.pathname !== '/risk' && <div className="banner info">Risk policy not yet accepted — paper execution stays disabled until you review it in the <a href="/risk" onClick={(e) => { e.preventDefault(); nav('/risk'); }}>Risk Center</a>.</div>}
       <ErrorLine e={shell.error} />
+      <CriticalStrip />
       <GroupTabs />
       <Routes location={routeLocation}>
         <Route path="/" element={<P.Overview />} />

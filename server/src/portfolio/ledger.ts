@@ -24,7 +24,7 @@ export interface AccountState {
 const dayKey = (t: number) => new Date(t).toISOString().slice(0, 10);
 const weekKey = (t: number) => { const d = new Date(t); const day = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - day); return d.toISOString().slice(0, 10); };
 
-export function accountState(account = PAPER_ACCOUNT, nowTs = Date.now()): AccountState {
+export function accountState(account = PAPER_ACCOUNT, nowTs = Date.now(), { persistMarks = true } = {}): AccountState {
   const cash = cashBalance(account); const pos = openPositions(account);
   let value = 0, unreal = 0, openRisk = 0; const missing: string[] = [];
   for (const p of pos) {
@@ -43,7 +43,7 @@ export function accountState(account = PAPER_ACCOUNT, nowTs = Date.now()): Accou
   if (marks.day !== dayKey(nowTs)) { marks.day = dayKey(nowTs); marks.sodPerf = perf; changed = true; }
   if (marks.week !== weekKey(nowTs)) { marks.week = weekKey(nowTs); marks.sowPerf = perf; changed = true; }
   if (perf > marks.hwmPerf) { marks.hwmPerf = perf; changed = true; }
-  if (changed && !missing.length) setSetting(`marks2:${account}`, marks);
+  if (persistMarks && changed && !missing.length) setSetting(`marks2:${account}`, marks);
   const sod = deposits + marks.sodPerf, sow = deposits + marks.sowPerf, hwm = deposits + marks.hwmPerf;
   const closed = all<{ realized_pnl: number }>("SELECT realized_pnl FROM positions WHERE account=? AND status='CLOSED' ORDER BY closed_at DESC LIMIT 20", account);
   let streak = 0; for (const c of closed) { if (c.realized_pnl < 0) streak++; else break; }
