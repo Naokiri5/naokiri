@@ -21,6 +21,14 @@ const options = {
   coverage: 'COMPLETE_ORDERS_AND_FILLS' as const,
   quantityDecimalsByInstrument: { 'BINANCE_SPOT:shadow-account:binance:BTCUSDT': 8 },
 };
+const otherScope = { venue: tracked.venue, accountId: 'shadow-account:binance', instrumentId: 'BTCUSDT' };
+const otherObservation = {
+  ...observation, ...otherScope, requestedQty: '1.00', cumulativeFilledQty: '0.20',
+};
+const trackedPrecision = {
+  venue: tracked.venue, accountId: tracked.accountId, instrumentId: tracked.instrumentId, decimals: 8,
+};
+const quantityPrecisions = [trackedPrecision, { ...otherScope, decimals: 2 }];
 
 describe('venue reconciliation: evidence only, never an execution gate', () => {
   it('never permits sending orders even when consistent', () => {
@@ -40,6 +48,76 @@ describe('venue reconciliation: evidence only, never an execution gate', () => {
     const result = assessVenueReconciliation([], [observation], options);
     expect(result.findings.map(x => x.code)).toContain('UNKNOWN_VENUE_ORDER');
   });
+  it('keeps account and instrument boundaries when their identifiers contain colons', () => {
+    const result = assessVenueReconciliation([tracked], [otherObservation], { ...options, quantityPrecisions });
+    expect(result.status).toBe('ATTENTION_REQUIRED');
+    expect(result.findings.map(x => x.code)).toEqual(['UNKNOWN_VENUE_ORDER', 'MISSING_VENUE_ORDER']);
+    expect(result.findings[0].orderKey).not.toBe(result.findings[1].orderKey);
+  });
+  it('rejects a legacy precision key claimed by two distinct scopes in either order', () => {
+    for (const orders of [[observation, otherObservation], [otherObservation, observation]]) {
+      const result = assessVenueReconciliation(orders, orders, options);
+      expect(result).toMatchObject({
+        status: 'ATTENTION_REQUIRED', observedOrders: 0, localOrders: 0, canSendOrders: false,
+      });
+      expect(result.findings.map(x => x.code)).toEqual(Array(4).fill('INVALID_CONFIGURATION'));
+    }
+  });
+  it('accepts the exact precision of each explicitly scoped instrument without a legacy map', () => {
+    const { quantityDecimalsByInstrument: _legacy, ...baseOptions } = options;
+    const result = assessVenueReconciliation(
+      [tracked, otherObservation], [observation, otherObservation], { ...baseOptions, quantityPrecisions },
+    );
+    expect(result).toEqual({
+      status: 'CONSISTENT', findings: [], observedOrders: 2, localOrders: 2, canSendOrders: false,
+    });
+  });
+  it('accepts an unambiguous legacy instrument alongside a scoped instrument on another venue', () => {
+    const bybit = {
+      ...observation, venue: 'BYBIT_SPOT' as const, requestedQty: '1.00', cumulativeFilledQty: '0.20',
+    };
+    const result = assessVenueReconciliation([tracked, bybit], [observation, bybit], {
+      ...options, quantityPrecisions: [{ ...trackedPrecision, venue: bybit.venue, decimals: 2 }],
+    });
+    expect(result).toEqual({
+      status: 'CONSISTENT', findings: [], observedOrders: 2, localOrders: 2, canSendOrders: false,
+    });
+  });
+  it('rejects fractional digits that only another explicitly scoped instrument would accept', () => {
+    const result = assessVenueReconciliation([tracked, otherObservation], [
+      observation, { ...otherObservation, cumulativeFilledQty: '0.201' },
+    ], { ...options, quantityPrecisions });
+    expect(result.findings.map(x => x.code)).toEqual(['INVALID_QUANTITY', 'MISSING_VENUE_ORDER']);
+    expect(result.canSendOrders).toBe(false);
+  });
+  it('does not let a legacy key configured for a declared scope leak to a different observed scope', () => {
+    const result = assessVenueReconciliation([otherObservation], [otherObservation], {
+      ...options, quantityPrecisions: [trackedPrecision],
+    });
+    expect(result.status).toBe('ATTENTION_REQUIRED');
+    expect(result.findings.map(x => x.code)).toEqual(['INVALID_CONFIGURATION', 'INVALID_CONFIGURATION']);
+    expect(result.canSendOrders).toBe(false);
+  });
+  it('rejects duplicate scoped precision declarations without falling back to legacy precision', () => {
+    const result = assessVenueReconciliation([tracked], [observation], {
+      ...options, quantityPrecisions: [trackedPrecision, { ...trackedPrecision, decimals: 2 }],
+    });
+    expect(result).toMatchObject({
+      status: 'ATTENTION_REQUIRED', observedOrders: 0, localOrders: 0, canSendOrders: false,
+    });
+    expect(result.findings.map(x => x.code)).toContain('INVALID_CONFIGURATION');
+  });
+  it('keeps event IDs scoped to their account even when identifiers contain colons', () => {
+    const first = { ...observation, eventId: 'binance:event-1' };
+    const second = { ...observation, accountId: 'shadow-account:binance', instrumentId: 'BTCUSDT2' };
+    const result = assessVenueReconciliation([first, second], [first, second], {
+      ...options,
+      quantityDecimalsByInstrument: { ...options.quantityDecimalsByInstrument, 'BINANCE_SPOT:shadow-account:binance:BTCUSDT2': 8 },
+    });
+    expect(result.status).toBe('CONSISTENT');
+    expect(result.observedOrders).toBe(2);
+    expect(result.findings).toEqual([]);
+  });
   it('reports fill mismatches without synthesizing a trade', () => {
     const result = assessVenueReconciliation([tracked], [
       { ...observation, cumulativeFilledQty: '0.30000000' },
@@ -48,11 +126,73 @@ describe('venue reconciliation: evidence only, never an execution gate', () => {
   });
   it('flags conflicting event IDs and stale evidence', () => {
     const result = assessVenueReconciliation([tracked], [
-      observation, { ...observation, state: 'FILLED', receivedAtMs: now - 5000 },
+      observation, { ...observation, state: 'CANCELED', receivedAtMs: now - 5000 },
     ], options);
     expect(result.findings.map(x => x.code)).toEqual(
       expect.arrayContaining(['DUPLICATE_EVENT_CONFLICT', 'EVIDENCE_STALE_OR_FUTURE']),
     );
+  });
+  it.each([0, 10])('requires attention for contradictory observations at the same venue time (%i ms apart at receipt)', offset => {
+    const conflicting = {
+      ...observation,
+      eventId: 'event-2',
+      cumulativeFilledQty: '0.30000000',
+      receivedAtMs: observation.receivedAtMs - offset,
+    };
+    const result = assessVenueReconciliation([tracked], [observation, conflicting], options);
+    const reversed = assessVenueReconciliation([tracked], [conflicting, observation], options);
+    expect(result.status).toBe('ATTENTION_REQUIRED');
+    expect(result.findings.map(x => x.code)).toEqual(['CONFLICTING_ORDER_OBSERVATIONS']);
+    expect(result.canSendOrders).toBe(false);
+    expect(reversed).toEqual(result);
+  });
+  it('treats compatible quantities at the same venue time as equivalent', () => {
+    const other = { ...observation, eventId: 'event-2', requestedQty: '1', cumulativeFilledQty: '0.2' };
+    const result = assessVenueReconciliation([tracked], [observation, other], options);
+    expect(result.status).toBe('CONSISTENT');
+  });
+  it('does not treat a late-arriving exchange event as fresh evidence', () => {
+    const result = assessVenueReconciliation([tracked], [
+      { ...observation, exchangeEventAtMs: now - options.maxEvidenceAgeMs - 1 },
+    ], options);
+    expect(result.status).toBe('ATTENTION_REQUIRED');
+    expect(result.findings.map(x => x.code)).toContain('EVIDENCE_STALE_OR_FUTURE');
+    expect(result.canSendOrders).toBe(false);
+  });
+  it('requires venue evidence to confirm an already known exchange order ID', () => {
+    const result = assessVenueReconciliation([tracked], [
+      { ...observation, exchangeOrderId: null },
+    ], options);
+    expect(result.status).toBe('ATTENTION_REQUIRED');
+    expect(result.findings.map(x => x.code)).toContain('EXCHANGE_ID_CONFLICT');
+  });
+  it('accepts a matching client order observation when the local exchange ID is unknown', () => {
+    const result = assessVenueReconciliation([{ ...tracked, exchangeOrderId: null }], [observation], options);
+    expect(result.status).toBe('CONSISTENT');
+    expect(result.canSendOrders).toBe(false);
+  });
+  it.each([
+    ['FILLED', '0.00000000'],
+    ['FILLED', '0.20000000'],
+    ['PARTIAL_FILL', '0.00000000'],
+    ['PARTIAL_FILL', '1.00000000'],
+  ] as const)('rejects %s with a contradictory cumulative fill of %s', (state, cumulativeFilledQty) => {
+    const result = assessVenueReconciliation(
+      [{ ...tracked, state, cumulativeFilledQty }],
+      [{ ...observation, state, cumulativeFilledQty }],
+      options,
+    );
+    expect(result.status).toBe('ATTENTION_REQUIRED');
+    expect(result.findings.map(x => x.code)).toEqual(['INVALID_STATE', 'INVALID_STATE']);
+  });
+  it('accepts a fully filled order with an exact cumulative quantity match', () => {
+    const result = assessVenueReconciliation(
+      [{ ...tracked, state: 'FILLED', cumulativeFilledQty: '1' }],
+      [{ ...observation, state: 'FILLED', cumulativeFilledQty: '1.00000000' }],
+      options,
+    );
+    expect(result.status).toBe('CONSISTENT');
+    expect(result.canSendOrders).toBe(false);
   });
   it('uses exact decimal quantities with no silent rounding', () => {
     expect(exactQuantityUnits('0.00000001', 8)).toBe(1n);
