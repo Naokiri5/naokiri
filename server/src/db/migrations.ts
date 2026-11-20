@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 
 /** Ordered, append-only migrations. Never edit a shipped migration — add a new one. */
@@ -113,18 +114,108 @@ const MIGRATIONS: string[] = [
   CREATE TABLE runtime_leases (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at INTEGER NOT NULL,
     renewed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   `,
+  // v6 — DITAS store-once market data (owner-approved 2026-11-18). Candle windows and order books are stored once,
+  // keyed by the sha256 of their canonical JSON, and snapshots reference them as {"$blob": hash}. Measured before:
+  // every event stored a full 223 KB snapshot (~394 MB/day). Blobs are immutable like every other DITAS table; older
+  // v1 snapshots are left exactly as written.
+  `
+  CREATE TABLE ditas_blobs (hash TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at INTEGER NOT NULL, payload TEXT NOT NULL);
+  CREATE TRIGGER ditas_blobs_no_update BEFORE UPDATE ON ditas_blobs BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  CREATE TRIGGER ditas_blobs_no_delete BEFORE DELETE ON ditas_blobs BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  `,
+  // v7 — indexes for hot filters (master audit MA-15/MA-24). Additive only: no table, row or trigger changes.
+  //  - unread notification count on every /api/shell poll (was a full scan);
+  //  - failed-login count in the security center (audit_log is hash-chained and append-only, so it only grows);
+  //  - DITAS child-event lookups by parent.
+  `
+  CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(read) WHERE read = 0;
+  CREATE INDEX IF NOT EXISTS idx_audit_action_ts ON audit_log(action, ts);
+  CREATE INDEX IF NOT EXISTS idx_ditas_events_parent ON ditas_events(parent_event_id);
+  `,
+  // v8 — Telegram command hub: owner link, update deduplication and delivery outbox.
+  `
+  CREATE TABLE telegram_links (id TEXT PRIMARY KEY,
+    status TEXT NOT NULL CHECK (status IN ('PENDING','ACTIVE','REVOKED')),
+    code_hash TEXT, code_expires_at INTEGER, code_attempts INTEGER NOT NULL DEFAULT 0,
+    telegram_user_id INTEGER, telegram_chat_id INTEGER,
+    created_at INTEGER NOT NULL, linked_at INTEGER, revoked_at INTEGER);
+  CREATE UNIQUE INDEX telegram_links_one_active ON telegram_links(status) WHERE status = 'ACTIVE';
+  CREATE UNIQUE INDEX telegram_links_pending_code ON telegram_links(code_hash) WHERE status = 'PENDING';
+  CREATE TABLE telegram_update_dedupe (update_id INTEGER PRIMARY KEY, received_at INTEGER NOT NULL);
+  CREATE INDEX telegram_update_dedupe_age ON telegram_update_dedupe(received_at);
+  CREATE TABLE telegram_outbox (id TEXT PRIMARY KEY, chat_id INTEGER NOT NULL, text TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('QUEUED','PROVIDER_ACCEPTED','FAILED')),
+    attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL, last_error TEXT,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+  CREATE INDEX telegram_outbox_due ON telegram_outbox(status, next_attempt_at);
+  `,
+  // v9 — queued account replies must carry the link that authorized them. Old queued rows have unknown scope.
+  `
+  ALTER TABLE telegram_outbox ADD COLUMN link_id TEXT REFERENCES telegram_links(id);
+  CREATE INDEX telegram_outbox_queued_link ON telegram_outbox(link_id) WHERE status = 'QUEUED';
+  UPDATE telegram_outbox SET status = 'FAILED', text = '', last_error = 'Legacy reply has no link authorization'
+    WHERE status = 'QUEUED';
+  `,
+  // v10 — MIA NEXUS fabric (N2): durable transactional outbox + per-consumer inbox. Generic event records ABOUT committed
+  // state; the OMS, ledger, DITAS and audit tables stay the sources of truth. Envelopes are immutable and never deleted;
+  // only delivery bookkeeping (status/attempts/next time/error) may change. (telegram_outbox is a separate message queue.)
+  `
+  CREATE TABLE fabric_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE, event_type TEXT NOT NULL,
+    producer TEXT NOT NULL, trace_id TEXT NOT NULL, envelope TEXT NOT NULL, payload_hash TEXT NOT NULL, recorded_at INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('PENDING','DELIVERED','NO_CONSUMER','DEAD')), attempts INTEGER NOT NULL DEFAULT 0,
+    deliver_after INTEGER NOT NULL, last_error TEXT, delivered_at INTEGER);
+  CREATE INDEX fabric_outbox_due ON fabric_outbox(status, deliver_after, seq);
+  CREATE INDEX fabric_outbox_topic ON fabric_outbox(event_type, status, seq);
+  CREATE TRIGGER fabric_outbox_envelope_immutable BEFORE UPDATE OF event_id, event_type, producer, trace_id, envelope, payload_hash, recorded_at ON fabric_outbox
+    BEGIN SELECT RAISE(ABORT, 'fabric events are immutable'); END;
+  CREATE TRIGGER fabric_outbox_no_delete BEFORE DELETE ON fabric_outbox BEGIN SELECT RAISE(ABORT, 'fabric events are append-only'); END;
+  CREATE TABLE fabric_inbox (consumer_id TEXT NOT NULL, event_id TEXT NOT NULL REFERENCES fabric_outbox(event_id), handled_at INTEGER NOT NULL,
+    PRIMARY KEY (consumer_id, event_id));
+  `,
 ];
+
+const OBJECT_RE = /CREATE\s+(?:UNIQUE\s+)?(?:VIRTUAL\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;
+/** Names of the tables, indexes, triggers and views a migration creates (migrations never drop or rename). */
+export function migrationObjects(sql: string): string[] { return [...sql.matchAll(OBJECT_RE)].map((m) => m[1]); }
+export const migrationChecksum = (sql: string) => createHash('sha256').update(sql.replace(/\s+/g, ' ').trim()).digest('hex');
+export class MigrationMismatchError extends Error {}
+
+/**
+ * SAFE-02 (ticket #93): refuse to run on a database whose recorded schema version N was produced by DIFFERENT
+ * migration code — e.g. a branch that reused version 6 for other tables. Without this, migrate() would see "6
+ * applied", skip this build's v6 and run with tables missing. Checks, for every applied version:
+ *  - the recorded checksum (stored since SAFE-02) equals this build's migration text;
+ *  - every object this build's migration creates exists (also covers databases from before checksums existed).
+ * A database newer than this build (unknown versions) is refused too: running old code on it is unsafe.
+ */
+function verifyApplied(db: DatabaseSync, current: number) {
+  if (current > MIGRATIONS.length) throw new MigrationMismatchError(`database schema v${current} is newer than this build (v${MIGRATIONS.length}); refusing to start. Use the build that created it, or restore a matching backup.`);
+  const rows = db.prepare('SELECT version, checksum FROM schema_migrations ORDER BY version').all() as { version: number; checksum: string | null }[];
+  const existing = new Set((db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map((r) => r.name));
+  for (const r of rows) {
+    const sql = MIGRATIONS[r.version - 1];
+    if (r.checksum && r.checksum !== migrationChecksum(sql)) throw new MigrationMismatchError(`schema v${r.version} in this database was created by different migration code than this build's v${r.version}; refusing to start (no table was skipped or modified). Restore a backup made by this build, or reconcile the branches that both used v${r.version}.`);
+    const missing = migrationObjects(sql).filter((n) => !existing.has(n));
+    if (missing.length) throw new MigrationMismatchError(`schema v${r.version} is recorded as applied but its objects are missing (${missing.slice(0, 5).join(', ')}): this database was migrated by a different build that reused v${r.version}. Refusing to start; nothing was changed.`);
+  }
+  // Databases from before SAFE-02 passed the structural check above: record this build's checksums for the future.
+  const fill = db.prepare('UPDATE schema_migrations SET checksum=? WHERE version=? AND checksum IS NULL');
+  for (const r of rows) if (!r.checksum) fill.run(migrationChecksum(MIGRATIONS[r.version - 1]), r.version);
+}
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
 export function migrate(db: DatabaseSync, target = MIGRATIONS.length) {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
+  const cols = (db.prepare('PRAGMA table_info(schema_migrations)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.includes('checksum')) db.exec('ALTER TABLE schema_migrations ADD COLUMN checksum TEXT'); // migration-ledger metadata only
   const row = db.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number | null };
   const current = row?.v ?? 0;
+  verifyApplied(db, current);
   for (let i = current; i < Math.min(target, MIGRATIONS.length); i++) {
     db.exec('BEGIN');
     try {
       db.exec(MIGRATIONS[i]);
-      db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(i + 1, Date.now());
+      db.prepare('INSERT INTO schema_migrations(version, applied_at, checksum) VALUES (?, ?, ?)').run(i + 1, Date.now(), migrationChecksum(MIGRATIONS[i]));
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   }

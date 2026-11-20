@@ -21,6 +21,8 @@ export const QUALITY_LIMITS = {
   clockSkewMs: 5_000, warnDeviationPct: 0.5, failDeviationPct: 1.5,
   maxExecBookAgeMs: envMs('MIA_MAX_EXEC_BOOK_AGE_MS', 60_000), maxExecQuoteAgeMs: 120_000,
 };
+/** A price anchor is usable only if its timestamp is finite, not in the future and within maxExecQuoteAgeMs. */
+export const quoteAgeOk = (ts: number | undefined, nowTs: number) => { const age = nowTs - Number(ts); return Number.isFinite(age) && age >= 0 && age <= QUALITY_LIMITS.maxExecQuoteAgeMs; };
 const positive = (x: number) => Number.isFinite(x) && x > 0;
 const timestamp = (x: number) => Number.isFinite(x) && x >= 0;
 

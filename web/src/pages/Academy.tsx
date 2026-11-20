@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, fmt, uploadFile, useApi } from '../api';
-import { Action, Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
+import { Action, Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs , rowProps} from '../ui';
 
 /**
  * Quantitative Trading Intelligence Academy. Library, retrieval, concepts, conflicts and research experiments.
@@ -10,8 +10,6 @@ const TABS = ['Overview', 'Library', 'Search & ask', 'Concepts', 'Conflicts', 'R
 const STATUS_TONE: Record<string, string> = { INDEXED: 'b-good', PARTIALLY_INDEXED: 'b-warn', NEEDS_REVIEW: 'b-warn', FAILED: 'b-bad', PROCESSING: 'b-info', INGESTION_PENDING: 'b-info', AWAITING_DOCUMENT: 'b-neutral' };
 const VERDICT_TONE: Record<string, string> = { SUPPORTED: 'b-good', SUPPORTED_MOMENTUM: 'b-good', SUPPORTED_MEAN_REVERSION: 'b-good', INCONCLUSIVE: 'b-warn', INSUFFICIENT_EVIDENCE: 'b-warn', NOT_SUPPORTED: 'b-bad' };
 /** Clickable table row that is also reachable and operable from the keyboard (Enter / Space). */
-const rowProps = (onOpen: () => void, label: string) => ({ role: 'button', tabIndex: 0, 'aria-label': label, style: { cursor: 'pointer' },
-  onClick: onOpen, onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } } });
 /** Runs a detail request and reports a failure instead of leaving an unhandled rejection. */
 const opener = (setErr: (e: string | null) => void) => (load: () => Promise<void>) => () => { setErr(null); load().catch((e: any) => setErr(e.message)); };
 const Status = ({ v }: { v: string }) => <Badge v={v.replace(/_/g, ' ')} tone={STATUS_TONE[v] ?? VERDICT_TONE[v] ?? 'b-neutral'} />;
@@ -55,19 +53,24 @@ function Overview() {
 
 function Library({ onChange }: { onChange: () => void }) {
   const docs = useApi<any[]>('/api/academy/documents', { topics: ['knowledge'] });
+  const limits = useApi<{ uploadLimitBytes?: number }>('/api/academy/stats'); const limit = limits.data?.uploadLimitBytes ?? null;
+  const [inputKey, setInputKey] = useState(0); // remount the <input type=file> to clear it after an upload
   const cat = useApi<any[]>('/api/academy/catalog');
   const [file, setFile] = useState<File | null>(null); const [catalogId, setCatalogId] = useState(''); const [msg, setMsg] = useState<string | null>(null);
   const [detail, setDetail] = useState<any>(null); const [err, setErr] = useState<string | null>(null); const open = opener(setErr);
   const upload = async () => {
     if (!file) throw new Error('choose a file first');
+    // MIA-WEB-032: say the limit up front instead of sending a large file only to get "Payload Too Large".
+    if (limit && file.size > limit) throw new Error(`${file.name} is ${(file.size / 1048576).toFixed(1)} MB; the limit is ${Math.round(limit / 1048576)} MB`);
     const r = await uploadFile(`/api/academy/documents${catalogId ? `?catalogId=${encodeURIComponent(catalogId)}` : ''}`, file);
     setMsg(r.duplicate ? `Already in the library (status ${r.status}).` : 'Uploaded — processing in the background.');
-    setCatalogId(''); docs.reload(); cat.reload(); onChange(); // the linked title is no longer available for linking
+    setCatalogId(''); setFile(null); setInputKey((k) => k + 1); // a second click must not re-upload the same file unlinked
+    docs.reload(); cat.reload(); onChange(); // the linked title is no longer available for linking
   };
   return <div className="col" style={{ gap: 14 }}>
     <Card title="Upload a document" right={<span className="hint">PDF · EPUB · DOCX · HTML · Markdown · TXT</span>}>
       <div className="row">
-        <input type="file" aria-label="Document file" accept=".pdf,.epub,.docx,.html,.htm,.md,.markdown,.txt" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+        <input key={inputKey} type="file" aria-label="Document file" accept=".pdf,.epub,.docx,.html,.htm,.md,.markdown,.txt" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
         <select aria-label="Catalog entry" value={catalogId} onChange={(e) => setCatalogId(e.target.value)}>
           <option value="">Not linked to a catalog title</option>
           {(cat.data ?? []).filter((c) => !c.document_id).map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}

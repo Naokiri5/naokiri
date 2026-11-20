@@ -6,6 +6,9 @@ import { getControl } from '../core/mode.js';
 import { withdrawalFrozen } from '../wallet/wallet.js';
 import { releaseGates } from '../qa/gates.js';
 import { sha256 } from '../core/util.js';
+import { authMode } from './stepUp.js';
+import { privyOwnerBound } from './privy.js';
+import { backupVerificationStatus } from '../ops/backup.js';
 
 /** Security Center data. Reports whether secrets are configured — never their values. */
 export interface Check { id: string; area: string; name: string; status: 'PASS' | 'WARN' | 'FAIL' | 'INFO'; detail: string }
@@ -18,9 +21,12 @@ export function securityOverview(currentToken?: string) {
   const since = Date.now() - 24 * 3600_000;
   const failed24h = get<{ n: number }>("SELECT COUNT(*) n FROM audit_log WHERE action='auth.login.failed' AND ts > ?", since)!.n;
   const chain = verifyAuditChain(); const ctl = getControl(); const gates = releaseGates();
+  const backup = backupVerificationStatus();
   const exposed = config.host === '0.0.0.0' || config.host === '::';
   const checks: Check[] = [
-    { id: 'AUTH-1', area: 'Authentication', name: 'Owner passphrase set (scrypt)', status: owner ? 'PASS' : 'FAIL', detail: owner ? `created ${new Date(owner.createdAt).toISOString()}` : 'not configured' },
+    authMode() === 'privy'
+      ? { id: 'AUTH-1', area: 'Authentication', name: 'Owner sign-in (Privy)', status: privyOwnerBound() ? 'PASS' : 'FAIL', detail: privyOwnerBound() ? 'one Privy identity bound to the owner; tokens verified on the server' : 'no owner bound yet (MIA_PRIVY_OWNER_ID or npm run owner -- bind-privy)' }
+      : { id: 'AUTH-1', area: 'Authentication', name: 'Owner passphrase set (scrypt)', status: owner ? 'PASS' : 'FAIL', detail: owner ? `created ${new Date(owner.createdAt).toISOString()}` : 'not configured' },
     { id: 'AUTH-2', area: 'Authentication', name: 'Failed logins (24h)', status: failed24h >= 10 ? 'FAIL' : failed24h > 0 ? 'WARN' : 'PASS', detail: `${failed24h} failed attempt(s); login, step-up and passphrase change share one limit: 5 per client (then 1 min, doubling) and 20 per server per 15 min` },
     { id: 'AUTH-3', area: 'Authentication', name: 'Active sessions', status: sessions.length > 3 ? 'WARN' : 'PASS', detail: `${sessions.length} active (12 h expiry, HttpOnly SameSite=Strict cookie)` },
     { id: 'NET-1', area: 'Network', name: 'Listening interface', status: exposed ? 'WARN' : 'PASS', detail: exposed ? `bound to ${config.host}:${config.port}${inContainer() ? ' (container detected — needed for port forwarding)' : ''}; use TLS before exposing beyond a trusted network` : `loopback only (${config.host}:${config.port})` },
@@ -28,6 +34,7 @@ export function securityOverview(currentToken?: string) {
     { id: 'NET-3', area: 'Network', name: 'API rate limiting', status: 'PASS', detail: 'passphrase checks limited per client and globally; Trader Joe, backtests, analysis, instrument loads and news refresh limited per session' },
     { id: 'DATA-1', area: 'Data', name: 'Audit log integrity', status: chain.ok ? 'PASS' : 'FAIL', detail: `${chain.entries} hash-chained entries${chain.ok ? ' verified' : ` — broken at ${chain.brokenAt}`}` },
     { id: 'DATA-2', area: 'Data', name: 'Database encryption at rest', status: 'WARN', detail: 'SQLite file not encrypted; contains no API keys or private keys (SEC-04)' },
+    { id: 'DATA-3', area: 'Data', name: 'Backup restore verification', ...backup.check },
     { id: 'SEC-1', area: 'Secrets', name: 'Anthropic API key', status: 'INFO', detail: config.anthropicApiKey ? 'configured (server-side only)' : 'not configured' },
     { id: 'SEC-2', area: 'Secrets', name: 'Telegram bot token', status: 'INFO', detail: config.telegramBotToken ? 'configured (server-side only)' : 'not configured' },
     { id: 'SEC-3', area: 'Secrets', name: 'Evidence-packet signing key', status: config.evidenceKeySource === 'ephemeral' ? 'WARN' : 'PASS', detail: ({ env: 'MIA_EVIDENCE_KEY configured (validated, 32+ bytes)', file: 'persistent key in data/evidence.key (mode 0600)', generated: 'persistent key created in data/evidence.key (mode 0600) — back it up with the database', ephemeral: 'random per process — packets cannot be re-verified after restart' } as const)[config.evidenceKeySource] },
@@ -38,7 +45,7 @@ export function securityOverview(currentToken?: string) {
     { id: 'AI-1', area: 'AI boundaries', name: 'Trader Joe authority', status: 'PASS', detail: 'read, analyze and pause only — no order, limit, mode, funding or withdrawal tools' },
   ];
   return {
-    checks, sessions: sessions.map((s) => ({ id: s.token_hash.slice(0, 12), createdAt: s.created_at, expiresAt: s.expires_at, current: s.token_hash === cur })),
+    checks, backup, sessions: sessions.map((s) => ({ id: s.token_hash.slice(0, 12), createdAt: s.created_at, expiresAt: s.expires_at, current: s.token_hash === cur })),
     authEvents, summary: { pass: checks.filter((c) => c.status === 'PASS').length, warn: checks.filter((c) => c.status === 'WARN').length, fail: checks.filter((c) => c.status === 'FAIL').length },
   };
 }

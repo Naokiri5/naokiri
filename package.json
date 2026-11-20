@@ -11,7 +11,9 @@
     "build": "npm run build -w web && npm run build -w server",
     "prestart": "node server/scripts/ensure-build.mjs",
     "start": "npm run start -w server",
+    "start:supervised": "npm run start:supervised -w server",
     "backup": "npm run backup -w server --",
+    "owner": "npm run owner -w server --",
     "test": "npm test -w server && npm test -w web",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "test:e2e": "npm run build -w web && playwright test -c e2e/playwright.config.ts",
@@ -23,6 +25,9 @@
     "concurrently": "^10.0.7"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": "^22.16.0 || >=24.0.0"
+  },
+  "overrides": {
+    "zod": "^4.6.7"
   }
 }

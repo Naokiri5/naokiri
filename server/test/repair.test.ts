@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
-import { freshDb, seedInstrument, setBook } from './helpers.js';
+import { modeGate } from '../src/qa/gates.js';
+import { freshDb, seedInstrument, setBook, ownerSetupPayload } from './helpers.js';
 import { closeDb, openDb, get, all, run, tx, inTransaction } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { market } from '../src/market/store.js';
@@ -23,7 +24,7 @@ describe('R-OMS: order-book freshness', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
     freshDb(); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
   it('R-OMS-1 refuses an entry when the order book is stale even if the ticker is fresh', () => {
     market.deep.get(id)!.book!.ts = Date.now() - 10 * 60_000; // 10-minute-old book, ticker still fresh
@@ -56,7 +57,7 @@ describe('R-PR7: CodeRabbit-verified fail-closed fixes', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
     freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
-    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
   it('nested tx joins the outer transaction and an inner failure rolls back everything (no isTransaction dependency)', () => {
     expect(() => tx(() => { run("INSERT INTO journal(id,ts,kind,summary) VALUES ('a',1,'X','outer')"); tx(() => { expect(inTransaction()).toBe(true); run("INSERT INTO journal(id,ts,kind,summary) VALUES ('b',1,'X','inner')"); throw new Error('boom'); }); })).toThrow('boom');
@@ -118,7 +119,7 @@ describe('R-API: validation and error classification', () => {
     app = await buildApp();
     // a deliberately faulty route, registered before the app starts, to exercise the error classifier
     app.get('/api/__boom_test', async () => { throw new TypeError("Cannot read properties of undefined (reading 'secretInternal')"); });
-    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: { password: 'repair passphrase' } }); cookie = String(r.headers['set-cookie']).split(';')[0];
+    const r = await app.inject({ method: 'POST', url: '/api/auth/setup', payload: ownerSetupPayload('repair passphrase') }); cookie = String(r.headers['set-cookie']).split(';')[0];
   });
   it('R-API-1 rejects an invalid chart interval with 400, never a crash', async () => {
     for (const iv of ['foo', '__proto__', 'constructor']) {

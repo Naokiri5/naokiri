@@ -51,6 +51,7 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
   step('Strategy performance & regime suitability', stratStats && stratStats.trades >= 20 ? (stratStats.expectancyR > 0 ? 'PASS' : 'FAIL') : 'WARN', stratStats ? `OOS ${stratStats.trades} trades, ${stratStats.expectancyR.toFixed(3)}R expectancy; regime ${cand.regime}` : `no out-of-sample record; regime ${cand.regime}`);
   const opp = scoreOpportunity(qci, stratStats, correlatedOpen);
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
+  step('Opportunity score vs policy minimum', opp.score >= pol.minOpportunityScore ? 'PASS' : 'FAIL', `score ${opp.score} vs minimum ${pol.minOpportunityScore} (heuristic, not a probability)`);
 
   let decision: DecisionState; let risk: RiskDecision | null = null;
   const mode = getControl().mode;
