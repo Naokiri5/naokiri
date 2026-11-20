@@ -63,7 +63,7 @@ const MUTATORS: Record<string, string[]> = {
 /** Who may import which mutators ('*' = whole module, for the owner-authenticated HTTP surface). */
 const ALLOWED: Record<string, Record<string, string[] | '*'>> = {
   'api/routes.ts': { 'exec/oms.ts': '*', 'core/mode.ts': '*', 'risk/policy.ts': '*', 'wallet/wallet.ts': '*' },
-  'bot/bot.ts': { 'exec/oms.ts': ['submitEntry', 'queueForApproval', 'monitorPositions', 'expireApprovals'] },
+  'bot/bot.ts': { 'exec/oms.ts': ['queueForApproval', 'monitorPositions', 'expireApprovals'] },
   'joe/joe.ts': { 'exec/oms.ts': ['pauseNewOrders'] },           // Trader Joe: read, explain, alert, pause only
   'ops/integrity.ts': { 'exec/oms.ts': ['protectPositions'] },   // risk-reducing only
   'exec/environment.ts': { 'exec/oms.ts': ['submitEntry', 'closePosition'] }, // Paper adapter wraps the canonical OMS
@@ -77,7 +77,14 @@ const PAUSE_ONLY_CALLERS = ['integrations/telegram/commands.ts', 'security/guard
 describe('Import boundaries (static, runtime imports only)', () => {
   it('the parser sees the real graph (sanity)', () => {
     expect(FILES.length).toBeGreaterThan(100);
-    expect(GRAPH.get('bot/bot.ts')!.some((i) => i.target === 'exec/oms.ts' && i.names.includes('submitEntry'))).toBe(true);
+    // The bot uses the canonical environment adapter for entries; it still uses the OMS for protective monitoring
+    // and owner-approval expiry. The only real submitEntry import stays in exec/environment.ts.
+    const bot = GRAPH.get('bot/bot.ts')!;
+    expect(bot.some((i) => i.target === 'exec/environment.ts' && i.names.includes('executionAdapter'))).toBe(true);
+    expect(bot.some((i) => i.target === 'exec/oms.ts' && i.names.includes('submitEntry'))).toBe(false);
+    expect(bot.some((i) => i.target === 'exec/oms.ts' && i.names.includes('monitorPositions') && i.names.includes('queueForApproval'))).toBe(true);
+    expect(GRAPH.get('exec/environment.ts')!.some((i) => i.target === 'exec/oms.ts' && i.names.includes('submitEntry'))).toBe(true);
+    expect(reachable('bot/bot.ts').has('exec/oms.ts')).toBe(true);
     expect(GRAPH.get('decision/certificate.ts')!.some((i) => i.target === 'decision/engine.ts')).toBe(false); // type-only import ignored
   });
 
