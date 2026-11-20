@@ -43,6 +43,18 @@ export function checkSetupCode(given: unknown) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 export const clearSetupCode = () => setSetting('setup_code', null);
+/**
+ * Checks a first-owner setup code under the shared per-client and global failure limits. The limit is checked before
+ * the audit row is written, so a stream of wrong codes cannot grow the append-only audit log without bound while no
+ * owner exists (CodeRabbit #45). Throws 429 while limited, 403 on a wrong code.
+ */
+export function verifySetupCode(given: unknown, client: string) {
+  failureGate.check(`setup:${client}`);
+  if (checkSetupCode(given)) { failureGate.ok(`setup:${client}`); return; }
+  failureGate.fail(`setup:${client}`);
+  audit('anonymous', 'auth.setup.code_rejected', { ip: client });
+  throw new AuthError('first-time setup needs the one-time setup code printed in the MIA server console (terminal or service log)', 403);
+}
 
 export function checkPassword(pass: string) {
   const o = getSetting<any>('owner', null); if (!o || typeof pass !== 'string' || pass.length > 1024) return false;

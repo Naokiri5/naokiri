@@ -77,21 +77,23 @@ export function aggregate(packets: EvidencePacket[], applicableDomains: Set<stri
       if (voting.length) groupScores.push(voting.reduce((acc, p) => acc + (p.stance === 'SUPPORT' ? 1 : -1), 0) / voting.length);
     }
     let score = groupScores.length ? groupScores.reduce((x, y) => x + y, 0) / groupScores.length : null;
-    if (score != null) { ws += weight * Math.max(0, score); wo += weight * Math.max(0, -score); }
+    const support = Math.max(0, score ?? 0);
+    let opposition = Math.max(0, -(score ?? 0));
     // D-01 (100-agent audit): this domain's own packets in groups whose single vote went to ANOTHER domain must not
     // disappear. Their ADVERSE balance still counts as this domain's opposition (support is never double-counted).
     const shadowVoting = own.filter((p) => p.stance !== 'ABSTAIN' && primary.get(p.dependency_group) !== dom);
     if (shadowVoting.length) {
       const shadow = shadowVoting.reduce((acc, p) => acc + (p.stance === 'SUPPORT' ? 1 : -1), 0) / shadowVoting.length;
-      // R-02 (independent review): count this domain's adverse evidence ONCE (max of its own vote and its shadow readings)
-      // and keep the domain's support + opposition within its weight, so weighted opposition stays in [0, 1].
+      // R-02 (independent review): count this domain's adverse evidence ONCE (max of its own vote and its shadow readings).
       if (shadow < 0) {
-        const counted = score != null ? Math.max(0, -score) : 0;
-        const room = Math.max(0, 1 - Math.max(0, score ?? 0) - counted);
-        wo += weight * Math.min(room, Math.max(0, -shadow - counted));
+        opposition = Math.max(opposition, -shadow);
         if (score == null) score = shadow;
       }
     }
+    // R-02: keep the domain's support + opposition within its weight, so the weighted totals stay in [0, 1]. Both are
+    // scaled together: supportive votes in other groups must not crowd out adverse shared evidence (CodeRabbit #45).
+    const scale = support + opposition > 1 ? 1 / (support + opposition) : 1;
+    ws += weight * support * scale; wo += weight * opposition * scale;
     domains.push({ domain: dom, groups: gm.size, support: s, oppose: o, abstain: a, score, weight, required: REQUIRED_DOMAINS.includes(dom as any), sharedGroups, constantRule });
   }
   return { domains, weightedSupport: wTotal ? ws / wTotal : 0, weightedOpposition: wTotal ? wo / wTotal : 0, groups };

@@ -16,6 +16,11 @@ Status: **first slice implemented and offline-tested:** read-only telemetry, an 
 | Dashboard | Security Center → **Guardian Shield** | P0–P3 counts, events with evidence ids, the seven layers, and a manual *Pause new orders* button when auto-pause is off. |
 | API | `GET /api/security/guardian` (owner session) | The report above; `authority` is always all `false`. |
 
+**Fixes from the CodeRabbit review of #45 (each with a regression test that fails without it):**
+- Events read the **newest** 20,000 audit rows of the 24-hour window, not the oldest, so a flood of old rows cannot hide a new signer event or mode change. When rows are left unread, the report says so (`evidence.truncated`).
+- Auto-pause skips evidence it already handled, so an older unhandled P0 is still contained.
+- The "handled" marker and the pause are one transaction: if the pause write fails, the next tick retries instead of treating the evidence as handled.
+
 **Fixes found during the P0 audit:**
 - Log redaction now also covers `otp`, `accessToken`, `consoleCode`, `setupCode` and `authorization` (the Privy and authenticator fields were missing).
 - Security Center check AUTH-1 showed **FAIL** ("no owner passphrase") in Privy mode. It now reports the bound Privy owner.

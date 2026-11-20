@@ -36,14 +36,23 @@ const IDENTITY_ACTIONS: Record<string, string> = {
   'auth.password.change': 'The owner passphrase was changed',
 };
 
+/** Most rows read per pass. When the window holds more, the NEWEST are read and the pass reports truncation. */
+export const MAX_EVIDENCE_ROWS = 20_000;
+let lastPass = { truncated: false, rows: 0 };
+/** Whether the latest pass had to leave older rows of the 24-hour window unread (incomplete evidence, shown in the report). */
+export const lastEvidencePass = () => ({ ...lastPass });
+
 export function collectEvents(nowMs = Date.now()): GuardianEvent[] {
   const since = nowMs - LOOKBACK_MS;
+  // Newest first, then back to chronological order: a flood of old rows must never hide a new signer event,
+  // mode change or step-up burst (CodeRabbit #45).
   const rows = all<Row>(
     `SELECT id, ts, actor, action, detail FROM audit_log WHERE ts > ? AND (
        action IN ('auth.login.failed','auth.stepup.failed','control.update','withdrawal.preview','withdrawal.freeze')
        OR action LIKE 'auth.privy.%' OR action LIKE 'auth.2fa.%' OR action = 'auth.password.change'
        OR action LIKE '%signer%' OR action LIKE '%signature%' OR action LIKE '%injection%')
-     ORDER BY id LIMIT 20000`, since);
+     ORDER BY id DESC LIMIT ?`, since, MAX_EVIDENCE_ROWS).reverse();
+  lastPass = { truncated: rows.length >= MAX_EVIDENCE_ROWS, rows: rows.length };
   const events: GuardianEvent[] = [];
   const ev = (kind: GuardianEvent['kind'], r: Row, summary: string, evidence = `audit:${r.id}`) =>
     events.push({ kind, timestampMs: r.ts, sourceId: 'audit_log', evidenceId: evidence, sanitizedSummary: summary });

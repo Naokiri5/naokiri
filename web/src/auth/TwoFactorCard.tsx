@@ -9,7 +9,7 @@ const digits = (v: string) => v.replace(/\D/g, '').slice(0, 6);
 
 /**
  * Owner authenticator app (TOTP) for step-up. Enrolling the first one needs independent proof (the server-console
- * code, the legacy passphrase, or being on the server machine); replacing one needs a current code. The server
+ * code or the legacy passphrase); replacing one needs a current code. The server
  * enforces all of this; this card only walks through it.
  */
 export function TwoFactorCard() {
