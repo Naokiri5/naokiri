@@ -115,12 +115,15 @@ export type BeginResult = { needsProof: 'otp' | 'console-code-or-passphrase' } |
  * Starts enrollment. Without proof, returns which proof is needed (and prints a console code if that is the route).
  * With wrong proof, throws 403 and counts a failure.
  */
-export function beginEnrollment(proof: EnrollProof, client: string, opts: { directLocal: boolean; log?: (m: string) => void; nowMs?: number }): BeginResult {
+export function beginEnrollment(proof: EnrollProof, client: string, opts: { log?: (m: string) => void; nowMs?: number } = {}): BeginResult {
   const nowMs = opts.nowMs ?? Date.now(); const log = opts.log ?? ((m: string) => console.log(m));
   if (enrolled()) {
     if (!proof.otp) return { needsProof: 'otp' };
     verifyTotpStepUp(proof.otp, client, { nowMs });
-  } else if (!opts.directLocal) {
+  } else {
+    // The first authenticator always needs independent proof (passphrase or the server-console code). A loopback
+    // request without forwarding headers is NOT proof of being at the machine: ssh -L, socat or kubectl port-forward
+    // deliver remote requests the same way (CodeRabbit #45, CWE-863). The owner at the machine reads the console code.
     if (proof.password) verifyPassphrase(proof.password, client, 'step-up');
     else if (proof.consoleCode) {
       failureGate.check(client, nowMs);

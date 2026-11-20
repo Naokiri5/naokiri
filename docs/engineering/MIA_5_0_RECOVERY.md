@@ -1,6 +1,6 @@
 # MIA 5.0 recovery register
 
-The recovery branch is based on `claude/mia-unified-01` at `541915070cb2b9b2df6df70be7ac2d18327d1ba9`. The source package is `MIA_5_0_Unified_Engineering_Pack.zip` with SHA-256 `a7d870e9bf25aa7b99191bc1ccc17fe33a6c4a6e738b89acf6791cef0e3fe0fd`. All 17 entries were inventoried and the listed entry checksums matched. The package's metadata validator and six standalone contract tests passed. These checks establish catalog consistency. Runtime checks use MIA's existing test suites.
+The pack pins `claude/mia-unified-01` at `541915070cb2b9b2df6df70be7ac2d18327d1ba9`. The recovery branch includes the subsequent unified commit `2954957b47c7b4f415d0e4a9a1357e8deb61fb5d`. The source package is `MIA_5_0_Unified_Engineering_Pack.zip` with SHA-256 `a7d870e9bf25aa7b99191bc1ccc17fe33a6c4a6e738b89acf6791cef0e3fe0fd`. All 17 entries were inventoried and the listed entry checksums matched. The package's metadata validator and six standalone contract tests passed. These checks establish catalog consistency. Runtime checks use MIA's existing test suites.
 
 | Recovery ID | Disposition | Evidence |
 | --- | --- | --- |
@@ -9,7 +9,7 @@ The recovery branch is based on `claude/mia-unified-01` at `541915070cb2b9b2df6d
 | MIA-RCV-P0-003 | Open | Complete the encrypted-restore dependency MIA-RCV-P2-002 in isolated storage, then bind snapshot verification to one file identity. Review the existing backup changes in #53 before modifying the same module. |
 | MIA-RCV-P0-004 | Fixed in the recovery candidate | `depth-stream.test.ts` covers old snapshots, gaps during replay, crossed depth, socket replacement, and the existing half-open watchdog. `depth-stream-fabric.test.ts` verifies REST polling stays eligible after insufficient snapshots. The existing age and liquidity checks still govern paper fills. |
 | MIA-RCV-P1-002 | Fixed in the recovery candidate | `guardian.test.ts` verifies that an already handled newest incident cannot starve an older incident. Audit markers preserve idempotency when the settings cache is full. |
-| MIA-RCV-P1-003 | Fixed in the recovery candidate | `guardian.test.ts` proves that a P0 appended after 20,000 matching audit entries is considered. The scan keeps the newest matching rows and sorts them chronologically for burst detection. |
+| MIA-RCV-P1-003 | Covered upstream | Unified commit `2954957` preserves the newest audit events, reports truncation and has a regression for a P0 appended after 20,000 matching rows. |
 
 The remaining recovery tasks retain their source-catalog status. This candidate does not meet the full release criteria while backup recovery and the remaining P1 tasks are open.
 

@@ -203,7 +203,7 @@ describe('step-up after the passphrase is gone (authenticator app)', () => {
   });
   it('guessing codes hits the shared brute-force limiter', async () => {
     const c = await signIn();
-    beginEnrollment({}, 'x', { directLocal: true });
+    beginEnrollment({}, 'x');
     setSetting('owner_2fa', { secret: base32Encode(Buffer.alloc(20, 7)), enrolledAt: Date.now(), lastCounter: 0 });
     let last = 0;
     for (let i = 0; i < 8; i++) last = (await post('/api/control', { pausedNewOrders: false, otp: String(100000 + i) }, { ...json, cookie: c })).statusCode;

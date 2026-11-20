@@ -101,6 +101,28 @@ describe('100-agent audit, Squad D findings', () => {
     const one = aggregate([pkt({ evidence_domain: 'flow', dependency_group: 'book', stance: 'SUPPORT' })], all);
     expect(b.weightedSupport).toBe(one.weightedSupport);
   });
+  it('CodeRabbit #45: supportive votes in another group cannot erase a domain\'s adverse shared evidence', () => {
+    // flow/book supports (the group is credited to flow), liquidity/book opposes, liquidity/cross supports.
+    const mixed = aggregate([
+      pkt({ evidence_domain: 'flow', dependency_group: 'book', stance: 'SUPPORT' }),
+      pkt({ evidence_domain: 'liquidity', dependency_group: 'book', stance: 'OPPOSE' }),
+      pkt({ evidence_domain: 'liquidity', dependency_group: 'cross', stance: 'SUPPORT' }),
+    ], all);
+    const withoutAdverse = aggregate([
+      pkt({ evidence_domain: 'flow', dependency_group: 'book', stance: 'SUPPORT' }),
+      pkt({ evidence_domain: 'liquidity', dependency_group: 'cross', stance: 'SUPPORT' }),
+    ], all);
+    expect(mixed.weightedOpposition).toBeGreaterThan(0);                            // was 0: the cross support filled liquidity's room
+    expect(mixed.weightedSupport).toBeLessThan(withoutAdverse.weightedSupport);     // the adverse reading now weighs against support
+    expect(mixed.weightedOpposition + mixed.weightedSupport).toBeLessThanOrEqual(1 + 1e-12);
+    // Shared SUPPORT is still never counted twice: a supportive shadow adds nothing.
+    const supportiveShadow = aggregate([
+      pkt({ evidence_domain: 'flow', dependency_group: 'book', stance: 'SUPPORT' }),
+      pkt({ evidence_domain: 'liquidity', dependency_group: 'book', stance: 'SUPPORT' }),
+      pkt({ evidence_domain: 'liquidity', dependency_group: 'cross', stance: 'SUPPORT' }),
+    ], all);
+    expect(supportiveShadow.weightedSupport).toBe(withoutAdverse.weightedSupport);
+  });
   it('D-03: duplicate packets from one worker cannot inflate the response ratio', () => {
     const many = Array.from({ length: 10 }, () => pkt({ worker_id: dataWorkers[0].id }));
     expect(responseRatio([dataWorkers[0].id, dataWorkers[1].id], many)).toBe(0.5); // was 5

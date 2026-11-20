@@ -4,6 +4,7 @@ import { buildApp } from '../src/index.js';
 import * as auth from '../src/api/auth.js';
 import { getSetting } from '../src/core/settings.js';
 import { all, getDb } from '../src/db/db.js';
+import { failureGate } from '../src/core/ratelimit.js';
 
 /** SEC-SETUP regression: every first-owner request requires the console code. */
 const json = { 'content-type': 'application/json' };
@@ -14,7 +15,7 @@ const codeOf = () => getSetting<{ code: string } | null>('setup_code', null)?.co
 describe('first-owner setup (SEC-SETUP)', () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
   const saved = { CODESPACES: process.env.CODESPACES, MIA_ALLOW_REMOTE_SETUP: process.env.MIA_ALLOW_REMOTE_SETUP };
-  beforeEach(async () => { freshDb(); delete process.env.MIA_ALLOW_REMOTE_SETUP; process.env.CODESPACES = 'true'; app = await buildApp(); });
+  beforeEach(async () => { freshDb(); failureGate.reset(); delete process.env.MIA_ALLOW_REMOTE_SETUP; process.env.CODESPACES = 'true'; app = await buildApp(); });
   afterEach(async () => { await app.close(); for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v; });
 
   it('rejects a remote claim inside a container without the one-time code (was 200 before the fix)', async () => {
@@ -34,6 +35,7 @@ describe('first-owner setup (SEC-SETUP)', () => {
   });
   it('treats a loopback socket with proxy headers as remote (port forwarders, reverse proxies)', async () => {
     for (const h of ['x-forwarded-for', 'forwarded', 'x-forwarded-host', 'x-real-ip', 'tailscale-funnel-request', 'tailscale-user-login']) {
+      failureGate.reset(); // each header is an independent case; the setup-guess limit itself is tested in auth-hardening-45
       expect((await setup(app, '127.0.0.1', { password: 'attacker-owned-passphrase' }, { [h]: '203.0.113.9' })).statusCode).toBe(403);
     }
     expect(auth.isSetup()).toBe(false);

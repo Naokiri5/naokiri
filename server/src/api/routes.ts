@@ -9,6 +9,7 @@ import * as totp from '../security/totp.js';
 import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
 import { createBackup } from '../ops/backup.js';
 import { assessAll, autoContain, autoPauseEnabled, startGuardian } from '../security/guardian/response.js';
+import { lastEvidencePass } from '../security/guardian/events.js';
 import { posture, recentGuardianActions } from '../security/guardian/posture.js';
 import { ccxtRoutes } from '../research/ccxtRoutes.js';
 import { defiRoutes } from '../research/defiRoutes.js';
@@ -197,10 +198,7 @@ export async function routes(app: FastifyInstance) {
     }).strict().parse(req.body);
     if (auth.isSetup()) throw httpError(400, 'owner already configured');
     auth.ensureSetupCode();
-    if (!auth.checkSetupCode(setupCode)) {
-      audit('anonymous', 'auth.setup.code_rejected', { ip: req.ip });
-      throw httpError(403, 'first-time setup needs the one-time setup code printed in the MIA server console (terminal or service log)');
-    }
+    auth.verifySetupCode(setupCode, req.ip);
     const token = tx(() => {
       auth.setupOwner(password);
       auth.clearSetupCode();
@@ -291,7 +289,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/security/2fa', async () => totp.twoFactorStatus());
   app.post('/api/security/2fa/begin', async (req) => {
     const b = z.object({ ...SU, consoleCode: z.string().max(64).optional() }).strict().parse(req.body ?? {});
-    return totp.beginEnrollment(b, stepUpClient(req), { directLocal: isDirectLocal(req), log: (m) => req.log.warn(m) });
+    return totp.beginEnrollment(b, stepUpClient(req), { log: (m) => req.log.warn(m) });
   });
   app.post('/api/security/2fa/confirm', async (req) => {
     const { otp } = z.object({ otp: OTP }).strict().parse(req.body);
@@ -531,7 +529,7 @@ export async function routes(app: FastifyInstance) {
     const containment = autoContain(items);
     const counts = { P0: 0, P1: 0, P2: 0, P3: 0 };
     for (const i of items) counts[i.assessment.severity]++;
-    return { generatedAt: Date.now(), counts, events: items.slice(0, 100), containment, autoPause: autoPauseEnabled(), layers: posture(), actions: recentGuardianActions(),
+    return { generatedAt: Date.now(), counts, events: items.slice(0, 100), containment, autoPause: autoPauseEnabled(), evidence: lastEvidencePass(), layers: posture(), actions: recentGuardianActions(),
       authority: { canAuthorizeTrading: false, canSignTransactions: false, canWithdraw: false, canResume: false } };
   });
   app.post('/api/security/sessions/revoke-others', async (req) => { stepUpRiskReducing(req, req.body); return revokeOtherSessions(tokenOf(req)); });

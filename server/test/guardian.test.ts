@@ -11,7 +11,7 @@ import { getControl } from '../src/core/mode.js';
 import { getSetting, setSetting } from '../src/core/settings.js';
 import { failureGate } from '../src/core/ratelimit.js';
 import { assessSecurityEvent, type GuardianEvent } from '../src/security/guardian/assess.js';
-import { collectEvents } from '../src/security/guardian/events.js';
+import { collectEvents, lastEvidencePass, MAX_EVIDENCE_ROWS } from '../src/security/guardian/events.js';
 import { assessAll, autoContain } from '../src/security/guardian/response.js';
 import { posture, JOE_ALLOWED_TOOLS } from '../src/security/guardian/posture.js';
 import { JOE_TOOL_NAMES } from '../src/joe/joe.js';
@@ -72,15 +72,6 @@ describe('events from the audit log', () => {
     const p0 = assessAll().find((i) => i.event.kind === 'AUDIT_CHAIN_BROKEN')!;
     expect(p0.assessment.severity).toBe('P0');
   });
-  it('includes the latest P0 even when the bounded audit scan has a backlog', () => {
-    tx(() => {
-      for (let i = 0; i < 20_000; i++) audit('test', 'auth.login.failed');
-      audit('test', 'engine.signature.unexpected');
-    });
-    expect(collectEvents().find(e => e.kind === 'UNEXPECTED_SIGNER_REQUEST')).toMatchObject({
-      evidenceId: 'audit:20001',
-    });
-  });
 });
 
 describe('containment: opt-in, pause-only, once per event', () => {
@@ -101,12 +92,38 @@ describe('containment: opt-in, pause-only, once per event', () => {
     run("UPDATE settings SET value=json_set(value,'$.pausedNewOrders',json('false')) WHERE key='control'"); // the owner reviewed and resumed
     expect(autoContain().action).toBe('NONE'); // same evidence: not paused again
   });
+  it('CodeRabbit #45: an older unhandled P0 is still contained when another P0 was already handled', () => {
+    process.env.MIA_GUARDIAN_AUTOPAUSE = '1';
+    raiseP0(); raiseP0();
+    const items = assessAll();
+    const p0 = items.filter((i) => i.assessment.severity === 'P0');
+    expect(p0).toHaveLength(2);
+    setSetting('guardian_handled_evidence', [p0[0].event.evidenceId]);
+    expect(autoContain(items)).toEqual({ action: 'PAUSED', evidenceId: p0[1].event.evidenceId }); // was NONE
+  });
+  it('CodeRabbit #45: if the pause write fails, the evidence is not marked handled, so the next tick retries', () => {
+    process.env.MIA_GUARDIAN_AUTOPAUSE = '1';
+    raiseP0();
+    run("CREATE TRIGGER fail_control_ins BEFORE INSERT ON settings WHEN NEW.key='control' BEGIN SELECT RAISE(ABORT,'simulated lock timeout'); END");
+    run("CREATE TRIGGER fail_control_upd BEFORE UPDATE ON settings WHEN NEW.key='control' BEGIN SELECT RAISE(ABORT,'simulated lock timeout'); END");
+    expect(() => autoContain()).toThrow(/simulated lock timeout/);
+    run('DROP TRIGGER fail_control_ins'); run('DROP TRIGGER fail_control_upd');
+    expect(all("SELECT value FROM settings WHERE key='guardian_handled_evidence'").map((r: any) => r.value).join('')).not.toMatch(/audit:/);
+    expect(autoContain().action).toBe('PAUSED'); // was NONE forever: the marker had committed without the pause
+    expect(getControl().pausedNewOrders).toBe(true);
+  });
+  it('CodeRabbit #45: a flood of older rows cannot hide the newest security evidence, and truncation is reported', () => {
+    tx(() => { for (let i = 0; i < MAX_EVIDENCE_ROWS; i++) audit('anonymous', 'auth.login.failed', { n: i }); });
+    raiseP0(); // row MAX_EVIDENCE_ROWS + 1: the newest
+    expect(collectEvents().some((e) => e.kind === 'UNAUTHORIZED_MODE_CHANGE')).toBe(true); // was invisible
+    expect(lastEvidencePass()).toEqual({ truncated: true, rows: MAX_EVIDENCE_ROWS });
+  }, 60_000);
   it('the dispatcher source cannot resume, clear an emergency, change mode or reach orders, wallets or the network', () => {
     const src = readFileSync(new URL('../src/security/guardian/response.ts', import.meta.url), 'utf8').replace(/\/\*\*[\s\S]*?\*\/|\/\/.*$/gm, '');
     expect(src).not.toMatch(/pausedNewOrders:\s*false|emergency:\s*false|mode:\s*['"]|disabledStrategies/);
     expect(src).not.toMatch(/from ['"][^'"]*(exec\/|wallet\/|providers\/http|node:http|fetch\()/);
   });
-  it('rolls back containment on a failed write and retries before publishing the pause', () => {
+  it('waits for containment audit and marker commit before publishing a pause', () => {
     process.env.MIA_GUARDIAN_AUTOPAUSE = '1';
     raiseP0();
     const evidenceId = assessAll()[0].event.evidenceId;
@@ -133,16 +150,6 @@ describe('containment: opt-in, pause-only, once per event', () => {
     } finally {
       bus.off('mode', onMode);
     }
-  });
-  it('handles a second incident while paused even if the newest incident was already handled', () => {
-    process.env.MIA_GUARDIAN_AUTOPAUSE = '1';
-    raiseP0();
-    const older = assessAll()[0];
-    raiseP0();
-    const newer = assessAll().find(i => i.event.evidenceId !== older.event.evidenceId)!;
-    expect(autoContain([newer, older])).toEqual({ action: 'PAUSED', evidenceId: newer.event.evidenceId });
-    expect(autoContain([newer, older])).toEqual({ action: 'ALREADY_PAUSED', evidenceId: older.event.evidenceId });
-    expect(autoContain([newer, older])).toEqual({ action: 'NONE' });
   });
   it('does not re-pause for previously handled evidence evicted from the settings cache', () => {
     process.env.MIA_GUARDIAN_AUTOPAUSE = '1';
