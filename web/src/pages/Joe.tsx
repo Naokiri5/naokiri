@@ -7,10 +7,17 @@ function Chat({ context, compact }: { context?: string; compact?: boolean }) {
   const end = useRef<HTMLDivElement>(null);
   const hist = [...(data?.history ?? []), ...local];
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [hist.length]);
+  // MIA-WEB-011: the failed-send error used to be wiped in the same tick and the typed text was already cleared, so a 429
+  // or network error looked like nothing happened and the message was lost. The input is cleared only after success; on
+  // failure the text comes back and the error stays visible until the next send.
   const send = async (text: string) => {
     if (!text.trim()) return; setBusy(true); setMsg(''); setLocal([{ role: 'user', content: text, id: 'u' }]);
-    try { await api('/api/joe', { body: { message: context && context !== '/' ? `[viewing ${context}] ${text}` : text } }); } catch (e: any) { setLocal((l) => [...l, { role: 'assistant', content: `Error: ${e.message}`, id: 'e' }]); }
-    setBusy(false); setLocal([]); reload();
+    try {
+      await api('/api/joe', { body: { message: context && context !== '/' ? `[viewing ${context}] ${text}` : text } });
+      await reload(); setLocal([]);
+    } catch (e: any) {
+      setMsg(text); setLocal((l) => [...l, { role: 'assistant', content: `Not sent: ${e.message}. Your message is back in the box.`, id: 'e' }]);
+    } finally { setBusy(false); }
   };
   return <div className="col" style={{ height: '100%', gap: 10 }}>
     <div className="chat" style={{ flex: 1, overflowY: 'auto', padding: compact ? 10 : 0, minHeight: 0 }}>
@@ -19,7 +26,7 @@ function Chat({ context, compact }: { context?: string; compact?: boolean }) {
       {busy && <div className="msg assistant muted">Trader Joe is checking live data…</div>}<div ref={end} />
     </div>
     <form className="row" style={{ padding: compact ? 10 : 0 }} onSubmit={(e) => { e.preventDefault(); send(msg); }}>
-      <input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="Message Trader Joe…" style={{ flex: 1 }} disabled={busy} aria-label="Message" />
+      <input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="Message Trader Joe…" style={{ flex: 1 }} disabled={busy} aria-label="Message" maxLength={3500} />
       <button className="primary" disabled={busy || !msg.trim()}>Send</button>
     </form>
     {!compact && <div className="row">{['brief', 'opportunities', 'portfolio', 'risk', 'news', 'analyze BTC', 'pause'].map((c) => <button key={c} className="sm" onClick={() => send(c)} disabled={busy}>{c}</button>)}</div>}

@@ -1,0 +1,368 @@
+# **MIA AUTOPILOT — Engineering Questions, Reality Check & Code Implementation Master Prompt**
+
+Before giving Claude or Codex another 100 features to build, I would make it answer one central question:
+
+**“If I close my laptop tonight, will MIA still operate correctly, protect the account, recover from failures, and explain every decision when I return tomorrow?”**
+
+That is a much stronger development target than simply making the dashboard look impressive.
+
+## **1. The difficult truths MIA's engineers need to confront**
+
+Based on your uploaded 100-upgrade plan and the GitHub repository:
+
+1. **100 market workers do not automatically create a profitable strategy.** MIA's documentation reports weak out-of-sample results for its initial strategies. More analysis isn't a substitute for demonstrated trading performance.
+2. **A working dashboard is not proof of a reliable automated trading system.** A 24/7 service needs independent hosting, recovery, monitoring, durable state, and failure testing.
+3. **An AI assistant should not control everything.** Trader Joe can explain decisions and coordinate safe operations, but financial authorization and risk enforcement must remain independent.
+4. **Instant withdrawals cannot be guaranteed.** A withdrawal request can be fast, but actual settlement depends on the provider, account restrictions, security checks, and payment or blockchain network.
+5. **Adding all 100 upgrades at once would introduce unnecessary risk.** You need a verified baseline, code ownership, small implementation batches, and regression testing.
+6. **The floating window should never be responsible for running the bot.** Closing the window must not interrupt background monitoring or permitted paper trading.
+
+Your repository already contains the React frontend, Fastify backend, market scanners, risk engine, paper trading, and other components. PR #7 and PR #8 are currently open, so their work must be reconciled before adding overlapping functionality.
+
+The objective should be **a system that is measurable, recoverable, understandable, and safe to leave running unattended in paper mode**—not merely a system with an impressive list of features.
+
+## **2. The questions every MIA engineer must answer**
+
+I selected 15 especially important questions from the 45-question engineering checklist.
+
+| #  | Engineering question                                                                   | What it determines     |
+| -- | -------------------------------------------------------------------------------------- | ---------------------- |
+| 1  | Can a beginner understand what MIA is doing within five seconds?                       | Dashboard clarity      |
+| 2  | If the browser closes, what exact process keeps MIA running?                           | 24/7 automation        |
+| 3  | If the market feed disconnects during a position, what happens?                        | Operational safety     |
+| 4  | Can Trader Joe explain why MIA rejected a trade?                                       | AI transparency        |
+| 5  | Are all 100 workers contributing useful evidence, or are some waiting on missing data? | Worker efficiency      |
+| 6  | Which tasks are repeated unnecessarily across backend services?                        | Code duplication       |
+| 7  | Could two simultaneous signals allocate the same available capital?                    | Accounting correctness |
+| 8  | Are paper gains ever displayed as actual withdrawable profits?                         | Financial accuracy     |
+| 9  | Can the floating widget remain usable without overloading the dashboard?               | Frontend performance   |
+| 10 | Can MIA recover from a crash without duplicating trades?                               | Backend reliability    |
+| 11 | Are decisions based on information available at the actual decision time?              | Backtesting integrity  |
+| 12 | Can a user access all functionality through six main navigation categories?            | Beginner accessibility |
+| 13 | Can a new update break existing risk protections?                                      | Regression safety      |
+| 14 | Which 100 upgrades are already implemented in unmerged pull requests?                  | Development efficiency |
+| 15 | What evidence would prove MIA is ready for unattended paper trading?                   | Release readiness      |
+
+These questions are valuable because their answers determine which features should be coded first.
+
+## **3. Master prompt for Claude Code or Codex**
+
+# MIA AUTOPILOT — MASTER ENGINEERING DIRECTIVE
+
+**Project:** MIA 4.1\
+**Repository:** [https://github.com/Naokiri5/naokiri](https://github.com/Naokiri5/naokiri)\
+**Mission:** Convert the 100-upgrade backlog into maintainable, tested frontend and backend functionality.
+
+## YOUR FIRST QUESTION
+
+"If the owner closes their laptop for 24 hours, can MIA continue operating in paper mode, recognize dangerous market conditions, recover from unexpected errors, protect its financial records, and explain exactly what happened?"
+
+Do not assume the answer is yes.
+
+Prove it through code inspection, execution, and testing.
+
+## REALITY-CHECK REQUIREMENT
+
+Before modifying anything, identify:
+
+1. What MIA genuinely does today.
+2. What exists only as code without runtime verification.
+3. What has been implemented in unmerged pull requests.
+4. What is currently incomplete.
+5. What requires external credentials or hosting.
+6. What is technically unsafe or not yet authorized.
+7. What must be developed before MIA can reliably operate unattended.
+
+Never treat a requirement document as evidence that functionality exists.
+
+## PROJECT REQUIREMENTS
+
+Preserve the existing architecture:
+
+- React, TypeScript, and Vite frontend
+- Node.js and Fastify backend
+- SQLite database and migrations
+- Existing REST and SSE infrastructure
+- Market scanners and provider adapters
+- 100 deterministic market workers
+- 50 indicator specialists
+- Quantum Consensus Intelligence
+- Central decision engine
+- Independent deterministic risk engine
+- Paper order-management system
+- Portfolio ledger and transaction history
+- Trader Joe assistant
+- Existing authentication and security controls
+
+Do not create duplicate systems.
+
+Do not replace existing working functionality unnecessarily.
+
+Preserve the existing MIA dark theme while simplifying its navigation and interface.
+
+## STEP 1 — INSPECT THE REPOSITORY
+
+Examine `main` and all relevant pull requests, including PR #7 and PR #8.
+
+Inspect every affected frontend and backend module.
+
+Record the current commit SHA and branch dependencies.
+
+Determine whether each proposed upgrade is:
+
+- VERIFIED WORKING
+- IMPLEMENTED BUT UNTESTED
+- PARTIALLY IMPLEMENTED
+- PRESENT IN AN UNMERGED PR
+- MISSING
+- BLOCKED BY EXTERNAL REQUIREMENTS
+
+Do not begin coding before completing this inventory.
+
+## STEP 2 — ANSWER THE ENGINEERING QUESTIONS
+
+Read all 45 questions in the attached detailed implementation blueprint.
+
+Answer each using repository evidence.
+
+Where evidence is missing, write UNKNOWN.
+
+Where something fails, identify the root cause.
+
+Provide a prioritized list of problems that deserve immediate development.
+
+## STEP 3 — CONVERT ALL 100 IDEAS INTO CODE CONTRACTS
+
+For each numbered upgrade, document:
+
+**A. User objective**
+
+What problem does this feature solve for the user?
+
+**B. Functional behavior**
+
+Explain exactly what happens when the feature is opened, activated, updated, disabled, or encounters a failure.
+
+**C. Frontend implementation**
+
+Identify the React components, user interactions, display states, accessibility requirements, and existing pages to modify.
+
+**D. Backend implementation**
+
+Identify the existing service responsible for the feature.
+
+Specify any new Fastify routes, event handlers, scheduled tasks, or domain functions that are genuinely necessary.
+
+**E. Data contract**
+
+Define TypeScript interfaces, validation schemas, request parameters, response types, and error states.
+
+**F. Persistence**
+
+Specify what must be saved, which existing SQLite tables should be reused, and whether an append-only migration is necessary.
+
+**G. Security**
+
+Explain the authentication, authorization, risk, and financial boundaries.
+
+**H. Failure recovery**
+
+Document behavior when services disconnect, data becomes stale, processes restart, or requests fail.
+
+**I. Testing**
+
+Write unit, integration, browser, and failure-recovery tests appropriate to the feature.
+
+**J. Completion evidence**
+
+Specify the exact observable conditions proving that the implementation actually works.
+
+Never mark a feature complete only because its code compiles.
+
+## STEP 4 — CREATE A BEGINNER-FRIENDLY COCKPIT
+
+Organize navigation into:
+
+1. Home
+2. Markets
+3. Autopilot
+4. Portfolio
+5. AI Intelligence
+6. Settings & Security
+
+Preserve all existing routes and features.
+
+Make Trader Joe accessible globally through a contextual drawer.
+
+Implement Simple, Analyst, and Engineer presentation modes.
+
+Keep safety warnings, account origin, and trading mode clearly visible in every presentation mode.
+
+## STEP 5 — DESIGN THE AUTONOMOUS BACKEND
+
+Keep the trading engine independent of the frontend browser lifecycle.
+
+Use an approved always-on hosting architecture.
+
+Implement or verify:
+
+- Process supervision
+- Health and readiness checks
+- Scheduled paper-trading tasks
+- Durable job state
+- Idempotent order handling
+- Provider disconnection recovery
+- Database backup and restoration
+- Event and exception logging
+- Independent uptime monitoring
+- Safe shutdown and restart
+
+The frontend must not be responsible for keeping the trading system alive.
+
+## STEP 6 — DESIGN THE FLOATING MIA MONITOR
+
+Implement a read-only compact monitor showing:
+
+- Account mode
+- Paper account equity
+- Daily PnL
+- Selected asset chart
+- Scanner health
+- Last update timestamp
+- Critical alerts
+
+Use Document Picture-in-Picture where supported, with a normal in-page fallback.
+
+If a standalone persistent desktop window is required, propose a separately approved Tauri implementation.
+
+Never put wallet signing, withdrawal submission, or unrestricted trading authority inside the floating monitor.
+
+## STEP 7 — IMPLEMENT SAFELY
+
+Do not implement 100 features simultaneously.
+
+Organize changes into small, independent development increments.
+
+Each increment must include:
+
+1. Baseline inspection
+2. Engineering design
+3. Exact file ownership
+4. Backend changes
+5. Frontend integration
+6. Validation
+7. Automated tests
+8. Runtime verification
+9. Security review
+10. Reviewable pull request
+
+Avoid overlapping modifications by multiple agents to shared critical files.
+
+## STEP 8 — VALIDATE
+
+Use the repository's supported commands, including:
+
+```
+npm ci
+npm run typecheck
+npm test
+npm run test:e2e
+npm run build
+npm run scan:secrets
+npm audit --audit-level=high
+```
+
+Record failures and skipped checks honestly.
+
+Test real browser interactions, backend state changes, recovery, authorization, database consistency, and stale-data handling.
+
+For unattended operation, perform an actual paper-only soak test with all browser clients closed.
+
+## STEP 9 — FINANCIAL SAFETY
+
+Live-money execution and withdrawal submission remain disabled.
+
+Do not bypass release gates.
+
+Do not grant Trader Joe unrestricted execution capabilities.
+
+Do not store wallet private keys or seed phrases in browser code, LLM prompts, or GitHub.
+
+Do not fabricate trades, prices, balances, or performance.
+
+Treat simulated financial results as simulations.
+
+Actual live execution and withdrawal infrastructure require separate authorization and independent certification.
+
+## FINAL DELIVERABLE
+
+Return a complete development report containing:
+
+- Answers to the 45 engineering questions
+- Status of all 100 upgrades
+- Exact changes needed
+- Frontend and backend implementation contracts
+- Database and API requirements
+- Security implications
+- Complete test plan
+- Verified completed work
+- Unresolved failures
+- Recommended next implementation
+- Pull-request link if a PR was actually created
+
+**PRIMARY SUCCESS CRITERION: MIA becomes easier to operate, easier to understand, more reliable, and safer—not simply larger or more complicated.**
+
+## **4. Example: How an idea becomes functioning code**
+
+Here is how Claude should translate four of your upgrades into concrete development work.
+
+| Upgrade                                 | How it functions                                                                                                                                              | Where the code belongs                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **003 — Floating profit monitor**       | User clicks Float Monitor. A small read-only window opens and receives current authenticated values. It displays stale/disconnected status when updates stop. | `web/src/App.tsx`, a new `MiniCockpit.tsx`, existing `web/src/api.ts` |
+| **012 — Independent automation**        | The server starts the paper scanner and monitoring loops without needing an open browser. Closing the browser only disconnects the viewer.                    | `server/src/main.ts`, `server/src/bot/bot.ts`                         |
+| **016 — Prevent duplicate orders**      | Every paper order gets a unique intent ID. Following a timeout or restart, MIA checks stored order status before attempting another execution.                | `server/src/exec/oms.ts`, `server/src/db/migrations.ts`               |
+| **093 — Simple/Analyst/Engineer modes** | Users change how much detail they see, while underlying features, balances, routes, and risk controls remain identical.                                       | `web/src/App.tsx`, `web/src/pages/Overview.tsx`, `web/src/styles.css` |
+
+The implementation should follow this flow:
+
+**User requirement**
+
+“I want to see my profit while working.”
+
+**React component**
+
+MiniCockpit with PnL, chart, data age and mode
+
+**Existing REST API + SSE**
+
+Authenticated account data and update events
+
+**Authoritative backend**
+
+Portfolio ledger, market snapshots and account state
+
+**Verified functionality**
+
+Accurate display, reconnection handling, fallback and automated tests
+
+For implementation, Document Picture-in-Picture requires a user action and is not supported in every browser. It also cannot remain open after its originating window closes. Tauri's `setAlwaysOnTop()` supports the separate desktop approach, provided the appropriate native permission is configured.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://developer.mozilla.org\&sz=32)
+
+MDN+2
+
+
+
+## **5. Download the complete technical specification**
+
+**MIA Autopilot — 100 Detailed Functions & Code Blueprint**
+
+100 individually specified upgrades · 45 engineering questions · Master prompt · Code examples · Failure handling · Acceptance tests · Development phases
+
+Download the complete engineering blueprint
+
+All 100 numbered entries are included and verified for completeness. This is an implementation specification, not a claim that the features have been coded or deployed.
+
+**Recommended first coding task:** Compact MIA's navigation and make Trader Joe globally accessible, while preserving the existing pages and safety warnings. After that, prioritize the independent 24/7 paper backend, then the floating monitor.
+
+Those three improvements will make the biggest immediate difference to how convenient and accessible MIA feels, without requiring you to rebuild the trading engine.

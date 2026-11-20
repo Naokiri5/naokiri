@@ -69,14 +69,14 @@ add('flow', 'CEX large-print imbalance', `aggtrades`, ['binance.aggTrades'], (c)
 add('flow', 'Order-book imbalance ±1%', `book`, ['binance.depth'], (c) => c.impact ? tri(c.impact.bookImbalance, (v) => v >= 0.55, (v) => v <= 0.4, 'bidShareWithin1pct') : ABSTAIN('no book'));
 // ── LIQUIDITY (10) ────────────────────────────────────────────
 add('liquidity', 'Spread', 'book', ['binance.depth'], (c) => c.impact ? tri(c.impact.spreadBps, (v) => v <= 5, (v) => v > 15, 'spreadBps', (v) => v.toFixed(2)) : ABSTAIN('no book'), { mandatory: true });
-add('liquidity', 'Impact at intended size', 'book', ['binance.depth'], (c) => c.impact ? tri(c.impact.filledFully ? c.impact.impactBps : Infinity, (v) => v <= 10, (v) => v > 30, 'impactBps', (v) => v.toFixed(2)) : ABSTAIN('no book'), { mandatory: true, canVeto: true });
+add('liquidity', 'Impact at intended size', 'book', ['binance.depth'], (c) => !c.impact ? ABSTAIN('no book') : !c.impact.filledFully ? { stance: 'OPPOSE', features: { filledFully: 0 }, reasons: ['book cannot absorb the intended size'], veto: true } : tri(c.impact.impactBps, (v) => v <= 10, (v) => v > 30, 'impactBps', (v) => v.toFixed(2)), { mandatory: true, canVeto: true }); // C-06
 add('liquidity', 'Depth within 1%', 'book', ['binance.depth'], (c) => c.impact ? tri(c.impact.depth1pct / Math.max(1, c.intendedNotional), (v) => v >= 50, (v) => v < 10, 'depthToOrderRatio', (v) => v.toFixed(0)) : ABSTAIN('no book'));
 add('liquidity', '24h quote volume', 'ticker.24h', ['binance.ticker24h'], (c) => c.ticker ? tri(c.ticker.quoteVolume, (v) => v >= 20e6, (v) => v < 5e6, 'quoteVolume24h', (v) => `$${(v / 1e6).toFixed(1)}M`) : ABSTAIN('no ticker'));
 add('liquidity', 'Trade count 24h', 'ticker.24h', ['binance.ticker24h'], (c) => c.ticker ? tri(c.ticker.trades, (v) => v >= 50_000, (v) => v < 10_000, 'trades24h', (v) => v.toFixed(0)) : ABSTAIN('no ticker'));
 add('liquidity', 'Order size vs daily volume', 'ticker.24h', ['binance.ticker24h'], (c) => c.ticker ? tri(c.intendedNotional / c.ticker.quoteVolume, (v) => v < 1e-4, (v) => v > 1e-3, 'orderToAdv', (v) => v.toExponential(2)) : ABSTAIN('no ticker'));
 add('liquidity', 'Exit liquidity at 2× size', 'book', ['binance.depth'], (c) => c.impact ? tri(c.impact.depth1pct / Math.max(1, 2 * c.intendedNotional), (v) => v >= 20, (v) => v < 5, 'exitDepthRatio', (v) => v.toFixed(0)) : ABSTAIN('no book'));
 add('liquidity', 'Cross-venue listing', 'cross', ['coinbase', 'kraken'], (c) => tri(c.quality.independentSources, (v) => v >= 2, () => false, 'independentVenues', (v) => v.toFixed(0)));
-add('liquidity', 'Market-cap tier', 'cg', ['coingecko'], (c) => c.safety.checks.find((x) => x.name === 'market-cap reference')?.result === 'PASS' ? { stance: 'SUPPORT', features: {}, reasons: ['listed in top-250 by market cap'] } : ABSTAIN('market cap reference unavailable'));
+add('liquidity', 'Market-cap tier', 'cg', ['coingecko'], (c) => (c.safety.checks ?? []).find((x) => x.name === 'market-cap reference')?.result === 'PASS' ? { stance: 'SUPPORT', features: {}, reasons: ['listed in top-250 by market cap'] } : ABSTAIN('market cap reference unavailable'));
 add('liquidity', 'Volume stability 1h', 'vol.1h', K('1h'), (c) => tri(F(c, '1h')?.relVol20 ?? null, (v) => v >= 0.6 && v <= 4, (v) => v > 8, 'relVol20', (v) => v.toFixed(2)));
 // ── STRUCTURE (10) ────────────────────────────────────────────
 add('structure', 'Above swing low 1h', 'swing.1h', K('1h'), (c) => { const f = F(c, '1h'); return ok(f, 'swingLow') ? vote(f!.close > f!.swingLow, { swingLow: f!.swingLow }, 'holding above recent swing low', 'broke recent swing low') : ABSTAIN('no swings'); });
@@ -88,7 +88,7 @@ add('structure', 'Pullback depth', 'swing.1h', K('1h'), (c) => { const f = F(c, 
 add('structure', 'Distance from 24h high', 'ticker.24h', ['binance.ticker24h'], (c) => c.ticker ? tri(1 - c.ticker.last / c.ticker.high, (v) => v < 0.05, (v) => v > 0.15, 'offHigh24h') : ABSTAIN('no ticker'));
 add('structure', 'Close vs 15m EMA20', 'ema.15m', K('15m'), (c) => { const f = F(c, '15m'); return ok(f, 'ema20') ? vote(f!.close >= f!.ema20, {}, 'short-term structure intact', 'short-term structure broken') : ABSTAIN('warming up'); });
 add('structure', 'Efficiency ratio 1h', 'er.1h', K('1h'), (c) => tri(F(c, '1h')?.efficiencyRatio10 ?? null, (v) => v >= 0.3, (v) => v < 0.1, 'efficiencyRatio10'));
-add('structure', 'Reward room to first target', 'swing.4h', K('4h'), (c) => { const f = F(c, '4h'); const s = c.candidate.signal; if (!ok(f, 'donchHigh20')) return ABSTAIN('warming up'); const t1 = s.entryRef + s.targets[0].r * (s.entryRef - s.stop); return vote(f!.donchHigh20 >= t1 || s.entryRef >= f!.donchHigh20 * 0.995, { t1, resistance4h: f!.donchHigh20 }, 'first target below 4h resistance or breaking out', '4h resistance before first target'); });
+add('structure', 'Reward room to first target', 'swing.4h', K('4h'), (c) => { const f = F(c, '4h'); const s = c.candidate.signal; if (!s.targets?.length) return ABSTAIN('no targets'); /* C-04 */ if (!ok(f, 'donchHigh20')) return ABSTAIN('warming up'); const t1 = s.entryRef + s.targets[0].r * (s.entryRef - s.stop); return vote(f!.donchHigh20 >= t1 || s.entryRef >= f!.donchHigh20 * 0.995, { t1, resistance4h: f!.donchHigh20 }, 'first target below 4h resistance or breaking out', '4h resistance before first target'); });
 // ── REGIME / CROSS-MARKET (8) ─────────────────────────────────
 add('regime', 'Strategy-regime fit', 'regime', K('1h'), (c) => { const fit = ['trend_pullback', 'donchian_breakout'].includes(c.candidate.strategyId) ? ['TREND_UP', 'COMPRESSION', 'RANGE'].includes(c.candidate.regime) : c.candidate.regime === 'RANGE'; return c.candidate.regime === 'UNKNOWN' ? ABSTAIN('regime unknown') : vote(fit, { regime: c.candidate.regime }, `${c.candidate.regime} suits strategy`, `${c.candidate.regime} unsuitable for strategy`); }, { mandatory: true });
 add('regime', 'BTC trend 1h', 'btc.1h', ['binance.klines.1h.BTC'], (c) => ok(c.btc1h, 'ema20', 'ema50') ? vote(c.btc1h!.ema20 > c.btc1h!.ema50, {}, 'BTC 1h uptrend', 'BTC 1h downtrend') : ABSTAIN('BTC data unavailable'));
@@ -100,10 +100,10 @@ add('regime', 'Higher-timeframe regime 4h', 'regime.4h', K('4h'), (c) => { const
 // Breadth over ≥30 liquid pairs from a ticker snapshot no older than 5 minutes; otherwise abstain (never guessed).
 add('regime', 'Market breadth', 'breadth', ['binance.ticker24h'], (c) => {
   const b = c.breadth; if (!b || b.universe < 30) return ABSTAIN('breadth unavailable (fewer than 30 liquid pairs)');
-  const age = b.asOf == null ? NaN : Date.now() - b.asOf;
+  const age = b.asOf == null ? NaN : (c.asOf ?? Date.now()) - b.asOf; // evaluation clock, so replays are deterministic
   if (!Number.isFinite(age) || age < 0 || age > 300_000) return ABSTAIN('breadth snapshot stale, future-dated or missing');
   return tri(b.advancers / b.universe, (v) => v >= 0.55, (v) => v <= 0.35, 'advancerShare', (v) => `${(v * 100).toFixed(0)}%`);
-}, { version: '1.1.0' });
+}, { version: '1.2.0' });
 // ── NEWS (8) ──────────────────────────────────────────────────
 add('news', 'Asset headline sentiment', 'googlenews', ['googlenews'], (c) => { const n = c.news; if (!n || n.relevant === 0) return ABSTAIN('no recent asset headlines'); return tri(n.positive - n.negative, (v) => v > 0, (v) => v < 0, 'netSentimentCount', (v) => v.toFixed(0)); });
 add('news', 'Negative-event screen', 'googlenews', ['googlenews'], (c) => { const n = c.news; if (!n) return ABSTAIN('news feed unavailable'); return n.negative >= 2 ? { stance: 'OPPOSE', features: { negative: n.negative }, reasons: ['multiple negative headlines (hack/exploit/delisting/lawsuit)'] } : { stance: 'ABSTAIN', features: { negative: n.negative }, reasons: ['no material negative headlines'] }; });
@@ -124,7 +124,7 @@ add('risk', 'Reward:risk', 'signal', ['strategy'], (c) => tri(c.candidate.signal
 add('risk', 'Liquidation/leverage', 'policy', ['policy'], () => ({ stance: 'SUPPORT', features: { leverage: 1 }, reasons: ['spot, no leverage'] }), { constant: true });
 // ── EXECUTION (8) ─────────────────────────────────────────────
 const costR = (c: WorkerContext) => { const s = c.candidate.signal; if (!c.impact) return null; const rt = 2 * c.feeRate + (c.impact.spreadBps + 2 * c.impact.impactBps) / 1e4; return (rt * s.entryRef) / (s.entryRef - s.stop); };
-add('execution', 'Round-trip cost in R', 'cost', ['binance.depth', 'fees'], (c) => tri(costR(c), (v) => v <= 0.1, (v) => v > 0.25, 'costR', (v) => v.toFixed(3)), { mandatory: true, canVeto: true });
+add('execution', 'Round-trip cost in R', 'cost', ['binance.depth', 'fees'], (c) => !(c.candidate.signal.entryRef > c.candidate.signal.stop) ? { stance: 'OPPOSE', features: {}, reasons: ['stop at or above entry: cost per R undefined'], veto: true } : tri(costR(c), (v) => v <= 0.1, (v) => v > 0.25, 'costR', (v) => v.toFixed(3)), { mandatory: true, canVeto: true }); // C-07
 add('execution', 'Min notional feasibility', 'rules', ['binance.exchangeInfo'], (c) => vote(c.intendedNotional >= 10, { notional: c.intendedNotional }, 'order above venue minimum', 'order below venue minimum'));
 add('execution', 'Quote age', 'quality', ['binance'], (c) => tri(c.quality.quoteAgeMs, (v) => v < 30_000, (v) => v > 60_000, 'quoteAgeMs', (v) => `${(v / 1000).toFixed(0)}s`));
 add('execution', 'Book age', 'quality', ['binance.depth'], (c) => tri(c.quality.bookAgeMs, (v) => v < 120_000, (v) => v > 180_000, 'bookAgeMs', (v) => `${(v / 1000).toFixed(0)}s`));

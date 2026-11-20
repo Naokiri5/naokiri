@@ -25,6 +25,13 @@ describe('DITAS Decision Twin', () => {
     const r = simulateTwin(plan(), bars({}, { o: 90, h: 93, l: 85, c: 89 }), costs());
     expect(r.shadow.fills[1].price).toBe(90); expect(r.shadow.netPnL).toBe(-100);
   });
+  it('closes the full hypothetical position at the last accepted target', () => {
+    const p = plan();
+    p.signal.targets = [{ r: 1, fraction: 0.5 }, { r: 2, fraction: 0.4999999998 }];
+    const result = simulateTwin(p, bars({ h: 112 }), costs()).shadow;
+    expect(result).toMatchObject({ state: 'CLOSED', qtyOpen: 0 });
+    expect(result.fills.filter(fill => fill.side === 'SELL').reduce((quantity, fill) => quantity + fill.qty, 0)).toBeCloseTo(result.qty, 10);
+  });
   it('keeps delayed-entry targets frozen and compares a loss with waiting', () => {
     const r = simulateTwin(plan(), bars({ h: 103, l: 99 }, { o: 102, h: 111, l: 100, c: 110 }), costs());
     expect(r.shadow.state).toBe('CLOSED'); expect(r.counterfactual.state).toBe('CLOSED');

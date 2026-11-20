@@ -1,3 +1,4 @@
+import { candleVwap } from '../features/indicators.js';
 import { INTERVAL_MS, type Candle, type Interval } from '../market/types.js';
 
 export interface Detection {
@@ -5,10 +6,18 @@ export interface Detection {
   boundaries: { low: number; high: number }; method: string; evidence: string[];
   confidence: number; calibration: 'NOT_CALIBRATED'; expiresAt: number; invalidation: string;
 }
+export interface AnchoredVwap {
+  anchor: 'UTC_DAY' | 'UTC_WEEK' | 'UTC_MONTH' | 'CONFIRMED_SWING';
+  anchorAt: number;
+  price: number | null;
+  deviationPct: number | null;
+}
+
 export interface ChartReport {
   instrument: string; timeframe: Interval; asOf: number; status: 'VALID' | 'INVALID' | 'INSUFFICIENT_DATA';
   issues: string[]; trend: 'BULLISH' | 'BEARISH' | 'RANGING' | 'UNKNOWN';
   support: number | null; resistance: number | null; detections: Detection[];
+  anchoredVwap: AnchoredVwap[];
   decision: 'NO TRADE'; note: string;
 }
 
@@ -30,7 +39,7 @@ export function validateCandles(candles: readonly Candle[], timeframe: Interval,
 /** Conservative OHLCV heuristics. Scores describe rule strength, never win probability. */
 export function analyzeChart(instrument: string, timeframe: Interval, candles: readonly Candle[], asOf: number): ChartReport {
   const issues = validateCandles(candles, timeframe, asOf);
-  const report: ChartReport = { instrument, timeframe, asOf, status: issues.length ? 'INVALID' : candles.length < 22 ? 'INSUFFICIENT_DATA' : 'VALID', issues, trend: 'UNKNOWN', support: null, resistance: null, detections: [], decision: 'NO TRADE', note: 'Chart evidence only; existing QCI, decision and risk engines retain trading authority. Confidence is not calibrated.' };
+  const report: ChartReport = { instrument, timeframe, asOf, status: issues.length ? 'INVALID' : candles.length < 22 ? 'INSUFFICIENT_DATA' : 'VALID', issues, trend: 'UNKNOWN', support: null, resistance: null, detections: [], anchoredVwap: [], decision: 'NO TRADE', note: 'Chart evidence only; existing QCI, decision and risk engines retain trading authority. Confidence is not calibrated.' };
   if (report.status !== 'VALID') return report;
   const duration = INTERVAL_MS[timeframe], last = candles[candles.length - 1], prev = candles[candles.length - 2];
   const add = (kind: string, low: number, high: number, method: string, evidence: string[], invalidation: string, confidence = 0.6) => report.detections.push({ instrument, timeframe, detectedAt: asOf, kind, boundaries: { low, high }, method, evidence, confidence, calibration: 'NOT_CALIBRATED', expiresAt: asOf + duration, invalidation });
@@ -44,6 +53,47 @@ export function analyzeChart(instrument: string, timeframe: Interval, candles: r
     if (neighbors.every(x => c.h > x.h)) swings.push({ kind: 'HIGH', price: c.h, t: c.t });
     if (neighbors.every(x => c.l < x.l)) swings.push({ kind: 'LOW', price: c.l, t: c.t });
   }
+  // The comparison levels must already have been confirmed at the prior close.
+  const priorSwings = swings.filter(s => s.t + 2 * duration <= prev.t);
+  const priorHighs = priorSwings.filter(s => s.kind === 'HIGH').slice(-2);
+  const priorLows = priorSwings.filter(s => s.kind === 'LOW').slice(-2);
+  if (priorHighs.length === 2 && priorLows.length === 2) {
+    const [olderHigh, high] = priorHighs, [olderLow, low] = priorLows;
+    const bullish = high.price > olderHigh.price && low.price > olderLow.price;
+    const bearish = high.price < olderHigh.price && low.price < olderLow.price;
+    const method = 'First close across a swing level confirmed before the signal bar';
+    if ((bullish || bearish) && prev.c <= high.price && last.c > high.price) {
+      add(bullish ? 'STRUCTURE_BREAK_UP' : 'CHANGE_OF_CHARACTER_UP', high.price, last.c, method,
+        [`prior high=${high.price}`, `close=${last.c}`], `Close at or below ${high.price}`);
+    }
+    if ((bullish || bearish) && prev.c >= low.price && last.c < low.price) {
+      add(bearish ? 'STRUCTURE_BREAK_DOWN' : 'CHANGE_OF_CHARACTER_DOWN', last.c, low.price, method,
+        [`prior low=${low.price}`, `close=${last.c}`], `Close at or above ${low.price}`);
+    }
+  }
+
+  const anchors: Pick<AnchoredVwap, 'anchor' | 'anchorAt'>[] = [];
+  const day = new Date(last.t);
+  if (instrument.startsWith('crypto:binance:') && Number.isFinite(day.getTime())) {
+    // Anchor to the latest closed candle's UTC period, even when a new period is forming.
+    day.setUTCHours(0, 0, 0, 0);
+    anchors.push({ anchor: 'UTC_DAY', anchorAt: day.getTime() });
+    anchors.push({ anchor: 'UTC_WEEK', anchorAt: day.getTime() - ((day.getUTCDay() + 6) % 7) * 86_400_000 });
+    day.setUTCDate(1);
+    anchors.push({ anchor: 'UTC_MONTH', anchorAt: day.getTime() });
+  }
+  const swing = swings.at(-1);
+  if (swing) anchors.push({ anchor: 'CONFIRMED_SWING', anchorAt: swing.t });
+  report.anchoredVwap = anchors.map(anchor => {
+    const start = candles.findIndex(c => c.t === anchor.anchorAt);
+    const price = start < 0 ? NaN : candleVwap(candles.slice(start));
+    const deviationPct = (last.c / price - 1) * 100;
+    return {
+      ...anchor,
+      price: Number.isFinite(price) && price > 0 ? price : null,
+      deviationPct: Number.isFinite(deviationPct) && price > 0 ? deviationPct : null,
+    };
+  });
   const highs = swings.filter(s => s.kind === 'HIGH').slice(-2), lows = swings.filter(s => s.kind === 'LOW').slice(-2);
   if (highs.length === 2 && lows.length === 2) {
     report.trend = highs[1].price > highs[0].price && lows[1].price > lows[0].price ? 'BULLISH' : highs[1].price < highs[0].price && lows[1].price < lows[0].price ? 'BEARISH' : 'RANGING';
@@ -60,6 +110,16 @@ export function analyzeChart(instrument: string, timeframe: Interval, candles: r
   }
   if (last.c > report.resistance) add('BREAKOUT_UP', report.resistance, last.c, 'Close exceeds prior 20-bar high', [`close=${last.c}`], `Close back below ${report.resistance}`);
   if (last.c < report.support) add('BREAKOUT_DOWN', last.c, report.support, 'Close below prior 20-bar low', [`close=${last.c}`], `Close back above ${report.support}`);
+  const beforeBreakout = candles.slice(-22, -2);
+  const retestHigh = Math.max(...beforeBreakout.map(c => c.h));
+  const retestLow = Math.min(...beforeBreakout.map(c => c.l));
+  const retestMethod = 'Prior close outside its 20-bar range, followed by a touch and close beyond the same boundary';
+  if (prev.c > retestHigh && last.l <= retestHigh && last.c > retestHigh) {
+    add('BREAKOUT_RETEST_UP', last.l, last.c, retestMethod, [`retested high=${retestHigh}`], `Close at or below ${retestHigh}`);
+  }
+  if (prev.c < retestLow && last.h >= retestLow && last.c < retestLow) {
+    add('BREAKOUT_RETEST_DOWN', last.c, last.h, retestMethod, [`retested low=${retestLow}`], `Close at or above ${retestLow}`);
+  }
   if (last.h > report.resistance && last.c <= report.resistance) add('UPPER_LIQUIDITY_SWEEP_HYPOTHESIS', report.resistance, last.h, 'Wick above prior range, close back inside', ['Observed OHLCV only; hidden stops and institutional orders unknown'], `Close above ${last.h}`);
   if (last.l < report.support && last.c >= report.support) add('LOWER_LIQUIDITY_SWEEP_HYPOTHESIS', last.l, report.support, 'Wick below prior range, close back inside', ['Observed OHLCV only; hidden stops and institutional orders unknown'], `Close below ${last.l}`);
   const a = candles[candles.length - 3];

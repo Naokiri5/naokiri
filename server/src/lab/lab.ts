@@ -16,11 +16,22 @@ export function seedStrategies() {
 export function listStrategies() {
   return all<any>('SELECT * FROM strategies ORDER BY id').map((r) => ({ ...r, params: P(r.params), stats: strategyStats(r.id), live: paperStats(r.id) }));
 }
+/** Minimum out-of-sample evidence for PAPER promotion without an explicit owner override (F-01). */
+export const MIN_PROMOTION_OOS_TRADES = 30;
 export function setStrategyStatus(actor: string, id: string, status: StrategyStatus, note?: string) {
   if (!strategyById(id)) throw new Error('unknown strategy');
   if (status === 'LIVE_CANDIDATE') throw new Error('LIVE_CANDIDATE requires release-gate certification (Part 12.7) — not available in this build');
   if (actor !== 'owner' && status !== 'SUSPENDED' && status !== 'RETIRED') throw new Error('only the owner may promote or re-enable a strategy');
-  if (status === 'PAPER' && !(strategyStats(id)?.trades)) throw new Error('promotion to PAPER requires at least one stored backtest');
+  if (status === 'PAPER') {
+    const st = strategyStats(id);
+    if (!st?.trades) throw new Error('promotion to PAPER requires at least one stored backtest');
+    // F-01 (100-agent audit): one losing out-of-sample trade used to be enough. Require a minimum OOS sample with a
+    // positive expectancy, or an explicit owner override reason that is recorded in the audit log.
+    const weak = st.trades < MIN_PROMOTION_OOS_TRADES || !(st.expectancyR > 0);
+    const override = typeof note === 'string' && /^OVERRIDE:\s*\S/.test(note) && note.length >= 20;
+    if (weak && !override) throw new Error(`promotion to PAPER requires ≥ ${MIN_PROMOTION_OOS_TRADES} out-of-sample trades with positive expectancy (have ${st.trades}, expectancy ${st.expectancyR.toFixed(3)}R); to promote anyway, give a note starting "OVERRIDE:" with your reason`);
+    if (weak) audit(actor, 'strategy.promotion.override', { id, trades: st.trades, expectancyR: st.expectancyR, note });
+  }
   run('UPDATE strategies SET status=?, updated_at=?, note=COALESCE(?, note) WHERE id=?', status, Date.now(), note ?? null, id);
   const susp = new Set(getSetting<string[]>('suspendedStrategies', []));
   status === 'SUSPENDED' || status === 'RETIRED' ? susp.add(id) : susp.delete(id);
