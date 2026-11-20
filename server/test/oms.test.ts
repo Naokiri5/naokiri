@@ -6,6 +6,7 @@ import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, getControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState, openPositions } from '../src/portfolio/ledger.js';
 import { submitEntry, monitorPositions, emergencyStop, closeAllPositions, closePosition, executeExit, queueForApproval, decideApproval, listOrders, listPositions, cancelPendingEntries, expireApprovals, paperEntryForDecision } from '../src/exec/oms.js';
+import { executionAdapter, LiveLockedError, environmentsOverview } from '../src/exec/environment.js';
 import { tradingHistory } from '../src/journal/history.js';
 import { reconcile, calendar } from '../src/portfolio/calendar.js';
 import { verifyAuditChain } from '../src/core/audit.js';
@@ -26,6 +27,30 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     freshDb(); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }, modeGate); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
+  it('routes paper via the existing OMS adapter and refuses live without touching financial state', () => {
+    const environments = environmentsOverview();
+    expect(environments.map(x => x.environment)).toEqual(['PAPER', 'LIVE']);
+    expect(environments[0].state).toBe('ACTIVE');
+    expect(environments[1].state).toBe('LOCKED');
+
+    const paper = executionAdapter('PAPER');
+    const entry = paper.submitEntry(report(id, last), 'bot');
+    expect(entry).toMatchObject({ ok: true, environment: 'PAPER' });
+    expect(entry.positionId).toBeTruthy();
+    const fillsBefore = get<{ n: number }>('SELECT COUNT(*) n FROM fills')!.n;
+    const ordersBefore = get<{ n: number }>('SELECT COUNT(*) n FROM orders')!.n;
+    const cashBefore = accountState().cash;
+
+    const live = executionAdapter('LIVE');
+    expect(live.availability().state).toBe('LOCKED');
+    expect(() => live.submitEntry(report(id, last), 'bot')).toThrow(LiveLockedError);
+    expect(() => live.closePosition('bot', entry.positionId!)).toThrow(LiveLockedError);
+    expect(get<{ n: number }>('SELECT COUNT(*) n FROM fills')!.n).toBe(fillsBefore);
+    expect(get<{ n: number }>('SELECT COUNT(*) n FROM orders')!.n).toBe(ordersBefore);
+    expect(accountState().cash).toBe(cashBefore);
+    expect(all<{ account: string }>('SELECT DISTINCT account FROM orders').map(x => x.account)).toEqual([PAPER_ACCOUNT]);
+  });
+
   it('enters with book-walk fill, attaches OMS-monitored stop, exits on stop, reconciles', () => {
     const r = submitEntry(report(id, last), 'bot');
     expect(r.ok).toBe(true);
