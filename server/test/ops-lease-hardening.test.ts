@@ -12,6 +12,7 @@ import { readiness, _resetWatchdog } from '../src/ops/readiness.js';
 import { botStatus, stopBot, ENGINE_LEASE, engineLeaseTtlMs, _test } from '../src/bot/bot.js';
 import * as lab from '../src/lab/lab.js';
 import * as oms from '../src/exec/oms.js';
+import * as integrity from '../src/ops/integrity.js';
 import type { DecisionReport } from '../src/decision/engine.js';
 
 // Network lanes are replaced; everything that writes (OMS, ledger, lease, journal) is the real code.
@@ -138,5 +139,36 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(_test.holdEngine()).toBe(true); expect(botStatus.role).toBe('LEADER');
     run("UPDATE audit_log SET hash='tampered' WHERE id=(SELECT MIN(id) FROM audit_log)");
     expect(_test.holdEngine()).toBe(true); expect(botStatus.role).toBe('LEADER');
+  });
+
+  it.each([false, true])('a thrown integrity check latches refusal until restart (release fails: %s)', (releaseFails) => {
+    expect(_test.holdEngine()).toBe(true);
+    run('UPDATE runtime_leases SET expires_at=0 WHERE name=?', ENGINE_LEASE);
+    if (releaseFails) run(`CREATE TEMP TRIGGER reject_lease_release BEFORE DELETE ON runtime_leases
+      BEGIN SELECT RAISE(ABORT, 'fixture lease release failure'); END`);
+    const check = vi.spyOn(integrity, 'takeoverIntegrity');
+    check.mockImplementationOnce(() => { throw new Error('fixture integrity read failed'); });
+    try {
+      expect(_test.holdEngine()).toBe(false);
+      expect(botStatus).toMatchObject({ running: false, role: 'STOPPED' });
+      expect(botStatus.lastError).toContain('fixture integrity read failed');
+      expect(currentLease(ENGINE_LEASE)?.holder ?? null).toBe(releaseFails ? botStatus.instanceId : null);
+      const retained = currentLease(ENGINE_LEASE);
+      _test.onDecision(report(id, last));
+      expect(oms.submitEntry).not.toHaveBeenCalled();
+      expect(currentLease(ENGINE_LEASE)).toEqual(retained);
+      expect(check).toHaveBeenCalledTimes(1);
+
+      // Simulate an owner restart without scheduling timers or reaching external providers.
+      _test.resetTakeoverRefusal();
+      botStatus.running = true;
+      expect(_test.holdEngine()).toBe(true);
+      expect(check).toHaveBeenCalledTimes(2);
+      expect(botStatus.role).toBe('LEADER');
+      _test.onDecision(report(id, last));
+      expect(oms.submitEntry).toHaveBeenCalledTimes(1);
+    } finally {
+      check.mockRestore();
+    }
   });
 });
