@@ -1,0 +1,2596 @@
+{
+  "notice": "Tracked-file metadata inventory, not proof of line-by-line review. New review artifacts and untracked regression files are not included in this snapshot.",
+  "baseline": "2c9c216",
+  "files": [
+    {
+      "path": ".claude/agents/architecture-analyst.md",
+      "bytes": 1100,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/backend-engineer.md",
+      "bytes": 913,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/database-engineer.md",
+      "bytes": 782,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/documentation-engineer.md",
+      "bytes": 777,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/frontend-engineer.md",
+      "bytes": 917,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/fullstack-engineer.md",
+      "bytes": 2048,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/integration-reviewer.md",
+      "bytes": 892,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/performance-reviewer.md",
+      "bytes": 825,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/refactoring-specialist.md",
+      "bytes": 1172,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/security-reviewer.md",
+      "bytes": 804,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/test-engineer.md",
+      "bytes": 833,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/agents/trading-risk-reviewer.md",
+      "bytes": 1194,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/rules/backend.md",
+      "bytes": 913,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/rules/database-and-tests.md",
+      "bytes": 964,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/rules/frontend.md",
+      "bytes": 848,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/rules/trading-safety.md",
+      "bytes": 1323,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/settings.json",
+      "bytes": 444,
+      "extension": ".json"
+    },
+    {
+      "path": ".claude/skills/duplication-audit/SKILL.md",
+      "bytes": 2006,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/skills/fullstack-delivery/SKILL.md",
+      "bytes": 2445,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/skills/mia-guardian-shield/SKILL.md",
+      "bytes": 2037,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/skills/mia-vike-parity/SKILL.md",
+      "bytes": 6033,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/skills/release-review/SKILL.md",
+      "bytes": 1013,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/skills/safe-refactor/SKILL.md",
+      "bytes": 1761,
+      "extension": ".md"
+    },
+    {
+      "path": ".claude/skills/solana-hunter/SKILL.md",
+      "bytes": 4442,
+      "extension": ".md"
+    },
+    {
+      "path": ".env.example",
+      "bytes": 4352,
+      "extension": ".example"
+    },
+    {
+      "path": ".github/pull_request_template.md",
+      "bytes": 1496,
+      "extension": ".md"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "bytes": 2968,
+      "extension": ".yml"
+    },
+    {
+      "path": ".github/workflows/claude.yml",
+      "bytes": 1160,
+      "extension": ".yml"
+    },
+    {
+      "path": ".github/workflows/research-python.yml",
+      "bytes": 973,
+      "extension": ".yml"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 563,
+      "extension": "(none)"
+    },
+    {
+      "path": ".nvmrc",
+      "bytes": 3,
+      "extension": "(none)"
+    },
+    {
+      "path": "CLAUDE.md",
+      "bytes": 13339,
+      "extension": ".md"
+    },
+    {
+      "path": "README.md",
+      "bytes": 9905,
+      "extension": ".md"
+    },
+    {
+      "path": "deploy/mia.service",
+      "bytes": 2112,
+      "extension": ".service"
+    },
+    {
+      "path": "docs/API_INTEGRATIONS.md",
+      "bytes": 3926,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "bytes": 9172,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/CHANGELOG.md",
+      "bytes": 19862,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/README.md",
+      "bytes": 7309,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/SECURITY.md",
+      "bytes": 9172,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/academy/ACADEMY_ARCHITECTURE.md",
+      "bytes": 8047,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/academy/IMPLEMENTATION_STATUS.md",
+      "bytes": 3142,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/architecture/MIA_NEXUS_CURRENT_VS_TARGET.md",
+      "bytes": 11879,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/architecture/MIA_NEXUS_DURABLE_LOG.md",
+      "bytes": 4627,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/architecture/MIA_NEXUS_EVENT_CATALOG.md",
+      "bytes": 5400,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/architecture/TRADER_JOE_LIVE.md",
+      "bytes": 5829,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/BASELINE_STATUS.csv",
+      "bytes": 17614,
+      "extension": ".csv"
+    },
+    {
+      "path": "docs/autopilot/IMPLEMENTATION_REPORT.md",
+      "bytes": 3711,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/MILESTONE_CONTRACT.md",
+      "bytes": 3885,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/MILESTONE_REVIEW.md",
+      "bytes": 10812,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/QUESTIONS_01_18.md",
+      "bytes": 9283,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/QUESTIONS_19_34.md",
+      "bytes": 13358,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/QUESTIONS_35_45.md",
+      "bytes": 9625,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/README.md",
+      "bytes": 2492,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/SECURITY_REVIEW.md",
+      "bytes": 7216,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/SOURCE_MANIFEST.json",
+      "bytes": 443,
+      "extension": ".json"
+    },
+    {
+      "path": "docs/autopilot/TICKETS_001_035.md",
+      "bytes": 32409,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/TICKETS_036_070.md",
+      "bytes": 63575,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/TICKETS_071_100.md",
+      "bytes": 61736,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/TICKET_CONTRACTS.json",
+      "bytes": 213445,
+      "extension": ".json"
+    },
+    {
+      "path": "docs/autopilot/sources/MIA_Autopilot_100_Detailed_Functions_Code_Blueprint.md",
+      "bytes": 112308,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/autopilot/sources/MIA_Autopilot_Engineering_Master_Prompt.txt",
+      "bytes": 15752,
+      "extension": ".txt"
+    },
+    {
+      "path": "docs/chart-intelligence/ADAPTIVE_LEARNING_SPEC.md",
+      "bytes": 563,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/AI_SPECIALIST_COORDINATION_SPEC.md",
+      "bytes": 657,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/CHART_ANALYSIS_ENGINE_SPEC.md",
+      "bytes": 1733,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/CHART_INTELLIGENCE_TEST_REPORT.md",
+      "bytes": 2032,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/FUNDAMENTAL_INTELLIGENCE_SPEC.md",
+      "bytes": 557,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/GLOBAL_CHART_INTELLIGENCE_AUDIT.md",
+      "bytes": 4360,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/GLOBAL_MARKET_DATA_SPEC.md",
+      "bytes": 564,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/IMPLEMENTATION_STATUS.md",
+      "bytes": 5277,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/MULTI_TIMEFRAME_ANALYSIS_SPEC.md",
+      "bytes": 561,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/PERFORMANCE_BENCHMARK_REPORT.md",
+      "bytes": 1036,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/QUANT_STRATEGY_LAB_SPEC.md",
+      "bytes": 635,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/chart-intelligence/TRADE_FAILURE_CHALLENGER_SPEC.md",
+      "bytes": 542,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/AI_RELIABILITY_SPEC.md",
+      "bytes": 826,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/CONFIDENCE_CALIBRATION_SPEC.md",
+      "bytes": 1753,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/DECISION_LEDGER_SPEC.md",
+      "bytes": 1820,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/DECISION_TWIN_SPEC.md",
+      "bytes": 1688,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/DITAS_ACCEPTANCE_CRITERIA.md",
+      "bytes": 1492,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/DITAS_ARCHITECTURE_AUDIT.md",
+      "bytes": 4618,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/DITAS_CERTIFICATION_REPORT.md",
+      "bytes": 2777,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/DITAS_DATA_FLOW_MAP.md",
+      "bytes": 1220,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/DITAS_IMPLEMENTATION_ROADMAP.md",
+      "bytes": 1584,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/DITAS_SERVICE_DEPENDENCY_MAP.md",
+      "bytes": 827,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/DITAS_TEST_REPORT.md",
+      "bytes": 3099,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/EXECUTION_INTELLIGENCE_SPEC.md",
+      "bytes": 668,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/EXECUTION_QUALITY_INCREMENT.md",
+      "bytes": 906,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/IMPLEMENTATION_STATUS.md",
+      "bytes": 3876,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/MARKET_DATA_TRUTH_SPEC.md",
+      "bytes": 1620,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/MARKET_DNA_SPEC.md",
+      "bytes": 968,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/PORTFOLIO_INTELLIGENCE_SPEC.md",
+      "bytes": 748,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/SAFETY_GOVERNOR_SPEC.md",
+      "bytes": 870,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/ditas/STRATEGY_PASSPORT_SPEC.md",
+      "bytes": 1122,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/AGENT_ROSTER.md",
+      "bytes": 11851,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/AGENT_ROSTER.yaml",
+      "bytes": 7234,
+      "extension": ".yaml"
+    },
+    {
+      "path": "docs/engineering/AUTONOMOUS_CAPITAL_READINESS_PLAN.md",
+      "bytes": 9432,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/AUTONOMY_AUDIT_2026-11-18.md",
+      "bytes": 16897,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/AUTOPILOT_100_INVENTORY.md",
+      "bytes": 12876,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/BLUEPRINT_STATUS.md",
+      "bytes": 6043,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/CLAUDE_CODE_WORKFLOW.md",
+      "bytes": 3902,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/DASHBOARD_RUNTIME_VERIFICATION.md",
+      "bytes": 6973,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/DEBUG_AUDIT_2026-11-17.md",
+      "bytes": 28760,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/IMPLEMENTATION_INVENTORY.md",
+      "bytes": 8087,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MASTER_AUDIT_2026-11-18.md",
+      "bytes": 20975,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_100_AGENT_REPORT.md",
+      "bytes": 4271,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_ARCHITECTURE_AUDIT.md",
+      "bytes": 2282,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_CRITICAL_DEFECTS.md",
+      "bytes": 1931,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_DUPLICATION_AUDIT.md",
+      "bytes": 2034,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_ERROR_REGISTER.md",
+      "bytes": 16262,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_FILE_INVENTORY.csv",
+      "bytes": 70590,
+      "extension": ".csv"
+    },
+    {
+      "path": "docs/engineering/MIA_FILE_INVENTORY.md",
+      "bytes": 3213,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_FINAL_ENGINEERING_ASSESSMENT.md",
+      "bytes": 5326,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_MASTER_REPAIR_TRACKER.md",
+      "bytes": 3221,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_OMEGA_FOUR_LAYER_TRACEABILITY.csv",
+      "bytes": 36529,
+      "extension": ".csv"
+    },
+    {
+      "path": "docs/engineering/MIA_OMEGA_FOUR_LAYER_TRACEABILITY.md",
+      "bytes": 5749,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/MIA_QUANT_VALIDATION.md",
+      "bytes": 2938,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/NAVIGATION_PR_A.md",
+      "bytes": 5201,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/PHASE1_SOAK.md",
+      "bytes": 3703,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/REQUIREMENTS_TRACEABILITY.csv",
+      "bytes": 12818,
+      "extension": ".csv"
+    },
+    {
+      "path": "docs/engineering/TITAN_HUNTER_ARCHITECTURE.md",
+      "bytes": 7262,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/engineering/audit-files.json",
+      "bytes": 46742,
+      "extension": ".json"
+    },
+    {
+      "path": "docs/engineering/audit-review-status.json",
+      "bytes": 3533,
+      "extension": ".json"
+    },
+    {
+      "path": "docs/engineering/inventory.json",
+      "bytes": 50590,
+      "extension": ".json"
+    },
+    {
+      "path": "docs/history/KNOWN_LIMITATIONS.md",
+      "bytes": 2966,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/history/PROJECT_STATUS.md",
+      "bytes": 4674,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/history/TEST_REPORT.md",
+      "bytes": 6174,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/LATENCY_BASELINE.json",
+      "bytes": 1515,
+      "extension": ".json"
+    },
+    {
+      "path": "docs/omega/MIA_OMEGA_PHASE_1_PLAN.md",
+      "bytes": 3265,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/PR_OVERLAP_MATRIX.md",
+      "bytes": 2368,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/README.md",
+      "bytes": 1798,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/REPO_INVENTORY.md",
+      "bytes": 3144,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/REQUIREMENTS_CONFLICT_REGISTER.md",
+      "bytes": 2865,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/REQUIREMENTS_TRACEABILITY_OMEGA.md",
+      "bytes": 15859,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/SOURCE_LICENSE_REGISTER.md",
+      "bytes": 1418,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/TEST_MATRIX.md",
+      "bytes": 3127,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/sources/MIA_OMEGA_CLAUDE_CODEX_HANDOFF.md",
+      "bytes": 2383,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/sources/MIA_OMEGA_CLOUDFLARE_DEPLOYMENT_PLAN.md",
+      "bytes": 3751,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/sources/MIA_OMEGA_SOURCE_AUDIT_AND_IMPORT_MAP.md",
+      "bytes": 4879,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/omega/sources/MIA_OMEGA_UNIFIED_CLAUDE_OPUS_CODEX_MASTER_PROMPT.md",
+      "bytes": 130069,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/operations/DEPLOYMENT_GUIDE.md",
+      "bytes": 11012,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/operations/PRIVY_SIGN_IN.md",
+      "bytes": 9280,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/operations/QHEF_LATENCY_BASELINE.md",
+      "bytes": 1607,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/operations/SETUP_GUIDE_BEGINNER.md",
+      "bytes": 2570,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/operations/TAILSCALE_FUNNEL.md",
+      "bytes": 4524,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/operations/img/privy-login.png",
+      "bytes": 213214,
+      "extension": ".png"
+    },
+    {
+      "path": "docs/planning/IMPLEMENTATION_ROADMAP.md",
+      "bytes": 6464,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/planning/REFACTORING_BACKLOG.md",
+      "bytes": 6020,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/planning/REQUIREMENTS_TRACEABILITY.md",
+      "bytes": 12779,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/research/CCXT_RESEARCH.md",
+      "bytes": 2859,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/research/DEFI_RESEARCH.md",
+      "bytes": 3640,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/research/INTEGRATIONS_OVERVIEW.md",
+      "bytes": 4913,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/research/PREDICTION_MARKETS.md",
+      "bytes": 8051,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/research/PYTHON_RESEARCH_LABS.md",
+      "bytes": 3702,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/research/VIKE_INTEGRATION.md",
+      "bytes": 7767,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/security/GUARDIAN_SHIELD.md",
+      "bytes": 8607,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/solana/OMEGA_PR01_REVIEW.md",
+      "bytes": 8233,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/solana/SOLANA_HUNTER_INTEGRATION.md",
+      "bytes": 6556,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/solana/starter/README.md",
+      "bytes": 3266,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/solana/starter/patches/0001-add-solana-hunter-to-discover.patch",
+      "bytes": 1624,
+      "extension": ".patch"
+    },
+    {
+      "path": "docs/solana/starter/patches/discover.ts.review-copy",
+      "bytes": 2592,
+      "extension": ".review-copy"
+    },
+    {
+      "path": "docs/think/ADR-0001-THINK-CERTIFICATE.md",
+      "bytes": 5115,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/think/THINK_BASELINE_2026-11-18.md",
+      "bytes": 2598,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/think/THINK_OFFLINE_RECONNECT_RUNBOOK.md",
+      "bytes": 5478,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/think/THINK_ROADMAP_TRACKS_A_TO_E.md",
+      "bytes": 2020,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/think/THINK_SECURITY_REVIEW_HANDOFF.md",
+      "bytes": 3826,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/think/THINK_SLICE_2_BOUNDARIES_AND_FAULTS.md",
+      "bytes": 3107,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/think/THINK_SLICE_3_RISK_INVARIANTS.md",
+      "bytes": 1985,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/think/THINK_SLICE_5_HORIZON_CONFLICT.md",
+      "bytes": 1610,
+      "extension": ".md"
+    },
+    {
+      "path": "docs/think/THINK_TICKET_AUDIT.csv",
+      "bytes": 33850,
+      "extension": ".csv"
+    },
+    {
+      "path": "docs/think/THINK_TICKET_AUDIT.json",
+      "bytes": 58252,
+      "extension": ".json"
+    },
+    {
+      "path": "e2e/app.spec.ts",
+      "bytes": 28152,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/auth.spec.ts",
+      "bytes": 5658,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/autopilot.spec.ts",
+      "bytes": 13480,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/ditas.spec.ts",
+      "bytes": 9584,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/navigation.spec.ts",
+      "bytes": 6778,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/notifications.spec.ts",
+      "bytes": 13544,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/owner-fixture.ts",
+      "bytes": 1209,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/playwright.config.ts",
+      "bytes": 634,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/prediction.spec.ts",
+      "bytes": 1935,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/privy-login.spec.ts",
+      "bytes": 3999,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/quarantine-worker.mjs",
+      "bytes": 160,
+      "extension": ".mjs"
+    },
+    {
+      "path": "e2e/request-races.spec.ts",
+      "bytes": 7792,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/review-regressions.spec.ts",
+      "bytes": 4468,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/seed-backtest.ts",
+      "bytes": 245,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/solana.spec.ts",
+      "bytes": 4220,
+      "extension": ".ts"
+    },
+    {
+      "path": "e2e/start-server.mjs",
+      "bytes": 1659,
+      "extension": ".mjs"
+    },
+    {
+      "path": "e2e/telegram-connection.spec.ts",
+      "bytes": 2990,
+      "extension": ".ts"
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 351952,
+      "extension": ".json"
+    },
+    {
+      "path": "package.json",
+      "bytes": 1073,
+      "extension": ".json"
+    },
+    {
+      "path": "research/python/freqtrade/make_synthetic_data.py",
+      "bytes": 1146,
+      "extension": ".py"
+    },
+    {
+      "path": "research/python/freqtrade/requirements.txt",
+      "bytes": 19,
+      "extension": ".txt"
+    },
+    {
+      "path": "research/python/freqtrade/user_data/config.json",
+      "bytes": 1446,
+      "extension": ".json"
+    },
+    {
+      "path": "research/python/freqtrade/user_data/strategies/MiaResearchEmaCross.py",
+      "bytes": 1619,
+      "extension": ".py"
+    },
+    {
+      "path": "research/python/nautilus/requirements.txt",
+      "bytes": 25,
+      "extension": ".txt"
+    },
+    {
+      "path": "research/python/nautilus/smoke_backtest.py",
+      "bytes": 3333,
+      "extension": ".py"
+    },
+    {
+      "path": "scripts/audit-inventory.mjs",
+      "bytes": 3523,
+      "extension": ".mjs"
+    },
+    {
+      "path": "scripts/benchmark-chart.mjs",
+      "bytes": 931,
+      "extension": ".mjs"
+    },
+    {
+      "path": "scripts/benchmark-think.mjs",
+      "bytes": 4398,
+      "extension": ".mjs"
+    },
+    {
+      "path": "scripts/inventory.mjs",
+      "bytes": 2769,
+      "extension": ".mjs"
+    },
+    {
+      "path": "scripts/load-baseline.mjs",
+      "bytes": 4039,
+      "extension": ".mjs"
+    },
+    {
+      "path": "scripts/research-python.sh",
+      "bytes": 3321,
+      "extension": ".sh"
+    },
+    {
+      "path": "scripts/secret-scan.mjs",
+      "bytes": 1347,
+      "extension": ".mjs"
+    },
+    {
+      "path": "scripts/verify-ditas-execution.py",
+      "bytes": 5096,
+      "extension": ".py"
+    },
+    {
+      "path": "server/package.json",
+      "bytes": 1221,
+      "extension": ".json"
+    },
+    {
+      "path": "server/scripts/ensure-build.mjs",
+      "bytes": 948,
+      "extension": ".mjs"
+    },
+    {
+      "path": "server/scripts/qa.mjs",
+      "bytes": 3825,
+      "extension": ".mjs"
+    },
+    {
+      "path": "server/scripts/run.mjs",
+      "bytes": 2644,
+      "extension": ".mjs"
+    },
+    {
+      "path": "server/scripts/supervise.mjs",
+      "bytes": 3902,
+      "extension": ".mjs"
+    },
+    {
+      "path": "server/src/api/auth.ts",
+      "bytes": 5764,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/api/google.ts",
+      "bytes": 4092,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/api/routes.ts",
+      "bytes": 51306,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/bot/bot.ts",
+      "bytes": 13862,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/chart/analysis.ts",
+      "bytes": 10663,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/chart/replay.ts",
+      "bytes": 1023,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/chart/timeframes.ts",
+      "bytes": 2970,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/config.ts",
+      "bytes": 5287,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/accounts.ts",
+      "bytes": 278,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/audit.ts",
+      "bytes": 1302,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/bus.ts",
+      "bytes": 524,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/latency.ts",
+      "bytes": 1144,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/mode.ts",
+      "bytes": 3200,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/ratelimit.ts",
+      "bytes": 3415,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/settings.ts",
+      "bytes": 485,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/signing.ts",
+      "bytes": 929,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/time.ts",
+      "bytes": 1442,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/core/util.ts",
+      "bytes": 3656,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/dashboard/overview.ts",
+      "bytes": 7145,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/db/db.ts",
+      "bytes": 2847,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/db/migrations.ts",
+      "bytes": 20211,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/decision/certificate.ts",
+      "bytes": 10654,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/decision/engine.ts",
+      "bytes": 10565,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/decision/noTrade.ts",
+      "bytes": 14208,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/decision/profitLab.ts",
+      "bytes": 9207,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/decision/scoring.ts",
+      "bytes": 2974,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ditas/calibration.ts",
+      "bytes": 4629,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ditas/execution.ts",
+      "bytes": 2293,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ditas/fingerprint.ts",
+      "bytes": 4105,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ditas/memory.ts",
+      "bytes": 13483,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ditas/passports.ts",
+      "bytes": 5834,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ditas/replay.ts",
+      "bytes": 9576,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ditas/routes.ts",
+      "bytes": 3695,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ditas/service.ts",
+      "bytes": 13757,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ditas/twin.ts",
+      "bytes": 10964,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/exec/crashpoint.ts",
+      "bytes": 826,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/exec/environment.ts",
+      "bytes": 4974,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/exec/incidents.ts",
+      "bytes": 5607,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/exec/oms.ts",
+      "bytes": 42071,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/fabric/catalog.ts",
+      "bytes": 11528,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/fabric/contracts.ts",
+      "bytes": 6445,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/fabric/outbox.ts",
+      "bytes": 1681,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/fabric/relay.ts",
+      "bytes": 6467,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/features/indicators.ts",
+      "bytes": 14538,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/fundamentals/routes.ts",
+      "bytes": 993,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/hunt/ranker.ts",
+      "bytes": 5913,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/index.ts",
+      "bytes": 4660,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/integrations/telegram/commands.ts",
+      "bytes": 6029,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/integrations/telegram/link.ts",
+      "bytes": 5829,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/integrations/telegram/webhook.ts",
+      "bytes": 12833,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/joe/joe.ts",
+      "bytes": 19805,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/joe/live/events.ts",
+      "bytes": 3021,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/joe/live/narrator.ts",
+      "bytes": 6489,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/joe/live/projection.ts",
+      "bytes": 12542,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/journal/history.ts",
+      "bytes": 2376,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/journal/journal.ts",
+      "bytes": 752,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/chunk.ts",
+      "bytes": 7489,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/concepts.ts",
+      "bytes": 15650,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/extract.ts",
+      "bytes": 20640,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/integration.ts",
+      "bytes": 2551,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/memory.ts",
+      "bytes": 2831,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/providers.ts",
+      "bytes": 7081,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/research.ts",
+      "bytes": 22183,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/routes.ts",
+      "bytes": 7602,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/search.ts",
+      "bytes": 8832,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/store.ts",
+      "bytes": 17429,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/knowledge/taxonomy.ts",
+      "bytes": 26399,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/lab/backtest.ts",
+      "bytes": 7410,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/lab/exits.ts",
+      "bytes": 2263,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/lab/lab.ts",
+      "bytes": 7939,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/lab/strategies.ts",
+      "bytes": 4281,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/main.ts",
+      "bytes": 4057,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/bubbles.ts",
+      "bytes": 3491,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/cexActivity.ts",
+      "bytes": 8155,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/cexActivityTypes.ts",
+      "bytes": 1713,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/coverage.ts",
+      "bytes": 2731,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/depthStream.ts",
+      "bytes": 15257,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/discover.ts",
+      "bytes": 3944,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/fabric.ts",
+      "bytes": 16431,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/quality.ts",
+      "bytes": 10776,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/scanner.ts",
+      "bytes": 12238,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/store.ts",
+      "bytes": 2900,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/market/types.ts",
+      "bytes": 623,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/news/news.ts",
+      "bytes": 5483,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/notify/notify.ts",
+      "bytes": 7266,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ops/backup-cli.ts",
+      "bytes": 2355,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ops/backup.ts",
+      "bytes": 20966,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ops/integrity.ts",
+      "bytes": 2473,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ops/lease.ts",
+      "bytes": 3562,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ops/owner-cli.ts",
+      "bytes": 2856,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ops/readiness.ts",
+      "bytes": 5248,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/ops/verify-worker.ts",
+      "bytes": 782,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/portfolio/calendar.ts",
+      "bytes": 6711,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/portfolio/correlation.ts",
+      "bytes": 1017,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/portfolio/ledger.ts",
+      "bytes": 5997,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/portfolio/stress.ts",
+      "bytes": 10472,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/prediction/analytics.ts",
+      "bytes": 17791,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/prediction/backtest.ts",
+      "bytes": 6976,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/prediction/routes.ts",
+      "bytes": 9084,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/prediction/venues.ts",
+      "bytes": 10577,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/binance.ts",
+      "bytes": 4727,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/coinbase.ts",
+      "bytes": 1192,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/coingecko.ts",
+      "bytes": 1076,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/dexscreener.ts",
+      "bytes": 3942,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/frankfurter.ts",
+      "bytes": 1631,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/googlenews.ts",
+      "bytes": 1829,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/http.ts",
+      "bytes": 6595,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/kraken.ts",
+      "bytes": 1654,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/pending.ts",
+      "bytes": 2633,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/sec.ts",
+      "bytes": 5415,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/providers/vike.ts",
+      "bytes": 10303,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/qa/gates.ts",
+      "bytes": 17757,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/qci/challenge.ts",
+      "bytes": 6229,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/qci/coordinator.ts",
+      "bytes": 13137,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/qci/schemas.ts",
+      "bytes": 3654,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/qhef/qhef.ts",
+      "bytes": 4153,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/regime/regime.ts",
+      "bytes": 1754,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/research/aave.ts",
+      "bytes": 10187,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/research/ccxtResearch.ts",
+      "bytes": 9153,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/research/ccxtRoutes.ts",
+      "bytes": 1704,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/research/defiRoutes.ts",
+      "bytes": 1989,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/research/defillama.ts",
+      "bytes": 7472,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/research/vikeRoutes.ts",
+      "bytes": 4094,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/risk/gate.ts",
+      "bytes": 11318,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/risk/policy.ts",
+      "bytes": 6173,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/safety/safety.ts",
+      "bytes": 8032,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/security/guardian/assess.ts",
+      "bytes": 4541,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/security/guardian/events.ts",
+      "bytes": 5344,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/security/guardian/posture.ts",
+      "bytes": 7704,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/security/guardian/response.ts",
+      "bytes": 3231,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/security/privy.ts",
+      "bytes": 13218,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/security/security.ts",
+      "bytes": 6439,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/security/stepUp.ts",
+      "bytes": 2151,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/security/totp.ts",
+      "bytes": 10064,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/solana/gmgn-read.ts",
+      "bytes": 2926,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/solana/hunting.ts",
+      "bytes": 6785,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/solana/mint-audit.ts",
+      "bytes": 5322,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/solana/quotes.ts",
+      "bytes": 999,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/wallet/keccak.ts",
+      "bytes": 2065,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/wallet/wallet.ts",
+      "bytes": 8824,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/whales/prints.ts",
+      "bytes": 2243,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/workers/effectiveness.ts",
+      "bytes": 2243,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/workers/indicators.ts",
+      "bytes": 3878,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/workers/registry.ts",
+      "bytes": 25228,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/workers/runtime.ts",
+      "bytes": 5100,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/src/workers/types.ts",
+      "bytes": 2985,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/api.test.ts",
+      "bytes": 24031,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/auth-lockout.test.ts",
+      "bytes": 5571,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/auth-setup.test.ts",
+      "bytes": 5987,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/authority-boundaries.test.ts",
+      "bytes": 11234,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/autopilot-display.test.ts",
+      "bytes": 2567,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/backtest-integrity.test.ts",
+      "bytes": 5220,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/backup-cli-wrong-dir.test.ts",
+      "bytes": 1639,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/backup-worker.test.ts",
+      "bytes": 5231,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/bot-lane-errors.test.ts",
+      "bytes": 1223,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ccxt-research.test.ts",
+      "bytes": 9167,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/cex-activity.test.ts",
+      "bytes": 7518,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/chart-review.test.ts",
+      "bytes": 2050,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/chart-timeframes.test.ts",
+      "bytes": 4321,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/chart.test.ts",
+      "bytes": 5949,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/config-env.test.ts",
+      "bytes": 1078,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/config-hygiene.test.ts",
+      "bytes": 1224,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/crash.oms.test.ts",
+      "bytes": 12131,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/crash/child.ts",
+      "bytes": 2618,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/crash/harness.ts",
+      "bytes": 9359,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/crash/invariants.ts",
+      "bytes": 4510,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/dashboard.test.ts",
+      "bytes": 5032,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/db-permissions.test.ts",
+      "bytes": 1224,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/defi-research.test.ts",
+      "bytes": 12904,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/depth-stream-fabric.test.ts",
+      "bytes": 6386,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/depth-stream.test.ts",
+      "bytes": 11777,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/dex-safety.test.ts",
+      "bytes": 2347,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-api.test.ts",
+      "bytes": 16627,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-calibration.test.ts",
+      "bytes": 4663,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-execution-api.test.ts",
+      "bytes": 2107,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-execution.test.ts",
+      "bytes": 4734,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-frames.test.ts",
+      "bytes": 4891,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-market.test.ts",
+      "bytes": 6729,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-memory.test.ts",
+      "bytes": 12342,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-replace-guard.test.ts",
+      "bytes": 1279,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-store-once.test.ts",
+      "bytes": 3191,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ditas-twin.test.ts",
+      "bytes": 7372,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/exit-edge-cases.test.ts",
+      "bytes": 3771,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/fabric-contracts.test.ts",
+      "bytes": 8346,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/fabric-outbox.test.ts",
+      "bytes": 15099,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/features.test.ts",
+      "bytes": 5225,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/fixtures/engine-lease-process.ts",
+      "bytes": 950,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/fixtures/stale-writer-process.ts",
+      "bytes": 1847,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/gates.test.ts",
+      "bytes": 18784,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/google-auth.test.ts",
+      "bytes": 5796,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/guardian.test.ts",
+      "bytes": 11284,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/hardening.test.ts",
+      "bytes": 8022,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/helpers.ts",
+      "bytes": 5164,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/hunt-ranker.test.ts",
+      "bytes": 3024,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/import-boundaries.test.ts",
+      "bytes": 9504,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/incidents.test.ts",
+      "bytes": 8116,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/integrity-evidence.test.ts",
+      "bytes": 1759,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/joe-gate.test.ts",
+      "bytes": 1747,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/joe-live.test.ts",
+      "bytes": 18973,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/kb-fixtures.ts",
+      "bytes": 5498,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/knowledge.test.ts",
+      "bytes": 29746,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/lab.test.ts",
+      "bytes": 1914,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/lease-fence.test.ts",
+      "bytes": 2342,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/live.providers.test.ts",
+      "bytes": 4256,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/market-data-hardening.test.ts",
+      "bytes": 5019,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/market-time.test.ts",
+      "bytes": 3015,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/migration-guard.test.ts",
+      "bytes": 3542,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/migration-v7-indexes.test.ts",
+      "bytes": 1913,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/mode-authority.test.ts",
+      "bytes": 2239,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/news-freshness.test.ts",
+      "bytes": 2230,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/no-trade.test.ts",
+      "bytes": 13331,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/notify-center.test.ts",
+      "bytes": 8592,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/oms-clock-callbacks.test.ts",
+      "bytes": 11645,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/oms.test.ts",
+      "bytes": 21767,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ops-backup.test.ts",
+      "bytes": 21591,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ops-lease-fence.process.test.ts",
+      "bytes": 3537,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ops-lease-hardening.test.ts",
+      "bytes": 9680,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ops-lease.process.test.ts",
+      "bytes": 4646,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ops-lease.test.ts",
+      "bytes": 3156,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ops-readiness.test.ts",
+      "bytes": 5670,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/ops-supervise.test.ts",
+      "bytes": 3996,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/phase1.test.ts",
+      "bytes": 5111,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/policy-exit-safety.test.ts",
+      "bytes": 6047,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/portfolio-stress.test.ts",
+      "bytes": 5847,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/prediction-replay-order.test.ts",
+      "bytes": 1831,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/prediction.test.ts",
+      "bytes": 17791,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/privy-login.test.ts",
+      "bytes": 15193,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/privy.test.ts",
+      "bytes": 11401,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/promotion-gate.test.ts",
+      "bytes": 1431,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/provider-validation.test.ts",
+      "bytes": 3703,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/qci-vote-counting.test.ts",
+      "bytes": 7846,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/qci.test.ts",
+      "bytes": 5700,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/quality.test.ts",
+      "bytes": 12242,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/reconcile-integrity.test.ts",
+      "bytes": 4008,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/repair.test.ts",
+      "bytes": 10444,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/research-limits.test.ts",
+      "bytes": 2303,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/research-python-guard.test.ts",
+      "bytes": 2990,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/risk-correlation-sizing.test.ts",
+      "bytes": 6926,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/risk.test.ts",
+      "bytes": 11158,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/route-validation.test.ts",
+      "bytes": 1459,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/sec-filings.test.ts",
+      "bytes": 6431,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/shutdown-sse.test.ts",
+      "bytes": 1477,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/solana-hunter-isolation.test.ts",
+      "bytes": 1570,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/solana-hunter-review.test.ts",
+      "bytes": 8035,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/solana-hunter.test.ts",
+      "bytes": 4831,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/static.test.ts",
+      "bytes": 2405,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/strategy-toggle.test.ts",
+      "bytes": 1797,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/telegram-link.test.ts",
+      "bytes": 3055,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/telegram-migration.test.ts",
+      "bytes": 2901,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/telegram-webhook.test.ts",
+      "bytes": 13384,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/think-certificate.test.ts",
+      "bytes": 10960,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/think-horizons.test.ts",
+      "bytes": 6081,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/think-replay.test.ts",
+      "bytes": 7289,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/think-review-fixes.test.ts",
+      "bytes": 6865,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/untrusted-provider-text.test.ts",
+      "bytes": 4000,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/vike-routes.test.ts",
+      "bytes": 6224,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/vike.test.ts",
+      "bytes": 5722,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/wallet.test.ts",
+      "bytes": 1898,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/worker-fault-injection.test.ts",
+      "bytes": 6724,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/worker-runtime-hardening.test.ts",
+      "bytes": 3629,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/test/workers-effectiveness.test.ts",
+      "bytes": 4517,
+      "extension": ".ts"
+    },
+    {
+      "path": "server/tsconfig.build.json",
+      "bytes": 253,
+      "extension": ".json"
+    },
+    {
+      "path": "server/tsconfig.json",
+      "bytes": 334,
+      "extension": ".json"
+    },
+    {
+      "path": "server/vitest.config.ts",
+      "bytes": 181,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/index.html",
+      "bytes": 504,
+      "extension": ".html"
+    },
+    {
+      "path": "web/package.json",
+      "bytes": 773,
+      "extension": ".json"
+    },
+    {
+      "path": "web/src/App.tsx",
+      "bytes": 15947,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/CriticalStrip.tsx",
+      "bytes": 1930,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/Navigation.tsx",
+      "bytes": 4593,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/StatusRibbon.tsx",
+      "bytes": 2427,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/api.ts",
+      "bytes": 10539,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/src/attention.test.ts",
+      "bytes": 1411,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/src/attention.ts",
+      "bytes": 1766,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/src/auth/LoginScreen.tsx",
+      "bytes": 3322,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/auth/TwoFactorCard.tsx",
+      "bytes": 5305,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/cockpit.ts",
+      "bytes": 2335,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/src/components/GuardianCard.tsx",
+      "bytes": 3682,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/components/MiniCockpit.tsx",
+      "bytes": 8793,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/main.tsx",
+      "bytes": 238,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/nav.ts",
+      "bytes": 7263,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/src/pages/Academy.tsx",
+      "bytes": 22005,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/Account.tsx",
+      "bytes": 21384,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/AdvancedIndicators.tsx",
+      "bytes": 1754,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/CexActivity.tsx",
+      "bytes": 3032,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/Ditas.tsx",
+      "bytes": 15717,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/Intel.tsx",
+      "bytes": 21526,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/Joe.tsx",
+      "bytes": 3623,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/MarketCoverage.tsx",
+      "bytes": 2152,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/Markets.tsx",
+      "bytes": 24000,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/NoTradeBoard.tsx",
+      "bytes": 5751,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/Overview.tsx",
+      "bytes": 13862,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/PaperStress.tsx",
+      "bytes": 2125,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/Phase1.tsx",
+      "bytes": 18557,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/Prediction.tsx",
+      "bytes": 13944,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/SecFilings.tsx",
+      "bytes": 1738,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/SolanaWatchlist.tsx",
+      "bytes": 4997,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/TelegramConnection.tsx",
+      "bytes": 3227,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/ThinkCertificate.tsx",
+      "bytes": 8062,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/Trading.tsx",
+      "bytes": 34088,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/VikeResearch.tsx",
+      "bytes": 5638,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/pages/index.ts",
+      "bytes": 551,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/src/palette.tsx",
+      "bytes": 4224,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/presentation.tsx",
+      "bytes": 1463,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/privy/PrivyPanels.tsx",
+      "bytes": 11148,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/src/privy/lazy.ts",
+      "bytes": 422,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/src/status.test.ts",
+      "bytes": 14067,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/src/status.ts",
+      "bytes": 13856,
+      "extension": ".ts"
+    },
+    {
+      "path": "web/src/styles.css",
+      "bytes": 20402,
+      "extension": ".css"
+    },
+    {
+      "path": "web/src/ui.tsx",
+      "bytes": 9853,
+      "extension": ".tsx"
+    },
+    {
+      "path": "web/tsconfig.json",
+      "bytes": 259,
+      "extension": ".json"
+    },
+    {
+      "path": "web/vite.config.ts",
+      "bytes": 521,
+      "extension": ".ts"
+    }
+  ]
+}

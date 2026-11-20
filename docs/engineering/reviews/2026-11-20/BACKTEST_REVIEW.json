@@ -1,0 +1,93 @@
+{
+  "revision": "b17c09697d14ba0728c49b454e0b961691b1b5b4",
+  "canonical_entrypoints": [
+    {
+      "name": "CEX Strategy Lab",
+      "path": "POST /api/lab/backtest -> lab.runBacktest -> fetchHistory -> lab/backtest.backtest",
+      "source": "server/src/lab/backtest.ts",
+      "execution_authority": "research only; persisted OOS results require separate promotion and deterministic risk"
+    },
+    {
+      "name": "Quant Academy research",
+      "path": "POST /api/academy/experiments and /api/academy/compare -> knowledge/research -> same lab backtest",
+      "source": "server/src/knowledge/research.ts",
+      "data": "provider plus stored candles; explicit STORE_ONLY offline"
+    },
+    {
+      "name": "Blind chart cursor replay",
+      "path": "POST /api/chart/replay -> chart/replay.replayChart -> visible prefix analyzeChart",
+      "source": "server/src/chart/replay.ts",
+      "execution_authority": "NO TRADE"
+    },
+    {
+      "name": "Decision Twin",
+      "path": "DITAS frozen proposal -> simulateTwin using shared exit capsule",
+      "source": "server/src/ditas/twin.ts",
+      "execution_authority": "HYPOTHETICAL; never paper ledger"
+    },
+    {
+      "name": "Prediction book replay",
+      "path": "POST /api/research/prediction/backtest -> prediction/backtest.replay",
+      "source": "server/src/prediction/backtest.ts",
+      "execution_authority": "HYPOTHETICAL, tradeEligible false"
+    }
+  ],
+  "delivered_fixes": [
+    {
+      "id": "F-03",
+      "finding": "CEX backtest TIME exits omitted configured sell-side spread/slippage",
+      "fix": "Charge TIME alongside TARGET in the existing backtest execution-cost layer. Shared exit capsule unchanged because Twin already applies TIME costs and OMS executes against books."
+    },
+    {
+      "id": "F-05",
+      "finding": "CEX backtest accepted gaps, duplicates, unordered, nonfinite and malformed candle data",
+      "fix": "Reuse existing chart validateCandles at historical endpoint before strategy evaluation; no sort/dedup/gap-fill."
+    },
+    {
+      "id": "BT-CENSOR",
+      "finding": "Open final position silently excluded from performance summary",
+      "fix": "Explicit warning that closed-trade statistics exclude its unrealized PnL and entry costs; no synthetic closing fill."
+    },
+    {
+      "id": "PRED-ORDER",
+      "finding": "Sorting prediction books detached a supplied fair-value series from original timestamps; duplicate instants could masquerade as later snapshots",
+      "fix": "Require nonnegative safe-integer strictly increasing timestamps, preserve original observation order, reject rather than sort."
+    }
+  ],
+  "verification": {
+    "before_backtest": "backtest-before.log: 10 failed / 2 passed on original12 tests; one additional Twin exactly-once regression added subsequently",
+    "before_prediction": "prediction-order-before.log: 7 failed / 1 passed",
+    "after": "backtest-final-focused.log: 6 files, 102 tests passed",
+    "triage": "research-triage-tests.log: 4 files, 51 passed; backtest-after.log: 6 files, 83 passed including DITASAPI+hunt-ranker",
+    "typecheck": "npm run typecheck -w server passed",
+    "synthetic_replays": "strategy-replay-fixtures.json: every one of the3 canonical strategies over3 distinct4000bar deterministic synthetic fixtures; no performance-certification claim"
+  },
+  "open_research_findings": [
+    {
+      "id": "F-02",
+      "status": "CODE_CONFIRMED_OPEN",
+      "finding": "latest-per-instrument strategyStats selects stored trials without trial-count penalty or experiment registry"
+    },
+    {
+      "id": "F-04",
+      "status": "CODE_CONFIRMED_OPEN",
+      "finding": "fetchHistory/researchCandles use post-fetch Date.now cutoff, not frozen request-start cutoff"
+    },
+    {
+      "id": "F-06/F-07",
+      "status": "CODE_CONFIRMED_OPEN",
+      "finding": "Lab uncertainty UI and empty/annualized metric conventions remain separate scope"
+    },
+    {
+      "id": "J-03",
+      "status": "CODE_CONFIRMED_OPEN",
+      "finding": "G10 counts lifetime closed trades and elapsed time since first position, not continuous active30day evaluation"
+    },
+    {
+      "id": "J-05",
+      "status": "CODE_CONFIRMED_OPEN",
+      "finding": "costR copies use different financial inputs/thresholds; must not blindly deduplicate"
+    }
+  ],
+  "historical_performance": "No provenance-backed historical dataset was present in this isolated checkout. Synthetic correctness evidence must never be presented as real market backtest returns."
+}

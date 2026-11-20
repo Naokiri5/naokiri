@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChartApi, type UTCTimestamp } from 'lightweight-charts';
 import { hierarchy, pack } from 'd3-hierarchy';
@@ -13,11 +13,28 @@ export function Terminal() {
   const { data, error } = useApi(`/api/instrument/${symbol}?interval=${iv}`, { topics: ['scan'], every: 15_000 });
   const watch = useApi('/api/markets', { every: 30_000 });
   const [ana, setAna] = useState<any>(null);
+  const analysisRequest = useRef<AbortController | null>(null);
+  useLayoutEffect(() => {
+    setAna(null);
+    return () => { analysisRequest.current?.abort(); analysisRequest.current = null; };
+  }, [symbol]);
+  const runAnalysis = async () => {
+    analysisRequest.current?.abort();
+    const request = new AbortController(); analysisRequest.current = request;
+    try {
+      const result = await api('/api/analyze', { body: { symbol }, signal: request.signal });
+      if (analysisRequest.current === request && !request.signal.aborted) setAna(result);
+    } catch (error) {
+      // The canonical api helper checks the signal before dispatching 401, so an obsolete analysis cannot sign out
+      // the next terminal. Active request failures still reach Action's visible error state.
+      if (!request.signal.aborted) throw error;
+    } finally { if (analysisRequest.current === request) analysisRequest.current = null; }
+  };
   const t = data?.ticker; const f = data?.features;
   // The API answers 404 (unknown symbol) / 503 (data not loaded) with a reason; with nothing loaded yet, show it as the banner.
   const gone: string | null = data?.unavailable ? data.reason : !data && error ? error : null;
   return <Page title={`Market Terminal · ${data?.instrument?.base ?? symbol}`} sub={data?.instrument ? `${data.instrument.symbol} · Binance spot (public market data) · cross-venue checks: ${Object.keys(data.cross).join(', ') || 'none'}` : ''}
-    right={<><Freshness at={t?.receivedAt} label="quote" /><Action className="primary" label="Run full analysis" disabled={!!gone} run={async () => setAna(await api('/api/analyze', { body: { symbol } }))} /></>}>
+    right={<><Freshness at={t?.receivedAt} label="quote" /><Action className="primary" label="Run full analysis" disabled={!!gone} run={runAnalysis} /></>}>
     <ErrorLine e={gone ? null : error} />
     {gone ? <div className="banner info">No data for {symbol}: {gone}</div> :
     <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px' }}>

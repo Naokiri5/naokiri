@@ -135,20 +135,32 @@ test('why MIA is not trading: grouped reasons, superseded history, unreadable re
 });
 
 test('board evidence ages on the client and turns STALE at the 2h TTL between polls', async ({ browser }) => {
-  withDb((db) => seedDecision(db, 'AVAXUSDT', 'REJECTED', Date.now() - TTL + 15_000, { risk: { decision: 'DENY', reasonCodes: ['NO_ORDER_BOOK (cannot estimate slippage)'], policyVersion: 1, ts: 'x' } }));
   const context = await browser.newContext({ storageState: await page.context().storageState() });
   try {
     const board = await context.newPage();
-    await board.clock.install();
+    const now = new Date('2026-11-18T12:00:00Z');
+    await board.clock.install({ time: now });
+    await board.clock.pauseAt(now);
+    let requests = 0;
+    await board.route('**/api/no-trade', route => {
+      requests++;
+      if (requests > 1) return new Promise<void>(() => { /* later polls cannot change the loaded evidence */ });
+      return route.fulfill({ json: { asOf: now.getTime(), ttlMs: TTL, windowMs: 24 * 3600_000,
+        globalLabel: 'known blockers, not execution clearance', global: [], omittedTrades: [], rows: [{
+          instrumentId: 'crypto:binance:AVAXUSDT', symbol: 'AVAXUSDT', decisionId: 'fixture-client-aging',
+          strategy: 'trend_pullback', decision: 'REJECTED', score: 55, createdAt: now.getTime() - TTL + 15_000,
+          ageMs: TTL - 15_000, expiresAt: now.getTime() + 15_000, evidence: 'RECENT', supersededBy: null,
+          risk: null, reasons: [{ group: 'risk', code: 'NO_ORDER_BOOK', text: 'Explicit client-aging fixture.' }], missing: [], history: [],
+        }] } });
+    });
     await board.goto('/scanner');
     await board.getByRole('tab', { name: 'Why not trading' }).click();
     const avax = board.locator('.nt-current > .nt-card', { hasText: 'AVAXUSDT' });
     await expect(avax).toContainText('RECENT');
-    // Hold every later poll: only client-side aging may move AVAX into the stale list.
-    await board.route('**/api/no-trade', () => new Promise<void>(() => { /* never answered */ }));
     await board.clock.fastForward('00:16');
-    await expect(board.locator('details.nt-stale summary')).toContainText('2 stale decision(s)');
+    await expect(board.locator('details.nt-stale summary')).toContainText('1 stale decision(s)');
     await expect(avax).toHaveCount(0);
+    expect(requests).toBe(1);
   } finally { await context.close(); }
 });
 

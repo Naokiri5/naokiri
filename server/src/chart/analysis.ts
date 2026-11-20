@@ -97,7 +97,7 @@ export function analyzeChart(instrument: string, timeframe: Interval, candles: r
   const highs = swings.filter(s => s.kind === 'HIGH').slice(-2), lows = swings.filter(s => s.kind === 'LOW').slice(-2);
   if (highs.length === 2 && lows.length === 2) {
     report.trend = highs[1].price > highs[0].price && lows[1].price > lows[0].price ? 'BULLISH' : highs[1].price < highs[0].price && lows[1].price < lows[0].price ? 'BEARISH' : 'RANGING';
-    add('SWING_STRUCTURE', Math.min(...lows.map(s => s.price)), Math.max(...highs.map(s => s.price)), 'Strict two-left/two-right confirmed pivots', [...highs, ...lows].map(s => `${s.kind} at ${s.t}: ${s.price}`), 'A newly confirmed pivot changes the sequence');
+    add('SWING_STRUCTURE', Math.min(...[...highs, ...lows].map(s => s.price)), Math.max(...[...highs, ...lows].map(s => s.price)), 'Strict two-left/two-right confirmed pivots', [...highs, ...lows].map(s => `${s.kind} at ${s.t}: ${s.price}`), 'A newly confirmed pivot changes the sequence');
   }
   const range = last.h - last.l, body = Math.abs(last.c - last.o);
   if (range > 0 && body / range <= 0.1) add('DOJI', last.l, last.h, 'Body <= 10% of candle range', [`body/range=${body / range}`], 'Context changes after next close');
@@ -120,8 +120,8 @@ export function analyzeChart(instrument: string, timeframe: Interval, candles: r
   if (prev.c < retestLow && last.h >= retestLow && last.c < retestLow) {
     add('BREAKOUT_RETEST_DOWN', last.c, last.h, retestMethod, [`retested low=${retestLow}`], `Close at or above ${retestLow}`);
   }
-  if (last.h > report.resistance && last.c <= report.resistance) add('UPPER_LIQUIDITY_SWEEP_HYPOTHESIS', report.resistance, last.h, 'Wick above prior range, close back inside', ['Observed OHLCV only; hidden stops and institutional orders unknown'], `Close above ${last.h}`);
-  if (last.l < report.support && last.c >= report.support) add('LOWER_LIQUIDITY_SWEEP_HYPOTHESIS', last.l, report.support, 'Wick below prior range, close back inside', ['Observed OHLCV only; hidden stops and institutional orders unknown'], `Close below ${last.l}`);
+  if (last.h > report.resistance && last.c <= report.resistance && last.c >= report.support) add('UPPER_LIQUIDITY_SWEEP_HYPOTHESIS', report.resistance, last.h, 'Wick above prior range, close back inside', ['Observed OHLCV only; hidden stops and institutional orders unknown'], `Close above ${last.h}`);
+  if (last.l < report.support && last.c >= report.support && last.c <= report.resistance) add('LOWER_LIQUIDITY_SWEEP_HYPOTHESIS', last.l, report.support, 'Wick below prior range, close back inside', ['Observed OHLCV only; hidden stops and institutional orders unknown'], `Close below ${last.l}`);
   const a = candles[candles.length - 3];
   if (last.l > a.h) add('BULLISH_FVG_HYPOTHESIS', a.h, last.l, 'Three-bar non-overlap: latest low > first high', ['Price imbalance hypothesis; no order-flow inference'], `Price fills gap to ${a.h}`);
   if (last.h < a.l) add('BEARISH_FVG_HYPOTHESIS', last.h, a.l, 'Three-bar non-overlap: latest high < first low', ['Price imbalance hypothesis; no order-flow inference'], `Price fills gap to ${a.l}`);

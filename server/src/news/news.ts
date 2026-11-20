@@ -56,14 +56,15 @@ export async function refreshNews() {
   if (added) bus.publish('news', { added });
   return added;
 }
-export function recentNews(limit = 100, sinceMs = 7 * 86400_000): NewsItem[] {
-  return all<any>('SELECT * FROM news WHERE ts > ? ORDER BY ts DESC LIMIT ?', Date.now() - sinceMs, limit).map((r) => {
+export function recentNews(limit = 100, sinceMs = 7 * 86400_000, nowTs = Date.now()): NewsItem[] {
+  return all<any>('SELECT * FROM news WHERE ts > ? AND ts <= ? ORDER BY ts DESC LIMIT ?', nowTs - sinceMs, nowTs, limit).map((r) => {
     const m = P<any>(r.assets, {});
     return { id: r.id, ts: r.ts, title: r.title, source: r.source, url: r.url, query: r.query, impact: r.impact, assets: m.assets ?? [], credibility: r.credibility, sentiment: m.sentiment ?? 'NEUTRAL', macro: !!m.macro };
   });
 }
 export function newsContext(base: string, nowTs = Date.now()) {
-  const items = recentNews(400, 48 * 3600_000);
+  // Exclude future rows already persisted by older versions and use the same assessment time for the query and counts.
+  const items = recentNews(400, 48 * 3600_000, nowTs);
   if (!items.length) return null;
   const rel = items.filter((i) => i.assets.includes(base) && nowTs - i.ts < 24 * 3600_000);
   return {

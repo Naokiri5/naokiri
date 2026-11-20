@@ -25,10 +25,16 @@ const snapDown = (p: number, tick: number) => Math.floor(p / tick + 1e-9) * tick
 const snapUp = (p: number, tick: number) => Math.ceil(p / tick - 1e-9) * tick;
 
 export function replay(input: ReplayInput) {
+  // Snapshot order is part of the evidence: a fair-value series is indexed alongside these observations.
+  // Sorting only the books would silently pair beliefs with another time; equal times are not a later observation.
+  for (let i = 0; i < input.snapshots.length; i++) {
+    const t = input.snapshots[i].t;
+    if (!Number.isSafeInteger(t) || t < 0) throw new Error('snapshot timestamps must be nonnegative safe integers');
+    if (i > 0 && t <= input.snapshots[i - 1].t) throw new Error('snapshot timestamps must be strictly increasing');
+  }
   const tick = input.tick && input.tick > 0 ? input.tick : 0.01;
   const fee = (q: number, p: number) => polymarketTakerFee(q, p, input.feeRateBps ?? 0);
-  const books: (Book & { t: number })[] = input.snapshots.map((s) => ({ ...normaliseBook({ bids: s.bids, asks: s.asks, tick }), t: s.t }))
-    .sort((a, b) => a.t - b.t);
+  const books: (Book & { t: number })[] = input.snapshots.map((s) => ({ ...normaliseBook({ bids: s.bids, asks: s.asks, tick }), t: s.t }));
   const s = input.strategy;
   let cash = 0; let inv = 0; let fees = 0; let turnover = 0; let maxInv = 0;
   let peak = 0; let maxDd = 0; let lastMark = 0.5;
