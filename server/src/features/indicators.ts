@@ -15,7 +15,8 @@ export interface FeatureSnapshot {
   obv: number; obvSlope10: number;
   volZ20: number; relVol20: number; takerBuyRatio: number;
   ret1: number; ret5: number; ret20: number; roc10: number;
-  realizedVol20: number; stochK14: number; williamsR14: number; cci20: number; mfi14: number;
+  realizedVol20: number; retMean20: number; retSkew20: number; retExcessKurt20: number;
+  stochK14: number; williamsR14: number; cci20: number; mfi14: number;
   vwap20: number; zscore20: number; swingHigh: number; swingLow: number;
   ema20Slope5: number; ema50Slope10: number; bbWidthPctile100: number; efficiencyRatio10: number;
 }
@@ -87,6 +88,7 @@ export class FeatureEngine {
     const vm = avg(vols), vs = sdev(vols);
     const back = (k: number) => (n > k ? cs[n - 1 - k].c : NaN);
     const logr = win(21).map((x, i, a) => (i ? Math.log(x.c / a[i - 1].c) : NaN)).slice(1);
+    const distribution = returnDistribution20(logr);
     const h14 = hi(14), l14 = lo(14);
     const tp = win(20).map((x) => (x.h + x.l + x.c) / 3); const tpm = avg(tp); const md = avg(tp.map((x) => Math.abs(x - tpm)));
     // MFI 14
@@ -110,7 +112,8 @@ export class FeatureEngine {
       volZ20: vols.length >= 10 && vs > 0 ? (c.v - vm) / vs : NaN, relVol20: vm > 0 ? c.v / vm : NaN,
       takerBuyRatio: c.tbv != null && c.v > 0 ? c.tbv / c.v : NaN,
       ret1: back(1) ? c.c / back(1) - 1 : NaN, ret5: c.c / back(5) - 1, ret20: c.c / back(20) - 1, roc10: c.c / back(10) - 1,
-      realizedVol20: sdev(logr), stochK14: h14 === l14 ? 50 : (100 * (c.c - l14)) / (h14 - l14), williamsR14: h14 === l14 ? -50 : (-100 * (h14 - c.c)) / (h14 - l14),
+      realizedVol20: sdev(logr), retMean20: distribution.mean, retSkew20: distribution.skew, retExcessKurt20: distribution.excessKurtosis,
+      stochK14: h14 === l14 ? 50 : (100 * (c.c - l14)) / (h14 - l14), williamsR14: h14 === l14 ? -50 : (-100 * (h14 - c.c)) / (h14 - l14),
       cci20: md ? (tp[tp.length - 1] - tpm) / (0.015 * md) : NaN, mfi14: neg === 0 ? (pos ? 100 : 50) : 100 - 100 / (1 + pos / neg),
       vwap20: vv ? pv / vv : NaN, zscore20: sd ? (c.c - mid) / sd : NaN, swingHigh, swingLow,
       ema20Slope5: this.ema20Hist.length >= 6 ? this.ema20Hist[5] / this.ema20Hist[0] - 1 : NaN,
@@ -118,6 +121,21 @@ export class FeatureEngine {
       bbWidthPctile100: NaN, efficiencyRatio10: er,
     };
   }
+}
+/** Closed-bar, 20-return distribution summary (population moments).
+ * Shape metrics deliberately abstain for zero variance or incomplete history;
+ * these are descriptive statistics, NOT trading signals or forecast probabilities.
+ */
+function returnDistribution20(returns: readonly number[]) {
+  const unavailable = { mean: NaN, skew: NaN, excessKurtosis: NaN };
+  if (returns.length !== 20 || returns.some((r) => !Number.isFinite(r))) return unavailable;
+  const mean = returns.reduce((s, r) => s + r, 0) / returns.length;
+  const centered = returns.map((r) => r - mean);
+  const m2 = centered.reduce((s, r) => s + r * r, 0) / returns.length;
+  if (!(m2 > 0) || !Number.isFinite(m2)) return { mean, skew: NaN, excessKurtosis: NaN };
+  const m3 = centered.reduce((s, r) => s + r ** 3, 0) / returns.length;
+  const m4 = centered.reduce((s, r) => s + r ** 4, 0) / returns.length;
+  return { mean, skew: m3 / m2 ** 1.5, excessKurtosis: m4 / m2 ** 2 - 3 };
 }
 function avg(xs: number[]) { return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN; }
 function sdev(xs: number[]) { if (xs.length < 2) return NaN; const m = avg(xs); return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length); }

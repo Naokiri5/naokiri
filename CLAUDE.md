@@ -109,3 +109,12 @@ Validation: `npm run typecheck`, `npm test`, `npm run test:e2e`, `npm run scan:s
 ## DITAS foundation
 
 For the newer Decision Intelligence, Trust & Adaptive Strategy System work, start with `docs/ditas/IMPLEMENTATION_STATUS.md`, `DITAS_ARCHITECTURE_AUDIT.md`, and the test/certification reports in that directory. The feature branch stacks on the chart intelligence increment. Preserve immutable pre-QCI snapshots, exact probability cohorts and separation of hypothetical simulations from actual paper OMS records. Continue the remaining phases from the status table; no live certification or automatic promotion is implied.
+
+## Unified quantitative intelligence feature development (2026-11-20)
+
+- Canonical integrated requirements: `docs/REQUIREMENTS_TRACEABILITY.md` → **Unified quantitative intelligence overlay**. Do not paste old standalone kit source files into the repository as parallel engines.
+- Searchable 100-ID machine catalog: `docs/engineering/QUANT_FEATURE_CATALOG.json`; preserve all feature IDs MIA-Q001..MIA-Q100. Catalog `sourceBaseline` is an owner-provided estimate, **not** end-to-end code certification.
+- The existing `server/src/knowledge/research.ts` has a walk-forward strategy research routine with purge/embargo. Reuse it and `lab/backtest.ts`; do not create another backtester or change fills without dedicated tests.
+- For each MIA-Q task: select at most one bounded feature family, inspect the existing owner path, report REUSE/EXTEND/BLOCKED, implement there, add tests, update the canonical doc/catalog, report exact test outcomes. Prefer small context windows instead of sending the full 100-feature master to each agent.
+- PAPER/DEMO and future LIVE must share market truth, strategies, feature math, QCI evidence, the **one** decision engine, risk policy, vetoes and audit semantics. Mode-specific execution is downstream. LIVE is currently locked; this document is not authority to add a signer or live order path.
+- Start with the existing `FeatureEngine` 20-return distribution metrics and its regression test as a bounded example; do not route descriptive moments to trading until prospectively validated.

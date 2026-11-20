@@ -62,3 +62,28 @@ Official references:
 - Claude Code settings: https://code.claude.com/docs/en/settings
 - Claude Code GitHub Action setup: https://github.com/anthropics/claude-code-action
 - Action security guidance: https://github.com/anthropics/claude-code-action/blob/main/docs/security.md
+
+
+## Compact task protocol: 100 quantitative requirements (2026-11-20)
+
+Canonical master: `docs/REQUIREMENTS_TRACEABILITY.md` (see **Unified quantitative intelligence overlay**). Machine-readable index: `docs/engineering/QUANT_FEATURE_CATALOG.json`. These enhance the existing codebase; do not scaffold a second MIA quant/trading backend.
+
+**Low-token workflow:** choose one `MIA-Q###` feature; extract only its catalog record; inspect only its listed `repositoryOwnerPaths`, direct callers and relevant tests; implement minimal diff with clear acceptance evidence. Avoid loading all 100 records, every .claude agent or unrelated documentation. Treat `sourceBaseline` as planning context, not runtime status.
+
+**Codex / Claude mini-handoff template:**
+
+```text
+Repository: Naokiri5/naokiri; branch: current review branch (never main).
+Feature ID: MIA-Q###.
+Read CLAUDE.md, the matching record in docs/engineering/QUANT_FEATURE_CATALOG.json,
+and only the existing owner file(s) plus direct tests.
+Before coding: prove reuse and list actual missing behavior.
+Implement by extending current FeatureEngine/Lab/Knowledge/QCI/Decision/Risk/OMS as applicable;
+no second trading authority, no standalone starter code pasted into production.
+Maintain PAPER/LIVE shared analysis and risk, while LIVE remains disabled.
+Tests: reference vectors, no-lookahead, paper decision parity, risk-denial invariants.
+Output: exact diffs, test commands/results, known gaps, status update for MIA-Q###.
+No push to main, no PR merge, no live order or signer.
+```
+
+**Acceptance for any quantitative increment:** numerical reference validation; closed-bar causality; zero/missing-data abstentions; no extra voting rights for duplicated price evidence; backtest-vs-live execution distinction; no changes to risk limits or release gates without explicit review. The documentation-only checks do not certify performance.
