@@ -1,4 +1,5 @@
 import { all, get, run, tx, J, P } from '../db/db.js';
+import { detectInjection, screenUntrusted } from '../security/guardian/injection.js';
 import { uid, sha256 } from '../core/util.js';
 import { audit } from '../core/audit.js';
 import { bus } from '../core/bus.js';
@@ -82,6 +83,9 @@ export function resumeIngestion() { for (const d of all<{ id: string }>("SELECT 
 export const waitForIdle = async () => { while (busy || queue.length) await new Promise((r) => setTimeout(r, 10)); };
 
 function storeChunks(docId: string, chunks: ReturnType<typeof chunkDocument>['chunks']) {
+  // Uploaded documents are evidence, never instructions: record instruction-like passages for Guardian, once per batch.
+  const flagged = chunks.filter((c) => detectInjection(c.text).length);
+  if (flagged.length) screenUntrusted('knowledge', flagged.map((c) => c.text).join('\n'), docId);
   const emb = embedder(); const vectors = emb.embed(chunks.map((c) => `${c.chapter ?? ''} ${c.heading ?? ''}\n${c.text}`));
   tx(() => chunks.forEach((c, i) => {
     const cid = `chk_${docId.slice(4)}_${c.seq}`;

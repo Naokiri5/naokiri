@@ -47,11 +47,3 @@ export function autoContain(items: Assessed[] = assessAll()): { action: 'NONE' |
   });
 }
 
-let timer: NodeJS.Timeout | null = null;
-/** Background check every minute, only when auto-pause is enabled. */
-export function startGuardian(intervalMs = 60_000) {
-  if (timer || !autoPauseEnabled()) return;
-  timer = setInterval(() => { try { autoContain(); } catch { /* a Guardian fault must never affect trading or the server */ } }, intervalMs);
-  timer.unref();
-}
-export function stopGuardian() { if (timer) clearInterval(timer); timer = null; }

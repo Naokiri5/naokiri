@@ -25,6 +25,50 @@ Status: **first slice implemented and offline-tested:** read-only telemetry, an 
 - Log redaction now also covers `otp`, `accessToken`, `consoleCode`, `setupCode` and `authorization` (the Privy and authenticator fields were missing).
 - Security Center check AUTH-1 showed **FAIL** ("no owner passphrase") in Privy mode. It now reports the bound Privy owner.
 
+## AI side: prompt-injection detection and opt-in alerts (owner-approved 2026-11-20)
+
+**Prompt-injection detector** (`guardian/injection.ts`, GUARD-041…048).
+- Text MIA's AI reads is scanned:
+  - the owner's messages to Trader Joe;
+  - each new news headline;
+  - the passages of each uploaded knowledge document.
+- **Signals:**
+  - instruction override ("ignore previous instructions");
+  - a fake `system:`/`assistant:` turn;
+  - a persona switch ("you are now an admin");
+  - a privileged request, such as sending funds to an address, disabling the stop-loss, risk gate, 2FA or Guardian, or turning on live trading;
+  - a secret request, such as pasting a seed phrase or private key (a warning like "never share your seed phrase" does not count);
+  - hidden (zero-width or bidirectional) characters;
+  - a long encoded blob.
+- Each rule needs request-like wording, so ordinary market text such as "whales move all their coins" is not flagged.
+- **What happens on a hit:**
+  - one audit row `joe.injection`, `news.injection` or `knowledge.injection` holds a short hash, the length and the signal names, **never the text**, because a pasted message can contain a secret;
+  - Guardian turns it into a `PROMPT_INJECTION` event, rated **P1** with the suggestion "quarantine the input".
+- **What does not happen:**
+  - the text is not blocked; it stays data everywhere, and Trader Joe has no privileged tools anyway;
+  - it never triggers the automatic pause, so planted headlines cannot be used to stop trading.
+- **Bounds:** each item is recorded at most once a day, and no more than 30 records an hour across all sources.
+- Signals are heuristics for review, not verdicts.
+
+**Opt-in alerts** (`guardian/alerts.ts`, GUARD-097).
+- Off by default.
+- Switch on: Security Center, Guardian Shield, *Turn alerts on*. Switching off needs step-up, because it lowers visibility.
+- When on, each new P0 or P1 event since switching on sends **one** notification, at most 5 an hour:
+  - in the app always;
+  - on Telegram when it is configured. P0 is CRITICAL; P1 is WARNING and follows the owner's minimum Telegram severity and quiet hours.
+- An alert holds the event kind, its sanitized summary and the evidence id, plus a reminder that Guardian never trades, signs or withdraws.
+- The marker and the notification commit together, so an alert is never lost or sent twice.
+- **Background pass** (`guardian/runner.ts`): runs once a minute, and reads the audit log only when auto-pause or alerts is on.
+
+**Tests:** `server/test/guardian-ai.test.ts` (12) and one e2e test. 14 deliberately broken versions were each caught:
+- detector rules and the warning exception;
+- the text never being stored;
+- de-duplication and both hourly caps;
+- all three hookups;
+- alerts being off by default, never replaying old events, never repeating;
+- step-up to switch off;
+- an injection event can never cause a pause.
+
 ## Tests (`server/test/guardian.test.ts`, 19)
 
 - Severity rules; quarantine of future, stale and unprovenanced events; frozen, zero-authority results.
@@ -44,10 +88,10 @@ The tickets are **proposals, not observed vulnerabilities**.
 |---|---|---|---|
 | 1 Edge (001–010) | 256 KB body limit; proxy headers not trusted; loopback default | Tests for 006 and 007; posture shows edge as NOT_VERIFIED | 001–005, 008–010: managed DDoS/WAF or CRS ingress, private origin, ingress timeouts. **Needs the owner's host/DNS access.** |
 | 2 Identity (011–020) | Server-verified Privy, bound owner, single-use TOTP step-up, CSRF, revocable HttpOnly sessions, shared brute-force limiter (PR #38) | Identity-change and step-up-burst detection | 015 device enrollment, 018 recovery cooldown, 019 dual approval |
-| 3 App & agent (021–050) | Fail-closed mode gate (#18); Joe fixed tool list; untrusted content treated as data; research `RESEARCH_ONLY` | Boundary tests for 021, 049 and 096; secret-canary test for 050/082 | 041–048 tracing prompt injection end-to-end in Joe and knowledge ingestion (detector + audit action `*.injection`) |
+| 3 App & agent (021–050) | Fail-closed mode gate (#18); Joe fixed tool list; untrusted content treated as data; research `RESEARCH_ONLY` | Boundary tests for 021, 049 and 096; secret-canary test for 050/082 | 041–048: **detector and `*.injection` audit records added** for Joe chat, news and knowledge (section above). Still pending: scanning provider data that never reaches the AI, and model-side output checks. |
 | 4 Money (021–040) | Live locked; no signer, no keys (G07/G12 NOT_IMPLEMENTED); withdrawals preview-only plus freeze; risk gate | Mode-change and signer-action detection; withdrawal-attempt events | 023–040 transaction firewall and wallet policy: **phase P6, only before any Live work** |
 | 5 Host (061–070) | Container detection, systemd unit | Posture shows host as NOT_VERIFIED | Falco or Wazuh, egress allowlist, rootless runtime: **host-dependent** |
-| 6 Incident (071–090) | Persistent protection incidents; audit trail | Guardian rules, P0–P3, opt-in containment, dashboard | 072/074 venue-balance and API-key telemetry (Live only); 097 out-of-band alerts (Telegram exists, not yet wired to Guardian) |
+| 6 Incident (071–090) | Persistent protection incidents; audit trail | Guardian rules, P0–P3, opt-in containment, dashboard | 072/074 venue-balance and API-key telemetry (Live only). 097 out-of-band alerts: **added, opt-in** (section above) |
 | 7 Recovery (091–100) | Local SHA-256 audit chain; optional AES-256-GCM backups with restore verification | Chain-break P0; backup encryption visible in posture | 083 remote immutable anchors; 069/093 offsite backups and restore drills |
 | CI / supply chain (051–060) | `permissions: contents: read`; npm audit (high); local secret scan | — | 052/054: **pin every Action to a full commit SHA**. CI uses floating `@v4` tags today (`actions/checkout`, `setup-node`, `upload-artifact`). Add Gitleaks, OSV and zizmor jobs pinned by SHA after verifying source and advisories. The SHAs could not be resolved from the build sandbox, so none were guessed. |
 
