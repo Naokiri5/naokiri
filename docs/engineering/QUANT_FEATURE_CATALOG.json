@@ -1,12 +1,83 @@
 {
-  "schemaVersion": "1.1.0",
-  "source": "MIA recommendations consolidated November 20, 2026",
-  "auditedRepository": "Naokiri5/naokiri",
-  "auditedBranch": "main",
-  "auditedTreeSha": "2627cd276d2108c15a47ba41d60cdb54fddf10ff",
-  "auditScope": "Read-only source/docs inspection. Labels are integration hypotheses, not verified end-to-end certifications.",
-  "canonicalDocument": "docs/REQUIREMENTS_TRACEABILITY.md",
-  "statuses": "sourceBaseline retained from user upload; mergeAction is proposed ownership routing, not runtime completeness.",
+  "schemaVersion": "1.1.1",
+  "repository": "Naokiri5/naokiri",
+  "baselineRef": "2627cd276d2108c15a47ba41d60cdb54fddf10ff",
+  "canonicalDoc": "docs/REQUIREMENTS_TRACEABILITY.md",
+  "statusMeaning": "Original baseline labels retained unchanged. BASE_EXISTS means related code only; statuses are not operational certification.",
+  "mergeRules": {
+    "BASE_EXISTS": "extend existing ownership; do not clone it",
+    "PARTIAL": "finish existing implementation; verify every claimed function",
+    "NEEDS_EXTERNAL_FEED": "blocked pending trusted provider/data/authority",
+    "PROPOSED": "research in existing owner only if measurable value"
+  },
+  "categoryOwnerPaths": {
+    "Statistics": [
+      "server/src/features/indicators.ts",
+      "server/src/lab/backtest.ts",
+      "server/src/knowledge/research.ts",
+      "server/src/ditas/calibration.ts"
+    ],
+    "Charts": [
+      "server/src/chart/analysis.ts",
+      "server/src/chart/replay.ts"
+    ],
+    "Solana": [
+      "server/src/market/fabric.ts",
+      "server/src/safety/safety.ts",
+      "server/src/providers/pending.ts"
+    ],
+    "AI": [
+      "server/src/qci/coordinator.ts",
+      "server/src/decision/engine.ts",
+      "server/src/ditas/service.ts"
+    ],
+    "Research": [
+      "server/src/lab/backtest.ts",
+      "server/src/lab/lab.ts",
+      "server/src/knowledge/research.ts"
+    ],
+    "Risk": [
+      "server/src/risk/gate.ts",
+      "server/src/exec/oms.ts"
+    ],
+    "Data": [
+      "server/src/market/quality.ts",
+      "server/src/market/fabric.ts",
+      "server/src/ditas/memory.ts"
+    ],
+    "Microstructure": [
+      "server/src/market/quality.ts",
+      "server/src/whales/prints.ts"
+    ],
+    "Portfolio": [
+      "server/src/portfolio/ledger.ts",
+      "server/src/portfolio/correlation.ts",
+      "server/src/ditas/execution.ts"
+    ],
+    "Operations": [
+      "server/src/core/latency.ts",
+      "server/src/exec/incidents.ts",
+      "server/src/qa/gates.ts"
+    ]
+  },
+  "evidenceOverrides": {
+    "MIA-Q001": "Phase-one draft extends existing FeatureEngine with 20-log-return moments; not yet test-certified.",
+    "MIA-Q006": "Costs and risk-normalized backtest outcomes already exist in lab/backtest.ts.",
+    "MIA-Q009": "IID trade bootstrap exists; dependence-aware/block bootstrap is not verified.",
+    "MIA-Q013": "Confirmed pivots are present in chart/analysis.ts; BOS/CHoCH enhancements remain.",
+    "MIA-Q023": "No verified Solana launch feed; provider integration required.",
+    "MIA-Q035": "MarketStore and DITAS snapshots exist; persistent general feature store not verified.",
+    "MIA-Q036": "DITAS calibration evaluates supplied forecasts; no certified production forecasting model.",
+    "MIA-Q040": "Deterministic QCI challenge panel exists; not a trained multi-agent ensemble.",
+    "MIA-Q042": "Existing decision twin is hypothetical; source is owner-uploaded/unverified.",
+    "MIA-Q045": "knowledge/research.ts already implements multi-window strategyWalkforward with crossing-trade purge and embargo.",
+    "MIA-Q046": "knowledge/research.ts already uses crossing-trade purge and embargo; overlapping-label pipeline may need more.",
+    "MIA-Q047": "chart/replay.ts supports prefix replay; full OMS event replay not established.",
+    "MIA-Q058": "Core decision/risk code is shared by existing paper workflow; live trading is locked and parity is not certified.",
+    "MIA-Q063": "chart/analysis.ts and market/quality.ts reject candle gaps and duplicates.",
+    "MIA-Q076": "Lab exits define stop/target/time behavior; labels for supervised learning are not verified.",
+    "MIA-Q091": "Pairwise correlation exists; full portfolio factor decomposition is not verified."
+  },
   "features": [
     {
       "id": "MIA-Q001",
@@ -23,17 +94,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Draft branch adds closed-bar mean/skew/excess kurtosis to the existing FeatureEngine; verification pending CI.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q002",
@@ -50,17 +111,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q003",
@@ -77,17 +128,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q004",
@@ -104,17 +145,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q005",
@@ -131,17 +162,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q006",
@@ -158,17 +179,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Existing lab/backtest.ts calculates net R after fees, spread and modeled slippage.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q007",
@@ -185,17 +196,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q008",
@@ -212,17 +213,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q009",
@@ -239,17 +230,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Existing lab/backtest.ts implements independent-trade bootstrap; dependence-aware stress testing remains unimplemented.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q010",
@@ -266,17 +247,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q011",
@@ -293,17 +264,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q012",
@@ -320,17 +281,7 @@
         "lab/backtest.ts",
         "ditas/calibration.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/features/indicators.ts",
-        "server/src/lab/backtest.ts",
-        "server/src/ditas/calibration.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q013",
@@ -346,16 +297,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Existing chart/analysis.ts confirms pivots; dedicated BOS/CHoCH classifiers remain pending.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q014",
@@ -371,16 +313,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q015",
@@ -396,16 +329,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q016",
@@ -421,16 +345,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q017",
@@ -446,16 +361,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q018",
@@ -471,16 +377,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q019",
@@ -496,16 +393,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Existing 15m/1h/4h features; strict as-of alignment across a broader feed set remains incomplete.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q020",
@@ -521,16 +409,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q021",
@@ -546,16 +425,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q022",
@@ -571,16 +441,7 @@
         "chart/analysis.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/chart/analysis.ts",
-        "server/src/chart/replay.ts",
-        "server/src/features/indicators.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q023",
@@ -597,17 +458,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "No confirmed real-time Solana launch subscription; provider integration required.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q024",
@@ -624,17 +475,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q025",
@@ -651,17 +492,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q026",
@@ -678,17 +509,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q027",
@@ -705,17 +526,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q028",
@@ -732,17 +543,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q029",
@@ -759,17 +560,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q030",
@@ -786,17 +577,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q031",
@@ -813,17 +594,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q032",
@@ -840,17 +611,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q033",
@@ -867,17 +628,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q034",
@@ -894,17 +645,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q035",
@@ -921,17 +662,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "MarketStore and DITAS snapshots exist; a persistent general-purpose feature store is not established.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q036",
@@ -948,17 +679,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "DITAS calibration evaluates supplied explicit forecasts; no certified trained production forecaster.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q037",
@@ -975,17 +696,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q038",
@@ -1002,17 +713,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q039",
@@ -1029,17 +730,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q040",
@@ -1056,17 +747,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "Existing qci/challenge.ts deterministic BULL/BEAR/CONTRARIAN/DATA_AUDITOR/EXECUTION reviewers.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q041",
@@ -1083,17 +764,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "Existing DITAS fingerprint and historical similarity services.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q042",
@@ -1110,17 +781,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "Existing DITAS decision twin is hypothetical and uses uploaded, unverified candles.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q043",
@@ -1137,17 +798,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q044",
@@ -1164,17 +815,7 @@
         "decision/engine.ts",
         "ditas/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/workers/registry.ts",
-        "server/src/qci/coordinator.ts",
-        "server/src/decision/engine.ts",
-        "server/src/ditas/service.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q045",
@@ -1190,16 +831,7 @@
         "lab/backtest.ts",
         "lab/lab.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/lab/backtest.ts",
-        "server/src/lab/lab.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Existing knowledge/research.ts strategyWalkforward partitions trade outcomes into training and multiple OOS windows, with purge+embargo. Does not train/tune parameters.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q046",
@@ -1215,16 +847,7 @@
         "lab/backtest.ts",
         "lab/lab.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/lab/backtest.ts",
-        "server/src/lab/lab.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Existing knowledge/research.ts purges crossing trades and uses embargo, but fuller overlapping-label validation is incomplete.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q047",
@@ -1240,16 +863,7 @@
         "lab/backtest.ts",
         "lab/lab.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/lab/backtest.ts",
-        "server/src/lab/lab.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Existing chart/replay.ts has visible-prefix chart replay; full QCI-to-OMS replay remains unverified.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q048",
@@ -1265,16 +879,7 @@
         "lab/backtest.ts",
         "lab/lab.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/lab/backtest.ts",
-        "server/src/lab/lab.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q049",
@@ -1290,16 +895,7 @@
         "lab/backtest.ts",
         "lab/lab.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/lab/backtest.ts",
-        "server/src/lab/lab.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q050",
@@ -1315,16 +911,7 @@
         "lab/backtest.ts",
         "lab/lab.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/lab/backtest.ts",
-        "server/src/lab/lab.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q051",
@@ -1340,16 +927,7 @@
         "lab/backtest.ts",
         "lab/lab.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/lab/backtest.ts",
-        "server/src/lab/lab.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Existing research and twin provide non-authoritative simulations; no complete prospective shadow strategy supervisor verified.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q052",
@@ -1365,16 +943,7 @@
         "lab/backtest.ts",
         "lab/lab.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/lab/backtest.ts",
-        "server/src/lab/lab.ts",
-        "server/src/knowledge/research.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q053",
@@ -1390,16 +959,7 @@
         "risk/gate.ts",
         "risk/policy.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/risk/gate.ts",
-        "server/src/risk/policy.ts",
-        "server/src/exec/oms.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q054",
@@ -1415,16 +975,7 @@
         "risk/gate.ts",
         "risk/policy.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/risk/gate.ts",
-        "server/src/risk/policy.ts",
-        "server/src/exec/oms.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q055",
@@ -1440,16 +991,7 @@
         "risk/gate.ts",
         "risk/policy.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/risk/gate.ts",
-        "server/src/risk/policy.ts",
-        "server/src/exec/oms.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q056",
@@ -1465,16 +1007,7 @@
         "risk/gate.ts",
         "risk/policy.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/risk/gate.ts",
-        "server/src/risk/policy.ts",
-        "server/src/exec/oms.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q057",
@@ -1490,16 +1023,7 @@
         "risk/gate.ts",
         "risk/policy.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/risk/gate.ts",
-        "server/src/risk/policy.ts",
-        "server/src/exec/oms.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q058",
@@ -1515,16 +1039,7 @@
         "risk/gate.ts",
         "risk/policy.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/risk/gate.ts",
-        "server/src/risk/policy.ts",
-        "server/src/exec/oms.ts"
-      ],
-      "sourceEvidence": "Risk/decision core is centralized but real live trading is locked: PAPER/LIVE parity is a required contract, not certified operation.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q059",
@@ -1540,16 +1055,7 @@
         "risk/gate.ts",
         "risk/policy.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/risk/gate.ts",
-        "server/src/risk/policy.ts",
-        "server/src/exec/oms.ts"
-      ],
-      "sourceEvidence": "Existing lab/lab.ts monitors paper expectancy decay; robust regime/sample/evidence checks are pending.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q060",
@@ -1565,16 +1071,7 @@
         "risk/gate.ts",
         "risk/policy.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/risk/gate.ts",
-        "server/src/risk/policy.ts",
-        "server/src/exec/oms.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q061",
@@ -1590,16 +1087,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q062",
@@ -1615,16 +1103,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q063",
@@ -1640,16 +1119,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Existing chart/analysis.ts and market/quality.ts reject gaps, duplicates, invalid candle sequences.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q064",
@@ -1665,16 +1135,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q065",
@@ -1690,16 +1151,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q066",
@@ -1715,16 +1167,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q067",
@@ -1740,16 +1183,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q068",
@@ -1765,16 +1199,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q069",
@@ -1790,16 +1215,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q070",
@@ -1815,16 +1231,7 @@
         "market/fabric.ts",
         "market/quality.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/market/fabric.ts",
-        "server/src/ditas/memory.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q071",
@@ -1840,15 +1247,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q072",
@@ -1864,15 +1263,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q073",
@@ -1888,15 +1279,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q074",
@@ -1912,15 +1295,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q075",
@@ -1936,15 +1311,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q076",
@@ -1960,15 +1327,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Existing lab/exits.ts implements exit barriers for trades; dedicated target labels for predictive modeling not established.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q077",
@@ -1984,15 +1343,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q078",
@@ -2008,15 +1359,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PROPOSED",
-      "mergeAction": "PLAN_IN_CURRENT_OWNER_NOT_PARALLEL_ENGINE",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q079",
@@ -2032,15 +1375,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q080",
@@ -2056,15 +1391,7 @@
         "market/quality.ts",
         "features/indicators.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/market/quality.ts",
-        "server/src/whales/prints.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q081",
@@ -2081,17 +1408,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q082",
@@ -2108,17 +1425,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q083",
@@ -2135,17 +1442,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q084",
@@ -2162,17 +1459,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q085",
@@ -2189,17 +1476,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q086",
@@ -2216,17 +1493,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q087",
@@ -2243,17 +1510,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q088",
@@ -2270,17 +1527,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q089",
@@ -2297,17 +1544,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q090",
@@ -2324,17 +1561,7 @@
         "providers/",
         "safety/safety.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "NEEDS_EXTERNAL_FEED",
-      "mergeAction": "EXTEND_EXISTING_WITH_VERIFIED_PROVIDER",
-      "repositoryOwnerPaths": [
-        "server/src/market/fabric.ts",
-        "server/src/safety/safety.ts",
-        "server/src/providers/pending.ts",
-        "server/src/providers/dexscreener.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q091",
@@ -2350,16 +1577,7 @@
         "portfolio/correlation.ts",
         "portfolio/ledger.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/portfolio/ledger.ts",
-        "server/src/portfolio/correlation.ts",
-        "server/src/ditas/execution.ts"
-      ],
-      "sourceEvidence": "Existing covariance/correlation functionality is basic pairwise correlation; full factor decomposition not verified.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q092",
@@ -2375,16 +1593,7 @@
         "portfolio/correlation.ts",
         "portfolio/ledger.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/portfolio/ledger.ts",
-        "server/src/portfolio/correlation.ts",
-        "server/src/ditas/execution.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q093",
@@ -2400,16 +1609,7 @@
         "portfolio/correlation.ts",
         "portfolio/ledger.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/portfolio/ledger.ts",
-        "server/src/portfolio/correlation.ts",
-        "server/src/ditas/execution.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q094",
@@ -2425,16 +1625,7 @@
         "portfolio/correlation.ts",
         "portfolio/ledger.ts"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/portfolio/ledger.ts",
-        "server/src/portfolio/correlation.ts",
-        "server/src/ditas/execution.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q095",
@@ -2451,16 +1642,7 @@
         "ops/",
         "qa/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/core/latency.ts",
-        "server/src/exec/incidents.ts",
-        "server/src/qa/gates.ts"
-      ],
-      "sourceEvidence": "Existing exec/incidents.ts and core/mode.ts support protective incidents/pause; full autonomous supervisor pending.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q096",
@@ -2477,16 +1659,7 @@
         "ops/",
         "qa/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/core/latency.ts",
-        "server/src/exec/incidents.ts",
-        "server/src/qa/gates.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q097",
@@ -2503,16 +1676,7 @@
         "ops/",
         "qa/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/core/latency.ts",
-        "server/src/exec/incidents.ts",
-        "server/src/qa/gates.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q098",
@@ -2529,16 +1693,7 @@
         "ops/",
         "qa/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/core/latency.ts",
-        "server/src/exec/incidents.ts",
-        "server/src/qa/gates.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q099",
@@ -2555,16 +1710,7 @@
         "ops/",
         "qa/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "BASE_EXISTS",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/core/latency.ts",
-        "server/src/exec/incidents.ts",
-        "server/src/qa/gates.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     },
     {
       "id": "MIA-Q100",
@@ -2581,16 +1727,7 @@
         "ops/",
         "qa/"
       ],
-      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation.",
-      "sourceBaseline": "PARTIAL",
-      "mergeAction": "ENHANCE_EXISTING_OWNER",
-      "repositoryOwnerPaths": [
-        "server/src/core/latency.ts",
-        "server/src/exec/incidents.ts",
-        "server/src/qa/gates.ts"
-      ],
-      "sourceEvidence": "Category ownership inferred from inspected source tree; exact feature behavior must be independently verified before changing status.",
-      "implementationCertified": false
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
     }
   ]
 }
