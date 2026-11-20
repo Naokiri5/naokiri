@@ -61,6 +61,7 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 | [`planning/IMPLEMENTATION_ROADMAP.md`](planning/IMPLEMENTATION_ROADMAP.md) | phases and prioritized backlog |
 | [`planning/REQUIREMENTS_TRACEABILITY.md`](planning/REQUIREMENTS_TRACEABILITY.md) | spec Parts 1–33 → code → status |
 | [`planning/REFACTORING_BACKLOG.md`](planning/REFACTORING_BACKLOG.md) | evidence-based code-organization plan |
+| [`mia5/MIA5_CLAUDE_CODEX_JOINT_DECISIONS.md`](mia5/MIA5_CLAUDE_CODEX_JOINT_DECISIONS.md) | MIA 5.0: how Claude and Codex share the work (base branch, PR owners, file locks, migration numbers, what is already built vs. missing). Codex reads it through [`../AGENTS.md`](../AGENTS.md) |
 
 ## History (dated, not re-verified)
 These reports describe earlier phases. They are kept for the record and point to the current documents above.

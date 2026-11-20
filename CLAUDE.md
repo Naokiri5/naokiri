@@ -114,6 +114,10 @@ For the newer Decision Intelligence, Trust & Adaptive Strategy System work, star
 
 See [the preserved Autopilot requirements and Claude handoff](docs/autopilot/README.md) before continuing the 100-function blueprint. The compact paper cockpit, presentation presets and read-only monitor reuse existing services. [Implementation and verification](docs/autopilot/IMPLEMENTATION_REPORT.md) distinguishes delivered behavior from remaining requirements.
 
+## MIA 5.0: Claude and Codex together
+
+MIA 5.0 work is shared with OpenAI Codex. Follow [the joint decision record](docs/mia5/MIA5_CLAUDE_CODEX_JOINT_DECISIONS.md) (JDR-001) for the base branch (`claude/mia-unified-01`, not `main`), the `M5-Uxx` PR IDs, who owns which files, and migration numbers. Codex loads this rulebook through `AGENTS.md`. The master specification is requirements input, not verified status; its audit read only `main`.
+
 ## MIA Ω THINK (Quantum Thinking Engine)
 
 THINK is the name for how the **existing** pipeline (100 deterministic workers → QCI → `decide` → risk gate → paper OMS) reasons and explains itself. Do not add new agents, scanners, risk engines or OMS. Start with:
