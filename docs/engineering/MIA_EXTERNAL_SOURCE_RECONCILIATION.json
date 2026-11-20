@@ -1,0 +1,347 @@
+{
+  "schemaVersion": "1.0.0",
+  "baseline": "PR #45 unified MIA, compare current head before merge",
+  "disclaimer": "Code presence != production verification; PROPOSED requires additional verification. No live trading authority.",
+  "features": [
+    {
+      "id": "MIA-X001",
+      "source": "TradingAgents",
+      "license": "Apache-2.0",
+      "name": "Agent roles / analyst graph",
+      "repoStatus": "PRESENT",
+      "canonicalOwner": "workers/registry.ts + qci/coordinator.ts",
+      "action": "REUSE",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X002",
+      "source": "TradingAgents",
+      "license": "Apache-2.0",
+      "name": "Bull/bear/risk challenge",
+      "repoStatus": "PRESENT",
+      "canonicalOwner": "qci/challenge.ts",
+      "action": "REUSE_ENHANCE",
+      "priority": "P1"
+    },
+    {
+      "id": "MIA-X003",
+      "source": "TradingAgents",
+      "license": "Apache-2.0",
+      "name": "Point-in-time research checkpoints",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "ditas/memory.ts + ditas/replay.ts",
+      "action": "EXTEND_EXISTING",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X004",
+      "source": "TradingAgents",
+      "license": "Apache-2.0",
+      "name": "Research run provenance",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "decision/certificate.ts",
+      "action": "EXTEND_EXISTING",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X005",
+      "source": "TradingAgents",
+      "license": "Apache-2.0",
+      "name": "Bounded posttrade reflections",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "knowledge/research.ts",
+      "action": "RESEARCH_ONLY",
+      "priority": "P3"
+    },
+    {
+      "id": "MIA-X006",
+      "source": "Hummingbot",
+      "license": "Apache-2.0",
+      "name": "In-flight order tracking",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "exec/oms.ts + PR64 venue-reconcile.ts",
+      "action": "EXTEND_EXISTING",
+      "priority": "P0"
+    },
+    {
+      "id": "MIA-X007",
+      "source": "Hummingbot",
+      "license": "Apache-2.0",
+      "name": "Lost-order / unknown ACK handling",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "exec/oms.ts + exec/incidents.ts",
+      "action": "EXTEND_EXISTING",
+      "priority": "P0"
+    },
+    {
+      "id": "MIA-X008",
+      "source": "Hummingbot",
+      "license": "Apache-2.0",
+      "name": "Collateral reservations",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "risk/gate.ts + portfolio/ledger.ts",
+      "action": "VERIFY_BEFORE_CODE",
+      "priority": "P1"
+    },
+    {
+      "id": "MIA-X009",
+      "source": "Hummingbot",
+      "license": "Apache-2.0",
+      "name": "Controller executor orchestration",
+      "repoStatus": "PRESENT",
+      "canonicalOwner": "bot/bot.ts + exec/oms.ts",
+      "action": "REUSE",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X010",
+      "source": "Hummingbot",
+      "license": "Apache-2.0",
+      "name": "Execution attribution",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "ditas/executionQuality.ts + joe/live",
+      "action": "EXTEND_EXISTING",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X011",
+      "source": "Freqtrade",
+      "license": "GPL-3.0",
+      "name": "Cost-adjusted OOS backtesting",
+      "repoStatus": "PRESENT",
+      "canonicalOwner": "lab/backtest.ts",
+      "action": "REUSE",
+      "priority": "P1"
+    },
+    {
+      "id": "MIA-X012",
+      "source": "Freqtrade",
+      "license": "GPL-3.0",
+      "name": "Lookahead feature perturbation test",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "lab/backtest.ts",
+      "action": "INDEPENDENT_TS_NO_GPL_COPY",
+      "priority": "P1"
+    },
+    {
+      "id": "MIA-X013",
+      "source": "Freqtrade",
+      "license": "GPL-3.0",
+      "name": "Recursive indicator parity audit",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "features/indicators.ts",
+      "action": "INDEPENDENT_TS_NO_GPL_COPY",
+      "priority": "P1"
+    },
+    {
+      "id": "MIA-X014",
+      "source": "Freqtrade",
+      "license": "GPL-3.0",
+      "name": "Hyperparameter overfitting tests",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "lab/lab.ts",
+      "action": "VERIFY_BEFORE_CODE",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X015",
+      "source": "Freqtrade",
+      "license": "GPL-3.0",
+      "name": "Pairlist spread/volume filtering",
+      "repoStatus": "PRESENT",
+      "canonicalOwner": "market/quality.ts + market/scanner.ts",
+      "action": "REUSE",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X016",
+      "source": "Freqtrade",
+      "license": "GPL-3.0",
+      "name": "Drawdown/stoploss protection",
+      "repoStatus": "PRESENT",
+      "canonicalOwner": "risk/gate.ts + risk/policy.ts",
+      "action": "REUSE",
+      "priority": "P1"
+    },
+    {
+      "id": "MIA-X017",
+      "source": "skfolio",
+      "license": "BSD-3-Clause",
+      "name": "4h empirical VaR and expected shortfall",
+      "repoStatus": "NEW_DRAFT",
+      "canonicalOwner": "portfolio/tailRisk.ts + portfolio/stress.ts",
+      "action": "ADD_RESEARCH_ONLY",
+      "priority": "P1"
+    },
+    {
+      "id": "MIA-X018",
+      "source": "skfolio",
+      "license": "BSD-3-Clause",
+      "name": "Nominal holdings concentration",
+      "repoStatus": "NEW_DRAFT",
+      "canonicalOwner": "portfolio/tailRisk.ts",
+      "action": "ADD_RESEARCH_ONLY",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X019",
+      "source": "skfolio",
+      "license": "BSD-3-Clause",
+      "name": "Purged combinatorial cross validation",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "lab/backtest.ts",
+      "action": "RESEARCH_ONLY",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X020",
+      "source": "skfolio",
+      "license": "BSD-3-Clause",
+      "name": "CVaR risk budget experiments",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "portfolio/stress.ts",
+      "action": "RESEARCH_ONLY",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X021",
+      "source": "skfolio",
+      "license": "BSD-3-Clause",
+      "name": "Robust optimization uncertainty sets",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "portfolio/stress.ts",
+      "action": "RESEARCH_ONLY",
+      "priority": "P3"
+    },
+    {
+      "id": "MIA-X022",
+      "source": "TA-Lib Python",
+      "license": "BSD-2-Clause",
+      "name": "RSI/MACD/ATR",
+      "repoStatus": "PRESENT",
+      "canonicalOwner": "features/indicators.ts + workers/indicators.ts",
+      "action": "REUSE",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X023",
+      "source": "TA-Lib Python",
+      "license": "BSD-2-Clause",
+      "name": "Reference indicator numerical parity",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "features/indicators.ts",
+      "action": "OFFLINE_TESTS",
+      "priority": "P1"
+    },
+    {
+      "id": "MIA-X024",
+      "source": "TA-Lib Python",
+      "license": "BSD-2-Clause",
+      "name": "Incremental streaming indicators",
+      "repoStatus": "PRESENT",
+      "canonicalOwner": "features/indicators.ts",
+      "action": "REUSE",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X025",
+      "source": "Lightweight Charts",
+      "license": "Apache-2.0",
+      "name": "Candlestick/time scale visualizations",
+      "repoStatus": "PRESENT",
+      "canonicalOwner": "web/package.json",
+      "action": "REUSE_INSTALLED_DEP",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X026",
+      "source": "Lightweight Charts",
+      "license": "Apache-2.0",
+      "name": "Risk uncertainty overlays",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "web/src/pages/Trading.tsx + PaperStress.tsx",
+      "action": "EXTEND_EXISTING",
+      "priority": "P3"
+    },
+    {
+      "id": "MIA-X027",
+      "source": "Lightweight Charts",
+      "license": "Apache-2.0",
+      "name": "Tail-risk research legend",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "web/src/pages/PaperStress.tsx",
+      "action": "RESEARCH_ONLY",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X028",
+      "source": "APScheduler",
+      "license": "MIT",
+      "name": "Persistent job lease/scheduling",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "ops/lease.ts + bot/bot.ts",
+      "action": "VERIFY_BEFORE_CODE",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X029",
+      "source": "APScheduler",
+      "license": "MIT",
+      "name": "Misfire, overlap and coalescing",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "ops/lease.ts + bot/bot.ts",
+      "action": "EXTEND_EXISTING",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X030",
+      "source": "APScheduler",
+      "license": "MIT",
+      "name": "Retry/dead-letter job health",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "fabric/relay.ts + ops/readiness.ts",
+      "action": "EXTEND_EXISTING",
+      "priority": "P2"
+    },
+    {
+      "id": "MIA-X031",
+      "source": "User LiveOms attachment",
+      "license": "User-provided source; provenance unverified",
+      "name": "Binance/Bybit live order transport",
+      "repoStatus": "INCOMPATIBLE",
+      "canonicalOwner": "exec/environment.ts + exec/oms.ts",
+      "action": "DO_NOT_IMPORT_LIVE",
+      "priority": "P0"
+    },
+    {
+      "id": "MIA-X032",
+      "source": "User LiveOms attachment",
+      "license": "User-provided source; provenance unverified",
+      "name": "Unknown ACK reconciliation",
+      "repoStatus": "PARTIAL",
+      "canonicalOwner": "exec/venue-reconcile.ts PR64",
+      "action": "EXTEND_READ_ONLY",
+      "priority": "P0"
+    },
+    {
+      "id": "MIA-X033",
+      "source": "User LiveOms attachment",
+      "license": "User-provided source; provenance unverified",
+      "name": "Dead-man capability verification",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "exec/incidents.ts + ops/readiness.ts",
+      "action": "RESEARCH_ONLY",
+      "priority": "P1"
+    },
+    {
+      "id": "MIA-X034",
+      "source": "User LiveOms attachment",
+      "license": "User-provided source; provenance unverified",
+      "name": "Spot cost basis vs balance",
+      "repoStatus": "PROPOSED",
+      "canonicalOwner": "portfolio/ledger.ts",
+      "action": "RESEARCH_ONLY",
+      "priority": "P1"
+    }
+  ]
+}
