@@ -16,7 +16,7 @@
  * Verification key: MIA_PRIVY_VERIFICATION_KEY (the PEM public key from the Privy dashboard) is preferred; otherwise
  * the app's public JWKS is fetched from auth.privy.io. Neither is a secret. No Privy app secret is needed or used.
  */
-import { createLocalJWKSet, createRemoteJWKSet, importSPKI, jwtVerify, type JSONWebKeySet, type JWTVerifyGetKey } from 'jose';
+import { createLocalJWKSet, createRemoteJWKSet, errors, importSPKI, jwtVerify, type JSONWebKeySet, type JWTVerifyGetKey } from 'jose';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { failureGate } from '../core/ratelimit.js';
@@ -73,6 +73,9 @@ export const getLink = () => getSetting<PrivyLink | null>('privy_link', null);
 
 // ---- token verification -----------------------------------------------------------------------------------------
 let keyCache: { appId: string; source: string; key: JWTVerifyGetKey } | null = null;
+export class PrivyVerificationUnavailable extends AuthError {
+  constructor(message: string) { super(message, 503); }
+}
 /** Test hook: inject a key resolver (e.g. a local JWKS) instead of the dashboard key / remote JWKS. */
 export function _setPrivyKeyForTests(jwks: JSONWebKeySet | null) {
   keyCache = jwks ? { appId: privyAppId() ?? '', source: 'test', key: createLocalJWKSet(jwks) } : null;
@@ -80,25 +83,40 @@ export function _setPrivyKeyForTests(jwks: JSONWebKeySet | null) {
 async function verificationKey(appId: string): Promise<JWTVerifyGetKey> {
   if (keyCache && (keyCache.appId === appId || keyCache.source === 'test')) return keyCache.key;
   const pem = process.env.MIA_PRIVY_VERIFICATION_KEY?.trim().replace(/\\n/g, '\n');
-  const publicKey = pem ? await importSPKI(pem, 'ES256') : null;
-  const key: JWTVerifyGetKey = publicKey
-    ? () => publicKey
-    : createRemoteJWKSet(new URL(`https://auth.privy.io/api/v1/apps/${encodeURIComponent(appId)}/jwks.json`), { timeoutDuration: 5000, cooldownDuration: 30_000 });
+  let key: JWTVerifyGetKey;
+  if (pem) {
+    try {
+      const publicKey = await importSPKI(pem, 'ES256');
+      key = () => publicKey;
+    } catch {
+      throw new PrivyVerificationUnavailable('MIA could not load its configured Privy verification key. Ask the server administrator to check the public key.');
+    }
+  } else {
+    const remote = createRemoteJWKSet(new URL(`https://auth.privy.io/api/v1/apps/${encodeURIComponent(appId)}/jwks.json`), { timeoutDuration: 5000, cooldownDuration: 30_000 });
+    key = async (header, token) => {
+      try { return await remote(header, token); }
+      catch (error) {
+        if (error instanceof errors.JWKSNoMatchingKey || error instanceof errors.JWKSMultipleMatchingKeys) throw error;
+        throw new PrivyVerificationUnavailable('The Privy verification service is unavailable. Try signing in again shortly.');
+      }
+    };
+  }
   keyCache = { appId, source: pem ? 'pem' : 'jwks', key };
   return key;
 }
 
-/** Verifies a Privy access token and returns the Privy user id. Throws AuthError(401) on any problem. */
+/** Verifies a Privy access token and returns the Privy user id. */
 export async function verifyPrivyAccessToken(token: unknown): Promise<string> {
   const appId = privyAppId();
   if (!appId) throw new AuthError('Privy sign-in is not enabled on this server', 404);
   if (typeof token !== 'string' || token.length < 20 || token.length > 4096) throw new AuthError('invalid Privy token');
+  const key = await verificationKey(appId);
   try {
-    const key = await verificationKey(appId);
-    const { payload } = await jwtVerify(token, key, { issuer: ISSUER, audience: appId, algorithms: ['ES256'], clockTolerance: 5 });
+    const { payload } = await jwtVerify(token, key, { issuer: ISSUER, audience: appId, algorithms: ['ES256'], requiredClaims: ['exp'], clockTolerance: 5 });
     if (typeof payload.sub !== 'string' || !DID_RE.test(payload.sub)) throw new Error('bad subject');
     return payload.sub;
-  } catch {
+  } catch (error) {
+    if (error instanceof PrivyVerificationUnavailable) throw error;
     throw new AuthError('invalid or expired Privy token'); // never echo verifier internals
   }
 }
@@ -171,7 +189,8 @@ export class OwnerNotProvisionedError extends AuthError {
 export async function loginWithPrivy(token: unknown, client: string, opts: { directLocal?: boolean; backup?: () => void } = {}) {
   failureGate.check(client, Date.now(), { global: !opts.directLocal });
   let userId: string | null = null;
-  try { userId = await verifyPrivyAccessToken(token); } catch (e) { if ((e as AuthError).statusCode === 404) throw e; }
+  try { userId = await verifyPrivyAccessToken(token); }
+  catch (error) { if (!(error instanceof AuthError) || error.statusCode !== 401) throw error; }
   const fail = (reason: string, err: AuthError): never => {
     failureGate.fail(client);
     audit('anonymous', 'auth.login.failed', { ip: client, method: 'privy', reason });

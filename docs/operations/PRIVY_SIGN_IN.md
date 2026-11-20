@@ -90,6 +90,7 @@ Set it up in **Security Center → Two-factor step-up**.
    - `MIA_PRIVY_APP_ID=<your app id>` (required).
    - `MIA_PRIVY_OWNER_ID=did:privy:...` (the owner; see above).
    - Optional: `MIA_PRIVY_VERIFICATION_KEY` set to the PEM public key from the dashboard. Without it, MIA fetches Privy's public key set from `auth.privy.io`, so the server must be able to reach that host.
+   - For `npm start`, export the variables in the shell that starts MIA. The bundled systemd unit reads `/etc/mia/mia.env`.
 5. Open MIA → **Continue with Privy** → you land on the dashboard.
 6. Go to **Security Center → Two-factor step-up** and set up your authenticator app.
 
@@ -103,6 +104,8 @@ The server log explains a wrong App ID (not 25 characters), a malformed owner id
 | "Can't reach the MIA server." | The page loaded but the API did not answer | Start MIA (`npm start`, port 8787). With `npm run dev`, the 5173 page proxies to 8787. |
 | "The MIA server answered with an error." | The API is up but failed | Check the server log; the message shows the detail. |
 | "Privy is taking unusually long to load." | Privy's SDK could not start | Check the internet connection, that this address is in **Allowed origins**, and the App ID. |
+| "The Privy verification service is unavailable." | The MIA server could not retrieve Privy's public verification keys | Retry after the service recovers. Check the server's outbound HTTPS access to `auth.privy.io` if it persists. |
+| "MIA could not load its configured Privy verification key." | The configured public key could not be read | Set `MIA_PRIVY_VERIFICATION_KEY` to the dashboard's ES256 public verification key in PEM format, then restart MIA. |
 | "…no MIA owner has been set up yet… MIA_PRIVY_OWNER_ID=did:privy:…" | Privy verified you, but no owner is bound | Put that id in `MIA_PRIVY_OWNER_ID` on the server and restart. |
 | "this Privy account is not the MIA owner" | You signed in with a different Privy account | Press **Use a different Privy account**. |
 | "Too many sign-in attempts." | Brute-force limit | Wait and retry. |

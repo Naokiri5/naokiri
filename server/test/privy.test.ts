@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
-import { generateKeyPair, exportJWK, exportSPKI, SignJWT, type JSONWebKeySet } from 'jose';
+import * as jose from 'jose';
 import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { failureGate } from '../src/core/ratelimit.js';
 import { _setPrivyKeyForTests, contentSecurityPolicy, verifyPrivyAccessToken } from '../src/security/privy.js';
+
+vi.mock('jose', { spy: true });
 
 /**
  * Privy sign-in, offline: tokens are signed with a locally generated ES256 key served through a local JWKS, exactly
@@ -15,14 +17,16 @@ const PW = 'privy route owner';
 const NOW_SECONDS = Date.parse('2026-11-10T00:00:00Z') / 1000;
 const json = { 'content-type': 'application/json', 'x-mia-csrf': '1' };
 let priv: CryptoKey; let otherPriv: CryptoKey;
-const token = (o: { sub?: string; aud?: string; iss?: string; exp?: number; key?: CryptoKey } = {}) =>
-  new SignJWT({ sid: 'sess_1' }).setProtectedHeader({ alg: 'ES256', kid: 'k1' }).setSubject(o.sub ?? OWNER)
-    .setIssuer(o.iss ?? 'privy.io').setAudience(o.aud ?? APP).setIssuedAt(NOW_SECONDS).setExpirationTime(o.exp ?? NOW_SECONDS + 3600)
-    .sign(o.key ?? priv);
+const token = (o: { sub?: string; aud?: string; iss?: string; exp?: number | null; key?: CryptoKey } = {}) => {
+  const jwt = new jose.SignJWT({ sid: 'sess_1' }).setProtectedHeader({ alg: 'ES256', kid: 'k1' }).setSubject(o.sub ?? OWNER)
+    .setIssuer(o.iss ?? 'privy.io').setAudience(o.aud ?? APP).setIssuedAt(NOW_SECONDS);
+  if (o.exp !== null) jwt.setExpirationTime(o.exp ?? NOW_SECONDS + 3600);
+  return jwt.sign(o.key ?? priv);
+};
 
 describe('Privy sign-in', () => {
   let app: Awaited<ReturnType<typeof buildApp>>; let cookie = '';
-  let jwks: JSONWebKeySet;
+  let jwks: jose.JSONWebKeySet;
   let verificationKey: string;
   const post = (url: string, payload: unknown, withCookie = false) => app.inject({ method: 'POST', url, headers: withCookie ? { ...json, cookie } : json, payload: payload as any });
   const linkOwner = async () => {
@@ -31,10 +35,10 @@ describe('Privy sign-in', () => {
   };
   beforeAll(async () => {
     process.env.MIA_PRIVY_APP_ID = APP;
-    const k = await generateKeyPair('ES256'); priv = k.privateKey as CryptoKey;
-    otherPriv = (await generateKeyPair('ES256')).privateKey as CryptoKey;
-    jwks = { keys: [{ ...(await exportJWK(k.publicKey)), kid: 'k1', alg: 'ES256', use: 'sig' }] };
-    verificationKey = await exportSPKI(k.publicKey);
+    const k = await jose.generateKeyPair('ES256'); priv = k.privateKey as CryptoKey;
+    otherPriv = (await jose.generateKeyPair('ES256')).privateKey as CryptoKey;
+    jwks = { keys: [{ ...(await jose.exportJWK(k.publicKey)), kid: 'k1', alg: 'ES256', use: 'sig' }] };
+    verificationKey = await jose.exportSPKI(k.publicKey);
     _setPrivyKeyForTests(jwks);
   });
   beforeEach(async () => {
@@ -103,11 +107,50 @@ describe('Privy sign-in', () => {
       vi.unstubAllEnvs();
     }
   });
+  it('allows the owner to retry after a key service outage without consuming login attempts', async () => {
+    await linkOwner();
+    const accessToken = await token();
+    const resolveKey = vi.fn<ReturnType<typeof jose.createRemoteJWKSet>>().mockRejectedValue(new jose.errors.JWKSTimeout());
+    const remoteFactory = vi.mocked(jose.createRemoteJWKSet).mockReturnValue(resolveKey);
+    try {
+      vi.stubEnv('MIA_PRIVY_VERIFICATION_KEY', undefined);
+      _setPrivyKeyForTests(null);
+      for (let i = 0; i < 12; i++) {
+        const r = await post('/api/auth/privy/login', { accessToken });
+        expect(r.statusCode).toBe(503);
+        expect(r.json().error).toMatch(/verification service is unavailable/i);
+        expect(r.headers['set-cookie']).toBeUndefined();
+      }
+      resolveKey.mockRejectedValueOnce(new jose.errors.JWKSNoMatchingKey());
+      expect((await post('/api/auth/privy/login', { accessToken })).statusCode).toBe(401);
+      resolveKey.mockImplementation(jose.createLocalJWKSet(jwks));
+      expect((await post('/api/auth/privy/login', { accessToken })).statusCode).toBe(200);
+    } finally {
+      _setPrivyKeyForTests(jwks);
+      remoteFactory.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+  it('reports a malformed configured verification key as a service error', async () => {
+    await linkOwner();
+    vi.stubEnv('MIA_PRIVY_VERIFICATION_KEY', 'invalid-pem-fixture');
+    _setPrivyKeyForTests(null);
+    try {
+      const r = await post('/api/auth/privy/login', { accessToken: await token() });
+      expect(r.statusCode).toBe(503);
+      expect(r.json().error).toMatch(/configured Privy verification key/i);
+      expect(r.headers['set-cookie']).toBeUndefined();
+    } finally {
+      _setPrivyKeyForTests(jwks);
+      vi.unstubAllEnvs();
+    }
+  });
   it.each([
     ['another Privy user', () => token({ sub: 'did:privy:someoneelse0001' })],
     ['a token for another app', () => token({ aud: 'cmanotherprivyapp00000001' })],
     ['a token from another issuer', () => token({ iss: 'evil.example' })],
     ['an expired token', () => token({ exp: NOW_SECONDS - 60 })],
+    ['a token without an expiration', () => token({ exp: null })],
     ['a token signed with a different key', () => token({ key: otherPriv })],
     ['a non-Privy subject', () => token({ sub: 'owner' })],
   ])('refuses %s', async (_name, make) => {
