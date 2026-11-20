@@ -190,6 +190,8 @@ describe('relay and consumer inbox', () => {
     ['not valid JSON (does not stall the relay)', () => 'not json{'],
     ['a payload whose hash no longer matches', (env: any) => JSON.stringify({ ...env, payload: { ...env.payload, outcome: 0 } })],
     ['an envelope for a different event id', (env: any) => JSON.stringify({ ...env, eventId: 'ditas.outcome.other' })],
+    // 1e400 parses to Infinity and canonicalization throws: the relay must dead-letter it, not stop (CodeRabbit #45).
+    ['a payload number that overflows to Infinity', (env: any) => JSON.stringify(env).replace('"outcome":1,', '"outcome":1e400,')],
   ])('a stored envelope with %s is dead-lettered and later events still flow', (_n, corrupt) => {
     const seen: string[] = [];
     registerConsumer({ id: 'test:readmodel', topics: ['ditas.outcome.recorded.v1'], handle: (e) => { seen.push(e.eventId); } });

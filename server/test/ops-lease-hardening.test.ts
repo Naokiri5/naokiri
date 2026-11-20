@@ -21,6 +21,9 @@ vi.mock('../src/whales/prints.js', async (orig) => ({ ...(await orig<object>()),
 vi.mock('../src/news/news.js', async (orig) => ({ ...(await orig<object>()), refreshNews: async () => 0 }));
 vi.mock('../src/lab/lab.js', async (orig) => { const real = await orig<typeof import('../src/lab/lab.js')>(); return { ...real, checkStrategyHealth: vi.fn(real.checkStrategyHealth) }; });
 vi.mock('../src/exec/oms.js', async (orig) => { const real = await orig<typeof import('../src/exec/oms.js')>(); return { ...real, monitorPositions: vi.fn(real.monitorPositions), submitEntry: vi.fn(real.submitEntry) }; });
+// Pass-through, except that a test can make the takeover integrity check throw once (e.g. a busy or failing database).
+const integrity = vi.hoisted(() => ({ throwOnce: false }));
+vi.mock('../src/ops/integrity.js', async (orig) => { const real = await orig<typeof import('../src/ops/integrity.js')>(); return { ...real, takeoverIntegrity: () => { if (integrity.throwOnce) { integrity.throwOnce = false; throw new Error('database is locked'); } return real.takeoverIntegrity(); } }; });
 
 function report(id: string, last: number): DecisionReport {
   const cid = `cand_${Math.random().toString(36).slice(2)}`;
@@ -100,6 +103,17 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     freshDb(); run('INSERT INTO schema_migrations(version, applied_at) VALUES (999, 0)');
     restart();
     expect(_test.holdEngine()).toBe(false); expect(botStatus.lastError).toMatch(/schema: v999/);
+  });
+
+  it('a takeover check that throws drops a stale cached LEADER to STANDBY, so the next renewal still runs the check', () => {
+    botStatus.role = 'LEADER'; run('DELETE FROM runtime_leases'); // paused as LEADER; the persisted lease has since expired
+    integrity.throwOnce = true;
+    expect(_test.holdEngine()).toBe(false);
+    expect(botStatus.lastError).toMatch(/^takeover check: database is locked/);
+    expect(botStatus.role).toBe('STANDBY'); // was LEADER: the next renewal skipped the integrity check (CodeRabbit #45)
+    run("UPDATE audit_log SET hash='tampered' WHERE id=(SELECT MIN(id) FROM audit_log)");
+    expect(_test.holdEngine()).toBe(false); // was true: work resumed on a tampered database
+    expect(botStatus.lastError).toMatch(/^integrity: audit chain: broken at entry/);
   });
 
   it('a refused takeover stays refused: the process cannot re-acquire the lease or trade from an in-flight scan', () => {

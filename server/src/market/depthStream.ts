@@ -64,10 +64,12 @@ export class BookSync {
       return 'BUFFERED';
     }
     if (ev.u <= this.lastUpdateId) return 'IGNORED'; // duplicate / already applied
-    if (!this.continues(ev)) return this.gap();
+    // The discarded event is known to exist: only a snapshot through its `u` may resynchronize, so a lagging snapshot
+    // cannot be published over the missing update (CodeRabbit #45).
+    if (!this.continues(ev)) return this.gapThrough(ev.u);
     // A book that becomes crossed or loses a whole side is not a valid book: resynchronize instead of sitting in
     // SYNCED while never publishing (CodeRabbit PR #18).
-    return this.apply(ev) && this.sane() ? 'APPLIED' : this.gap();
+    return this.apply(ev) && this.sane() ? 'APPLIED' : this.gapThrough(ev.u);
   }
   /** A discarded update can only be recovered from a snapshot covering it. */
   requireSnapshotThrough(updateId: number): boolean {
@@ -138,6 +140,10 @@ export class BookSync {
   }
   /** Test/diagnostic: number of locally held levels per side. */
   levels() { return { bids: this.bids.size, asks: this.asks.size }; }
+  private gapThrough(updateId: number): 'SNAPSHOT_NEEDED' {
+    this.requiredSnapshotId = Math.max(this.requiredSnapshotId, updateId);
+    return this.gap();
+  }
   private gap(): 'SNAPSHOT_NEEDED' {
     this.state = 'BUFFERING'; this.buffer = []; this.bids.clear(); this.asks.clear(); this.resyncs++;
     return 'SNAPSHOT_NEEDED';

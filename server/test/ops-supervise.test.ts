@@ -43,6 +43,14 @@ describe('supervisor', () => {
     });
     expect(r.code).toBe(0); expect(r.runs).toBe(1); expect(termSeen).toBe(true); expect(r.err).toMatch(/SIGTERM: stopping/);
   });
+  it('a stop where the server fails to drain (exit 1 on SIGTERM) is reported to the service manager as a failure', async () => {
+    const child = `${COUNT} process.on('SIGTERM', () => process.exit(1)); setInterval(() => {}, 1000);`;
+    const r = await supervise(child, {}, (p, dir) => {
+      const wait = setInterval(() => { if (existsSync(join(dir, 'runs'))) { clearInterval(wait); p.kill('SIGTERM'); } }, 10);
+    });
+    expect(r.code).toBe(1); // was 0: a failed drain looked like a clean stop (CodeRabbit #45)
+    expect(r.runs).toBe(1); expect(r.err).toMatch(/did not shut down cleanly \(code 1/);
+  });
   it('rejects a malformed command override', async () => {
     const r = await supervise('', { MIA_SUPERVISE_CMD: '{"not":"an array"}' });
     expect(r.code).toBe(2);

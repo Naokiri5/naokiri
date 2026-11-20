@@ -84,9 +84,13 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
   if (config.offline) throw new ProviderError(id, 'offline mode');
-  const until = blockedUntil.get(id) ?? 0;
-  if (Date.now() < until) throw new ProviderError(id, `rate limited by provider; retry after ${new Date(until).toISOString()}`, 429);
+  const assertNotBlocked = () => {
+    const until = blockedUntil.get(id) ?? 0;
+    if (Date.now() < until) throw new ProviderError(id, `rate limited by provider; retry after ${new Date(until).toISOString()}`, 429);
+  };
+  assertNotBlocked();
   await buckets.get(id)?.take();
+  assertNotBlocked(); // another call may have hit 429 while this one waited for a token (CodeRabbit #45)
   const t0 = performance.now();
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
@@ -99,7 +103,10 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
       throw Object.assign(new ProviderError(id, 'HTTP 404 (resource not found)', 404), { resourceMiss: true });
     }
     if (!res.ok) {
-      if (res.status === 429 || res.status === 418 || res.status === 503) { const ms = retryAfterMs(res, res.status); if (ms != null) blockedUntil.set(id, Date.now() + ms); }
+      if (res.status === 429 || res.status === 418 || res.status === 503) {
+        // Keep the longest active backoff: a shorter Retry-After from a concurrent response must not cut it short.
+        const ms = retryAfterMs(res, res.status); if (ms != null) blockedUntil.set(id, Math.max(blockedUntil.get(id) ?? 0, Date.now() + ms));
+      }
       throw new ProviderError(id, `HTTP ${res.status}`, res.status);
     }
     const raw: unknown = opts.as === 'text' ? await res.text() : await res.json();

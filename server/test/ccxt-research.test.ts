@@ -67,6 +67,22 @@ describe('CCXT research adapter', () => {
     _resetProviderBlocks(); stubFetch({}, 429);
     await expect(cx.ccxtTicker('kraken', 'BTC/USDT')).rejects.not.toBeInstanceOf(cx.CcxtResearchError);
   });
+  it('a failed first market load does not poison the exchange: the next request builds a fresh instance', async () => {
+    Object.assign(config, { offline: false }); stubFetch({});
+    let built = 0;
+    cx._setCcxtFactoryForTests(async (id) => {
+      const n = ++built; const ex = fakeExchange(id); let loading: Promise<Record<string, unknown>> | null = null;
+      // Like CCXT: an instance keeps its first loadMarkets() promise, so a rejected one is returned on every later call.
+      ex.loadMarkets = () => (loading ??= n === 1 ? Promise.reject(new Error('network down'))
+        : Promise.resolve({ 'BTC/USDT': {} }).then((m) => { ex.markets = m; return m; }));
+      return ex;
+    });
+    await expect(cx.ccxtMarkets('kraken')).rejects.toThrow(/network down/);
+    await expect(cx.ccxtMarkets('kraken')).resolves.toMatchObject({ data: { count: 1 } }); // was: 'network down' until restart
+    expect(built).toBe(2);
+    await cx.ccxtMarkets('kraken');
+    expect(built).toBe(2); // a working instance is reused
+  });
   it('refuses an exchange instance that carries any credential', async () => {
     cx._setCcxtFactoryForTests(async (id) => fakeExchange(id, { apiKey: 'k' }));
     await expect(cx.ccxtMarkets('okx')).rejects.toThrow(/credential \(apiKey\)/);

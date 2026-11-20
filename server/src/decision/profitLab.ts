@@ -62,10 +62,12 @@ export function scenarioTable(p: PlanInput): ScenarioReport {
   const perSideBps = Math.max(spreadBps / 2, slippageBps);
   const friction = (price: number, mult = 1) => price * ((perSideBps * mult) / 1e4);
   const fee = (price: number) => price * p.feeRate;
+  const rawNet = new Map<ScenarioId, number>(); // unrounded net per unit, for ranking (CodeRabbit #45)
   const make = (id: ScenarioId, description: string, exitPrice: number, slipMult = 1): Scenario => {
     const grossPerUnit = exitPrice - p.entry;
     const costsPerUnit = fee(p.entry) + fee(exitPrice) + friction(p.entry) + friction(exitPrice, slipMult);
     const netPerUnit = grossPerUnit - costsPerUnit;
+    rawNet.set(id, netPerUnit);
     return { id, description, exitPrice: r4(exitPrice), grossPerUnit: r4(grossPerUnit), costsPerUnit: r4(costsPerUnit), netPerUnit: r4(netPerUnit),
       netR: r4(netPerUnit / riskPerUnit), netUsd: qty === null ? null : r2(netPerUnit * qty) };
   };
@@ -86,7 +88,7 @@ export function scenarioTable(p: PlanInput): ScenarioReport {
   // Break-even exit: net = 0  ->  x*(1 - feeRate - f) = entry*(1 + feeRate + f), f = per-side friction fraction.
   const f = perSideBps / 1e4;
   const breakEvenExit = (p.entry * (1 + p.feeRate + f)) / (1 - p.feeRate - f);
-  const stop = scenarios.find((s) => s.id === 'STOP_FILLED')!; const worst = scenarios.reduce((a, b) => (b.netPerUnit < a.netPerUnit ? b : a));
+  const stop = scenarios.find((s) => s.id === 'STOP_FILLED')!; const worst = scenarios.reduce((a, b) => (rawNet.get(b.id)! < rawNet.get(a.id)! ? b : a));
   return { kind: 'HYPOTHETICAL', valid: true, invalidReason: null, riskPerUnit: r4(riskPerUnit),
     costAssumptions: { feeRatePerSide: p.feeRate, spreadBps, slippageBps, note: 'Fees on both sides; per fill the larger of half the spread or the measured impact (impact is measured from the mid, so it already includes half the spread); stress scenarios multiply that friction.' },
     scenarios, breakEvenExit: r4(breakEvenExit),

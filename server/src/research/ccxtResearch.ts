@@ -29,6 +29,8 @@ export interface CcxtLike {
   handleErrors?: (...args: unknown[]) => unknown;
   setSandboxMode: (on: boolean) => void;
   loadMarkets: () => Promise<Record<string, unknown>>;
+  /** Set by CCXT after a successful loadMarkets(). */
+  markets?: Record<string, unknown>;
   fetchTicker: (symbol: string) => Promise<unknown>;
   fetchOrderBook: (symbol: string, limit?: number) => Promise<unknown>;
   fetchOHLCV: (symbol: string, timeframe?: string, since?: number, limit?: number) => Promise<unknown>;
@@ -96,10 +98,11 @@ function installTransport(ex: CcxtLike, id: CcxtExchangeId) {
   };
 }
 
+const cacheKey = (id: string) => `${id}:${sandboxMode() ? 'sandbox' : 'live-data'}`;
 async function exchange(id: string): Promise<CcxtLike> {
   if (!(CCXT_EXCHANGES as readonly string[]).includes(id)) throw new CcxtResearchError(`exchange not allow-listed: ${id}`);
   const eid = id as CcxtExchangeId;
-  const key = `${eid}:${sandboxMode() ? 'sandbox' : 'live-data'}`;
+  const key = cacheKey(eid);
   let p = cache.get(key);
   if (!p) {
     p = (async () => {
@@ -134,20 +137,34 @@ export function ccxtOverview() {
     return { id, provider: providerId(id), status: h?.status ?? 'IDLE', lastOkAt: h?.lastOkAt ?? null, lastError: h?.lastError ?? null };
   }) };
 }
+/**
+ * Runs one research call. CCXT keeps a rejected initial `loadMarkets()` promise, so if a call fails before markets ever
+ * loaded, the cached instance is dropped and the next request builds a fresh one; a working instance is reused
+ * (CodeRabbit #45).
+ */
+async function withExchange<T>(id: string, fn: (ex: CcxtLike) => Promise<T>): Promise<T> {
+  const ex = await exchange(id); const key = cacheKey(id); const entry = cache.get(key);
+  try { return await fn(ex); }
+  catch (e) {
+    const loaded = !!ex.markets && Object.keys(ex.markets).length > 0;
+    if (!loaded && cache.get(key) === entry) cache.delete(key); // never drop a newer instance another request built
+    throw e;
+  }
+}
 export async function ccxtMarkets(id: string, limit = 50) {
-  const ex = await exchange(id); const markets = await ex.loadMarkets();
+  return withExchange(id, async (ex) => { const markets = await ex.loadMarkets();
   const symbols = Object.keys(markets).sort();
-  return envelope(ex.id as CcxtExchangeId, { count: symbols.length, symbols: symbols.slice(0, Math.min(Math.max(limit, 1), 500)) });
+  return envelope(ex.id as CcxtExchangeId, { count: symbols.length, symbols: symbols.slice(0, Math.min(Math.max(limit, 1), 500)) }); });
 }
 export async function ccxtTicker(id: string, symbol: string) {
-  const ex = await exchange(id); return envelope(ex.id as CcxtExchangeId, await ex.fetchTicker(symbolOf(symbol)));
+  const s = symbolOf(symbol); return withExchange(id, async (ex) => envelope(ex.id as CcxtExchangeId, await ex.fetchTicker(s)));
 }
 export async function ccxtOrderBook(id: string, symbol: string, limit = 20) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new CcxtResearchError('limit must be 1..100');
-  const ex = await exchange(id); return envelope(ex.id as CcxtExchangeId, await ex.fetchOrderBook(symbolOf(symbol), limit));
+  const s = symbolOf(symbol); return withExchange(id, async (ex) => envelope(ex.id as CcxtExchangeId, await ex.fetchOrderBook(s, limit)));
 }
 export async function ccxtCandles(id: string, symbol: string, timeframe: string = '1h', limit = 100) {
   if (!(TIMEFRAMES as readonly string[]).includes(timeframe)) throw new CcxtResearchError(`timeframe must be one of ${TIMEFRAMES.join(', ')}`);
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new CcxtResearchError('limit must be 1..1000');
-  const ex = await exchange(id); return envelope(ex.id as CcxtExchangeId, await ex.fetchOHLCV(symbolOf(symbol), timeframe, undefined, limit));
+  const s = symbolOf(symbol); return withExchange(id, async (ex) => envelope(ex.id as CcxtExchangeId, await ex.fetchOHLCV(s, timeframe, undefined, limit)));
 }

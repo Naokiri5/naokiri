@@ -43,7 +43,12 @@ function start() {
   function onExit(code, signal) {
     if (handled) return; handled = true;
     child = null; const upMs = Date.now() - startedAt;
-    if (stopping) { log(`stopped (${signal ?? code})`); process.exit(0); }
+    if (stopping) {
+      // The server exits 1 when a lane fails to drain; the service manager must see that, not a clean stop (CodeRabbit #45).
+      const clean = code === 0 || (code === null && (signal === 'SIGTERM' || signal === 'SIGINT'));
+      log(clean ? `stopped (${signal ?? code})` : `stopped, but the server did not shut down cleanly (code ${code}, signal ${signal})`);
+      process.exit(clean ? 0 : 1);
+    }
     if (code === 0) { log('exited cleanly; supervision ends'); process.exit(0); }
     const now = Date.now(); crashes.push(now); while (crashes.length && now - crashes[0] > windowMs) crashes.shift();
     if (crashes.length > maxCrashes) { log(`crash loop: ${crashes.length} crashes within ${Math.round(windowMs / 1000)} s; giving up`); process.exit(1); }

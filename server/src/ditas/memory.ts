@@ -67,7 +67,13 @@ function externalize(s: ReturnType<typeof capture>, ts: number) {
 const isChunkRef = (v: unknown): v is { $chunks: string[] } => !!v && typeof v === 'object' && Array.isArray((v as any).$chunks) && (v as any).$chunks.every((h: unknown) => typeof h === 'string');
 /** Expand blob references (v2) for readers; v1 snapshots pass through unchanged. A missing blob is an integrity error. */
 export function expandSnapshot(payload: any) {
-  const load = (hash: string) => { const b = get<{ payload: string }>('SELECT payload FROM ditas_blobs WHERE hash=?', hash); if (!b) throw new Error(`DITAS blob missing: ${hash}`); return P<any>(b.payload); };
+  const load = (hash: string) => {
+    const b = get<{ payload: string }>('SELECT payload FROM ditas_blobs WHERE hash=?', hash);
+    if (!b) throw new Error(`DITAS blob missing: ${hash}`);
+    // Content-addressed: a changed payload under the same key is tampering, never evidence (CodeRabbit #45).
+    if (sha256(b.payload) !== hash) throw new Error(`DITAS blob content does not match its hash: ${hash}`);
+    return P<any>(b.payload);
+  };
   const blob = (ref: any) => (isBlobRef(ref) ? load(ref.$blob) : isChunkRef(ref) ? ref.$chunks.flatMap((h) => load(h)) : ref);
   if (!payload || payload.schemaVersion !== 'ditas.snapshot.v2') return payload;
   return { ...payload, candles: Object.fromEntries(Object.entries(payload.candles ?? {}).map(([iv, c]) => [iv, blob(c)])), book: blob(payload.book) };

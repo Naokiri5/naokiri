@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { all } from '../src/db/db.js';
@@ -15,17 +15,21 @@ describe('auth hardening (CodeRabbit #45)', () => {
   const rejectedRows = () => all("SELECT id FROM audit_log WHERE action='auth.setup.code_rejected'").length;
 
   it('CWE-770: wrong setup codes are rate-limited before each one appends an audit row (one client, then many)', async () => {
-    const codes: number[] = [];
-    for (let i = 0; i < 30; i++) codes.push((await setup('WRONG-CODE')).statusCode);
-    expect(codes.slice(0, 5)).toEqual([403, 403, 403, 403, 403]); // the rejection itself is unchanged
-    expect(codes.at(-1)).toBe(429);
-    expect(rejectedRows()).toBe(5); // was 30: one permanent row per attempt
-    // Spreading attempts over many addresses is bounded by the global failure budget.
-    for (let i = 0; i < 60; i++) await setup('WRONG-CODE', `203.0.113.${i + 1}`);
-    expect(rejectedRows()).toBeLessThanOrEqual(20);
-    // The right code still works for a client that is not locked out once the window passes (here: a fresh gate).
-    failureGate.reset();
-    expect((await app.inject({ method: 'POST', url: '/api/auth/setup', remoteAddress: '192.0.2.10', headers: { 'content-type': 'application/json' }, payload: ownerSetupPayload('a long enough passphrase') })).statusCode).toBe(200);
+    // A fixed clock keeps every attempt inside one failure window, however slowly the test runs.
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(Date.parse('2026-11-20T09:00:00.000Z'));
+    try {
+      const codes: number[] = [];
+      for (let i = 0; i < 30; i++) codes.push((await setup('WRONG-CODE')).statusCode);
+      expect(codes.slice(0, 5)).toEqual([403, 403, 403, 403, 403]); // the rejection itself is unchanged
+      expect(codes.at(-1)).toBe(429);
+      expect(rejectedRows()).toBe(5); // was 30: one permanent row per attempt
+      // Spreading attempts over many addresses is bounded by the global failure budget.
+      for (let i = 0; i < 60; i++) await setup('WRONG-CODE', `203.0.113.${i + 1}`);
+      expect(rejectedRows()).toBeLessThanOrEqual(20);
+      // The right code still works for a client that is not locked out once the window passes (here: a fresh gate).
+      failureGate.reset();
+      expect((await app.inject({ method: 'POST', url: '/api/auth/setup', remoteAddress: '192.0.2.10', headers: { 'content-type': 'application/json' }, payload: ownerSetupPayload('a long enough passphrase') })).statusCode).toBe(200);
+    } finally { vi.useRealTimers(); }
   });
 
   it('CWE-863: a loopback request without forwarding headers no longer skips first-authenticator proof', async () => {

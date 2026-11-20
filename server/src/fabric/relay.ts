@@ -61,7 +61,10 @@ export function relayOnce(opts: { nowMs?: number; batch?: number; maxAttempts?: 
 function storedEvent(r: Row): FabricEvent | string {
   let raw: unknown;
   try { raw = JSON.parse(r.envelope); } catch { return 'stored envelope is not valid JSON'; }
-  const v = validateEvent(raw);
+  let v: ReturnType<typeof validateEvent>;
+  // e.g. a payload number like 1e400 parses to Infinity and canonicalization throws: that row must dead-letter, not
+  // stop the relay before `kill` runs and block every later event (CodeRabbit #45).
+  try { v = validateEvent(raw); } catch (e: any) { return `stored envelope cannot be validated: ${String(e?.message ?? e).slice(0, 200)}`; }
   if (!v.ok) return `stored envelope no longer validates: ${v.errors.join('; ').slice(0, 200)}`;
   const e = raw as FabricEvent;
   if (e.eventId !== r.event_id || e.eventType !== r.event_type) return 'stored envelope does not match its outbox row';

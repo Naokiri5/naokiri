@@ -10,6 +10,7 @@ import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '.
 import { createBackup } from '../ops/backup.js';
 import { assessAll, autoContain, autoPauseEnabled, startGuardian } from '../security/guardian/response.js';
 import { lastEvidencePass } from '../security/guardian/events.js';
+import { endStream } from './sse.js';
 import { posture, recentGuardianActions } from '../security/guardian/posture.js';
 import { ccxtRoutes } from '../research/ccxtRoutes.js';
 import { defiRoutes } from '../research/defiRoutes.js';
@@ -311,7 +312,7 @@ export async function routes(app: FastifyInstance) {
     streams++;
     reply.raw.write(': connected\n\n');
     let closed = false; let backlog = 0;
-    const close = () => { if (closed) return; closed = true; streams--; openStreams.delete(close); bus.off('*', send); clearInterval(ka); reply.raw.end(); };
+    const close = () => { if (closed) return; closed = true; streams--; openStreams.delete(close); bus.off('*', send); clearInterval(ka); endStream(reply.raw); };
     openStreams.add(close);
     const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
     const send = (e: { topic: string; payload: unknown }) => write(`event: ${e.topic}\ndata: ${JSON.stringify(e.payload)}\n\n`);

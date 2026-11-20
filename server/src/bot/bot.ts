@@ -45,7 +45,10 @@ function holdEngine(): boolean {
   // Takeover checks run after EVERY acquisition, decided from the persisted lease (CodeRabbit PR #12) — not from the
   // cached role, which is stale when this process paused as LEADER and later re-acquired an expired lease.
   try { if (ok && botStatus.running && (acquired || botStatus.role !== 'LEADER') && !takeoverAllowed()) return false; }
-  catch (e: any) { botStatus.lastError = `takeover check: ${e.message}`; return false; }
+  catch (e: any) {
+    // Not leader, and not a cached LEADER either: the next renewal must pass the integrity check before any work.
+    botStatus.lastError = `takeover check: ${e.message}`; if (botStatus.running) botStatus.role = 'STANDBY'; return false;
+  }
   const role = ok ? 'LEADER' : 'STANDBY';
   if (botStatus.running && role !== botStatus.role) {
     try {
