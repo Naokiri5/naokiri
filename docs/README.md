@@ -50,7 +50,7 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 ## Engineering
 | Document | Contents |
 |---|---|
-| [`engineering/MIA_5_0_PDF_TYPESCRIPT_MANUAL_INTEGRATION_REVIEW.md`](engineering/MIA_5_0_PDF_TYPESCRIPT_MANUAL_INTEGRATION_REVIEW.md) | **MIA 5.0 uploaded TypeScript PDF:** complete unedited source copies (49 pages), manual MIA-CORE-01–06 feature/duplicate audit, critical safety findings, and documentation-first integration plan |
+| [`engineering/MIA_5_0_PDF_TYPESCRIPT_MANUAL_INTEGRATION_REVIEW.md`](engineering/MIA_5_0_PDF_TYPESCRIPT_MANUAL_INTEGRATION_REVIEW.md) | **Single MIA 5.0 PDF enhancement master document:** complete source-preservation links, MIA-CORE-01–06 manual audit, 15 safety findings, 17 concrete integration tickets cross-mapped to eight priorities, PAPER/LIVE mode boundaries and review/test gates |
 | [`engineering/MIA_OMEGA_FOUR_LAYER_TRACEABILITY.md`](engineering/MIA_OMEGA_FOUR_LAYER_TRACEABILITY.md) | **Unified eight-priority PAPER/LIVE development plan:** reviewed code vs open PRs, canonical module owners, missing integrations, safety gates, tests and owner-review sequence (docs-only) |
 | [`engineering/CLAUDE_CODE_WORKFLOW.md`](engineering/CLAUDE_CODE_WORKFLOW.md) | AI-assisted development: agents, skills, review workflow |
 | [`engineering/audit-files.json`](engineering/audit-files.json) | machine-readable list of every tracked file and its review status (`node scripts/audit-inventory.mjs`) |
