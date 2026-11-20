@@ -19,19 +19,22 @@ export interface TrackedOrderEvidence {
 export interface VenueOrderEvidence extends TrackedOrderEvidence {
   source: 'PRIVATE_WS' | 'REST_RECOVERY';
   eventId: string;
+  /** Venue time of the observation. A fresh receipt alone does not refresh old evidence. */
   exchangeEventAtMs: number;
   receivedAtMs: number;
 }
 export interface ReconciliationOptions {
   nowMs: number;
   maxEvidenceAgeMs: number;
+  /** Precision lookup keys use `venue:accountId:instrumentId` for compatibility. */
   quantityDecimalsByInstrument: Readonly<Record<string, number>>;
   coverage: 'PARTIAL' | 'OPEN_ORDERS_ONLY' | 'COMPLETE_ORDERS_AND_FILLS';
 }
 export type ReconciliationReasonCode =
   | 'INCOMPLETE_COVERAGE' | 'INVALID_CONFIGURATION' | 'INVALID_ORDER_IDENTITY'
   | 'INVALID_QUANTITY' | 'INVALID_STATE' | 'EVIDENCE_STALE_OR_FUTURE'
-  | 'DUPLICATE_EVENT_CONFLICT' | 'DUPLICATE_LOCAL_ORDER' | 'UNKNOWN_VENUE_ORDER'
+  | 'DUPLICATE_EVENT_CONFLICT' | 'CONFLICTING_ORDER_OBSERVATIONS'
+  | 'DUPLICATE_LOCAL_ORDER' | 'UNKNOWN_VENUE_ORDER'
   | 'MISSING_VENUE_ORDER' | 'EXCHANGE_ID_CONFLICT' | 'REQUESTED_QTY_MISMATCH'
   | 'CUMULATIVE_FILL_MISMATCH' | 'VENUE_STATE_MISMATCH';
 export interface ReconciliationFinding {
@@ -50,10 +53,12 @@ const STATES = new Set<VenueOrderState>([
   'ACK', 'PARTIAL_FILL', 'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED',
 ]);
 const ID = /^[A-Za-z0-9_.:/-]{1,128}$/;
-const instrumentKey = (o: TrackedOrderEvidence) =>
+const precisionKey = (o: TrackedOrderEvidence) =>
   o.venue + ':' + o.accountId + ':' + o.instrumentId;
-const orderKey = (o: TrackedOrderEvidence) =>
-  instrumentKey(o) + ':' + o.clientOrderId;
+function orderKey(o: TrackedOrderEvidence): string | undefined {
+  const fields = [o.venue, o.accountId, o.instrumentId, o.clientOrderId];
+  if (fields.every(id => typeof id === 'string' && ID.test(id))) return JSON.stringify(fields);
+}
 /** Exact decimal conversion: no JS floating point for quantity comparison. */
 export function exactQuantityUnits(value: string, decimals: number): bigint | null {
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) return null;
@@ -65,12 +70,12 @@ export function exactQuantityUnits(value: string, decimals: number): bigint | nu
   return BigInt(parts[0]) * 10n ** BigInt(decimals) +
     BigInt((frac + '0'.repeat(decimals)).slice(0, decimals) || '0');
 }
-function equivalent(a: VenueOrderEvidence, b: VenueOrderEvidence) {
+function equivalent(a: VenueOrderEvidence, b: VenueOrderEvidence, scale: number) {
   return a.venue === b.venue && a.accountId === b.accountId &&
     a.instrumentId === b.instrumentId && a.clientOrderId === b.clientOrderId &&
     a.exchangeOrderId === b.exchangeOrderId && a.state === b.state &&
-    a.requestedQty === b.requestedQty &&
-    a.cumulativeFilledQty === b.cumulativeFilledQty &&
+    exactQuantityUnits(a.requestedQty, scale) === exactQuantityUnits(b.requestedQty, scale) &&
+    exactQuantityUnits(a.cumulativeFilledQty, scale) === exactQuantityUnits(b.cumulativeFilledQty, scale) &&
     a.exchangeEventAtMs === b.exchangeEventAtMs;
 }
 /**
@@ -92,58 +97,70 @@ export function assessVenueReconciliation(
     flag('INVALID_CONFIGURATION', 'Invalid clock or evidence age limit');
   const locals = new Map<string, TrackedOrderEvidence>();
   const events = new Map<string, VenueOrderEvidence>();
-  const newest = new Map<string, VenueOrderEvidence>();
-  const valid = (o: TrackedOrderEvidence, kind: string) => {
-    const key = orderKey(o);
-    if (![o.venue, o.accountId, o.instrumentId, o.clientOrderId].every(
-      s => typeof s === 'string' && ID.test(s)
-    )) { flag('INVALID_ORDER_IDENTITY', kind + ' has invalid identity'); return false; }
+  const newest = new Map<string, { observation: VenueOrderEvidence; conflicting: boolean }>();
+  const valid = (o: TrackedOrderEvidence, kind: string, key: string | undefined): key is string => {
+    if (key === undefined) { flag('INVALID_ORDER_IDENTITY', kind + ' has invalid identity'); return false; }
     if (!STATES.has(o.state)) flag('INVALID_STATE', kind + ' has unknown status', key);
-    const scale = options.quantityDecimalsByInstrument[instrumentKey(o)];
+    const scale = options.quantityDecimalsByInstrument[precisionKey(o)];
     const qty = exactQuantityUnits(o.requestedQty, scale);
     const fill = exactQuantityUnits(o.cumulativeFilledQty, scale);
-    if (qty === null || qty <= 0n || fill === null || fill < 0n || fill > qty)
+    if (qty === null || qty <= 0n || fill === null || fill < 0n || fill > qty) {
       flag('INVALID_QUANTITY', kind + ' has invalid quantity', key);
-    return STATES.has(o.state) && qty !== null && qty > 0n && fill !== null && fill <= qty;
+      return false;
+    }
+    if ((o.state === 'FILLED' && fill !== qty) ||
+        (o.state === 'PARTIAL_FILL' && (fill === 0n || fill === qty))) {
+      flag('INVALID_STATE', kind + ' status conflicts with its cumulative filled quantity', key);
+      return false;
+    }
+    return STATES.has(o.state);
   };
   for (const o of local) {
-    if (!valid(o, 'LOCAL')) continue;
     const key = orderKey(o);
+    if (!valid(o, 'LOCAL', key)) continue;
     if (locals.has(key)) flag('DUPLICATE_LOCAL_ORDER', 'Duplicate client order', key);
     else locals.set(key, o);
   }
   for (const o of remote) {
-    const good = valid(o, 'REMOTE');
     const key = orderKey(o);
-    if (typeof o.eventId !== 'string' || !ID.test(o.eventId))
+    const good = valid(o, 'REMOTE', key);
+    const validEventId = typeof o.eventId === 'string' && ID.test(o.eventId);
+    if (!validEventId)
       flag('INVALID_ORDER_IDENTITY', 'Missing/invalid remote event ID', key);
     if (!Number.isSafeInteger(o.receivedAtMs) ||
         !Number.isSafeInteger(o.exchangeEventAtMs) ||
+        o.exchangeEventAtMs < 0 ||
         o.exchangeEventAtMs > o.receivedAtMs ||
         o.receivedAtMs > options.nowMs ||
-        options.nowMs - o.receivedAtMs > options.maxEvidenceAgeMs)
+        options.nowMs - o.exchangeEventAtMs > options.maxEvidenceAgeMs)
       flag('EVIDENCE_STALE_OR_FUTURE', 'Bad remote evidence timestamp', key);
-    if (!good || typeof o.eventId !== 'string' || !ID.test(o.eventId)) continue;
-    const eid = o.venue + ':' + o.accountId + ':' + o.eventId;
+    if (!good || !validEventId) continue;
+    const scale = options.quantityDecimalsByInstrument[precisionKey(o)];
+    const eid = JSON.stringify([o.venue, o.accountId, o.eventId]);
     const previous = events.get(eid);
-    if (previous && !equivalent(previous, o))
+    if (previous && !equivalent(previous, o, scale))
       flag('DUPLICATE_EVENT_CONFLICT', 'Event ID has conflicting values', key);
     else events.set(eid, o);
     const prev = newest.get(key);
-    if (!prev || o.exchangeEventAtMs > prev.exchangeEventAtMs ||
-        (o.exchangeEventAtMs === prev.exchangeEventAtMs &&
-         o.receivedAtMs > prev.receivedAtMs)) newest.set(key, o);
+    if (!prev || o.exchangeEventAtMs > prev.observation.exchangeEventAtMs) {
+      newest.set(key, { observation: o, conflicting: false });
+    } else if (o.exchangeEventAtMs === prev.observation.exchangeEventAtMs && !equivalent(prev.observation, o, scale)) {
+      // A later receipt cannot settle conflicting evidence with the same venue timestamp.
+      prev.conflicting = true;
+    }
   }
-  for (const [key, observation] of newest) {
+  for (const [key, { observation, conflicting }] of newest) {
+    if (conflicting)
+      flag('CONFLICTING_ORDER_OBSERVATIONS', 'Latest venue observations share a timestamp but report different order values', key);
     const tracked = locals.get(key);
     if (!tracked) {
       flag('UNKNOWN_VENUE_ORDER', 'Exchange order is not tracked locally', key);
       continue;
     }
-    if (tracked.exchangeOrderId && observation.exchangeOrderId &&
-        tracked.exchangeOrderId !== observation.exchangeOrderId)
-      flag('EXCHANGE_ID_CONFLICT', 'Exchange order identifiers differ', key);
-    const decimals = options.quantityDecimalsByInstrument[instrumentKey(observation)];
+    if (conflicting) continue;
+    if (tracked.exchangeOrderId !== null && tracked.exchangeOrderId !== observation.exchangeOrderId)
+      flag('EXCHANGE_ID_CONFLICT', 'Exchange evidence does not confirm the known order identifier', key);
+    const decimals = options.quantityDecimalsByInstrument[precisionKey(observation)];
     if (exactQuantityUnits(tracked.requestedQty, decimals) !==
         exactQuantityUnits(observation.requestedQty, decimals))
       flag('REQUESTED_QTY_MISMATCH', 'Requested quantities differ', key);
