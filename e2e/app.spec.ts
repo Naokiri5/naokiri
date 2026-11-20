@@ -176,6 +176,19 @@ test('Intelligence quarantine release refuses a wrong passphrase, then succeeds'
   await expect(passphrase).toHaveCount(0);
 });
 
+test('Guardian alerts: switching on needs only a session; switching off refuses a wrong passphrase, then succeeds', async () => {
+  await page.goto('/security');
+  const box = page.getByLabel('Guardian alerts');
+  await expect(box.getByText('Alerts for serious events')).toBeVisible();
+  await box.getByRole('button', { name: 'Turn alerts on' }).click();
+  await expect(box.getByText('ON', { exact: true })).toBeVisible();
+  const passphrase = box.getByPlaceholder('Owner passphrase (step-up)'); const off = box.getByRole('button', { name: 'Turn alerts off' });
+  await refuseStepUp(off, passphrase, '/api/security/guardian/alerts');
+  expect((await (await page.request.get('/api/security/guardian')).json()).alerts.telegram).toBe(true);
+  await passphrase.fill(PW); await off.click();
+  await expect(box.getByRole('button', { name: 'Turn alerts on' })).toBeVisible();
+  expect((await (await page.request.get('/api/security/guardian')).json()).alerts.telegram).toBe(false);
+});
 test('trading history CSV export downloads', async () => {
   await page.goto('/history');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Export orders CSV' }).click()]);

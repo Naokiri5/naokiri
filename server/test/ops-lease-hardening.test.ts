@@ -12,6 +12,7 @@ import { readiness, _resetWatchdog } from '../src/ops/readiness.js';
 import { botStatus, stopBot, ENGINE_LEASE, engineLeaseTtlMs, _test } from '../src/bot/bot.js';
 import * as lab from '../src/lab/lab.js';
 import * as oms from '../src/exec/oms.js';
+import * as integrity from '../src/ops/integrity.js';
 import type { DecisionReport } from '../src/decision/engine.js';
 
 // Network lanes are replaced; everything that writes (OMS, ledger, lease, journal) is the real code.
@@ -21,10 +22,6 @@ vi.mock('../src/whales/prints.js', async (orig) => ({ ...(await orig<object>()),
 vi.mock('../src/news/news.js', async (orig) => ({ ...(await orig<object>()), refreshNews: async () => 0 }));
 vi.mock('../src/lab/lab.js', async (orig) => { const real = await orig<typeof import('../src/lab/lab.js')>(); return { ...real, checkStrategyHealth: vi.fn(real.checkStrategyHealth) }; });
 vi.mock('../src/exec/oms.js', async (orig) => { const real = await orig<typeof import('../src/exec/oms.js')>(); return { ...real, monitorPositions: vi.fn(real.monitorPositions), submitEntry: vi.fn(real.submitEntry) }; });
-// Pass-through, except that a test can make the takeover integrity check throw once (e.g. a busy or failing database).
-const integrity = vi.hoisted(() => ({ throwOnce: false }));
-vi.mock('../src/ops/integrity.js', async (orig) => { const real = await orig<typeof import('../src/ops/integrity.js')>(); return { ...real, takeoverIntegrity: () => { if (integrity.throwOnce) { integrity.throwOnce = false; throw new Error('database is locked'); } return real.takeoverIntegrity(); } }; });
-
 function report(id: string, last: number): DecisionReport {
   const cid = `cand_${Math.random().toString(36).slice(2)}`;
   return { id: `dec_${cid}`, candidateId: cid, traceId: 'tr', asset: id.split(':')[2], instrumentId: id, market: 'crypto', venue: 'binance', strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',
@@ -105,15 +102,23 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(_test.holdEngine()).toBe(false); expect(botStatus.lastError).toMatch(/schema: v999/);
   });
 
-  it('a takeover check that throws drops a stale cached LEADER to STANDBY, so the next renewal still runs the check', () => {
+  it('a takeover check that throws stops a stale cached leader and rechecks integrity after restart', () => {
     botStatus.role = 'LEADER'; run('DELETE FROM runtime_leases'); // paused as LEADER; the persisted lease has since expired
-    integrity.throwOnce = true;
-    expect(_test.holdEngine()).toBe(false);
-    expect(botStatus.lastError).toMatch(/^takeover check: database is locked/);
-    expect(botStatus.role).toBe('STANDBY'); // was LEADER: the next renewal skipped the integrity check (CodeRabbit #45)
-    run("UPDATE audit_log SET hash='tampered' WHERE id=(SELECT MIN(id) FROM audit_log)");
-    expect(_test.holdEngine()).toBe(false); // was true: work resumed on a tampered database
-    expect(botStatus.lastError).toMatch(/^integrity: audit chain: broken at entry/);
+    const check = vi.spyOn(integrity, 'takeoverIntegrity').mockImplementationOnce(() => { throw new Error('database is locked'); });
+    try {
+      expect(_test.holdEngine()).toBe(false);
+      expect(botStatus.lastError).toMatch(/takeover check: database is locked/);
+      expect(botStatus).toMatchObject({ running: false, role: 'STOPPED' });
+      expect(_test.holdEngine()).toBe(false);
+      expect(check).toHaveBeenCalledTimes(1);
+
+      run("UPDATE audit_log SET hash='tampered' WHERE id=(SELECT MIN(id) FROM audit_log)");
+      _test.resetTakeoverRefusal();
+      botStatus.running = true;
+      expect(_test.holdEngine()).toBe(false);
+      expect(check).toHaveBeenCalledTimes(2);
+      expect(botStatus.lastError).toMatch(/integrity: audit chain: broken at entry/);
+    } finally { check.mockRestore(); }
   });
 
   it('a refused takeover stays refused: the process cannot re-acquire the lease or trade from an in-flight scan', () => {
@@ -152,5 +157,36 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(_test.holdEngine()).toBe(true); expect(botStatus.role).toBe('LEADER');
     run("UPDATE audit_log SET hash='tampered' WHERE id=(SELECT MIN(id) FROM audit_log)");
     expect(_test.holdEngine()).toBe(true); expect(botStatus.role).toBe('LEADER');
+  });
+
+  it.each([false, true])('a thrown integrity check latches refusal until restart (release fails: %s)', (releaseFails) => {
+    expect(_test.holdEngine()).toBe(true);
+    run('UPDATE runtime_leases SET expires_at=0 WHERE name=?', ENGINE_LEASE);
+    if (releaseFails) run(`CREATE TEMP TRIGGER reject_lease_release BEFORE DELETE ON runtime_leases
+      BEGIN SELECT RAISE(ABORT, 'fixture lease release failure'); END`);
+    const check = vi.spyOn(integrity, 'takeoverIntegrity');
+    check.mockImplementationOnce(() => { throw new Error('fixture integrity read failed'); });
+    try {
+      expect(_test.holdEngine()).toBe(false);
+      expect(botStatus).toMatchObject({ running: false, role: 'STOPPED' });
+      expect(botStatus.lastError).toContain('fixture integrity read failed');
+      expect(currentLease(ENGINE_LEASE)?.holder ?? null).toBe(releaseFails ? botStatus.instanceId : null);
+      const retained = currentLease(ENGINE_LEASE);
+      _test.onDecision(report(id, last));
+      expect(oms.submitEntry).not.toHaveBeenCalled();
+      expect(currentLease(ENGINE_LEASE)).toEqual(retained);
+      expect(check).toHaveBeenCalledTimes(1);
+
+      // Simulate an owner restart without scheduling timers or reaching external providers.
+      _test.resetTakeoverRefusal();
+      botStatus.running = true;
+      expect(_test.holdEngine()).toBe(true);
+      expect(check).toHaveBeenCalledTimes(2);
+      expect(botStatus.role).toBe('LEADER');
+      _test.onDecision(report(id, last));
+      expect(oms.submitEntry).toHaveBeenCalledTimes(1);
+    } finally {
+      check.mockRestore();
+    }
   });
 });

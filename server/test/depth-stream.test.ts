@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { BookSync, parseDepthEvent, startDepthStream, type DepthEvent, type StreamBook } from '../src/market/depthStream.js';
 
 /** Blueprint milestone 3: sequence-checked streaming books (Binance diff-depth algorithm), fully offline. */
@@ -28,6 +28,25 @@ describe('BookSync (Binance diff-depth synchronization)', () => {
     expect(s.onEvent(ev(9, 12))).toBe('APPLIED');   // first event overlaps the snapshot
     expect(s.onEvent(ev(14, 15))).toBe('SNAPSHOT_NEEDED'); // 13 missing
     expect(s.state).toBe('BUFFERING'); expect(s.book(1)).toBeNull(); expect(s.resyncs).toBe(1);
+  });
+  it('refuses an older snapshot after a gap until the discarded update is covered', () => {
+    const s = new BookSync('BTCUSDT');
+    s.onSnapshot(snap(100));
+    expect(s.onEvent(ev(103, 103))).toBe('SNAPSHOT_NEEDED');
+    expect(s.onSnapshot(snap(101))).toBe('SNAPSHOT_TOO_OLD');
+    expect(s.book(1)).toBeNull();
+    expect(s.onSnapshot(snap(103))).toBe('SYNCED');
+    expect(s.onEvent(ev(104, 104))).toBe('APPLIED');
+  });
+  it('retains the highest discarded update after replay fails and refuses a crossed replacement', () => {
+    const s = new BookSync('BTCUSDT');
+    s.onEvent(ev(101, 101));
+    s.onEvent(ev(103, 104));
+    expect(s.onSnapshot(snap(100))).toBe('WAITING');
+    expect(s.onSnapshot(snap(103))).toBe('SNAPSHOT_TOO_OLD');
+    expect(s.onSnapshot({ ...snap(104), bids: [[102, 1]] })).toBe('WAITING');
+    expect(s.book(1)).toBeNull();
+    expect(s.onSnapshot(snap(104))).toBe('SYNCED');
   });
   it('duplicates are ignored; the first event after a snapshot must overlap it', () => {
     const s = new BookSync('BTCUSDT'); s.onSnapshot(snap(10));
@@ -133,6 +152,35 @@ describe('stream retry, lag and stall safety (MA-10, MA-18)', () => {
       await tick();
       expect(published).toHaveLength(0);
     } finally { h.stop(); }
+  });
+  it('does not replay the previous socket generation when reconnecting', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const published: StreamBook[] = [];
+    const snapshots: ((value: ReturnType<typeof snap>) => void)[] = [];
+    const t = 50_000;
+    const h = startDepthStream(['BTCUSDT'], {
+      url: () => 'wss://test', snapshot: () => new Promise(resolve => snapshots.push(resolve)),
+      publish: (_symbol, book) => published.push(book), now: () => t, random: () => 0, WebSocketImpl: FakeWS as any,
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(0);
+      const old = FakeWS.last!;
+      old.send(upd(103, 103, t));
+      old.close();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(FakeWS.last).not.toBe(old);
+      snapshots.shift()!(snap(102, t)); // closed socket completion
+      snapshots.shift()!(snap(102, t)); // new socket needs a snapshot covering the abandoned delta
+      await vi.advanceTimersByTimeAsync(0);
+      expect(published).toHaveLength(0);
+      expect(h.status().synced).toBe(0);
+      snapshots.shift()!(snap(103, t));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(published.map(book => book.lastUpdateId)).toEqual([103]);
+    } finally {
+      h.stop();
+      vi.useRealTimers();
+    }
   });
   it('rejects malformed metadata and does not publish future or stale buffered events', async () => {
     const published: StreamBook[] = [];

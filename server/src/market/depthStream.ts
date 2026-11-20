@@ -56,20 +56,27 @@ export class BookSync {
   private asks = new Map<number, number>();
   constructor(readonly symbol: string, private readonly depth = 100) {}
 
+  /** A replacement socket must reconcile from a snapshot, without applying deltas from the old socket. */
+  disconnect() {
+    const highest = this.buffer.reduce((id, ev) => Math.max(id, ev.u), this.lastUpdateId);
+    this.gap(highest);
+  }
+
   /** Returns 'SNAPSHOT_NEEDED' when the caller must (re)fetch a REST snapshot. */
   onEvent(ev: DepthEvent): 'BUFFERED' | 'APPLIED' | 'IGNORED' | 'SNAPSHOT_NEEDED' {
     if (ev.s !== this.symbol) return 'IGNORED';
     if (this.state === 'BUFFERING') {
-      this.buffer.push(ev); if (this.buffer.length > MAX_BUFFER) this.buffer.shift();
+      this.buffer.push(ev);
+      if (this.buffer.length > MAX_BUFFER) this.requireSnapshotThrough(this.buffer.shift()!.u);
       return 'BUFFERED';
     }
     if (ev.u <= this.lastUpdateId) return 'IGNORED'; // duplicate / already applied
     // The discarded event is known to exist: only a snapshot through its `u` may resynchronize, so a lagging snapshot
     // cannot be published over the missing update (CodeRabbit #45).
-    if (!this.continues(ev)) return this.gapThrough(ev.u);
+    if (!this.continues(ev)) return this.gap(ev.u);
     // A book that becomes crossed or loses a whole side is not a valid book: resynchronize instead of sitting in
     // SYNCED while never publishing (CodeRabbit PR #18).
-    return this.apply(ev) && this.sane() ? 'APPLIED' : this.gapThrough(ev.u);
+    return this.apply(ev) && this.sane() ? 'APPLIED' : this.gap(ev.u);
   }
   /** A discarded update can only be recovered from a snapshot covering it. */
   requireSnapshotThrough(updateId: number): boolean {
@@ -83,17 +90,20 @@ export class BookSync {
     const L = s.lastUpdateId;
     if (L < this.requiredSnapshotId) return 'SNAPSHOT_TOO_OLD';
     const pending = this.buffer.filter((e) => e.u > L);
-    if (!pending.length) {
-      // Nothing newer buffered yet: start from the snapshot; the next event only has to overlap it.
-      this.load(s); this.state = 'SYNCED'; this.buffer = []; this.requiredSnapshotId = 0; return 'SYNCED';
-    }
-    if (pending[0].U > L + 1) return 'SNAPSHOT_TOO_OLD'; // events are missing between the snapshot and the buffer
-    this.load(s); this.state = 'SYNCED'; this.buffer = [];
+    if (pending[0] && pending[0].U > L + 1) return 'SNAPSHOT_TOO_OLD';
+    this.load(s);
+    // If replay fails, every buffered event will be discarded. A replacement must cover the whole discarded range.
+    const discard = () => {
+      this.gap(pending.reduce((highest, ev) => Math.max(highest, ev.u), L));
+      return 'WAITING' as const;
+    };
     for (const ev of pending) {
       if (ev.u <= this.lastUpdateId) continue;
-      if (!this.continues(ev) || !this.apply(ev)) { this.gap(); return 'WAITING'; }
+      if (!this.continues(ev) || !this.apply(ev)) return discard();
     }
-    if (!this.sane()) { this.gap(); return 'WAITING'; }
+    if (!this.sane()) return discard();
+    this.state = 'SYNCED';
+    this.buffer = [];
     this.requiredSnapshotId = 0;
     return 'SYNCED';
   }
@@ -140,11 +150,8 @@ export class BookSync {
   }
   /** Test/diagnostic: number of locally held levels per side. */
   levels() { return { bids: this.bids.size, asks: this.asks.size }; }
-  private gapThrough(updateId: number): 'SNAPSHOT_NEEDED' {
-    this.requiredSnapshotId = Math.max(this.requiredSnapshotId, updateId);
-    return this.gap();
-  }
-  private gap(): 'SNAPSHOT_NEEDED' {
+  private gap(discardedThrough = 0): 'SNAPSHOT_NEEDED' {
+    this.requiredSnapshotId = Math.max(this.requiredSnapshotId, discardedThrough);
     this.state = 'BUFFERING'; this.buffer = []; this.bids.clear(); this.asks.clear(); this.resyncs++;
     return 'SNAPSHOT_NEEDED';
   }
@@ -219,7 +226,6 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
   const connect = () => {
     if (stopped || !WS) return;
     generation++; inFlight.clear();
-    for (const s of syncs.values()) s.state = 'BUFFERING';
     const sock: WebSocket = new WS(deps.url(symbols)); ws = sock;
     sock.onopen = () => {
       if (stopped || ws !== sock) return;
@@ -254,7 +260,11 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
     sock.onclose = () => {
       if (ws !== sock) return;
       generation++;
-      status.connected = false; ws = null; for (const s of symbols) invalidate(s);
+      status.connected = false; ws = null;
+      for (const [symbol, sync] of syncs) {
+        sync.disconnect();
+        invalidate(symbol);
+      }
       if (stopped) return;
       status.reconnects++; const delay = Math.min(60_000, 1_000 * 2 ** attempt++) * (0.5 + rand() / 2);
       timer = setTimeout(connect, delay);

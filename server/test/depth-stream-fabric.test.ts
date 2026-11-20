@@ -85,11 +85,16 @@ describe('streaming books wired into the market fabric', () => {
   it('a sequence gap hands the symbol back to REST immediately (MA-18)', async () => {
     const { inst, last } = seedInstrument('STRM4USDT');
     Object.assign(config, { streaming: true, offline: false });
-    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({ lastUpdateId: 50, ts: Date.now(), bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]] }) });
+    let snapshotId = 50;
+    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any, snapshot: async () => ({ lastUpdateId: snapshotId, ts: Date.now(), bids: [[last * 0.999, 3]], asks: [[last * 1.001, 4]] }) });
     await tick(); await tick();
     expect(streamFresh(inst.id)).toBe(true);
+    snapshotId = 51;
     FakeWS.last!.send({ e: 'depthUpdate', E: Date.now(), s: 'STRM4USDT', U: 60, u: 61, b: [], a: [] }); // gap: 51..59 missing
     expect(streamFresh(inst.id)).toBe(false);
+    await tick(); await tick();
+    expect(streamFresh(inst.id)).toBe(false);
+    expect(market.deep.get(inst.id)!.book!.lastUpdateId).toBe(50);
   });
   it('a stream book that setBook rejects (older id) does not mark the symbol fresh (SAFE-03)', async () => {
     const { inst, last } = seedInstrument('STRM5USDT');

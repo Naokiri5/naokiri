@@ -1,4 +1,5 @@
 import { searchNews } from '../providers/googlenews.js';
+import { screenUntrusted } from '../security/guardian/injection.js';
 import { all, run, J, P } from '../db/db.js';
 import { sha256, escapeRegExp, safeHttpUrl } from '../core/util.js';
 import { market } from '../market/store.js';
@@ -49,6 +50,7 @@ export async function refreshNews() {
         id, it.ts, Date.now(), title, it.source, safeHttpUrl(it.link), q, c.impact, J({ assets, sentiment: c.sentiment, macro: c.macro }), c.credibility);
       if (Number(r.changes) > 0) {
         added++;
+        screenUntrusted('news', title, id); // a headline is data; instruction-like text is recorded for Guardian
         if (c.impact === 'HIGH' && Date.now() - it.ts < 3 * 3600_000) notify('WARNING', `Heads-up: ${title.slice(0, 120)}`, `${it.source} · ${c.macro ? 'macro event' : c.sentiment.toLowerCase()} · affected: ${assets.join(', ') || 'market-wide'}`, 'news');
       }
     }
