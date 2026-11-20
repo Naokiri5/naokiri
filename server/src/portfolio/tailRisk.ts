@@ -22,6 +22,7 @@ export interface TailRiskReport {
   confidence: 0.95 | 0.99;
   observations: number;
   varLoss: number | null;
+  /** Mean loss in the worst 5% or 1% of observations, prorating the cutoff observation. */
   expectedShortfallLoss: number | null;
   worstObservedLoss: number | null;
   maxObservedLossPctEquity: number | null;
@@ -104,10 +105,15 @@ export function historicalPortfolioTailRisk(
   }
   if (losses.length < minObservations) return result('UNAVAILABLE', 'INSUFFICIENT_HISTORY');
   const ranked = [...losses].sort((a, b) => a - b);
-  const firstTail = Math.max(0, Math.ceil(confidence * ranked.length) - 1);
-  const tail = ranked.slice(firstTail);
-  const varLoss = Math.max(0, ranked[firstTail]);
-  const es = Math.max(0, tail.reduce((sum, v) => sum + v, 0) / tail.length);
+  const varIndex = Math.max(0, Math.ceil(confidence * ranked.length) - 1);
+  const varLoss = Math.max(0, ranked[varIndex]);
+  // Work in hundredths of an observation so exact tail sizes never round up at the cutoff.
+  const tailHundredths = ranked.length * (confidence === 0.95 ? 5 : 1);
+  const tailCount = tailHundredths / 100;
+  const fullTailStart = ranked.length - Math.floor(tailCount);
+  const cutoffWeight = (tailHundredths % 100) / tailHundredths;
+  const fullTailMean = ranked.slice(fullTailStart).reduce((sum, loss) => sum + loss / tailCount, 0);
+  const es = Math.max(0, fullTailMean + ranked[fullTailStart - 1] * cutoffWeight);
   const worst = Math.max(0, ranked[ranked.length - 1]);
   const hhi = exposures.reduce((sum, e) => sum + (e.value / investedValue) ** 2, 0);
   return result('ESTIMATED', null, {

@@ -19,6 +19,24 @@ describe('historicalPortfolioTailRisk: readonly and fail-closed estimates', () =
     expect(result.expectedShortfallLoss!).toBeGreaterThanOrEqual(result.varLoss!);
     expect(result.effectiveHoldings).toBe(1);
   });
+  it('averages exactly the worst five losses at 95% with 100 observations', () => {
+    const prices = [...Array<number>(100).fill(128), 64];
+    const result = historicalPortfolioTailRisk([mk('BTCUSDT', 100, prices)], options);
+    expect(result).toMatchObject({ status: 'ESTIMATED', observations: 100, varLoss: 0, worstObservedLoss: 50 });
+    expect(result.expectedShortfallLoss).toBe(50 / 5);
+  });
+  it('weights the cutoff loss by half at 95% with 90 observations', () => {
+    const prices = [...Array<number>(86).fill(128), 112, 56, 28, 14, 7];
+    const result = historicalPortfolioTailRisk([mk('BTCUSDT', 100, prices)], options);
+    expect(result).toMatchObject({ status: 'ESTIMATED', observations: 90, varLoss: 12.5, worstObservedLoss: 50 });
+    expect(result.expectedShortfallLoss).toBeCloseTo((4 * 50 + 0.5 * 12.5) / 4.5, 12);
+  });
+  it('uses only the worst loss at 99% with 100 observations', () => {
+    const prices = [...Array<number>(99).fill(128), 112, 56];
+    const result = historicalPortfolioTailRisk([mk('BTCUSDT', 100, prices)], { ...options, confidence: 0.99 });
+    expect(result).toMatchObject({ status: 'ESTIMATED', observations: 100, varLoss: 12.5, worstObservedLoss: 50 });
+    expect(result.expectedShortfallLoss).toBe(50);
+  });
   it('does not invent a number on insufficient data', () => {
     const result = historicalPortfolioTailRisk([mk('BTCUSDT', 1000, priceSeries.slice(0, 60))], options);
     expect(result).toMatchObject({ status: 'UNAVAILABLE', reason: 'INSUFFICIENT_HISTORY', varLoss: null });
