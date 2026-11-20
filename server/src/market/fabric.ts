@@ -13,13 +13,18 @@ import { timed } from '../core/latency.js';
 import { config } from '../config.js';
 import { openPositions } from '../portfolio/ledger.js';
 import type { Book } from '../providers/binance.js';
+import { startDepthStream, binanceStreamUrl, type StreamBook, type StreamDeps } from './depthStream.js';
 
 /** Install a book snapshot unless it is older than the one already held (concurrent refreshes can land out of order). */
-function setBook(id: string, b: Book) {
-  const d = market.deep.get(id); if (!d) return;
+/** Install a book unless it is older than the held one. Returns whether it was installed. */
+function setBook(id: string, b: Book): boolean {
+  const d = market.deep.get(id); if (!d) return false;
   const cur = d.book;
-  if (cur && ((b.lastUpdateId != null && cur.lastUpdateId != null && b.lastUpdateId < cur.lastUpdateId) || b.ts < cur.ts)) return;
-  d.book = b;
+  if (cur && ((b.lastUpdateId != null && cur.lastUpdateId != null && b.lastUpdateId < cur.lastUpdateId) || b.ts < cur.ts)) return false;
+  // Same lastUpdateId = the venue book has not changed (cached mirror response, halted symbol). Re-stamping it with our
+  // receive time would make frozen depth look fresh and executable; keep the old timestamp so it ages out (Squad B B-01).
+  if (cur && b.lastUpdateId != null && b.lastUpdateId === cur.lastUpdateId) return false;
+  d.book = b; return true;
 }
 
 /** Part 29 L0 + Part 33.6 tiered scanning. Polling is the documented fallback (no WS hosts allow-listed). */
@@ -28,6 +33,8 @@ const LEVERAGED = /(UP|DOWN|BULL|BEAR)$/;
 export const isEligibleSpot = (base: string, quote: string) => quote === 'USDT' && !STABLES.has(base) && !LEVERAGED.test(base) && base !== 'PAXG';
 
 let rulesFetchedAt = 0;
+/** Tolerated provider-vs-local clock difference for exchange timestamps. */
+const TICKER_CLOCK_SKEW_MS = 5_000;
 const coinbaseMissing = new Set<string>();
 let universeAt = 0;
 
@@ -50,6 +57,8 @@ export async function refreshTickers() {
     // Out-of-order / replayed payload: never overwrite a newer exchange timestamp with an older one.
     const prev = market.tickers.get(id);
     if (prev && Number.isFinite(t.closeTime) && t.closeTime < prev.providerTs) continue;
+    // A future-dated exchange timestamp is invalid: storing it would block every later (valid) update (Squad B B-02).
+    if (Number.isFinite(t.closeTime) && t.closeTime > recv + TICKER_CLOCK_SKEW_MS) continue;
     if (!(t.lastPrice > 0)) continue;
     market.tickers.set(id, { instrumentId: id, symbol: t.symbol, base: inst.base, quote: inst.quote, last: t.lastPrice, bid: t.bidPrice, ask: t.askPrice, changePct: t.priceChangePercent, quoteVolume: t.quoteVolume, high: t.highPrice, low: t.lowPrice, open: t.openPrice, trades: t.count, providerTs: t.closeTime, receivedAt: recv, source: 'binance' });
   }
@@ -179,9 +188,48 @@ async function refreshCross(ids: string[]) {
 }
 
 /** Refresh only the order books for the given instruments (hot lane: open positions; API: just before an owner action). */
+/** Last time a sequence-checked stream book was published per instrument (REST skips symbols the stream keeps fresh). */
+const streamBookAt = new Map<string, number>();
+export const STREAM_FRESH_MS = 2_000;
+export const streamFresh = (id: string, nowTs = Date.now()) => nowTs - (streamBookAt.get(id) ?? 0) <= STREAM_FRESH_MS;
+let depthStream: ReturnType<typeof startDepthStream> | null = null; let streamKey = '';
+/**
+ * Keep one combined depth stream for `ids` (open positions + deep tier). Restarted only when the set changes. Each
+ * published book goes through setBook, which already refuses an older lastUpdateId, so stream and REST books coexist.
+ */
+export function syncDepthStreams(ids: string[], seams: Partial<Pick<StreamDeps, 'WebSocketImpl' | 'snapshot'>> = {}) {
+  if (!config.streaming || config.offline) return null;
+  const symbols = [...new Set(ids.map((id) => market.instruments.get(id)?.symbol).filter((s): s is string => !!s))].sort().slice(0, 200);
+  const key = symbols.join(',');
+  if (key === streamKey && depthStream) return depthStream;
+  depthStream?.stop(); depthStream = null; streamKey = key;
+  if (!symbols.length) return null;
+  depthStream = startDepthStream(symbols, {
+    url: binanceStreamUrl,
+    WebSocketImpl: seams.WebSocketImpl,
+    snapshot: seams.snapshot ?? (async (sym) => {
+      const b = await binance.depth(sym, 100);
+      if (b.lastUpdateId == null) throw new Error('snapshot without lastUpdateId cannot be synchronized');
+      return { ...b, lastUpdateId: b.lastUpdateId };
+    }),
+    publish: (sym, b: StreamBook) => {
+      const id = `crypto:binance:${sym}`; const inst = market.instruments.get(id); if (!inst) return;
+      market.deepState(inst); // Fresh only if the book was actually installed: a rejected (older) stream book must not stop REST (CodeRabbit PR #18).
+      if (setBook(id, { bids: b.bids, asks: b.asks, ts: b.ts, lastUpdateId: b.lastUpdateId })) streamBookAt.set(id, b.ts);
+    },
+    // Gap or disconnect: the published book stays valid only as of its timestamp and ages out under the normal execution
+    // limits; REST stops skipping this symbol immediately (MA-18).
+    invalidate: (sym) => { streamBookAt.delete(`crypto:binance:${sym}`); },
+  });
+  return depthStream;
+}
+export function stopDepthStreams() { depthStream?.stop(); depthStream = null; streamKey = ''; streamBookAt.clear(); }
+export const depthStreamStatus = () => depthStream?.status() ?? null;
+
 export async function refreshBooks(ids: string[]) {
   await Promise.all([...new Set(ids)].map(async (id) => {
     const inst = market.instruments.get(id); if (!inst) return;
+    if (streamFresh(id)) return; // the stream already keeps this book continuous and fresh
     try { market.deepState(inst); setBook(id, await timed('fabric.book', () => binance.depth(inst.symbol, 100))); }
     catch { /* provider health tracked; a book that could not be refreshed keeps its old timestamp and ages out */ }
   }));
@@ -204,6 +252,8 @@ let rulesTriedAt = 0;
 /** Refresh venue rules every 6 h; after a failure keep the rules already held and retry at most once a minute. */
 export async function ensureRules() {
   const t = Date.now();
-  if (t - rulesFetchedAt <= 6 * 3600_000 || (rulesFetchedAt && t - rulesTriedAt < 60_000)) return;
+  // Throttle retries even when no fetch has ever succeeded (a failing first exchangeInfo, weight 20, used to be retried
+  // on every hot-lane tick; Squad B B-03).
+  if (t - rulesFetchedAt <= 6 * 3600_000 || (rulesTriedAt && t - rulesTriedAt < 60_000)) return;
   rulesTriedAt = t; await refreshRules();
 }

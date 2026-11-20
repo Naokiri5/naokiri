@@ -3,6 +3,7 @@
  * Cross-platform launcher (replaces POSIX `VAR=x cmd` prefixes that fail in Windows cmd/PowerShell).
  *   node scripts/run.mjs start|dev
  *   node scripts/run.mjs backup create|verify <file>|list
+ *   node scripts/run.mjs owner status|bind-privy <did>|reset-2fa
  * Sets NODE_USE_ENV_PROXY (so built-in fetch honours HTTPS_PROXY where one is configured) and silences the
  * node:sqlite experimental warning, then runs src/main.ts through tsx.
  */
@@ -12,16 +13,17 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const [maj, min] = process.versions.node.split('.').map(Number);
-if (maj < 22 || (maj === 22 && min < 13)) {
-  console.error(`\n✖ MIA requires Node.js 22.13 or newer (found ${process.versions.node}). Install Node 22 LTS or newer.\n`);
+if (!(maj >= 24 || (maj === 22 && min >= 16))) {
+  console.error(`\n✖ MIA requires Node.js 22.16+ in the 22 LTS line, or Node.js 24+ (found ${process.versions.node}). Install a Node.js LTS release that includes SQLite FTS5.\n`);
   process.exit(1);
 }
 const mode = process.argv[2] ?? 'start';
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const env = { ...process.env, NODE_USE_ENV_PROXY: '1', NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' ') };
 const { existsSync } = await import('node:fs');
-const entry = mode === 'backup' ? 'ops/backup-cli' : 'main';
-const extra = mode === 'backup' ? process.argv.slice(3) : [];
+const CLIS = { backup: 'ops/backup-cli', owner: 'ops/owner-cli' };
+const entry = CLIS[mode] ?? 'main';
+const extra = CLIS[mode] ? process.argv.slice(3) : [];
 const builtEntry = resolve(serverDir, 'dist', `${entry}.js`);
 let command;
 let args;

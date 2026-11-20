@@ -84,7 +84,7 @@ export function activityFeed(limit = 25): Activity[] {
 
 export function overviewSnapshot(nowTs = Date.now()) {
   const b = bubbleMap({ limit: 60 }); const btc = market.deep.get('crypto:binance:BTCUSDT')?.engines['1h'].last ?? null;
-  const realized = get<{ pnl: number | null; fees: number | null; closed: number }>("SELECT SUM(realized_pnl) pnl, SUM(fees) fees, COUNT(*) closed FROM positions WHERE status='CLOSED'")!;
+  const realized = get<{ pnl: number | null; fees: number | null; closed: number }>("SELECT SUM(realized_pnl) pnl, SUM(fees) fees, COUNT(*) closed FROM positions WHERE account=? AND status='CLOSED'", PAPER_ACCOUNT)!;
   return {
     // Fields kept from the original /api/overview contract (existing consumers rely on them).
     breadth: b.breadth, btcRegime: classifyRegime(btc), account: accountState(PAPER_ACCOUNT, nowTs), opportunities: recentDecisions().slice(0, 8),

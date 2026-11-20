@@ -15,7 +15,7 @@ export function executionQuality(limit = 100) {
     const expectedPrice = o.purpose === 'ENTRY' && Number.isFinite(report?.entryRef) && report.entryRef > 0 ? report.entryRef : null;
     return { orderId: o.id, instrumentId: o.instrument, decisionId: o.decision_id, strategyId: report?.strategy?.id ?? null,
       side: o.side, purpose: o.purpose, status: o.status, requestedQty: o.qty, filledQty: qty,
-      averageFillPrice, expectedPrice, adverseSlippageBps: expectedPrice && averageFillPrice != null ? (averageFillPrice / expectedPrice - 1) * 10000 * (o.side === 'BUY' ? 1 : -1) : null,
+      averageFillPrice, expectedPrice, adverseSlippageBps: expectedPrice && averageFillPrice != null && (o.side === 'BUY' || o.side === 'SELL') ? (averageFillPrice / expectedPrice - 1) * 10000 * (o.side === 'BUY' ? 1 : -1) : null,
       fees: fills.reduce((s, f) => s + f.fee, 0), fillCount: fills.length,
       firstFillDelayMs: fills.length ? fills[0].ts - o.created_at : null,
       lastRecordedFillDelayMs: fills.length ? fills[fills.length - 1].ts - o.created_at : null,

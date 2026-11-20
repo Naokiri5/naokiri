@@ -1,0 +1,247 @@
+# Logical development-role registry; NOT a process launcher, account credential store or trade authority.
+schema_version: 1
+source: "MIA 4.2 Super Engineering Master Directive, section 4"
+runtime: "logical_roles_only"
+max_recommended_parallel_independent_agents: 12
+production_trade_authority: false
+squads:
+  - id: 1
+    name: "Architecture"
+    owning_scope: "docs/engineering, CLAUDE.md, API contracts, architecture decisions"
+    roles:
+      - id: 1
+        title: "Chief architecture specialist"
+      - id: 2
+        title: "Requirements analyst"
+      - id: 3
+        title: "Domain architecture specialist"
+      - id: 4
+        title: "Integration architect"
+      - id: 5
+        title: "API contract specialist"
+      - id: 6
+        title: "Data architecture specialist"
+      - id: 7
+        title: "Dependency analyst"
+      - id: 8
+        title: "Migration architect"
+      - id: 9
+        title: "Architecture decision-record specialist"
+      - id: 10
+        title: "Technical project manager"
+  - id: 2
+    name: "Backend"
+    owning_scope: "server/src/api, db, core, bot"
+    roles:
+      - id: 11
+        title: "TypeScript specialist"
+      - id: 12
+        title: "Fastify specialist"
+      - id: 13
+        title: "Database specialist"
+      - id: 14
+        title: "Database migration specialist"
+      - id: 15
+        title: "API engineering specialist"
+      - id: 16
+        title: "Authentication specialist"
+      - id: 17
+        title: "Background-job specialist"
+      - id: 18
+        title: "Event-bus specialist"
+      - id: 19
+        title: "Caching specialist"
+      - id: 20
+        title: "Backend observability specialist"
+  - id: 3
+    name: "Market Data"
+    owning_scope: "server/src/providers, market, safety"
+    roles:
+      - id: 21
+        title: "Exchange API specialist"
+      - id: 22
+        title: "WebSocket specialist"
+      - id: 23
+        title: "Crypto data specialist"
+      - id: 24
+        title: "Solana specialist"
+      - id: 25
+        title: "EVM specialist"
+      - id: 26
+        title: "Equities and ETF specialist"
+      - id: 27
+        title: "Futures specialist"
+      - id: 28
+        title: "Forex and commodities specialist"
+      - id: 29
+        title: "Instrument normalization specialist"
+      - id: 30
+        title: "Market data quality specialist"
+  - id: 4
+    name: "Quantitative Research"
+    owning_scope: "server/src/lab, features, portfolio"
+    roles:
+      - id: 31
+        title: "Market microstructure specialist"
+      - id: 32
+        title: "Technical analysis specialist"
+      - id: 33
+        title: "Statistics specialist"
+      - id: 34
+        title: "Econometrics specialist"
+      - id: 35
+        title: "Backtesting specialist"
+      - id: 36
+        title: "Walk-forward validation specialist"
+      - id: 37
+        title: "Portfolio optimization specialist"
+      - id: 38
+        title: "Execution-cost specialist"
+      - id: 39
+        title: "Forecasting specialist"
+      - id: 40
+        title: "Strategy research specialist"
+  - id: 5
+    name: "QCI and Workers"
+    owning_scope: "server/src/workers, qci, decision evidence"
+    roles:
+      - id: 41
+        title: "Worker registry specialist"
+      - id: 42
+        title: "Task scheduling specialist"
+      - id: 43
+        title: "Candidate task-graph specialist"
+      - id: 44
+        title: "Evidence schema specialist"
+      - id: 45
+        title: "Evidence signature specialist"
+      - id: 46
+        title: "Dependency diversity specialist"
+      - id: 47
+        title: "Adversarial challenge specialist"
+      - id: 48
+        title: "Consensus specialist"
+      - id: 49
+        title: "Outcome calibration specialist"
+      - id: 50
+        title: "Worker health specialist"
+  - id: 6
+    name: "Knowledge and AI"
+    owning_scope: "server/src/knowledge, joe, academy"
+    roles:
+      - id: 51
+        title: "Document ingestion specialist"
+      - id: 52
+        title: "PDF and OCR specialist"
+      - id: 53
+        title: "EPUB processing specialist"
+      - id: 54
+        title: "Metadata and copyright specialist"
+      - id: 55
+        title: "Semantic chunking specialist"
+      - id: 56
+        title: "Embedding specialist"
+      - id: 57
+        title: "Retrieval specialist"
+      - id: 58
+        title: "Knowledge taxonomy specialist"
+      - id: 59
+        title: "Prompt-injection defense specialist"
+      - id: 60
+        title: "LLM integration specialist"
+  - id: 7
+    name: "Risk and Security"
+    owning_scope: "server/src/risk, exec, wallet, security"
+    roles:
+      - id: 61
+        title: "Risk policy specialist"
+      - id: 62
+        title: "Position sizing specialist"
+      - id: 63
+        title: "Order-management specialist"
+      - id: 64
+        title: "Idempotency specialist"
+      - id: 65
+        title: "Reconciliation specialist"
+      - id: 66
+        title: "Signer isolation specialist"
+      - id: 67
+        title: "Permission control specialist"
+      - id: 68
+        title: "Kill-switch specialist"
+      - id: 69
+        title: "Threat modeling specialist"
+      - id: 70
+        title: "Secrets management specialist"
+  - id: 8
+    name: "Frontend"
+    owning_scope: "web/src, e2e browser"
+    roles:
+      - id: 71
+        title: "React specialist"
+      - id: 72
+        title: "Design-system specialist"
+      - id: 73
+        title: "Dashboard specialist"
+      - id: 74
+        title: "Chart visualization specialist"
+      - id: 75
+        title: "Knowledge Academy interface specialist"
+      - id: 76
+        title: "Operator controls specialist"
+      - id: 77
+        title: "Accessibility specialist"
+      - id: 78
+        title: "Responsive UI specialist"
+      - id: 79
+        title: "API client specialist"
+      - id: 80
+        title: "Browser testing specialist"
+  - id: 9
+    name: "Infrastructure"
+    owning_scope: "deploy, scripts, .github/workflows, ops, qhef"
+    roles:
+      - id: 81
+        title: "Build engineering specialist"
+      - id: 82
+        title: "CI specialist"
+      - id: 83
+        title: "Container specialist"
+      - id: 84
+        title: "Backup and recovery specialist"
+      - id: 85
+        title: "Metrics specialist"
+      - id: 86
+        title: "Logging specialist"
+      - id: 87
+        title: "Distributed tracing specialist"
+      - id: 88
+        title: "Load testing specialist"
+      - id: 89
+        title: "Chaos testing specialist"
+      - id: 90
+        title: "Incident response specialist"
+  - id: 10
+    name: "QA and Release"
+    owning_scope: "server/test, e2e, docs test records, qa"
+    roles:
+      - id: 91
+        title: "Unit testing specialist"
+      - id: 92
+        title: "Integration testing specialist"
+      - id: 93
+        title: "End-to-end testing specialist"
+      - id: 94
+        title: "Property-based testing specialist"
+      - id: 95
+        title: "Quantitative validation specialist"
+      - id: 96
+        title: "Security testing specialist"
+      - id: 97
+        title: "Performance regression specialist"
+      - id: 98
+        title: "Provider contract testing specialist"
+      - id: 99
+        title: "Release-gate auditor"
+      - id: 100
+        title: "Independent code reviewer"

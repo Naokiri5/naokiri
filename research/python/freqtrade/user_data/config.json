@@ -1,0 +1,62 @@
+{
+  "$comment": "MIA research config. DRY-RUN ONLY: no exchange keys, no API server (block intentionally absent), no Telegram. Not a trading bot for MIA. See docs/research/PYTHON_RESEARCH_LABS.md.",
+  "dry_run": true,
+  "dry_run_wallet": 1000,
+  "max_open_trades": 2,
+  "stake_currency": "USD",
+  "stake_amount": "unlimited",
+  "tradable_balance_ratio": 0.99,
+  "fiat_display_currency": "USD",
+  "timeframe": "1h",
+  "trading_mode": "spot",
+  "margin_mode": "",
+  "initial_state": "stopped",
+  "force_entry_enable": false,
+  "unfilledtimeout": {
+    "entry": 10,
+    "exit": 10,
+    "unit": "minutes"
+  },
+  "entry_pricing": {
+    "price_side": "same",
+    "use_order_book": true,
+    "order_book_top": 1,
+    "price_last_balance": 0.0,
+    "check_depth_of_market": {
+      "enabled": false,
+      "bids_to_ask_delta": 1
+    }
+  },
+  "exit_pricing": {
+    "price_side": "same",
+    "use_order_book": true,
+    "order_book_top": 1
+  },
+  "exchange": {
+    "name": "kraken",
+    "key": "",
+    "secret": "",
+    "ccxt_config": {},
+    "ccxt_async_config": {},
+    "pair_whitelist": [
+      "BTC/USD",
+      "ETH/USD"
+    ],
+    "pair_blacklist": []
+  },
+  "pairlists": [
+    {
+      "method": "StaticPairList"
+    }
+  ],
+  "telegram": {
+    "enabled": false,
+    "token": "",
+    "chat_id": ""
+  },
+  "bot_name": "mia-research-dryrun",
+  "db_url": "sqlite:///user_data/tradesv3.dryrun.sqlite",
+  "internals": {
+    "process_throttle_secs": 5
+  }
+}

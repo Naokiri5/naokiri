@@ -1,5 +1,5 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
-import type { Quote } from './coinbase.js';
+import { validQuote, type Quote } from './coinbase.js';
 registerProvider({
   id: 'kraken', name: 'Kraken (public)', sourceClass: 'cex', markets: ['crypto'],
   license: 'Kraken public REST market data — Kraken Terms of Service.', realtime: 'NEAR_REALTIME', requiresCredentials: false,
@@ -23,7 +23,8 @@ export async function tickers(altnames: string[]): Promise<Record<string, Quote>
   const out: Record<string, Quote> = {};
   for (const alt of valid) {
     const t = r.result[map.get(alt)!];
-    if (t) out[alt] = { price: +t.c[0], bid: +t.b[0], ask: +t.a[0], ts: Date.now(), venue: 'kraken' };
+    // Kraken's ticker carries no event time: ts is OUR receive time. Malformed or crossed quotes are dropped (MIA-PROV-002).
+    if (t) { const q = { price: +t.c?.[0], bid: +t.b?.[0], ask: +t.a?.[0], ts: Date.now(), venue: 'kraken' }; if (validQuote(q)) out[alt] = q; }
   }
   return out;
 }

@@ -1,7 +1,10 @@
-import { useState } from 'react';
-import { api, fmt, useApi } from '../api';
+import { useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api, authInfo, fmt, useApi, stepUpBody } from '../api';
 import { Action, Badge, Card, Empty, ErrorLine, Page, Tabs } from '../ui';
 import { StepUp } from './Trading';
+import { TelegramConnection } from './TelegramConnection';
+import { ackGroup } from '../CriticalStrip';
 
 export function Wallet() {
   const { data, error, reload } = useApi('/api/wallet');
@@ -19,7 +22,7 @@ export function Wallet() {
         <div className="row"><Action label="Validate" run={async () => setCheck(await api('/api/wallet/validate', { body: { network: form.network, address: form.address } }))} />
           <Action className="primary" label="Add (24h cooling-off)" run={async () => { const r = await api('/api/wallet/address', { body: form }); setCheck({ valid: true, warnings: r.warnings }); setForm({ ...form, address: '', label: '' }); reload(); }} /></div>
         {check && <div className={check.valid ? 'ok' : 'err'}>{check.valid ? `Valid${check.normalized ? `: ${check.normalized}` : ''}` : check.error}{check.warnings?.map((w: string) => <div key={w} className="hint warn">{w}</div>)}</div>}
-        <table><tbody>{(data?.addresses ?? []).map((a: any) => <tr key={a.id}><td><b>{a.label}</b><div className="mono hint">{a.address}</div></td><td>{a.network}</td><td>{a.verified_at ? <Badge v="VERIFIED" tone="b-good" /> : <Action className="sm" label="Verify (step-up)" run={async () => { await api(`/api/wallet/address/${a.id}/verify`, { body: { password: pw } }); reload(); }} />}{a.cooldown_until > Date.now() && <div className="hint">cooling-off until {fmt.time(a.cooldown_until)}</div>}</td><td><Action className="sm ghost" label="Remove" confirm="Remove this address?" run={async () => { await api(`/api/wallet/address/${a.id}`, { method: 'DELETE' }); reload(); }} /></td></tr>)}</tbody></table>
+        <table><tbody>{(data?.addresses ?? []).map((a: any) => <tr key={a.id}><td><b>{a.label}</b><div className="mono hint">{a.address}</div></td><td>{a.network}</td><td>{a.verified_at ? <Badge v="VERIFIED" tone="b-good" /> : <Action className="sm" label="Verify (step-up)" run={async () => { await api(`/api/wallet/address/${a.id}/verify`, { body: { ...stepUpBody(pw) } }); reload(); }} />}{a.cooldown_until > Date.now() && <div className="hint">cooling-off until {fmt.time(a.cooldown_until)}</div>}</td><td><Action className="sm ghost" label="Remove" confirm="Remove this address?" run={async () => { await api(`/api/wallet/address/${a.id}`, { method: 'DELETE' }); reload(); }} /></td></tr>)}</tbody></table>
         {!data?.addresses.length && <Empty>No saved addresses.</Empty>}
       </div></Card>
       <Card title="Withdrawal (guided preview, Part 24.2)"><div className="col">
@@ -28,9 +31,9 @@ export function Wallet() {
           <input type="number" placeholder="Amount" value={wd.amount} onChange={(e) => setWd({ ...wd, amount: e.target.value })} style={{ width: 110 }} /></div>
         {net && !net.assets.includes(wd.asset) && <div className="err">⚠ {wd.asset} is not supported on {net.name}. Never infer a network from a ticker.</div>}
         <select value={wd.addressId} onChange={(e) => setWd({ ...wd, addressId: e.target.value })} aria-label="Destination"><option value="">Select verified destination…</option>{(data?.addresses ?? []).map((a: any) => <option key={a.id} value={a.id}>{a.label} · {a.network} · {a.address.slice(0, 10)}…</option>)}</select>
-        <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="primary" label="Preview" run={async () => { setPreview(await api('/api/wallet/withdraw/preview', { body: { ...wd, amount: Number(wd.amount), password: pw } })); reload(); }} /></div>
+        <div className="row"><StepUp value={pw} onChange={setPw} /><Action className="primary" label="Preview" run={async () => { setPreview(await api('/api/wallet/withdraw/preview', { body: { ...wd, amount: Number(wd.amount), ...stepUpBody(pw) } })); reload(); }} /></div>
         {preview && <div className="card"><div className="bd col"><div className="row"><Badge v={preview.status} /></div><div className="kv"><span>Network</span><span>{preview.preview.network}</span><span>Asset / amount</span><span>{preview.preview.amount} {preview.preview.asset}</span><span>Destination</span><span className="mono">{preview.preview.destination}</span><span>Fee / net</span><span>unavailable (no custody provider)</span></div><ul style={{ margin: 0, paddingLeft: 18 }}>{preview.reasons.map((r: string) => <li key={r} className="hint">{r}</li>)}</ul></div></div>}
-        <div className="row">Emergency withdrawal freeze: <Badge v={data?.frozen ? 'FROZEN' : 'OFF'} tone={data?.frozen ? 'b-bad' : 'b-neutral'} /><Action className="sm" label={data?.frozen ? 'Lift (step-up)' : 'Freeze'} run={async () => { await api('/api/wallet/freeze', { body: { on: !data?.frozen, password: pw } }); reload(); }} /></div>
+        <div className="row">Emergency withdrawal freeze: <Badge v={data?.frozen ? 'FROZEN' : 'OFF'} tone={data?.frozen ? 'b-bad' : 'b-neutral'} /><Action className="sm" label={data?.frozen ? 'Lift (step-up)' : 'Freeze'} run={async () => { await api('/api/wallet/freeze', { body: { on: !data?.frozen, ...stepUpBody(pw) } }); reload(); }} /></div>
       </div></Card>
     </div>
     <div style={{ height: 14 }} />
@@ -52,19 +55,57 @@ export function Connections() {
     <div style={{ height: 14 }} />
     <div className="grid g3">
       <Card title="X (Twitter)"><Badge v="PENDING_CREDENTIALS" /><p className="muted">OAuth 2.0 PKCE linking requires an X developer app (paid read tier). Social posts would be untrusted data feeding the news/social worker only.</p></Card>
-      <Card title="Telegram"><p className="muted">Notifications: set <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> server-side (never in the browser). Launch-source monitoring requires approved channel configuration.</p></Card>
+      <TelegramConnection />
       <Card title="Exchange / broker (read-only)"><p className="muted">Read-only API keys for balance sync and a licensed equities/commodities feed are not configured. Live trading keys are deliberately unsupported until release gates pass.</p></Card>
     </div>
   </Page>;
 }
 
+interface NotificationGroup { source: string; title: string; severity: 'INFO' | 'WARNING' | 'CRITICAL'; count: number; unread: number; firstTs: number; lastTs: number; lastBody: string; ackThroughId: string; href: string | null; sticky: boolean }
+const HIDE_INFO_KEY = 'mia-hide-info';
+/**
+ * Severity notification center. Repeats are grouped by source + title + severity on the server; unread CRITICAL groups
+ * are pinned until explicitly acknowledged. "Hide INFO" is a local view preference and only ever removes INFO groups.
+ */
 export function Notifications() {
-  const { data, error, reload } = useApi('/api/notifications', { topics: ['notification'] }); const [sev, setSev] = useState('');
-  const items = (data ?? []).filter((n: any) => !sev || n.severity === sev);
-  return <Page title="Notifications" sub="In-app history with delivery state per channel." right={<><select value={sev} onChange={(e) => setSev(e.target.value)} aria-label="Severity"><option value="">All</option><option>CRITICAL</option><option>WARNING</option><option>INFO</option></select><Action label="Mark all read" run={async () => { await api('/api/notifications/read', { body: {} }); reload(); }} /></>}>
-    <ErrorLine e={error} />
-    <Card flush><div className="tablewrap" style={{ maxHeight: 700 }}><table><tbody>{items.map((n: any) => { const d = JSON.parse(n.delivery); return <tr key={n.id} style={{ opacity: n.read ? 0.65 : 1 }}><td className="faint" style={{ whiteSpace: 'nowrap' }}>{fmt.time(n.ts)}</td><td><Badge v={n.severity} /></td><td><b>{n.title}</b><div className="muted">{n.body}</div></td><td className="hint">{n.source}</td><td className="hint">app: {d.inApp}<br />telegram: {d.telegram}</td><td>{!n.read && <button className="sm ghost" onClick={async () => { await api('/api/notifications/read', { body: { id: n.id } }); reload(); }}>read</button>}</td></tr>; })}</tbody></table>{!items.length && <Empty>No notifications.</Empty>}</div></Card>
+  const [hideInfo, setHideInfo] = useState(() => { try { return localStorage.getItem(HIDE_INFO_KEY) === '1'; } catch { return false; } });
+  const [tab, setTab] = useState('By severity');
+  const center = useApi<{ groups: NotificationGroup[]; hasMore: boolean }>('/api/notifications/center?hideInfo=' + (hideInfo ? '1' : '0'), { topics: ['notification'], every: 30_000 });
+  const raw = useApi(tab === 'Raw history' ? '/api/notifications' : null, { topics: ['notification'] });
+  const toggleInfo = (on: boolean) => { setHideInfo(on); try { localStorage.setItem(HIDE_INFO_KEY, on ? '1' : '0'); } catch { /* */ } };
+  const groups = center.data?.groups ?? [];
+  const sections = [
+    { title: 'Needs acknowledgement', rows: groups.filter((g) => g.sticky) },
+    { title: 'Critical · acknowledged', rows: groups.filter((g) => !g.sticky && g.severity === 'CRITICAL') },
+    { title: 'Warning', rows: groups.filter((g) => g.severity === 'WARNING') },
+    { title: 'Info', rows: groups.filter((g) => g.severity === 'INFO') },
+  ];
+  // Completions (acknowledge, mark read) must refresh the CURRENT filter path, not the one captured when the click started.
+  const reload = () => { latest.current.center(); latest.current.raw(); };
+  const latest = useRef({ center: center.reload, raw: raw.reload }); latest.current = { center: center.reload, raw: raw.reload };
+  return <Page title="Notifications" sub="Repeats are grouped by source, title and severity. Unread CRITICAL stays pinned until you acknowledge it; acknowledging never resolves an incident or resumes trading."
+    right={<><label className="row" style={{ gap: 6 }}><input type="checkbox" checked={hideInfo} onChange={(e) => toggleInfo(e.target.checked)} />Hide INFO</label>
+      <Action label="Mark non-critical read" run={async () => { await api('/api/notifications/read', { body: {} }); reload(); }} /></>}>
+    <ErrorLine e={center.error} />
+    {center.error && <div className="alertbar warn" role="status">Critical status unknown: the notification center could not be refreshed.{center.data ? ' The list below is the last successful load and may be stale.' : ''}</div>}
+    {hideInfo && <div className="hint" style={{ marginBottom: 10 }}>INFO is hidden. CRITICAL and WARNING are never hidden.</div>}
+    <Tabs tabs={['By severity', 'Raw history']} value={tab} onChange={setTab} />
+    {tab === 'By severity' && <>
+      {sections.filter((x) => x.rows.length).map((x) => <Card key={x.title} title={x.title + ' (' + x.rows.length + ')'} flush>
+        <ul className="feed">{x.rows.map((g) => <NotificationGroupRow key={g.source + '|' + g.title + '|' + g.severity} g={g} onDone={reload} />)}</ul></Card>)}
+      {center.data && !groups.length && <Empty>No notifications in the last 14 days.</Empty>}
+      {center.data?.hasMore && <div className="hint">Older non-critical groups are not shown (the newest 100 are). Unread CRITICAL groups are always shown.</div>}
+    </>}
+    {tab === 'Raw history' && <Card flush><ErrorLine e={raw.error} /><div className="tablewrap" style={{ maxHeight: 700 }}><table><tbody>{(raw.data ?? []).map((n: any) => { const d = JSON.parse(n.delivery); return <tr key={n.id} style={{ opacity: n.read ? 0.65 : 1 }}><td className="faint" style={{ whiteSpace: 'nowrap' }}>{fmt.time(n.ts)}</td><td><Badge v={n.severity} /></td><td><b>{n.title}</b><div className="muted">{n.body}</div></td><td className="hint">{n.source}</td><td className="hint">app: {d.inApp}<br />telegram: {d.telegram}</td><td>{!n.read && n.severity !== 'CRITICAL' && <Action className="sm ghost" label="read" run={async () => { await api('/api/notifications/read', { body: { id: n.id } }); reload(); }} />}</td></tr>; })}</tbody></table>{raw.data && !raw.data.length && <Empty>No notifications.</Empty>}</div></Card>}
   </Page>;
+}
+function NotificationGroupRow({ g, onDone }: { g: NotificationGroup; onDone: () => void }) {
+  return <li style={{ opacity: g.unread ? 1 : 0.7 }}>
+    <Badge v={g.severity} />
+    <div className="what"><b>{g.title}</b> <span className="hint">×{g.count}{g.unread ? ' · ' + g.unread + ' unread' : ''} · last {fmt.ago(g.lastTs)}{g.count > 1 ? ' · first ' + fmt.ago(g.firstTs) : ''} · {g.source}</span>
+      <div className="hint">{g.lastBody}</div>{g.href && <Link to={g.href}>Root cause →</Link>}</div>
+    {g.unread > 0 && <Action className="sm" label={g.severity === 'CRITICAL' ? 'Acknowledge' : 'Mark read'} run={async () => { await ackGroup(g); onDone(); }} />}
+  </li>;
 }
 
 export function QA() {
@@ -78,22 +119,65 @@ export function QA() {
   </Page>;
 }
 
+function GoogleSignInSettings() {
+  const endpoint = '/api/settings/google';
+  const { data, error } = useApi<{ configured: boolean; linked: boolean }>(endpoint);
+  const [password, setPassword] = useState('');
+  const failed = new URLSearchParams(window.location.search).get('google') === 'failed';
+  return <Card title="Google sign-in">
+    <div className="col">
+      <ErrorLine e={error ?? (failed && !data?.linked ? 'Google linking could not be completed. Please try again.' : null)} />
+      {data && <p className="muted">{data.linked
+        ? 'A Google account is linked. Your owner passphrase is available for sign-in and sensitive actions.'
+        : data.configured ? 'Link your Google account to sign in to this MIA owner account.'
+        : 'Google sign-in requires server configuration.'}</p>}
+      {data && (data.configured || data.linked) && <>
+        <label className="col">Owner passphrase for Google
+          <input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
+        </label>
+        {data.linked
+          ? <Action label="Unlink Google" disabled={!password} confirm="Disconnect Google and sign out other sessions?" run={async () => {
+            try {
+              await api(`${endpoint}/unlink`, { body: { password } });
+              window.location.replace('/settings');
+            } finally { setPassword(''); }
+          }} />
+          : <Action label="Link Google" disabled={!password} run={async () => {
+            try {
+              const { url } = await api<{ url: string }>(`${endpoint}/link`, { body: { password } });
+              window.location.assign(url);
+            } finally { setPassword(''); }
+          }} />}
+      </>}
+    </div>
+  </Card>;
+}
+
 export function Settings() {
   const { data, error, reload } = useApi('/api/settings');
-  const [pw, setPw] = useState({ current: '', next: '' }); const [tz, setTz] = useState<number | null>(null); const [prefs, setPrefs] = useState<any>(null);
+  const [pw, setPw] = useState({ current: '', next: '' }); const [tz, setTz] = useState<string | null>(null); const [prefs, setPrefs] = useState<any>(null);
   const p = prefs ?? data?.notifyPrefs;
   return <Page title="Settings" sub="Security, notifications, display and assistant configuration. Risk limits live in the Risk Center; execution mode in Bot Account.">
     <ErrorLine e={error} />
     <div className="grid g2">
-      <Card title="Security"><div className="col"><input type="password" placeholder="Current passphrase" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" /><input type="password" placeholder="New passphrase (≥10 chars)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" />
-        <Action className="primary" label="Change passphrase (signs out all sessions)" run={async () => { await api('/api/settings/password', { body: pw }); window.location.reload(); }} />
+      <Card title="Security"><div className="col">{authInfo.mode === 'privy' ? <div className="hint">You sign in with Privy, so there is no MIA passphrase to change. Manage sign-in methods and the authenticator app in <Link to="/security">Security Center</Link>.</div> : <><input type="password" placeholder="Current passphrase" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" /><input type="password" placeholder="New passphrase (≥10 chars)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" />
+        <Action className="primary" label="Change passphrase (signs out all sessions)" run={async () => { await api('/api/settings/password', { body: pw }); window.location.reload(); }} /></>}
         <div className="hint">MIA never requests seed phrases or private keys. Secrets (API keys, bot tokens) are configured server-side via environment variables and never reach the browser.</div></div></Card>
       <Card title="Notifications"><div className="col">{p && <>
         <label className="row">Telegram minimum severity <select value={p.telegramMinSeverity} onChange={(e) => setPrefs({ ...p, telegramMinSeverity: e.target.value })}><option>INFO</option><option>WARNING</option><option>CRITICAL</option></select></label>
         <label className="row">Quiet hours (UTC, critical always delivered) <input type="number" min={0} max={23} style={{ width: 60 }} value={p.quietHoursUtc?.[0] ?? ''} onChange={(e) => setPrefs({ ...p, quietHoursUtc: e.target.value === '' ? null : [Number(e.target.value), p.quietHoursUtc?.[1] ?? 7] })} />–<input type="number" min={0} max={23} style={{ width: 60 }} value={p.quietHoursUtc?.[1] ?? ''} onChange={(e) => setPrefs({ ...p, quietHoursUtc: [p.quietHoursUtc?.[0] ?? 22, Number(e.target.value)] })} /></label>
         <div className="row"><Action className="primary" label="Save" run={async () => { await api('/api/settings/notify', { body: p }); reload(); }} /><Action label="Send test notification" run={() => api('/api/notifications/test', { body: {} })} /></div>
         <div className="hint">Telegram: {data?.telegram.configured ? 'configured' : 'not configured (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID on the server)'}</div></>}</div></Card>
-      <Card title="Profit calendar timezone"><div className="row"><select value={tz ?? data?.calendarTzOffsetMin ?? 0} onChange={(e) => setTz(Number(e.target.value))} aria-label="Timezone offset">{Array.from({ length: 27 }, (_, i) => (i - 12) * 60).map((m) => <option key={m} value={m}>UTC{m >= 0 ? '+' : ''}{m / 60}</option>)}</select><Action label="Save" run={async () => { await api('/api/calendar/tz', { body: { offsetMin: tz ?? 0 } }); reload(); }} /></div><div className="hint">Defines the day boundary for daily PnL attribution.</div></Card>
+      <GoogleSignInSettings />
+      <Card title="Display timezone">
+        <div className="row">
+          <input aria-label="IANA timezone" placeholder="Asia/Manila" value={tz ?? data?.calendarTimeZone ?? ''} onChange={e => setTz(e.target.value)} />
+          <Action label="Use device timezone" run={async () => setTz(Intl.DateTimeFormat().resolvedOptions().timeZone)} />
+          <Action label="Save timezone" disabled={!tz?.trim()} run={async () => { await api('/api/calendar/tz', { body: { timeZone: tz } }); setTz(null); reload(); }} />
+        </div>
+        <div className="hint">Used by market clocks and the profit calendar. Enter an IANA name such as America/New_York or UTC.</div>
+        {data && !data.calendarTimeZone && <div className="hint">Current profit calendar offset {data.calendarTzOffsetMin} minutes from UTC.</div>}
+      </Card>
       <Card title="Trader Joe"><div className="kv"><span>Mode</span><span>{data?.joe.llm ? `Claude API (${data.joe.model})` : 'Command mode — set ANTHROPIC_API_KEY on the server for conversational answers'}</span><span>Tools</span><span className="hint">{data?.joe.tools.join(', ')}</span><span>Authority</span><span className="hint">read, analyze, and risk-reducing pause only</span></div></Card>
     </div>
   </Page>;

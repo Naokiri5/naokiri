@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -174,13 +175,13 @@ describe('test-derived release gate evidence', () => {
 describe('release gate manifest and certification gaps', () => {
   beforeEach(() => freshDb());
 
-  it('cites existing files and exact uniquely collected Vitest test names', () => {
+  it('cites existing files and exact uniquely collected Vitest test names', { timeout: 65_000 }, () => {
     const refs = Object.values(gates.TEST_GATE_REQUIREMENTS).flat();
     const files = [...new Set(refs.map(r => r.file))];
     for (const file of files) expect(existsSync(join(REPO_ROOT, file)), file).toBe(true);
     const listed: { name: string; file: string }[] = JSON.parse(execFileSync(process.execPath, [
-      join(REPO_ROOT, 'node_modules/vitest/vitest.mjs'), 'list', '--json', '--no-static-parse', ...files.map(file => relative(join(REPO_ROOT, 'server'), join(REPO_ROOT, file))),
-    ], { cwd: join(REPO_ROOT, 'server'), env: { ...process.env, MIA_LIVE_TESTS: '1', MIA_OFFLINE: '1' }, encoding: 'utf8' }));
+      join(REPO_ROOT, 'node_modules/vitest/vitest.mjs'), 'list', '--json', '--no-static-parse', '--maxWorkers=2', ...files.map(file => relative(join(REPO_ROOT, 'server'), join(REPO_ROOT, file))),
+    ], { cwd: join(REPO_ROOT, 'server'), env: { ...process.env, MIA_LIVE_TESTS: '1', MIA_OFFLINE: '1' }, encoding: 'utf8', timeout: 60_000 }));
     for (const item of refs) {
       expect(listed.filter(test => test.file === join(REPO_ROOT, item.file) && test.name.split(' > ').join(' ') === item.fullName), `${item.file}: ${item.fullName}`).toHaveLength(1);
     }
@@ -249,8 +250,32 @@ describe('stored QA report loading', () => {
     expect(gate.evidence).not.toContain('malformed JSON');
   });
 
+  const saveRun = (reportText: string, outcome: object | null) => {
+    mkdirSync(join(dir, 'qa'), { recursive: true }); writeFileSync(join(dir, 'qa', 'test-results.json'), reportText);
+    if (outcome) writeFileSync(join(dir, 'qa', 'test-run.json'), JSON.stringify(outcome));
+  };
+  const sha = (t: string) => createHash('sha256').update(t).digest('hex');
+  const good = (text: string) => ({ exitCode: 0, reportSha256: sha(text), commit: gates.currentBuildCommit(), source: 'git-archive-v1', finishedAt: Date.now() });
   it('loads a valid saved report without depending on the launch directory', () => {
-    mkdirSync(join(dir, 'qa')); writeFileSync(join(dir, 'qa', 'test-results.json'), JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01)));
+    const text = JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01)); saveRun(text, good(text));
     expect(gates.releaseGates().gates.find(g => g.id === 'G09')?.status).toBe('PASS');
+  });
+  it('a report without a recorded successful run outcome is PENDING (CodeRabbit PR #13)', () => {
+    const text = JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01));
+    const g09 = () => gates.releaseGates().gates.find(g => g.id === 'G09')!;
+    saveRun(text, null); expect(g09()).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('run outcome missing') });
+    saveRun(text, { ...good(text), exitCode: 1 }); expect(g09()).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('exit code 1') });
+    saveRun(text, { ...good(text), reportSha256: sha('another report') }); expect(g09()).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('sha256 mismatch') });
+  });
+  it('evidence must come from an isolated snapshot of the running commit and the last 7 days (blueprint Q-01)', () => {
+    const text = JSON.stringify(report(gates.TEST_GATE_REQUIREMENTS.G01)); const ok = good(text);
+    const p = (o: object, ctx: object = {}) => gates.runOutcomeProblem(o, text, { currentCommit: 'a'.repeat(40), nowTs: ok.finishedAt, ...ctx });
+    expect(p({ ...ok, commit: 'a'.repeat(40) })).toBeNull();
+    expect(p({ ...ok, commit: 'b'.repeat(40) })).toMatch(/evidence is from commit bbbbbbbbbbbb, but the running build is aaaaaaaaaaaa/);
+    expect(p({ ...ok, commit: undefined })).toMatch(/no commit SHA/);
+    expect(p({ ...ok, commit: 'a'.repeat(40) }, { currentCommit: null })).toMatch(/running build commit is unknown/);
+    expect(p({ ...ok, commit: 'a'.repeat(40), source: undefined, dirty: false })).toMatch(/lacks an isolated Git snapshot/);
+    expect(p({ ...ok, commit: 'a'.repeat(40) }, { nowTs: ok.finishedAt + 8 * 86_400_000 })).toMatch(/stale \(8 days old/);
+    expect(p({ ...ok, commit: 'a'.repeat(40), finishedAt: ok.finishedAt + 3_600_000 })).toMatch(/invalid finish time/);
   });
 });

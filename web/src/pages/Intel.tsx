@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, fmt, useApi } from '../api';
+import { api, fmt, useApi, stepUpBody } from '../api';
 import { Badge, Card, Chg, Empty, ErrorLine, Page, Tabs, useSort, Action, Freshness, Modal } from '../ui';
+import { NoTradeBoard } from './NoTradeBoard';
 import { StepUp } from './Trading';
+import { ThinkCertificateView } from './ThinkCertificate';
 
 export function Scanner() {
   const { data, error } = useApi('/api/scanner', { topics: ['scan', 'decision'], every: 30_000 });
@@ -13,7 +15,7 @@ export function Scanner() {
   return <Page title="AI Scanner" sub="Deep-tier universe (most liquid Binance spot pairs) evaluated on every closed 1h candle by 3 versioned strategies → 100-worker QCI → decision engine → risk gate. Scores are evidence summaries, never win probabilities."
     right={<><Freshness at={data?.lastScanAt} label="last scan" /><input placeholder="Analyze symbol…" value={sym} onChange={(e) => setSym(e.target.value)} style={{ width: 150 }} /><Action label="Analyze now" className="primary" disabled={!sym} run={async () => setAna(await api('/api/analyze', { body: { symbol: sym } }))} /></>}>
     <ErrorLine e={error} />
-    <Tabs tabs={['Market board', `Decisions (${data?.decisions.length ?? 0})`, `Rejected (${data?.rejections.length ?? 0})`, 'Strategies']} value={tab.startsWith('Decisions') ? `Decisions (${data?.decisions.length ?? 0})` : tab.startsWith('Rejected') ? `Rejected (${data?.rejections.length ?? 0})` : tab} onChange={setTab} />
+    <Tabs tabs={['Market board', `Decisions (${data?.decisions.length ?? 0})`, `Rejected (${data?.rejections.length ?? 0})`, 'Why not trading', 'Strategies']} value={tab.startsWith('Decisions') ? `Decisions (${data?.decisions.length ?? 0})` : tab.startsWith('Rejected') ? `Rejected (${data?.rejections.length ?? 0})` : tab} onChange={setTab} />
     {tab === 'Market board' && <Card title={`${board.length} instruments`} right={<input placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />} flush>
       <div className="tablewrap"><table><thead><tr>{th('symbol', 'Asset')}{th('price', 'Price', true)}{th('changePct', '24h', true)}{th('quoteVolume', 'Volume', true)}{th('regime', 'Regime')}<th>Safety</th><th>Data</th>{th('spreadBps', 'Spread', true)}{th('rsi1h', 'RSI 1h', true)}<th>Indicators</th><th>Signals / last decision</th></tr></thead>
         <tbody>{sorted.map((r: any) => <tr key={r.instrumentId} className="click" onClick={() => nav(`/terminal/${r.symbol}`)}>
@@ -24,6 +26,7 @@ export function Scanner() {
         {!sorted.length && <Empty>Waiting for the first scan cycle (market data loading)…</Empty>}</div></Card>}
     {tab.startsWith('Decisions') && <DecisionTable rows={data?.decisions ?? []} />}
     {tab.startsWith('Rejected') && <Card title="Rejection intelligence (Part 16.8)" flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Asset</th><th>Stage</th><th>Reason</th></tr></thead><tbody>{(data?.rejections ?? []).map((r: any, i: number) => <tr key={i}><td className="faint">{fmt.ago(r.at)}</td><td><b>{r.symbol}</b></td><td><Badge v={r.stage} /></td><td>{r.reason}</td></tr>)}</tbody></table>{!data?.rejections.length && <Empty>No rejected candidates yet.</Empty>}</div></Card>}
+    {tab === 'Why not trading' && <NoTradeBoard />}
     {tab === 'Strategies' && <div className="grid g3">{(data?.strategies ?? []).map((s: any) => <Card key={s.id} title={`${s.name} v${s.version}`}><div className="col"><div className="muted">{s.description}</div><div className="kv"><span>Interval</span><span>{s.interval}</span><span>Regimes</span><span>{s.regimes.map((r: string) => <Badge key={r} v={r} />)}</span></div></div></Card>)}</div>}
     {ana && <Modal title="On-demand analysis" onClose={() => setAna(null)}>{ana.decision ? <DecisionView report={ana} /> : <AnalysisNoSignal a={ana} />}</Modal>}
   </Page>;
@@ -42,33 +45,51 @@ export function DecisionTable({ rows }: { rows: any[] }) {
     {!rows.length && <Empty>No candidates yet. Strategies fire only when their entry conditions are met on a closed 1h candle — most hours produce none, by design.</Empty>}</div></Card>;
 }
 
+interface PaperEntry {
+  orderId: string;
+  status: string;
+  filledQty: number;
+  averageFillPrice: number | null;
+  rejectReason: string | null;
+}
+
 export function DecisionPage() {
   const { id } = useParams(); const { data, error } = useApi(`/api/decisions/${id}`);
-  return <Page title="Decision record" sub="Part 8.3 trade explanation · Part 16.10 opportunity report · Part 29.6 consensus record"><ErrorLine e={error} />{data && <DecisionView report={data.report} consensus={data.consensus} />}</Page>;
+  return <Page title="Decision record" sub="Recorded market evidence, strategy decision, independent risk result and Paper OMS outcome"><ErrorLine e={error} />{data && <DecisionView report={data.report} consensus={data.consensus} paperEntry={data.paperEntry} />}</Page>;
 }
-export function DecisionView({ report: r, consensus }: { report: any; consensus?: any }) {
+export function DecisionView({ report: r, consensus, paperEntry }: { report: any; consensus?: any; paperEntry?: PaperEntry | null }) {
   const [tab, setTab] = useState('Explanation');
   return <div className="col" style={{ gap: 14 }}>
     <div className="row"><h2 style={{ fontSize: 18 }}>{r.asset}</h2><Badge v={r.decision} /><Badge v={r.direction} tone={r.direction === 'LONG' ? 'b-good' : 'b-neutral'} /><Badge v={r.consensus.state} /><span className="muted">{r.strategy.id} v{r.strategy.version} · {r.regime} · {fmt.time(r.createdAt)}</span></div>
     <div className="banner info" style={{ marginBottom: 0 }}>{r.disclaimer}</div>
-    <Tabs tabs={['Explanation', 'Pipeline steps', 'Score factors', 'QCI consensus', 'Indicators']} value={tab} onChange={setTab} />
+    <Tabs tabs={['Explanation', 'Certificate', 'Pipeline steps', 'Score factors', 'QCI consensus', 'Indicators']} value={tab} onChange={setTab} />
     {tab === 'Explanation' && <div className="grid g2">
-      <Card title="Trade plan"><div className="kv">
+      <Card title="Sense and Think · Trade plan"><div className="kv">
         <span>Market</span><span>{r.market} · {r.venue}</span><span>Final decision</span><span><b>{r.finalDecision}</b></span><span>Reason</span><span>{r.reason}</span>
         <span>Entry condition</span><span>{r.entryCondition}</span><span>Invalidation</span><span>{r.invalidation}</span>
         <span>Stop-loss</span><span className="mono">{fmt.px(r.stopLoss)}</span>
         <span>Take-profit</span><span className="mono">{r.takeProfit.map((t: any) => `${fmt.px(t.price)} (${t.r}R, ${t.fraction * 100}%)`).join(' · ')}</span>
         <span>Position size</span><span className="mono">{r.positionSize ? `${r.positionSize.qty} ≈ ${fmt.usd(r.positionSize.notional)} · max loss ${fmt.usd(r.positionSize.plannedMaxLoss)}` : 'not sized (not eligible for execution)'}</span>
         <span>Expected costs</span><span className="mono">fees {fmt.usd(r.expectedCosts.feesUsd)} · spread {fmt.num(r.expectedCosts.spreadBps, 1)}bps · slippage {fmt.num(r.expectedCosts.slippageBps, 1)}bps · {r.expectedCosts.costR ?? '—'}R · funding {r.expectedCosts.funding}</span>
-        <span>Data freshness</span><span><Badge v={r.dataFreshness.status} /> quote {fmt.num((r.dataFreshness.quoteAgeMs ?? 0) / 1000, 0)}s · book {fmt.num((r.dataFreshness.bookAgeMs ?? 0) / 1000, 0)}s</span>
+        <span>Data freshness</span><span><Badge v={r.dataFreshness.status} /> quote {r.dataFreshness.quoteAgeMs == null ? 'missing' : `${fmt.num(r.dataFreshness.quoteAgeMs / 1000, 0)}s`} · book {r.dataFreshness.bookAgeMs == null ? 'missing' : `${fmt.num(r.dataFreshness.bookAgeMs / 1000, 0)}s`}</span>
         <span>Opportunity score</span><span className="mono">{r.opportunity.score} <span className="faint">({r.opportunity.version})</span></span>
       </div></Card>
       <div className="col" style={{ gap: 14 }}>
         <Card title="Supporting evidence"><ul style={{ margin: 0, paddingLeft: 18 }}>{r.supportingEvidence.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul></Card>
         <Card title="Opposing evidence"><ul style={{ margin: 0, paddingLeft: 18 }}>{r.opposingEvidence.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul></Card>
-        <Card title="Risk assessment"><ul style={{ margin: 0, paddingLeft: 18 }}>{r.riskAssessment.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>{r.risk && <div className="row" style={{ marginTop: 8 }}>Risk gate: <Badge v={r.risk.decision} /> <span className="faint">policy v{r.risk.policyVersion} · trace {r.risk.traceId}</span></div>}</Card>
+        <Card title="Defend · Risk assessment"><ul style={{ margin: 0, paddingLeft: 18 }}>{r.riskAssessment.map((x: string, i: number) => <li key={i}>{x}</li>)}</ul>{r.risk && <div className="row" style={{ marginTop: 8 }}>Risk gate: <Badge v={r.risk.decision} /> <span className="faint">policy v{r.risk.policyVersion} · trace {r.risk.traceId}</span></div>}</Card>
+        {paperEntry !== undefined && <Card title="Execute · Paper OMS">
+          {paperEntry ? <div className="kv">
+            <span>Order status</span><Badge v={paperEntry.status} />
+            <span>Order ID</span><span className="mono">{paperEntry.orderId}</span>
+            <span>Filled quantity</span><span>{fmt.num(paperEntry.filledQty, 6)}</span>
+            <span>Average fill price</span><span>{fmt.px(paperEntry.averageFillPrice)}</span>
+            {paperEntry.rejectReason && <><span>Reason</span><span>{paperEntry.rejectReason}</span></>}
+          </div> : <Empty>No paper entry was recorded for this decision.</Empty>}
+        </Card>}
         <Card title="Missing information">{r.missingInformation.length ? <ul style={{ margin: 0, paddingLeft: 18 }}>{r.missingInformation.map((x: string, i: number) => <li key={i} className="muted">{x}</li>)}</ul> : <span className="muted">none</span>}</Card>
       </div></div>}
+    {tab === 'Certificate' && <ThinkCertificateView decisionId={r.id} />}
     {tab === 'Pipeline steps' && <Card flush><table><tbody>{r.steps.map((s: any) => <tr key={s.step}><td className="faint mono">{s.step}</td><td>{s.name}</td><td><Badge v={s.result} /></td><td className="muted">{s.detail}</td></tr>)}</tbody></table></Card>}
     {tab === 'Score factors' && <Card flush><table><thead><tr><th>Factor</th><th className="num">Weight</th><th className="num">Value</th><th>Basis</th></tr></thead><tbody>{r.opportunity.factors.map((f: any) => <tr key={f.factor}><td>{f.factor}{f.missing && <> <Badge v="MISSING" tone="b-warn" /></>}</td><td className="num">{(f.weight * 100).toFixed(0)}%</td><td className="num">{f.value}</td><td className="muted">{f.basis}</td></tr>)}</tbody></table></Card>}
     {tab === 'QCI consensus' && (consensus ? <ConsensusView c={consensus} /> : <Empty>Consensus record {r.consensus.id} — open from Decisions page for full detail.</Empty>)}
@@ -110,7 +131,7 @@ export function Intelligence() {
       <div className="tablewrap"><table><thead><tr><th>ID</th><th>Role</th><th>Domain</th><th>Dependency group</th><th>Flags</th><th className="num">↑</th><th className="num">↓</th><th className="num">○</th><th className="num">Fail</th><th>Health</th></tr></thead>
         <tbody>{workers.map((w: any) => <tr key={w.id}><td className="mono faint">{w.id}</td><td>{w.name}</td><td>{w.domain}</td><td className="faint mono">{w.dependencyGroup}</td><td>{w.mandatory && <Badge v="MANDATORY" tone="b-info" />} {w.canVeto && <Badge v="VETO" tone="b-bad" />}</td>
           <td className="num up">{w.stats?.support ?? 0}</td><td className="num down">{w.stats?.oppose ?? 0}</td><td className="num faint">{w.stats?.abstain ?? 0}</td><td className="num">{w.stats?.failed ?? 0}</td>
-          <td>{w.quarantined ? <span className="row"><Badge v="QUARANTINED" tone="b-bad" /><Action className="sm" label="Release" run={async () => { try { await api(`/api/workers/${w.id}/release`, { body: { password: pw || undefined } }); reload(); } finally { setPw(''); } }} /></span> : w.pending ? <Badge v="PROVIDER PENDING" tone="b-neutral" /> : w.capability === 'CONSTANT_RULE' ? <Badge v="CONSTANT RULE" tone="b-warn" title="Fixed verdict by construction; adds no market information" /> : <Badge v="HEALTHY" tone="b-good" />}</td></tr>)}</tbody></table></div></Card>}
+          <td>{w.quarantined ? <span className="row"><Badge v="QUARANTINED" tone="b-bad" /><Action className="sm" label="Release" run={async () => { try { await api(`/api/workers/${w.id}/release`, { body: { ...stepUpBody(pw) } }); reload(); } finally { setPw(''); } }} /></span> : w.pending ? <Badge v="PROVIDER PENDING" tone="b-neutral" /> : w.capability === 'CONSTANT_RULE' ? <Badge v="CONSTANT RULE" tone="b-warn" title="Fixed verdict by construction; adds no market information" /> : <Badge v="HEALTHY" tone="b-good" />}</td></tr>)}</tbody></table></div></Card>}
     {tab === 'Indicator specialists' && <Card flush><div className="tablewrap"><table><thead><tr><th>ID</th><th>Indicator</th><th>Timeframe</th></tr></thead><tbody>{data?.indicatorSpecialists.map((x: any) => <tr key={x.id}><td className="mono faint">{x.id}</td><td>{x.name}</td><td>{x.interval}</td></tr>)}</tbody></table></div></Card>}
     {tab === 'Consensus records' && <Card flush><div className="tablewrap"><table><thead><tr><th>When</th><th>Instrument</th><th>Strategy</th><th>State</th><th className="num">Support</th><th className="num">Opp.</th><th className="num">Resp.</th><th className="num">ms</th></tr></thead>
       <tbody>{data?.consensus.map((c: any) => <tr key={c.consensus_id} className="click" onClick={() => api(`/api/consensus/${c.consensus_id}`).then(setSel)}><td className="faint">{fmt.ago(c.created_at)}</td><td>{c.instrument_id.split(':')[2]}</td><td>{c.strategy_id}</td><td><Badge v={c.state} /></td><td className="num">{c.weighted_support}</td><td className="num">{c.weighted_opposition}</td><td className="num">{c.workers.responding}/{c.workers.eligible}</td><td className="num">{c.analysis_ms}</td></tr>)}</tbody></table>
