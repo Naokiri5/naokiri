@@ -39,11 +39,13 @@ const IDENTITY_ACTIONS: Record<string, string> = {
 export function collectEvents(nowMs = Date.now()): GuardianEvent[] {
   const since = nowMs - LOOKBACK_MS;
   const rows = all<Row>(
-    `SELECT id, ts, actor, action, detail FROM audit_log WHERE ts > ? AND (
+    `SELECT id, ts, actor, action, detail FROM (
+       SELECT id, ts, actor, action, detail FROM audit_log WHERE ts > ? AND (
        action IN ('auth.login.failed','auth.stepup.failed','control.update','withdrawal.preview','withdrawal.freeze')
        OR action LIKE 'auth.privy.%' OR action LIKE 'auth.2fa.%' OR action = 'auth.password.change'
        OR action LIKE '%signer%' OR action LIKE '%signature%' OR action LIKE '%injection%')
-     ORDER BY id LIMIT 20000`, since);
+       ORDER BY id DESC LIMIT 20000
+     ) ORDER BY ts, id`, since);
   const events: GuardianEvent[] = [];
   const ev = (kind: GuardianEvent['kind'], r: Row, summary: string, evidence = `audit:${r.id}`) =>
     events.push({ kind, timestampMs: r.ts, sourceId: 'audit_log', evidenceId: evidence, sanitizedSummary: summary });

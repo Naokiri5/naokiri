@@ -12,11 +12,13 @@
 import { getSetting, setSetting } from '../../core/settings.js';
 import { getControl, updateControl } from '../../core/mode.js';
 import { audit } from '../../core/audit.js';
+import { all, inTransaction, tx } from '../../db/db.js';
 import { assessSecurityEvent, type GuardianAssessment, type GuardianEvent } from './assess.js';
 import { collectEvents } from './events.js';
 
 export const autoPauseEnabled = () => process.env.MIA_GUARDIAN_AUTOPAUSE === '1';
 export const GUARDIAN_ACTIONS = ['PAUSE_NEW_ORDERS'] as const;
+const HANDLED_CACHE_SIZE = 200;
 
 export interface Assessed { event: GuardianEvent; assessment: GuardianAssessment }
 export function assessAll(nowMs = Date.now()): Assessed[] {
@@ -24,17 +26,40 @@ export function assessAll(nowMs = Date.now()): Assessed[] {
 }
 
 /** Pauses new orders for the newest unhandled P0 that asks for it, if auto-pause is enabled. Idempotent. */
-export function autoContain(items: Assessed[] = assessAll()): { action: 'NONE' | 'PAUSED' | 'ALREADY_PAUSED' | 'DISABLED'; evidenceId?: string } {
-  const target = items.find((i) => i.assessment.severity === 'P0' && i.assessment.suggestions.includes('PAUSE_NEW_EXPOSURE_REQUEST'));
-  if (!target) return { action: 'NONE' };
-  if (!autoPauseEnabled()) return { action: 'DISABLED', evidenceId: target.event.evidenceId };
-  const handled = getSetting<string[]>('guardian_handled_evidence', []);
-  if (handled.includes(target.event.evidenceId)) return { action: 'NONE' };
-  setSetting('guardian_handled_evidence', [target.event.evidenceId, ...handled].slice(0, 200));
-  if (getControl().pausedNewOrders) { audit('guardian', 'security.guardian.p0_already_paused', { kind: target.event.kind, evidence: target.event.evidenceId }); return { action: 'ALREADY_PAUSED', evidenceId: target.event.evidenceId }; }
-  updateControl('guardian', { pausedNewOrders: true }); // risk-reducing; only the owner can resume
-  audit('guardian', 'security.guardian.pause', { kind: target.event.kind, evidence: target.event.evidenceId });
-  return { action: 'PAUSED', evidenceId: target.event.evidenceId };
+type Containment = { action: 'NONE' | 'PAUSED' | 'ALREADY_PAUSED' | 'DISABLED'; evidenceId?: string };
+export function autoContain(items: Assessed[] = assessAll()): Containment {
+  const targets = items.filter(i => i.assessment.severity === 'P0' && i.assessment.suggestions.includes('PAUSE_NEW_EXPOSURE_REQUEST'));
+  if (!targets.length) return { action: 'NONE' };
+  if (!autoPauseEnabled()) return { action: 'DISABLED', evidenceId: targets[0].event.evidenceId };
+  // A joined transaction would publish before its caller commits.
+  if (inTransaction()) throw new Error('Guardian containment requires its own transaction');
+
+  const deferred: { publish?: () => void } = {};
+  const deferPublish = (publish: () => void) => { deferred.publish = publish; };
+  const result = tx<Containment>(() => {
+    const handled = getSetting<string[]>('guardian_handled_evidence', []);
+    const handledIds = new Set(handled);
+    if (handled.length >= HANDLED_CACHE_SIZE) {
+      // A handled event can still be in the scan after it falls out of the settings cache.
+      const audited = all<{ evidence: string | null }>(`
+        SELECT json_extract(CASE WHEN json_valid(detail) THEN detail ELSE '{}' END, '$.evidence') AS evidence
+        FROM audit_log WHERE actor='guardian' AND action IN ('security.guardian.pause', 'security.guardian.p0_already_paused')
+      `);
+      for (const row of audited) if (row.evidence) handledIds.add(row.evidence);
+    }
+    const target = targets.find(i => !handledIds.has(i.event.evidenceId));
+    if (!target) return { action: 'NONE' };
+    const { evidenceId, kind } = target.event;
+    const alreadyPaused = getControl().pausedNewOrders;
+    if (!alreadyPaused) {
+      updateControl('guardian', { pausedNewOrders: true }, undefined, deferPublish);
+    }
+    audit('guardian', alreadyPaused ? 'security.guardian.p0_already_paused' : 'security.guardian.pause', { kind, evidence: evidenceId });
+    setSetting('guardian_handled_evidence', [evidenceId, ...handled].slice(0, HANDLED_CACHE_SIZE));
+    return { action: alreadyPaused ? 'ALREADY_PAUSED' : 'PAUSED', evidenceId };
+  });
+  deferred.publish?.();
+  return result;
 }
 
 let timer: NodeJS.Timeout | null = null;

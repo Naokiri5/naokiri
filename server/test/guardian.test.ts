@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { freshDb, ownerSetupPayload } from './helpers.js';
 import { buildApp } from '../src/index.js';
-import { run, all } from '../src/db/db.js';
+import { run, all, tx } from '../src/db/db.js';
 import { audit } from '../src/core/audit.js';
+import { bus } from '../src/core/bus.js';
 import { getControl } from '../src/core/mode.js';
+import { getSetting, setSetting } from '../src/core/settings.js';
 import { failureGate } from '../src/core/ratelimit.js';
 import { assessSecurityEvent, type GuardianEvent } from '../src/security/guardian/assess.js';
 import { collectEvents } from '../src/security/guardian/events.js';
@@ -69,6 +72,15 @@ describe('events from the audit log', () => {
     const p0 = assessAll().find((i) => i.event.kind === 'AUDIT_CHAIN_BROKEN')!;
     expect(p0.assessment.severity).toBe('P0');
   });
+  it('includes the latest P0 even when the bounded audit scan has a backlog', () => {
+    tx(() => {
+      for (let i = 0; i < 20_000; i++) audit('test', 'auth.login.failed');
+      audit('test', 'engine.signature.unexpected');
+    });
+    expect(collectEvents().find(e => e.kind === 'UNEXPECTED_SIGNER_REQUEST')).toMatchObject({
+      evidenceId: 'audit:20001',
+    });
+  });
 });
 
 describe('containment: opt-in, pause-only, once per event', () => {
@@ -94,10 +106,59 @@ describe('containment: opt-in, pause-only, once per event', () => {
     expect(src).not.toMatch(/pausedNewOrders:\s*false|emergency:\s*false|mode:\s*['"]|disabledStrategies/);
     expect(src).not.toMatch(/from ['"][^'"]*(exec\/|wallet\/|providers\/http|node:http|fetch\()/);
   });
+  it('rolls back containment on a failed write and retries before publishing the pause', () => {
+    process.env.MIA_GUARDIAN_AUTOPAUSE = '1';
+    raiseP0();
+    const evidenceId = assessAll()[0].event.evidenceId;
+    const publications: unknown[] = [];
+    const onMode = () => publications.push({
+      paused: getControl().pausedNewOrders,
+      handled: getSetting('guardian_handled_evidence', []),
+    });
+    bus.on('mode', onMode);
+    try {
+      run(`CREATE TEMP TRIGGER reject_guardian_audit BEFORE INSERT ON audit_log
+        WHEN NEW.action = 'security.guardian.pause'
+        BEGIN SELECT RAISE(ABORT, 'fixture guardian write failure'); END`);
+      expect(() => autoContain()).toThrow('fixture guardian write failure');
+      expect(getControl().pausedNewOrders).toBe(false);
+      expect(getSetting('guardian_handled_evidence', [])).toEqual([]);
+      expect(all("SELECT * FROM audit_log WHERE actor = 'guardian'")).toEqual([]);
+      expect(publications).toEqual([]);
+
+      run('DROP TRIGGER reject_guardian_audit');
+      expect(autoContain()).toEqual({ action: 'PAUSED', evidenceId });
+      expect(publications).toEqual([{ paused: true, handled: [evidenceId] }]);
+      expect(autoContain()).toEqual({ action: 'NONE' });
+    } finally {
+      bus.off('mode', onMode);
+    }
+  });
+  it('handles a second incident while paused even if the newest incident was already handled', () => {
+    process.env.MIA_GUARDIAN_AUTOPAUSE = '1';
+    raiseP0();
+    const older = assessAll()[0];
+    raiseP0();
+    const newer = assessAll().find(i => i.event.evidenceId !== older.event.evidenceId)!;
+    expect(autoContain([newer, older])).toEqual({ action: 'PAUSED', evidenceId: newer.event.evidenceId });
+    expect(autoContain([newer, older])).toEqual({ action: 'ALREADY_PAUSED', evidenceId: older.event.evidenceId });
+    expect(autoContain([newer, older])).toEqual({ action: 'NONE' });
+  });
+  it('does not re-pause for previously handled evidence evicted from the settings cache', () => {
+    process.env.MIA_GUARDIAN_AUTOPAUSE = '1';
+    raiseP0();
+    const evidenceId = assessAll()[0].event.evidenceId;
+    expect(autoContain().action).toBe('PAUSED');
+    setSetting('guardian_handled_evidence', Array.from({ length: 200 }, (_, index) => `audit:${index + 100}`));
+    run("UPDATE settings SET value=json_set(value,'$.pausedNewOrders',json('false')) WHERE key='control'");
+    expect(getSetting<string[]>('guardian_handled_evidence', [])).not.toContain(evidenceId);
+    expect(autoContain().action).toBe('NONE');
+    expect(getControl().pausedNewOrders).toBe(false);
+  });
 });
 
 describe('privilege boundaries (GUARD-021 / 049 / 096)', () => {
-  const srcRoot = new URL('../src/', import.meta.url).pathname;
+  const srcRoot = fileURLToPath(new URL('../src/', import.meta.url));
   const files = (dir: string): string[] => readdirSync(join(srcRoot, dir)).flatMap((n) => { const p = join(dir, n); return statSync(join(srcRoot, p)).isDirectory() ? files(p) : p.endsWith('.ts') ? [p] : []; });
   const imports = (rel: string) => [...readFileSync(join(srcRoot, rel), 'utf8').matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+['"]([^'"]+)['"]/g)].map((m) => ({ names: m[1].split(',').map((s) => s.trim().split(/\s+as\s+/)[0]).filter(Boolean), from: m[2] }));
   /** Allowed imports from the order system and wallet, per area. Anything else is a boundary violation. */
