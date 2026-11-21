@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { screenUntrusted } from '../security/guardian/injection.js';
 import { config } from '../config.js';
 import { market } from '../market/store.js';
 import { bubbleMap } from '../market/bubbles.js';
@@ -72,6 +73,7 @@ function save(role: string, content: string) { run('INSERT INTO chat(ts, role, c
 
 export async function askJoe(message: string): Promise<{ reply: string; mode: 'LLM' | 'COMMAND'; toolsUsed: string[] }> {
   const text = message.slice(0, 4000);
+  screenUntrusted('joe', text); // records instruction-like text for Guardian; the message is still only data
   save('user', text);
   if (!config.anthropicApiKey) { const r = await commandMode(text); save('assistant', r); return { reply: r, mode: 'COMMAND', toolsUsed: [] }; }
   const client = new Anthropic({ apiKey: config.anthropicApiKey });
