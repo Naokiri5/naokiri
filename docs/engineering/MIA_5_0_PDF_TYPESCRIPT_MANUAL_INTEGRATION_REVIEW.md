@@ -209,3 +209,44 @@ Before implementing any UNI ticket, its owner shall record: **(a)** existing fil
 | **Release** | Existing unit/integration/E2E/security CI passes on the actual target head, negative tests are included, owner signs off, no automatic PR merge or production deployment |
 
 **Final boundary:** This entire master document and the accompanying source copies are documentation artifacts. Nothing here is a claim that the six PDF modules or all eight MIA priorities have been integrated, or that the PDF source is deployable, compiled, production-safe or trading-eligible.
+
+## 12. Swarm PDF ingestion — 97-slot features, 100 agents and worker threads (2026-11-21)
+
+**New owner-supplied sources:** a 104-page MIA5 Swarm Monolith PDF and a 59-page `agentDefinitions100.ts` PDF. Both have been inspected end-to-end and archived as **unedited PDF text extracts**, separate from the existing 49-page trading-core archive. The original uploaded PDF binary files remain the authoritative sources for precise formatting; extracted text is **not** asserted to be byte-identical to a TypeScript file.
+
+- [Complete 104-page source extract](sources/MIA5_SWARM_MONOLITH_104P_PDF_VERBATIM.txt): `FeatureVectorBuilder`, 97 enumerated `FeatureSlot` values, 100 `ALL_100_AGENTS`, `SwarmThreadPool`, worker-thread aggregation and 4 ms asserted hard deadline.
+- [Complete 59-page source extract](sources/MIA5_AGENT_DEFINITIONS_59P_PDF_VERBATIM.txt): the standalone 100-agent definitions from `AGT-001` through `AGT-100`, with the same 97 positional slot names. This overlaps the agent-definition section of the 104-page PDF; **do not install both**.
+
+### Manual TypeScript identification and repository comparison
+
+| PDF construct | Manual source identification | Existing MIA canonical owner | Decision |
+| --- | --- | --- | --- |
+| `FeatureVectorBuilder` and its 97 fixed slots | OHLCV/ring-buffer indicators, books, tape, derivatives, Solana, macro and on-chain provenance; code claims all 97 slots can be populated | `features/indicators.ts`, `market/fabric.ts`, `market/quality.ts`, `workers/indicators.ts` | **ENHANCE** existing FeatureEngine, no second builder. Compute only slots supported by verified inputs |
+| `ALL_100_AGENTS` / `AGT-001..100` | 100 evaluators in 10 evidence buckets including a 10-agent adversarial critic group; required source feeds and `ABSTAIN` rules | `workers/registry.ts` already has **100 different `W-...` market workers across 11 domains**, `workers/types.ts`, `workers/effectiveness.ts` | **DUPLICATE / NOT EQUIVALENT.** Do not append 100 more workers, map IDs 1:1 or double-count correlated votes. Compare hypotheses as optional, frozen research only |
+| `SwarmThreadPool` | Separate `node:worker_threads` shards, SharedArrayBuffer input and a claimed hard 4 ms deadline, experimental randomized calibration | `workers/runtime.ts` already has bounded 16-way worker evaluations, 250 ms deadline/fault/quarantine; `qci/coordinator.ts` owns vote aggregation | **DUPLICATE / BLOCKED** until independent latency/CPU/fairness evidence and compatibility review. Do not introduce a second coordinator or 4 ms promise |
+| `SwarmConsensusDecision` | PDF imports non-existent `../qci/AdaptiveQciCoordinator.js` and `./AgentIntelligenceTypes.js` on the reviewed #45 tree | `qci/schemas.ts` and `qci/coordinator.ts` with signed evidence, dependency groups, required domains and fail-closed quorum | **DO NOT IMPORT.** Missing modules and consensus contracts are not interchangeable |
+| Worker-to-market shared state | PDF assumes a NexusFabricRouter-managed SharedArrayBuffer layout and uses atomics | `fabric/contracts.ts`, `fabric/relay.ts`, `market/store.ts`, existing provider timestamps | **NOT YET PRESENT** as the claimed binary ABI. No fabricated zero-copy integration; require source-clock ordering/snapshot validation |
+
+**PDF audit findings (not errors introduced into MIA):** the PDF text contains zero-width characters and hard line wraps; no source `AgentIntelligenceTypes.ts` or `AdaptiveQciCoordinator.ts` exists on the inspected branch; a 4 ms shard timer is not proof of bounded end-to-end latency; randomized Thompson exploration is not deterministic replay; hard-coded default feed metrics (such as VPIN, organic volume and holder proportions) are not verified source observations; the purported 100 agents overlap a separate existing 100-worker registry and have different voting semantics; a missing Solana oracle/LP lock must not count as a successful validation.
+
+### Functional enhancement added to the existing files (not a second swarm)
+
+**Scope of this narrow code increment:** `server/src/features/indicators.ts` now maintains EMA21, EMA55 and MACD histogram slope **inside the current canonical incremental FeatureEngine**. It exports `MIA5_SWARM_FEATURE_SLOTS` (the 97 names in their original source index order) and `projectMia5SwarmResearchFeatures()`, a read-only missingness-aware projection. The existing instrument endpoint in `server/src/api/routes.ts` exposes a `swarmFeatureResearch` field **only with the existing timeframe quality verdict**; if the quality gate fails, all 97 slots are `null` / `UNVERIFIED`, not fabricated signals. Tested in the existing `server/test/features.test.ts`.
+
+**Contract:** up to 13 known slots are mapped after warm-up: EMA9, EMA21, EMA55, MACD histogram/slope, ADX, +DI, −DI, Ichimoku Tenkan/Kijun, Bollinger %B, Keltner position and EMA21/ATR extension. The other **84 or more** slots remain `null` because authoritative source timestamps or equivalent definitions/feeds are missing. In particular, the PDF's Donchian windows include the current bar whereas existing MIA Donchian breakout references exclude it; those slots are **not** copied under a misleading name. A populated slot is not a calibrated vote, source-finality guarantee or order permission.
+
+**Important:** The PDF's `FeatureVectorBuilder`, `AGT-001..100` evaluators and `SwarmThreadPool` are **NOT** imported or running in the bot/QCI/OMS. Do not mark the PDF's 100 agents or its 4 ms latency objective as implemented. The code increment only improves read-only feature compatibility; original source text was not changed. Existing 100 production workers, strategy scanner, QCI, risk policy, ledger, paper OMS and LIVE lock retain exactly their responsibilities.
+
+### Follow-on tickets (no duplicate implementation)
+
+| ID | Future integration goal | Exit requirement |
+| --- | --- | --- |
+| SW-01 — source custody | Preserve both PDFs in full as text extracts; keep original PDFs available outside repository | **DONE:** 104/104 and 59/59 pages archived, source identifiers intact |
+| SW-02 — honest 97-slot read model | Populate only supported, quality-gated indicators via existing FeatureEngine and instrument API | **CODE COMMITTED, CI/OWNER REVIEW REQUIRED:** 13 mapped / 84+ absent; no trading right |
+| SW-03 — verified feed coverage | Map actual time-provenanced L2/prints, Solana, derivatives and macro fields into additional empty slots if supported | **PENDING:** provider event time, receipt time, no extrapolation, independent quality/contract checks |
+| SW-04 — agent hypothesis audit | Classify each AGT definition against current 100 W-workers, identifying genuinely novel hypotheses | **PENDING:** proof of independent evidence, overlapping groups and feed requirements; no automatic duplicate worker registration |
+| SW-05 — challenger experiments | Evaluate shortlisted novel PDF agent hypotheses off-path in DITAS/Strategy Lab | **PENDING:** point-in-time replay, costs, OOS/negative controls, calibration, deterministic results, no risk/OMS imports |
+| SW-06 — concurrency certification | Benchmark optional bounded worker-thread execution only if workload justifies it | **PENDING:** per-symbol fairness, startup/worker-crash behavior, backpressure, actual p50/p95/p99; no unproven 4 ms hard SLA |
+| SW-07 — PAPER/LIVE parity | Publish validated research data in PAPER and locked-LIVE analysis surfaces | **PENDING:** separate account scope/venue risk, no inferred LIVE fills, no signer, explicit owner review |
+
+**Stop condition:** If implementing any next PDF feature requires creating a parallel `AgentIntelligenceTypes`, `AdaptiveQciCoordinator`, swap-in risk gate or a new order path, stop and revisit the current canonical owners and open PRs. Any later change must pass the full repository build/tests/security workflow and obtain owner review before merging. The current `LIVE_EXECUTION_AVAILABLE=false` remains untouched.
