@@ -22,7 +22,10 @@ export function Ditas() {
     finally { setOpening(null); }
   };
   const counts = data?.counts;
-  const calibration = data?.calibration;
+  const reportedCalibration = data?.calibration;
+  const pendingCalibration = (reportedCalibration?.cohort ?? '') !== cohort;
+  const calibration = pendingCalibration ? undefined : reportedCalibration;
+  const calibrationStatus = pendingCalibration ? (error && !loading ? 'UNAVAILABLE' : 'LOADING') : calibration?.status ?? 'UNCALIBRATED';
   return <Page title="DITAS · Decision intelligence" sub="Inspect the evidence behind decisions, strategy health and hypothetical alternatives. Every result is tied to stored records."
     right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={() => { reload(); setRefreshKey((k) => k + 1); }} disabled={loading}>Refresh</button></>}>
     <ErrorLine e={error} /><ErrorLine e={detailError} />
@@ -43,7 +46,7 @@ export function Ditas() {
           <Link to="/history">Inspect orders and fills</Link>
         </Card>
         <Card title="Calibration & operating state">
-          <div className="col"><div className="row"><Badge v={calibration?.status ?? 'UNCALIBRATED'} tone="b-warn" /><Badge v={data.controls?.emergency ? 'EMERGENCY' : data.controls?.pausedNewOrders ? 'PAUSED' : 'MONITORING'} /></div>
+          <div className="col"><div className="row"><Badge v={calibrationStatus} tone="b-warn" /><Badge v={data.controls?.emergency ? 'EMERGENCY' : data.controls?.pausedNewOrders ? 'PAUSED' : 'MONITORING'} /></div>
             <div className="hint">{calibration?.note ?? 'Probability forecasts require observed outcomes and sufficient samples. Evidence scores are not converted into probabilities.'}</div>
             <div className="row"><Link to="/risk">Risk Center</Link><Link to="/intelligence">Agent evidence</Link><Link to="/qhef">Performance</Link><Link to="/qa">Release gates</Link></div></div>
         </Card>
@@ -69,11 +72,11 @@ export function Ditas() {
       <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
     {tab === 'Execution quality' && <ExecutionQuality refreshKey={refreshKey} />}
-    {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibration?.status ?? 'UNCALIBRATED'} tone="b-warn" />}>
+    {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibrationStatus} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
             <option value="">Select a cohort to evaluate</option>
-            {(calibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{c.cohort} · {c.n} forecasts</option>)}
+            {(reportedCalibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{c.cohort} · {c.n} forecasts</option>)}
           </select>
         </label>
         <div className="hint">Calibration evaluates stored probability forecasts against outcomes. It does not turn chart confidence, opportunity scores or votes into win probabilities.</div>
@@ -83,7 +86,7 @@ export function Ditas() {
           {(calibration?.bins ?? []).map((b: any) => <tr key={b.lower}><td>{fmt.num(b.lower, 1)}–{fmt.num(b.upper, 1)}</td><td>{b.count}</td><td>{fmt.num(b.prediction, 3)}</td><td>{fmt.num(b.observed, 3)}</td><td>{b.wilson95 ? `${fmt.num(b.wilson95[0], 3)}–${fmt.num(b.wilson95[1], 3)}` : '—'}</td><td><Badge v={b.status} /></td></tr>)}
         </tbody></table></div>
         {(calibration?.uncertainty ?? []).map((u: string) => <div className="hint warn" key={u}>{u}</div>)}
-        <button className="sm" onClick={() => setDetail({ title: 'Calibration metrics, reliability bins and uncertainty', value: calibration })}>Inspect calibration evidence</button>
+        <button className="sm" disabled={!calibration} onClick={() => setDetail({ title: 'Calibration metrics, reliability bins and uncertainty', value: calibration })}>Inspect calibration evidence</button>
       </div>
     </Card>}
     {data && tab === 'Foundation coverage' && <Card title="Implementation coverage" flush><div className="tablewrap"><table><thead><tr><th>Foundation</th><th>Status</th><th>Scope and limitations</th></tr></thead><tbody>
