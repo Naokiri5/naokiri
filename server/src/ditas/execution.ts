@@ -1,6 +1,61 @@
 import { all, P } from '../db/db.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
+/** Research-only, execution-ID-based T+5s markout evidence for DITAS. No new authority or event bus. */
+export interface PostFillMarkoutEvidence {
+  executionId: string;
+  accountId: string;
+  executionVenueId: string;
+  marketDataVenueId: string;
+  instrumentId: string;
+  side: 'BUY' | 'SELL';
+  fillPrice: number;
+  fillAtMs: number;
+  quote: {
+    venueId: string;
+    instrumentId: string;
+    bid: number;
+    ask: number;
+    eventAtMs: number;
+    receivedAtMs: number;
+  } | null;
+}
+export type MarkoutEvidenceReport =
+  | { status: 'MEASURED'; executionId: string; favorableMarkoutBps: number; horizonMs: 5000; quoteAgeFromFillMs: number }
+  | { status: 'UNKNOWN'; executionId: string; favorableMarkoutBps: null; reasonCode: string };
+
+/**
+ * T+5s diagnostic, never a prediction/accuracy score. Requires an immutable execution ID and a
+ * quote measured within +/-250ms of five seconds after that execution, with independently identified
+ * venue/instrument and non-crossed bid/ask. No latest-price fallback. Source-specific buffering,
+ * retries and durable scheduling belong to the existing DITAS/market-data owner in a later PR.
+ */
+export function assessPostFillMarkout(evidence: PostFillMarkoutEvidence): MarkoutEvidenceReport {
+  const unknown = (reasonCode: string): MarkoutEvidenceReport => ({
+    status: 'UNKNOWN', executionId: evidence.executionId, favorableMarkoutBps: null, reasonCode,
+  });
+  if (![evidence.executionId, evidence.accountId, evidence.executionVenueId, evidence.marketDataVenueId, evidence.instrumentId].every(v => typeof v === 'string' && v.trim().length > 0)) {
+    return unknown('EXECUTION_IDENTITY_MISSING');
+  }
+  const q = evidence.quote;
+  if (!q) return unknown('NO_MATCHED_QUOTE');
+  if (q.venueId !== evidence.marketDataVenueId || q.instrumentId !== evidence.instrumentId) return unknown('QUOTE_SOURCE_MISMATCH');
+  if (evidence.side !== 'BUY' && evidence.side !== 'SELL') return unknown('TRADE_SIDE_INVALID');
+  if (![evidence.fillPrice, q.bid, q.ask].every(Number.isFinite) ||
+      !(evidence.fillPrice > 0 && q.bid > 0 && q.ask > q.bid)) return unknown('QUOTE_OR_FILL_INVALID');
+  if (![evidence.fillAtMs, q.eventAtMs, q.receivedAtMs].every(Number.isSafeInteger) ||
+      !(evidence.fillAtMs > 0 && q.eventAtMs > 0 && q.receivedAtMs >= q.eventAtMs)) return unknown('TIMESTAMP_INVALID');
+  const horizon = q.eventAtMs - evidence.fillAtMs;
+  if (Math.abs(horizon - 5000) > 250) return unknown('T5_QUOTE_TIME_MISMATCH');
+  if (q.receivedAtMs - q.eventAtMs > 2000) return unknown('QUOTE_RECEIPT_TOO_LATE');
+  const mid = q.bid / 2 + q.ask / 2;
+  const direction = evidence.side === 'BUY' ? 1 : -1;
+  const favorableMarkoutBps = (mid / evidence.fillPrice - 1) * 10000 * direction;
+  if (!Number.isFinite(favorableMarkoutBps)) return unknown('MARKOUT_NOT_FINITE');
+  return { status: 'MEASURED', executionId: evidence.executionId, favorableMarkoutBps,
+    horizonMs: 5000, quoteAgeFromFillMs: horizon };
+}
+
 /** Projection of actual paper OMS records, never hypothetical Twin fills. */
 export function executionQuality(limit = 100) {
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error('limit must be an integer from 1 to 500');
