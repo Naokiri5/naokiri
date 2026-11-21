@@ -1,6 +1,7 @@
 import { bookAge, QUALITY_LIMITS, walkBook } from '../market/quality.js';
 import { market } from '../market/store.js';
 import { cashBalance, openPositions, PAPER_ACCOUNT, type PositionRow } from './ledger.js';
+import { historicalPortfolioTailRisk } from './tailRisk.js';
 
 type StressStatus = 'MODELED' | 'PARTIAL' | 'UNAVAILABLE' | 'NO_EXPOSURE';
 interface StressScenario {
@@ -174,8 +175,16 @@ export function portfolioStress(asOf = Date.now()) {
       open.length ? null : 0, 0, open.length ? 'Verified memecoin classification and pool liquidity are unavailable for this account' : null),
   ];
 
+  // Additional historical risk evidence is informational only. Insufficient/misaligned 4h candle history => UNAVAILABLE.
+  // Never infer zero risk from missing data, and never feed this estimate into trade authorization.
+  const tailRisk = historicalPortfolioTailRisk(positions.map(row => ({
+    instrument: row.instrument,
+    value: row.value ?? Number.NaN,
+    candles: market.deep.get(row.instrument)?.engines['4h'].candles ?? [],
+  })), { asOf, cash });
+
   return {
-    asOf, account: PAPER_ACCOUNT, cash, baselineEquity, positions, scenarios,
+    asOf, account: PAPER_ACCOUNT, cash, baselineEquity, positions, scenarios, tailRisk,
     note: 'Hypothetical paper estimates in USDT or assumed parity for the depeg scenario. Percentages use baseline equity. Scenarios are independent, exclude fees and carry no order or risk-policy authority.',
   };
 }

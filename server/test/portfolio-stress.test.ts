@@ -31,6 +31,7 @@ describe('paper portfolio scenario stress', () => {
 
     const result = portfolioStress(NOW);
     expect(result).toMatchObject({ asOf: NOW, account: PAPER_ACCOUNT, cash: 300, baselineEquity: 600 });
+    expect(result.tailRisk).toMatchObject({ status: 'UNAVAILABLE', horizon: '4H', authority: 'RESEARCH_ONLY', varLoss: null });
     expect(result.positions).toEqual([
       { instrument: BTC, qty: 2, positionCount: 1, mark: 100, markAt: NOW, value: 200, equityPct: expect.closeTo(100 / 3), reason: null },
       { instrument: ETH, qty: 2, positionCount: 1, mark: 50, markAt: NOW, value: 100, equityPct: expect.closeTo(50 / 3), reason: null },
