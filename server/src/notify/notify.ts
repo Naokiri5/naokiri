@@ -8,14 +8,31 @@ import { getSetting } from '../core/settings.js';
 
 /** Part 6.5 / 13.3 notifications: in-app always; Telegram if configured. Never includes secrets. */
 export type Severity = 'INFO' | 'WARNING' | 'CRITICAL';
-export function notify(severity: Severity, title: string, body = '', source = 'system') {
+export function notify(
+  severity: Severity,
+  title: string,
+  body = '',
+  source = 'system',
+  deferDelivery?: (deliver: () => void) => void,
+) {
   const prefs = getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null as null | [number, number] });
   const id = uid('ntf'); const ts = Date.now();
   const wantsTg = !!(config.telegramBotToken && config.telegramChatId) && rank(severity) >= rank(prefs.telegramMinSeverity as Severity) && !inQuiet(prefs.quietHoursUtc, severity);
   const delivery = { inApp: 'DELIVERED', telegram: wantsTg ? 'PENDING' : config.telegramBotToken ? 'SKIPPED' : 'NOT_CONFIGURED' };
   run('INSERT INTO notifications(id,ts,severity,title,body,source,delivery) VALUES (?,?,?,?,?,?,?)', id, ts, severity, title.slice(0, 200), body.slice(0, 1000), source, JSON.stringify(delivery));
-  bus.publish('notification', { id, ts, severity, title, body, source });
-  if (wantsTg) sendTelegram(id, `[MIA ${severity}] ${title}\n${body}`).catch(() => {});
+  const deliver = () => {
+    try {
+      bus.publish('notification', { id, ts, severity, title, body, source });
+    } finally {
+      if (wantsTg) {
+        void sendTelegram(id, `[MIA ${severity}] ${title}\n${body}`).catch(() => {
+          process.emitWarning('Telegram delivery status could not be saved', { code: 'MIA_NOTIFICATION_DELIVERY' });
+        });
+      }
+    }
+  };
+  if (deferDelivery) deferDelivery(deliver);
+  else deliver();
   return id;
 }
 async function sendTelegram(id: string, text: string) {

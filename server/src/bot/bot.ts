@@ -65,7 +65,14 @@ let takeoverRefused = false;
  * scheduler. On failure the lease is released, the engine stops and the reason is recorded; nothing is repaired.
  */
 function takeoverAllowed(): boolean {
-  const r = takeoverIntegrity(); if (r.ok) return true;
+  let r: ReturnType<typeof takeoverIntegrity>;
+  try { r = takeoverIntegrity(); }
+  catch (error) {
+    // An exception is an integrity failure, even if the persisted lease has already been acquired.
+    const detail = error instanceof Error ? error.message : String(error);
+    r = { ok: false, checks: [{ name: 'takeover check', ok: false, detail: detail.slice(0, 200) }] };
+  }
+  if (r.ok) return true;
   takeoverRefused = true;
   const failed = r.checks.filter((c) => !c.ok);
   try { releaseLease(ENGINE_LEASE, botStatus.instanceId); } catch { /* lease simply expires */ }

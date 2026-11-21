@@ -20,6 +20,13 @@ Use when implementing or auditing WAF, DDoS protections, authentication, wallet 
 - Start with threat tests that demonstrate the risk without touching production.
 - For every change: add tests, provenance, rollback, read-back verification and evidence; run full MIA CI.
 
+## What MIA already has (reuse, do not rebuild)
+
+- Guardian events from the hash-chained audit log, P0–P3 assessment, opt-in auto-pause (pause only): `server/src/security/guardian/{events,assess,response}.ts`.
+- Prompt-injection detection for AI-read text (Joe chat, news headlines, knowledge passages): `guardian/injection.ts` `screenUntrusted()`. Use it for any NEW untrusted text that reaches an AI. It records a hash and the signals only, never the text; it never blocks or pauses.
+- Opt-in alerts (in-app + Telegram) for P0/P1: `guardian/alerts.ts`. Switching off needs step-up.
+- One background pass: `guardian/runner.ts`.
+
 ## Deliverables
 
 Read-only gap matrix with exact paths, patch plan and tests; narrow draft PR(s); hardened service/edge configs where permitted; documented runbooks; no invented risk scores or guarantee of no hacks.
