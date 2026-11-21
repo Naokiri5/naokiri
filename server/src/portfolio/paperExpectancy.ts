@@ -48,7 +48,7 @@ export function assessPaperExpectancyCohort(rows: readonly ClosedPaperTrade[]): 
     throw new Error('Cohort must contain <=30 trades from one market and strategy');
   }
   const base = {
-    market, strategy, sampleTrades: rows.length, sampleTarget: SAMPLE_TARGET as const,
+    market, strategy, sampleTrades: rows.length, sampleTarget: SAMPLE_TARGET,
     sleeve: rows.every(r => r.market === 'crypto' && r.instrument.startsWith('crypto:binance:'))
       ? 'spot' as const : null,
   };
