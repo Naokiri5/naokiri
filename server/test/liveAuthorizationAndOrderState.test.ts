@@ -184,6 +184,49 @@ describe('MIA exchange order observation reducer: no orders sent', () => {
       ...ev('old', 999), kind: 'ACK', venueOrderId: '7',
     })).toThrow('INVALID_EVENT_TIME');
   });
+  it('does not double-count replayed fill trade IDs after FILLED status', () => {
+    let x = reduceVenueOrder(make(), {
+      ...ev('ack', 1001), kind: 'ACK', venueOrderId: '7',
+    });
+    x = reduceVenueOrder(x, {
+      ...ev('fill1', 1002), kind: 'FILL',
+      venueTradeId: 'T1', quantityUnits: '1000',
+    });
+    expect(x.phase).toBe('FILLED');
+    const replay = reduceVenueOrder(x, {
+      ...ev('fill2', 1003), kind: 'FILL',
+      venueTradeId: 'T1', quantityUnits: '1000',
+    });
+    expect(replay.confirmedFillUnits).toBe('1000');
+    expect(replay.version).toBe(x.version + 1);
+    expect(() => reduceVenueOrder(replay, {
+      ...ev('fill3', 1004), kind: 'FILL',
+      venueTradeId: 'T1', quantityUnits: '999',
+    })).toThrow('TRADE_ID_CONFLICT');
+  });
+  it('does not reopen terminal orders from contradictory venue statuses', () => {
+    let x = reduceVenueOrder(make(), {
+      ...ev('ack', 1001), kind: 'ACK', venueOrderId: '7',
+    });
+    x = reduceVenueOrder(x, {
+      ...ev('fill', 1002), kind: 'FILL', venueTradeId: 'T1',
+      quantityUnits: '1000',
+    });
+    expect(() => reduceVenueOrder(x, {
+      ...ev('stale', 1003), kind: 'STATUS', source: 'REST_AND_TRADES',
+      venueOrderId: '7', venueStatus: 'NEW', cumulativeUnits: '1000',
+    })).toThrow('TERMINAL_STATUS_CONFLICT_REQUIRES_MANUAL_RECONCILIATION');
+  });
+  it('does not treat fill-less PARTIALLY_FILLED reports as verified', () => {
+    const state = reduceVenueOrder(make(), {
+      ...ev('e1', 1001), kind: 'STATUS',
+      source: 'REST_AND_TRADES', venueStatus: 'PARTIALLY_FILLED',
+      venueOrderId: '7', cumulativeUnits: '0',
+    });
+    expect(state).toMatchObject({
+      phase: 'UNKNOWN', confirmedFillUnits: '0', reconciliationRequired: true,
+    });
+  });
   it('never imports a live signer or network client from the reducer', () => {
     const a = make();
     expect(a.canAuthorizeTrade).toBe(false);
