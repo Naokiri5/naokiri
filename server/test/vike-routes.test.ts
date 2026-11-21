@@ -66,8 +66,11 @@ describe('Vike research routes', () => {
   });
   it('trading environments: same layout, Live reported LOCKED', async () => {
     const r = (await get('/api/trading/environments')).json();
-    expect(r.environments.map((e: any) => e.environment)).toEqual(['PAPER', 'LIVE']);
-    expect(r.environments[1]).toMatchObject({ state: 'LOCKED' }); expect(r.environments[1].reasons.join()).toMatch(/NOT_CERTIFIED/);
+    expect(r.environments.map((e: any) => e.environment)).toEqual(['PAPER', 'TESTNET', 'LIVE']);
+    expect(r.environments[1]).toMatchObject({ environment: 'TESTNET', state: 'LOCKED' });
+    expect(r.environments[1].reasons.join()).toMatch(/preflight|not configured/i);
+    expect(r.environments[2]).toMatchObject({ environment: 'LIVE', state: 'LOCKED' });
+    expect(r.environments[2].reasons.join()).toMatch(/NOT_CERTIFIED/);
   });
 });
 
