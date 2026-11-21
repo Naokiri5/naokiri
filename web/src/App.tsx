@@ -1,4 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { usePrivy } from '@privy-io/react-auth';
+import { PrivyShell, WalletLogin, type PrivyPublicConfig } from './privy/WalletLogin';
+import { requirePrivyLogout, completePrivyLogout } from './privy/browserSession';
+import { authInfo } from './api';
 import Landing from './Landing';
 import { Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, connectStream, disconnectStream, useApi, fmt } from './api';
@@ -18,13 +22,49 @@ export default function App() {
   return <ProtectedApp />;
 }
 
+type AuthReply = { mode: 'privy' | 'passphrase'; setup: boolean; authenticated: boolean; privy: PrivyPublicConfig; stepUp?: string };
 function ProtectedApp() {
-  const [auth, setAuth] = useState<{ setup: boolean; authenticated: boolean } | null>(null);
-  useEffect(() => { api('/api/auth/state').then(setAuth).catch(() => setAuth({ setup: true, authenticated: false })); const f = () => setAuth((a) => (a ? { ...a, authenticated: false } : a)); window.addEventListener('mia:unauthorized', f); return () => window.removeEventListener('mia:unauthorized', f); }, []);
+  const [auth, setAuth] = useState<AuthReply | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const load = useCallback(async () => {
+    try {
+      const raw = await api<Partial<AuthReply>>('/api/auth/state');
+      if ((raw.mode !== 'privy' && raw.mode !== 'passphrase') ||
+          typeof raw.authenticated !== 'boolean' || typeof raw.setup !== 'boolean')
+        throw new Error('MIA server authentication configuration is incomplete');
+      if (raw.mode === 'privy' && (!raw.privy || typeof raw.privy.enabled !== 'boolean'))
+        throw new Error('Privy configuration is unavailable on this MIA server');
+      authInfo.mode = raw.mode;
+      setAuth(raw as AuthReply); setError(null);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Authentication service unavailable'); setAuth(null); }
+  }, []);
+  useEffect(() => { void load(); const f = () => setAuth(a => a ? { ...a, authenticated: false } : a);
+    window.addEventListener('mia:unauthorized', f); return () => window.removeEventListener('mia:unauthorized', f); }, [load]);
   useEffect(() => { if (auth?.authenticated) connectStream(); else disconnectStream(); }, [auth?.authenticated]);
-  if (!auth) return null;
-  if (!auth.authenticated) return <Login setup={auth.setup} onDone={() => setAuth({ setup: true, authenticated: true })} />;
-  return <Shell onLogout={() => setAuth({ setup: true, authenticated: false })} />;
+  if (error) return <main className="mia-wallet-login"><section className="mia-wallet-card" role="alert">
+    <h1>Unable to connect to MIA</h1><p>{error}</p>
+    <button className="primary mia-wallet-button" onClick={() => void load()}>Try again</button>
+  </section></main>;
+  if (!auth) return <div className="mia-wallet-login" role="status">Connecting to MIA…</div>;
+  if (auth.mode === 'privy') {
+    if (!auth.privy?.enabled || !auth.privy.appId) return <main className="mia-wallet-login">
+      <section className="mia-wallet-card" role="alert"><h1>Privy setup required</h1>
+        <p>MIA wallet sign-in is not configured. The server administrator must set MIA_PRIVY_APP_ID and MIA_PRIVY_OWNER_ID.</p>
+        <p className="hint">No passphrase fallback is offered in production.</p></section></main>;
+    return <PrivyShell appId={auth.privy.appId}><PrivyOwnerApp auth={auth} load={load} /></PrivyShell>;
+  }
+  // Historical passphrase forms exist only in explicit OFFLINE recovery and test mode.
+  if (!auth.authenticated) return <Login setup={auth.setup} onDone={() => void load()} />;
+  return <Shell onLogout={() => void load()} />;
+}
+function PrivyOwnerApp({ auth, load }: { auth: AuthReply; load: () => Promise<void> }) {
+  const { logout } = usePrivy();
+  if (!auth.authenticated) return <WalletLogin appId={auth.privy.appId!} onDone={() => void load()} />;
+  return <Shell onLogout={async () => {
+    requirePrivyLogout(auth.privy.appId!);
+    await logout(); completePrivyLogout(auth.privy.appId!);
+    await load();
+  }} />;
 }
 
 function Login({ setup, onDone }: { setup: boolean; onDone: () => void }) {
@@ -43,7 +83,8 @@ function Login({ setup, onDone }: { setup: boolean; onDone: () => void }) {
   </div>;
 }
 
-function Shell({ onLogout }: { onLogout: () => void }) {
+function Shell({ onLogout }: { onLogout: () => void | Promise<void> }) {
+  const [signOutError, setSignOutError] = useState<string | null>(null);
   const shell = useApi<ShellDto>('/api/shell', { topics: ['mode', 'bot', 'notification', 'position', 'health'], every: 15_000 });
   const [palette, setPalette] = useState(false);
   useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
@@ -69,10 +110,11 @@ function Shell({ onLogout }: { onLogout: () => void }) {
       <Search />
       <button className="pill" onClick={() => nav('/notifications')} aria-label="Notifications">🔔 {s?.unread ?? 0}</button>
       <button className="ghost sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">{theme === 'dark' ? '☀' : '☾'}</button>
-      <button className="ghost sm" onClick={async () => { await api('/api/auth/logout', { body: {} }).catch(() => {}); onLogout(); }}>Sign out</button>
+      <button className="ghost sm" onClick={async () => { setSignOutError(null); try { await api('/api/auth/logout', { body: {} }); await onLogout(); } catch (e) { setSignOutError(e instanceof Error ? e.message : 'Sign out failed'); } }}>Sign out</button>
     </header>
     <main>
       <StaleBanner shell={shell} />
+      {signOutError && <div className="banner stale" role="alert">Sign-out was not fully completed: {signOutError}</div>}
       {s?.control.emergency && <div className="banner stale">⛔ EMERGENCY STOP active — new orders blocked. Existing positions are still monitored. Resolve in the Risk Center.</div>}
       {s && s.dataHealth.stale && <div className="banner stale">⚠ Market data is stale or disconnected (last update {fmt.ago(s.dataHealth.tickersAt)}). New entries are blocked by the data-quality gate.</div>}
       {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}
