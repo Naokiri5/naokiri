@@ -89,3 +89,52 @@ Honest statuses in this branch:
 | P10 | Real-money trading (separate future change) | Existing `exec/environment.ts`, release gates | **NOT AUTHORIZED** by this draft; explicit independent approval required |
 
 No proposal supersedes the accepted code, financial history, migration ledger, local security invariants or prior file owners. Do not auto-merge any draft PR.
+
+---
+
+## Appendix — 2026-11-22 63-page Unified Architecture integration
+
+**Source:** A distinct user-uploaded **63-page** “MIA 5.0 Unified Architecture Documentation, Master Prompt & TypeScript Catalog” (PDF SHA-256 `42fc0041a9e8741414ec49224e4b2cc3d4cc37254b904216dada421e9a6548cb`, 476,002 bytes). Its full **63-page parsed transcript** (2,746 searchable source lines) is preserved as the inert `sources/MIA_5_0_63_PAGE_UNIFIED_ARCHITECTURE_PDF_PARSED.txt`. Page markers were counted and the source PDF was not edited. This parsed text is not byte-identical to the original PDF and cannot be compiled or executed as-is.
+
+This source proposes 19 new modules and four scripts, plus five portfolio sleeves with a proposed **$10,000 virtual allocation** (futures 30%, spot 25%, memecoin 10%, yield 20%, stocks/ETF 15%). **None of those allocations is a deposit, account balance, approved strategy or LIVE permission.** Avoid replacing existing financial state or inventing functional sleeves.
+
+### 19 proposed module owners — NO parallel authority
+
+| PDF module / responsibility | Real owner or dependency | Decision |
+| --- | --- | --- |
+| 01 `types/mia5.catalog.ts` | `market/types.ts`, `workers/types.ts`, `market/coverage.ts` | REUSE contracts; no competing canonical type system |
+| 02 `NexusFabricRouter.ts` | `market/fabric.ts` and `market/quality.ts` | REUSE single feed + freshness engine |
+| 03 `FeatureVectorBuilder.ts` | `features/indicators.ts`; separate Hive observation work in PR #91/#93 | NO duplicate indicator engine or 97-index interpretation; cross-check different PDF versions first |
+| 04 `fastReflexWorker.ts` | `qhef/qhef.ts`, existing telemetry; PR #91/#93 | BLOCK unsupported <10ms claims and redundant worker |
+| 05 `deepConfluenceWorker.ts` | QCI, decision / THINK work (stacked PRs) | REUSE; benchmark separately before any OOM-respawn authority |
+| 06 `AgentRegistry.ts` | `workers/registry.ts` | REUSE exactly 100 canonical W-* workers; PDF AGT-* are design names, not independently executable agents |
+| 07 `SwarmThreadPool.ts` | `workers/runtime.ts` | REUSE bounded dispatch; 4ms p95 end-to-end not certified |
+| 08 `AdaptiveThinkingEngine.ts` | existing scanner, `decision/*`, THINK work | REUSE; avoid parallel order-decision entry points |
+| 09 `DitasCalibrator.ts` | `ditas/calibration.ts`, passports, current decision evidence | REUSE calibration; unknown confidence is never 100% |
+| 10 `UnifiedRiskGovernor.ts` | `risk/gate.ts`, `risk/policy.ts`, `portfolio/paperExpectancy.ts` | BLOCK second risk/promotion authority; existing 30-trade cohort is RESEARCH ONLY |
+| 11 `CanonicalRiskGate.ts` | `risk/gate.ts`, `exec/oms.ts`, `db/db.ts` | REUSE synchronous canonical paper gate and transaction helper |
+| 12 `MacroCalendarVetoSkill.ts` | existing risk inputs; macro research in PR #67 | DEFER official sourced calendars; no guessed FOMC/NFP times |
+| 13 `CapitalAllocatorSkill.ts` | `risk/gate.ts` sizing, `risk/policy.ts` | No independent leverage/Kelly authority |
+| 14 `TreasurySweepGuard.ts` | existing portfolio/ledger only | BLOCK vault transfers and recall until source/ledger/permissions and remote-finality proof |
+| 15 `PaperOmsAdapter.ts` | `exec/oms.ts`, `portfolio/ledger.ts` | REUSE canonical paper OMS; no duplicate fills |
+| 16 `LiveOmsRouter.ts` | `exec/environment.ts`, `core/mode.ts`, formal G01–G14 release gates | BLOCK unsupervised LIVE, futures, swaps, or Alpaca broker execution |
+| 17 `PrivyAuthGuard.ts` | `security/privy.ts` and `api/auth.ts` | REUSE identity handling; a login token alone is not wallet signing authority |
+| 18 `TcaDatabase.ts` / `SleeveTelemetryRepository.ts` | `db/db.ts`, `db/migrations.ts`, existing DITAS/portfolio reports | BLOCK extra financial DBs or writable TCA ledger; use established WAL database |
+| 19 `telemetryStream.ts` / `SleeveMatrixPanel.tsx` | `api/sse.ts`, `web/src/api.ts`, current dashboard | EXTEND existing read-only stream and UI only with truthful coverage |
+
+### Four scripts: status and critical safety correction
+
+1. `seedSqlite.ts`: **NOT INSTALLED**. The PDF's `--reset` removes database and WAL files. Never operate it against current data or create separate `mia_ledger.sqlite`/`mia_tca.sqlite`. Reuse migrations in `db/migrations.ts` and `db/db.ts`.
+2. `expectancyGateAudit.test.ts`: **NOT INSTALLED AS WRITTEN**. It tests a hypothetical `UnifiedRiskGovernor` against a new schema, not the existing MIA system. Keep `portfolio/paperExpectancy.ts` plus `paper-expectancy.test.ts` as current read-only evidence; no simulated thirty-trade result can automatically grant LIVE authority.
+3. `verifyPaperBurnIn.ts`: **NOT INSTALLED AS WRITTEN**. The reference demands non-existent five-sleeve execution/SSE, separate DBs and a 4ms SLA. Actual readiness remains `ops/readiness.ts` and the current health/test contracts; measured benchmarks need validated ingress clocks and real workloads.
+4. `verifyEquitiesPremarket.ts`: **NOT INSTALLED AS WRITTEN**. Even an Alpaca *paper* bracket order placed far from the market is still a real order in the paper broker's matching environment and may fill. A safe check must be **read-only** using validated clock/session/calendar, account and SPY/QQQ feed observations; there is no certified broker trade lifecycle here. Monday 9:30 AM America/New_York is not sufficient to prove trading-session eligibility on market holidays.
+
+### Implemented scope on this PR, without duplicating 30-trade research
+
+- Added `AGENTS.md`, a concise Codex instruction entrypoint that defers to the existing `CLAUDE.md` and actual authoritative modules. It explicitly bans destructive PDF scripts, unapproved execution, and replacing the existing risk/OMS.
+- Hardened `ditas/passports.ts` to restrict version-specific paper strategy diagnostics to `PAPER_ACCOUNT`, with stable newest-first ordering, finite per-R validation and a regression proving another account cannot corrupt paper evidence. The existing 30-trade cohort in `portfolio/paperExpectancy.ts` remains the sole *cohort-level* calculation; no second rolling evaluator or promotion gate was created.
+- The new reference is stored without running any of its scripts. Existing TypeScript source, route signatures, migrations, risk limits and order execution are otherwise unchanged.
+
+**Future autonomous behavior:** The default loop may monitor and self-recover *observational* components without user interaction. Production trading requires independent preauthorized risk envelopes, durable account-scoped intent and order reconciliation, certified protective orders, scoped identity and signing, independent human release and a fail-closed halt on uncertainty. An agent, UI, backtest or test fixture must never self-approve LIVE.
+
+**Release status:** Source preserved and narrow code changes committed to the existing five-sleeve PR stack. The document does **not** claim successful end-to-end tests, ready-to-merge status, live trading, 30-trade performance certification or sub-4ms latency. Check exact-head GitHub Actions, resolve stacked PR conflicts, perform security/risk review and keep the branch DRAFT until verified.
