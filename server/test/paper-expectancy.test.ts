@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { all, closeDb, run } from '../src/db/db.js';
 import { assessPaperExpectancyCohort, rollingPaperExpectancy, type ClosedPaperTrade } from '../src/portfolio/paperExpectancy.js';
 import { PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
+import { paperStats } from '../src/lab/lab.js';
 import { freshDb } from './helpers.js';
 
 const row = (i: number, pnl: number, extra: Partial<ClosedPaperTrade> = {}): ClosedPaperTrade => ({
@@ -68,6 +69,8 @@ describe('MIA 5.0 canonical PAPER 30-trade expectancy (research only)', () => {
         sampleTrades: 30, winningTrades: 30, status: 'THRESHOLDS_NOT_MET',
       });
       expect(report.cohorts.find(c => c.strategy === 'other-strategy')?.sampleTrades).toBe(1);
+      // The existing strategy health monitor must not be contaminated by another account.
+      expect(paperStats('trend_pullback')?.trades).toBe(33);
       expect(['positions','ledger_entries'].map(t => all(`SELECT * FROM ${t}`))).toEqual(before);
       expect(rollingPaperExpectancy()).toEqual(report);
     });
