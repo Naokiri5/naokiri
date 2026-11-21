@@ -96,6 +96,26 @@ describe('MIA wallet-first Privy integration into main — fail closed', () => {
     const denied = await post('/api/security/2fa/begin', { consoleCode: 'bad' }, cookie);
     expect(denied.statusCode).toBe(403);
   });
+  it('blocks logout CSRF without revoking the legitimate owner session', async () => {
+    bindOwner(OWNER, 'server-cli');
+    const login = await post('/api/auth/privy/login', { accessToken: await token() });
+    expect(login.statusCode).toBe(200);
+    const cookie = String(login.headers['set-cookie']).split(';')[0]!;
+    const session = () => app.inject({ method: 'GET', url: '/api/shell', headers: { cookie } });
+    expect((await session()).statusCode).toBe(200);
+
+    const csrf = await app.inject({
+      method: 'POST', url: '/api/auth/logout', headers: { cookie }, payload: {},
+    });
+    expect(csrf.statusCode).toBe(403);
+    expect(csrf.json().error).toMatch(/CSRF/i);
+    expect((await session()).statusCode).toBe(200);
+
+    const logout = await post('/api/auth/logout', {}, cookie);
+    expect(logout.statusCode).toBe(200);
+    expect(logout.headers['set-cookie']).toContain('Max-Age=0');
+    expect((await session()).statusCode).toBe(401);
+  });
   it('never grants live-trading authority through authentication', async () => {
     bindOwner(OWNER, 'server-cli');
     const login = await post('/api/auth/privy/login', { accessToken: await token() });
