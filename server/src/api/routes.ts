@@ -1,6 +1,7 @@
 import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { analyzeChart } from '../chart/analysis.js';
+import { analyzeDeepPrecision } from '../chart/precision.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -253,9 +254,16 @@ export async function routes(app: FastifyInstance) {
     }
     const d = market.deep.get(i.id);
     const f = d ? { '15m': d.engines['15m'].last, '1h': d.engines['1h'].last, '4h': d.engines['4h'].last } : {};
-    return { chartIntelligence: analyzeChart(i.id, iv, d?.engines[iv].candles ?? [], Date.now()), instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
+    const now = Date.now();
+    const canonicalQuality = assessQuality(i.id, '1h', now);
+    const quote = market.price(i.id);
+    const deepPrecision = analyzeDeepPrecision({ instrument: i,
+      candles: { '15m': d?.engines['15m'].candles ?? [], '1h': d?.engines['1h'].candles ?? [], '4h': d?.engines['4h'].candles ?? [] },
+      quality: canonicalQuality, quote: quote ? { price: quote.price, ts: quote.ts } : null,
+      nowMs: now, style: 'DAY_TRADING' });
+    return { deepPrecision, chartIntelligence: analyzeChart(i.id, iv, d?.engines[iv].candles ?? [], Date.now()), instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
-      quality: assessQuality(i.id), safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };
+      quality: canonicalQuality, safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };
   });
   // Bounded research-only replay. Uses owner-supplied history and the existing auth/CSRF gate.
   app.post('/api/chart/replay', async (req) => {
