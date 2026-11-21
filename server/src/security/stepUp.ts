@@ -18,7 +18,11 @@ import { twoFactorEnrolled, verifyTotpStepUp } from './totp.js';
 
 export type AuthMode = 'privy' | 'passphrase';
 export function authMode(): AuthMode {
-  return process.env.MIA_AUTH_MODE?.trim().toLowerCase() === 'passphrase' ? 'passphrase' : 'privy';
+  // Preserve historical offline unit/E2E fixtures while refusing a publicly
+  // exposed passphrase fallback in production, even if misconfigured.
+  if (process.env.MIA_OFFLINE === '1' &&
+      process.env.MIA_AUTH_MODE?.trim().toLowerCase() !== 'privy') return 'passphrase';
+  return 'privy';
 }
 export const passphraseSignInAllowed = () => authMode() === 'passphrase';
 
