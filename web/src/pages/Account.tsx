@@ -43,17 +43,37 @@ export function Wallet() {
 
 export function Connections() {
   const { data, error } = useApi('/api/connections', { topics: ['health'], every: 15_000 });
+  const integration = useApi('/api/integrations', { topics: ['health'], every: 30_000 });
   return <Page title="Connections Hub" sub="Every integration with its real status, license terms and latency. Nothing marked PENDING returns data — it is not simulated.">
     <ErrorLine e={error} />
     <Card flush><div className="tablewrap"><table><thead><tr><th>Provider</th><th>Class</th><th>Markets</th><th>Freshness</th><th>Status</th><th className="num">Latency</th><th className="num">OK / err</th><th>License / notes</th></tr></thead>
       <tbody>{(data?.providers ?? []).map((p: any) => <tr key={p.id}><td><b>{p.name}</b><div className="faint mono" style={{ fontSize: 11 }}>{p.id}</div></td><td>{p.sourceClass}</td><td>{p.markets.join(', ')}</td><td>{p.realtime.replace('_', ' ').toLowerCase()}</td><td><Badge v={p.status} />{p.lastOkAt && <div className="hint">ok {fmt.ago(p.lastOkAt)}</div>}{p.lastError && <div className="hint warn" title={p.lastError}>{p.lastError.slice(0, 40)}</div>}</td><td className="num">{p.lastLatencyMs ?? '—'}ms</td><td className="num">{p.okCount}/{p.errorCount}</td><td className="hint" style={{ maxWidth: 380 }}>{p.license}{p.note && <div>{p.note}</div>}</td></tr>)}</tbody></table></div></Card>
+    <div style={{ height: 14 }} />
+    <Card title="MIA multi-market integration capabilities" flush>
+      <div className="hint" style={{ padding: '10px 16px' }}>
+        Read-only data and token-risk evidence. A connected provider does not authorize orders,
+        funding, copy trading or live execution. Credentials remain server-side.
+      </div>
+      <div className="tablewrap"><table>
+        <thead><tr><th>Provider</th><th>Markets</th><th>Purpose</th><th>Credentials</th><th>Telemetry</th><th>Execution</th></tr></thead>
+        <tbody>{(integration.data?.integrations ?? []).map((p: any) => <tr key={p.id}>
+          <td><b>{p.id}</b></td><td>{p.markets.join(', ')}</td>
+          <td className="muted">{p.purpose}</td>
+          <td><Badge v={p.configuration} /></td>
+          <td><Badge v={p.existingProviderStatus} /></td>
+          <td><Badge v={p.execution} /></td>
+        </tr>)}</tbody>
+      </table></div>
+      {!integration.data && <div className="hint" style={{ padding: 12 }}>Awaiting authenticated provider capability data.</div>}
+      <ErrorLine e={integration.error} />
+    </Card>
     <div style={{ height: 14 }} />
     <Card title="Hot-path latency (Part 29.5 / 33.18)" flush><table><thead><tr><th>Stage</th><th className="num">Samples</th><th className="num">p50 ms</th><th className="num">p95 ms</th><th className="num">p99 ms</th><th className="num">max</th></tr></thead><tbody>{(data?.latency ?? []).map((l: any) => <tr key={l.stage}><td className="mono">{l.stage}</td><td className="num">{l.samples}</td><td className="num">{l.p50}</td><td className="num">{l.p95}</td><td className="num">{l.p99}</td><td className="num">{l.max}</td></tr>)}</tbody></table>{!data?.latency.length && <Empty>No samples yet.</Empty>}</Card>
     <div style={{ height: 14 }} />
     <div className="grid g3">
       <Card title="X (Twitter)"><Badge v="PENDING_CREDENTIALS" /><p className="muted">OAuth 2.0 PKCE linking requires an X developer app (paid read tier). Social posts would be untrusted data feeding the news/social worker only.</p></Card>
       <Card title="Telegram"><p className="muted">Notifications: set <code>TELEGRAM_BOT_TOKEN</code> and <code>TELEGRAM_CHAT_ID</code> server-side (never in the browser). Launch-source monitoring requires approved channel configuration.</p></Card>
-      <Card title="Exchange / broker (read-only)"><p className="muted">Read-only API keys for balance sync and a licensed equities/commodities feed are not configured. Live trading keys are deliberately unsupported until release gates pass.</p></Card>
+      <Card title="Exchange / broker (read-only)"><p className="muted">Alpaca PAPER, OANDA PRACTICE and Solana read-only adapters are available under the capability table. Configure eligible server-only credentials as needed. Live trading and broker order submission remain locked.</p></Card>
     </div>
   </Page>;
 }

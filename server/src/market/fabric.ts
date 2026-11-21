@@ -4,6 +4,13 @@ import * as kraken from '../providers/kraken.js';
 import * as coingecko from '../providers/coingecko.js';
 import * as dexscreener from '../providers/dexscreener.js';
 import * as frankfurter from '../providers/frankfurter.js';
+/* Additional MIA multi-market providers register metadata only.
+ * No automated trading, network polling or second market-data fabric.
+ */
+import '../providers/regulatedBrokers.js';
+import '../providers/helius.js';
+import '../providers/jupiter.js';
+import '../providers/goplus.js';
 import { market, type DeepState } from './store.js';
 import { validateCandles } from '../chart/analysis.js';
 import { INTERVAL_MS, type Candle, type Instrument, type Interval } from './types.js';

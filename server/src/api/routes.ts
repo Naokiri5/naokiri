@@ -7,6 +7,11 @@ import { replayDecision, ReplayError } from '../ditas/replay.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { BinanceSpotTestnet, testnetConfiguration } from '../exec/venues/binanceTestnet.js';
+import { marketIntegrations } from '../market/integrations.js';
+import { alpacaPaperAsset, oandaPracticePrice } from '../providers/regulatedBrokers.js';
+import { heliusAsset } from '../providers/helius.js';
+import { jupiterQuote } from '../providers/jupiter.js';
+import { goPlusSolanaRisk } from '../providers/goplus.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -422,6 +427,43 @@ export async function routes(app: FastifyInstance) {
 
   // ── connections / notifications / settings / QA ──
   app.get('/api/connections', async () => ({ providers: providers(), latency: latencyReport() }));
+  // MIA5: owner-authenticated read-only market expansion. These routes
+  // do not write orders or bypass canonical QCI/risk/OMS.
+  app.get('/api/integrations', async () => ({
+    version: 'mia5-multimarket-readonly-v1', canAuthorizeTrade: false,
+    integrations: marketIntegrations(),
+    note: 'Market-data and asset-risk discovery only. No broker or Solana execution unlocked.',
+  }));
+  app.get('/api/integrations/alpaca/asset/:symbol', async (req) => {
+    limit(req, 'analyze', 'Alpaca PAPER asset metadata');
+    const { symbol } = z.object({ symbol: z.string().regex(/^[A-Z][A-Z0-9.]{0,9}$/) }).strict().parse(req.params);
+    return alpacaPaperAsset(symbol);
+  });
+  app.get('/api/integrations/oanda/price/:pair', async (req) => {
+    limit(req, 'analyze', 'OANDA PRACTICE price');
+    const { pair } = z.object({ pair: z.enum(['EUR_USD','GBP_USD','USD_JPY','AUD_USD','USD_CAD']) }).strict().parse(req.params);
+    return oandaPracticePrice(pair);
+  });
+  app.get('/api/integrations/helius/asset/:mint', async (req) => {
+    limit(req, 'analyze', 'Helius read-only asset');
+    const { mint } = z.object({ mint: z.string().min(32).max(44) }).strict().parse(req.params);
+    return heliusAsset(mint);
+  });
+  app.get('/api/integrations/jupiter/quote', async (req) => {
+    limit(req, 'analyze', 'Jupiter quote only');
+    const { inputMint, outputMint, amount } = z.object({
+      inputMint: z.string().min(32).max(44),
+      outputMint: z.string().min(32).max(44),
+      amount: z.string().regex(/^[1-9][0-9]{0,10}$/),
+    }).strict().parse(req.query);
+    return jupiterQuote(inputMint, outputMint, amount);
+  });
+  app.get('/api/integrations/goplus/solana/:mint', async (req) => {
+    limit(req, 'analyze', 'GoPlus Solana risk evidence');
+    const { mint } = z.object({ mint: z.string().min(32).max(44) }).strict().parse(req.params);
+    return goPlusSolanaRisk(mint);
+  });
+
 
   // ── Phase 1 workspaces ──
   app.get('/api/qhef', async () => qhefReport());
