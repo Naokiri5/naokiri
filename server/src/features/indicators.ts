@@ -452,6 +452,6 @@ export function projectMia5SwarmResearchFeatures(
     values,
     missingCount: 97 - availableSlotIds.length,
     tradeEligible: false,
-    status: allowed ? 'PARTIAL' : 'UNVERIFIED',
+    status: allowed && availableSlotIds.length > 0 ? 'PARTIAL' : 'UNVERIFIED',
   };
 }
