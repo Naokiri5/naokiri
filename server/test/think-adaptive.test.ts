@@ -91,6 +91,11 @@ describe('adaptive THINK integration — real canonical modules', () => {
       version: 'mia-think-observer-v1', authority: 'EXPLANATION_ONLY',
       canAuthorizeTrade: false, enforcement: 'SHADOW', dataTransport: 'CANONICAL_MIA_MARKET_FABRIC',
     });
+    expect(result.thinking!.emotion).toMatchObject({
+      version: 'mia-market-emotion-overlay-v1',
+      canAuthorizeTrade: false, canIncreaseRisk: false,
+      dataClassification: 'OBSERVED_HEURISTIC_NOT_CALIBRATED',
+    });
     expect(result.decision).not.toBe('PAPER_TRADE');
     const row = get<{ report: string }>('SELECT report FROM decisions WHERE id=?', result.id);
     expect(JSON.parse(row!.report).thinking).toMatchObject({ route: result.thinking!.route });
@@ -107,6 +112,8 @@ describe('adaptive THINK integration — real canonical modules', () => {
     } as unknown as ConsensusRecord;
     const a = analyzeThinking({ ctx, qci, correlatedOpen: 0, preference: 'DEEP', enforcement: 'SHADOW' });
     expect(a).toMatchObject({ route: 'DEEP', canAuthorizeTrade: false, deep: { calibration: 'NO_VALID_FORECAST' } });
+    expect(a.emotion.canAuthorizeTrade).toBe(false);
+    expect(a.emotion.canIncreaseRisk).toBe(false);
     expect(a.deep!.hypotheticalScenarios).toMatchObject({ kind: 'HYPOTHETICAL', valid: true });
     expect(a.deep!.hypotheticalScenarios.scenarios.length).toBeGreaterThan(2);
     expect(a.deep!.hypotheticalScenarios.scenarios.every(s => s.netUsd === null)).toBe(true);
