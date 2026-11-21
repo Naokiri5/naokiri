@@ -35,7 +35,7 @@ export type StepUpProof = { password?: unknown; otp?: unknown } | null | undefin
 export function verifyStepUp(proof: StepUpProof, client: string, opts: { exemptFromGlobalLockout?: boolean } = {}) {
   const method = stepUpMethod();
   if (method === 'totp') return verifyTotpStepUp(proof?.otp, client, opts);
-  if (method === 'passphrase') return verifyPassphrase(proof?.password, client, 'step-up', opts);
+  if (method === 'passphrase') return verifyPassphrase(proof?.password, client, 'step-up');
   audit('owner', 'auth.stepup.unavailable', { client });
   throw new AuthError('this action needs two-factor step-up: set up an authenticator app in Security Center first', 403);
 }
