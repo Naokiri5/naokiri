@@ -3,7 +3,7 @@ import { closeDb, openDb, all, get, run } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { config } from '../src/config.js';
 import { createLinkCode, linkForIdentity, linkStatus, redeemLinkCode } from '../src/integrations/telegram/link.js';
-import { drainOutbox } from '../src/integrations/telegram/webhook.js';
+import { drainOutbox, sendViaBotApi } from '../src/integrations/telegram/webhook.js';
 import { ownerSetupPayload } from './helpers.js';
 import { getControl } from '../src/core/mode.js';
 import { bus } from '../src/core/bus.js';
@@ -249,6 +249,23 @@ describe('Telegram webhook (MIA-TG-01)', () => {
     expect(await drainOutbox(send, retryAt)).toBe(1);
     expect(send).toHaveBeenCalledTimes(1);
     expect(outbox()[0].status).toBe('PROVIDER_ACCEPTED');
+  });
+
+  it('sends replies only to the configured Bot API endpoint without following redirects', async () => {
+    const originalToken = config.telegramBotToken;
+    const fetchStub = vi.fn(async () => new Response('{}'));
+    vi.stubGlobal('fetch', fetchStub);
+    config.telegramBotToken = 'test-token';
+    try {
+      await sendViaBotApi(321, 'Guardian alert fixture');
+      expect(fetchStub).toHaveBeenCalledExactlyOnceWith('https://api.telegram.org/bottest-token/sendMessage', expect.objectContaining({
+        method: 'POST', redirect: 'error',
+        body: JSON.stringify({ chat_id: 321, text: 'Guardian alert fixture', disable_web_page_preview: true }),
+      }));
+    } finally {
+      config.telegramBotToken = originalToken;
+      vi.unstubAllGlobals();
+    }
   });
 
   it('never starts Telegram delivery in offline mode even with a configured token', async () => {

@@ -13,9 +13,9 @@
 import { AaveV3Ethereum } from '@bgd-labs/aave-address-book';
 import { createPublicClient, custom, formatUnits, parseAbi, type Address } from 'viem';
 import { mainnet } from 'viem/chains';
-import { fetchProvider, registerProvider, setRateLimit, ProviderError } from '../providers/http.js';
+import { configuredEthereumRpc, ETHEREUM_READ_ONLY_PROVIDER, fetchProvider, registerProvider, setRateLimit, ProviderError } from '../providers/http.js';
 
-export const ETH_RPC = 'eth-rpc-readonly';
+export const ETH_RPC = ETHEREUM_READ_ONLY_PROVIDER;
 registerProvider({ id: ETH_RPC, name: 'Ethereum JSON-RPC (read-only eth_call)', sourceClass: 'onchain', markets: ['defi-lending'],
   license: 'Public RPC terms of the configured endpoint.', realtime: 'NEAR_REALTIME', requiresCredentials: false,
   note: 'Read-only eth_call for Aave V3 research. No transactions, no signer.' });
@@ -23,14 +23,11 @@ setRateLimit(ETH_RPC, 60);
 
 export class AaveResearchError extends Error { statusCode = 400; }
 const ALLOWED_RPC = new Set(['eth_call', 'eth_chainId', 'eth_blockNumber']);
-const DEFAULT_RPC = 'https://ethereum-rpc.publicnode.com';
-
 function rpcUrl() {
-  const v = process.env.MIA_ETH_RPC_URL?.trim();
-  if (!v) return DEFAULT_RPC;
-  let u: URL; try { u = new URL(v); } catch { throw new AaveResearchError('MIA_ETH_RPC_URL is not a valid URL'); }
-  if (u.protocol !== 'https:') throw new AaveResearchError('MIA_ETH_RPC_URL must use https');
-  return u.href;
+  let endpoint: string;
+  try { endpoint = configuredEthereumRpc(); } catch { throw new AaveResearchError('MIA_ETH_RPC_URL is not a valid URL'); }
+  if (new URL(endpoint).protocol !== 'https:') throw new AaveResearchError('MIA_ETH_RPC_URL must use https');
+  return endpoint;
 }
 
 let rpcId = 0;
@@ -38,8 +35,8 @@ let rpcId = 0;
 export async function readOnlyRpc(method: string, params: unknown[] = []): Promise<unknown> {
   if (!ALLOWED_RPC.has(method)) throw new AaveResearchError(`blocked JSON-RPC method ${method}: Aave research is read-only`);
   const body = await fetchProvider(ETH_RPC, rpcUrl(), { timeoutMs: 15_000, redirectMode: 'error', jsonBody: { jsonrpc: '2.0', id: ++rpcId, method, params } });
-  const r = (body ?? {}) as { result?: unknown; error?: { message?: unknown } };
-  if (r.error) throw new AaveResearchError(`RPC error: ${String(r.error.message ?? 'unknown').slice(0, 120)}`);
+  const r = (body ?? {}) as { result?: unknown; error?: unknown };
+  if (r.error) throw new AaveResearchError('RPC returned an error');
   if (!('result' in r)) throw new AaveResearchError('malformed JSON-RPC response');
   return r.result;
 }

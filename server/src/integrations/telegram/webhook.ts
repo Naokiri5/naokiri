@@ -67,7 +67,7 @@ export async function sendViaBotApi(chatId: number, text: string): Promise<void>
   const timer = setTimeout(() => ctl.abort(), 10_000);
   try {
     const res = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }), signal: ctl.signal,
     });
     // Never include the URL or body in the error: both can carry the bot token or chat identifiers.

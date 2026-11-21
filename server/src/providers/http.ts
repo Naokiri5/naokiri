@@ -1,3 +1,4 @@
+import { isIP } from 'node:net';
 import { bus } from '../core/bus.js';
 import { record } from '../core/latency.js';
 import { config } from '../config.js';
@@ -65,10 +66,38 @@ export function setRateLimit(id: string, perMin: number) { buckets.set(id, new B
 
 export class ProviderError extends Error { constructor(public providerId: string, msg: string, public status?: number) { super(`${providerId}: ${msg}`); } }
 
-/** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
+const CREDENTIAL_ORIGINS = new Map([
+  ['telegram', 'https://api.telegram.org'],
+  ['vike-data', 'https://data.vike.io'],
+]);
+export const ETHEREUM_READ_ONLY_PROVIDER = 'eth-rpc-readonly';
+export function configuredEthereumRpc(): string {
+  const configured = process.env.MIA_ETH_RPC_URL?.trim();
+  return configured ? new URL(configured).href : 'https://ethereum-rpc.publicnode.com';
+}
+
+function assertProviderDestination(info: ProviderInfo, url: string): void {
+  const denied = () => new ProviderError(info.id, 'provider destination is not permitted');
+  let destination: URL;
+  try { destination = new URL(url); } catch { throw denied(); }
+  const host = destination.hostname.replace(/\.$/, '').replace(/^\[|\]$/g, '');
+  if (destination.protocol !== 'https:' || destination.username || destination.password || destination.hash ||
+      isIP(host) || !host.includes('.') || host.endsWith('.localhost') || host.endsWith('.local')) {
+    throw denied();
+  }
+  const expectedOrigin = CREDENTIAL_ORIGINS.get(info.id);
+  if (expectedOrigin ? destination.origin !== expectedOrigin : info.requiresCredentials) throw denied();
+  if (info.id === ETHEREUM_READ_ONLY_PROVIDER) {
+    let rpc: URL;
+    try { rpc = new URL(configuredEthereumRpc()); }
+    catch { throw denied(); }
+    if (destination.href !== rpc.href) throw denied();
+  }
+}
+
 /**
- * `redirectMode`/`redirect: 'error'` is for credentialed providers: a redirect must never carry an API key to another host
- * (fetch keeps custom headers across redirects). Default stays 'follow' for the public, keyless providers.
+ * Fetch with timeout, rate limit, latency and health accounting. Redirects are always refused; an API key may sit
+ * in a header, the URL path or query, and even keyless adapters control which destination receives their requests.
  * `jsonBody` sends a JSON POST (used only for read-only JSON-RPC such as eth_call); everything else is a GET.
  * `decode` (Codex four-layer) validates the raw payload into a typed result inside the provider boundary.
  */
@@ -84,6 +113,11 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
   if (config.offline) throw new ProviderError(id, 'offline mode');
+  assertProviderDestination(info, url);
+  if (opts.redirect === 'follow' || opts.redirectMode === 'follow') throw new ProviderError(id, 'automatic redirects are disabled');
+  const post = opts.jsonBody !== undefined;
+  const hideTransportDetails = info.requiresCredentials || CREDENTIAL_ORIGINS.has(id) || id === ETHEREUM_READ_ONLY_PROVIDER ||
+    post || Object.keys(opts.headers ?? {}).length > 0;
   const assertNotBlocked = () => {
     const until = blockedUntil.get(id) ?? 0;
     if (Date.now() < until) throw new ProviderError(id, `rate limited by provider; retry after ${new Date(until).toISOString()}`, 429);
@@ -95,8 +129,7 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
   try {
-    const post = opts.jsonBody !== undefined;
-    const res = await fetch(url, { signal: ctl.signal, redirect: opts.redirect ?? opts.redirectMode ?? 'follow', method: post ? 'POST' : 'GET', body: post ? JSON.stringify(opts.jsonBody) : undefined,
+    const res = await fetch(url, { signal: ctl.signal, redirect: 'error', method: post ? 'POST' : 'GET', body: post ? JSON.stringify(opts.jsonBody) : undefined,
       headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...(post ? { 'content-type': 'application/json' } : {}), ...opts.headers } });
     if (res.status === 404) { // resource-level miss (e.g. product not listed) — provider itself is reachable
       Object.assign(info, { lastOkAt: Date.now(), lastLatencyMs: Math.round(performance.now() - t0) });
@@ -119,7 +152,9 @@ export async function fetchProvider<T = any>(id: string, url: string, opts: {
     return body;
   } catch (e: any) {
     if (e?.resourceMiss) throw e;
-    const msg = e?.name === 'AbortError' ? 'timeout' : String(e?.message ?? e).replace(/(key|token)=[^&\s]+/gi, '$1=***');
+    const msg = e?.name === 'AbortError' ? 'timeout'
+      : hideTransportDetails && !(e instanceof ProviderError) ? 'request failed'
+        : String(e?.message ?? e).replace(/(key|token)=[^&\s]+/gi, '$1=***');
     info.errorCount++; info.lastErrorAt = Date.now(); info.lastError = msg;
     const recentOk = info.lastOkAt && Date.now() - info.lastOkAt < 120_000;
     const prev = info.status;
