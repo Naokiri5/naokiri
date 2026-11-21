@@ -53,6 +53,20 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(s.offline).toBe(true); expect(s.bot.running).toBe(false);
     expect(s.dataHealth.stale).toBe(true); expect(s.dataHealth.tickersAt).toBe(0);
   });
+  it('parity witness uses the canonical gates and never presents LIVE as executable', async () => {
+    expect((await app.inject({ url: '/api/trading/parity' })).statusCode).toBe(401);
+    const response = await app.inject({ url: '/api/trading/parity', headers: { cookie } });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    const body = response.json();
+    expect(body.readOnly).toBe(true);
+    expect(body.canonical.risk).toBe('server/src/risk/gate.ts');
+    expect(body.canonical.paperOms).toBe('server/src/exec/oms.ts');
+    expect(body.demo).toMatchObject({ environment: 'DEMO', mode: 'PAPER', account: 'paper-bot', simulationOnly: true });
+    expect(body.live).toMatchObject({ environment: 'LIVE', mode: 'BOUNDED_LIVE', account: null, canPlaceRealOrders: false });
+    expect(body.live.unmetGates).toContain('G07');
+    expect(body.releaseSummary).toMatch(/live execution LOCKED/);
+  });
   it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {
     const password = 'correct horse battery'; const id = STRATEGIES[0].id; const worker = WORKERS[0].id;
     const statusUrl = `/api/lab/strategy/${id}/status`; const releaseUrl = `/api/workers/${worker}/release`;
