@@ -112,18 +112,21 @@ export async function routes(app: FastifyInstance) {
    * Route-aware authentication and CSRF: only enumerated bootstrap/login/status endpoints are public.
    * NEVER exempt the entire /api/auth/* namespace: a future owner-management endpoint could otherwise
    * become publicly callable. Use Fastify's matched route (not the raw, potentially encoded URL).
-   * All state-changing routes, including public sign-in and logout, require MIA's CSRF header.
+   * Existing bootstrap/login clients may submit without the CSRF header; they cannot modify an
+   * authenticated session other than issuing a new, verified owner login. Logout and every other
+   * state-changing endpoint require the CSRF header, including future /api/auth/* endpoints.
    */
   const publicRoutes = new Set([
     '/api/health', '/api/ready',
     '/api/auth/state', '/api/auth/privy/config',
     '/api/auth/setup', '/api/auth/login', '/api/auth/privy/login', '/api/auth/logout',
   ]);
+  const csrfExemptSignIn = new Set(['/api/auth/setup', '/api/auth/login', '/api/auth/privy/login']);
   app.addHook('onRequest', async (req, reply) => {
     const route = req.routeOptions?.url ?? '';
     if (!publicRoutes.has(route) && !auth.validSession(tokenOf(req)))
       return bad(reply, 401, 'authentication required');
-    if (req.method !== 'GET' && req.headers['x-mia-csrf'] !== '1')
+    if (req.method !== 'GET' && !csrfExemptSignIn.has(route) && req.headers['x-mia-csrf'] !== '1')
       return bad(reply, 403, 'missing CSRF header');
   });
   const limit = (req: FastifyRequest, l: keyof typeof LIMITS, what: string) => LIMITS[l].take(sha256(tokenOf(req) ?? req.ip), what);
