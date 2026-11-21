@@ -4,6 +4,8 @@ import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
+import { submitPaperAtomicBundle } from '../src/exec/oms.js';
+import { reconcile } from '../src/portfolio/calendar.js';
 import { run, get, J } from '../src/db/db.js';
 import { previewBundle, bundleCapabilities } from '../src/exec/bundles/preview.js';
 import { assessBundle, type BundleIntent, type BundleEvidence } from '../src/exec/bundles/assessment.js';
@@ -51,10 +53,10 @@ describe('MIA bundle preflight using canonical PAPER authority', () => {
     expect(get<{ n: number }>('SELECT COUNT(*) n FROM positions')!.n).toBe(before.positions);
     expect(get<{ n: number }>('SELECT COUNT(*) n FROM ledger_entries')!.n).toBe(before.ledger);
   });
-  it('PAPER_ATOMIC refuses to imply that a transactional multi-entry OMS exists', () => {
+  it('PAPER_ATOMIC preview cannot itself submit, even when atomic PAPER OMS is installed', () => {
     const res = previewBundle({ ...req, mode: 'PAPER_ATOMIC' });
-    expect(res.approved).toBe(false);
-    expect(res.reasonCodes).toContain('PAPER_OMS_ATOMIC_COMMIT_NOT_INSTALLED');
+    expect(res.canSubmit).toBe(false);
+    expect(res.reasonCodes).not.toContain('PAPER_OMS_ATOMIC_COMMIT_NOT_INSTALLED');
   });
   it('TESTNET and LIVE remain locked without even reading a paper balance to authorize them', () => {
     for (const environment of ['TESTNET', 'LIVE'] as const) {
@@ -74,7 +76,40 @@ describe('MIA bundle preflight using canonical PAPER authority', () => {
   });
   it('capabilities truthfully describe the unavailable live and atomic order paths', () => {
     const s = bundleCapabilities();
-    expect(s.environments.every(x => !x.canPlaceBundleOrders)).toBe(true);
+    expect(s.environments.find(x => x.environment === 'PAPER')?.canPlaceBundleOrders).toBe(true);
+    expect(s.environments.filter(x => x.environment !== 'PAPER').every(x => !x.canPlaceBundleOrders)).toBe(true);
+  });
+  it('commits two PAPER entries together via the original OMS and reconciles canonical accounting', () => {
+    const result = submitPaperAtomicBundle(req.decisionIds, 'owner');
+    expect(result).toMatchObject({ ok: true });
+    expect(result.orderIds).toHaveLength(2);
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM orders WHERE purpose='ENTRY' AND status='FILLED'")!.n).toBe(2);
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM positions WHERE status='OPEN'")!.n).toBe(2);
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM orders WHERE purpose='PROTECTIVE_STOP' AND status='ACTIVE'")!.n).toBe(2);
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM bundle_executions WHERE status='FILLED'")!.n).toBe(1);
+    expect(get<{ n: number }>('SELECT COUNT(*) n FROM bundle_entry_links')!.n).toBe(2);
+    expect(reconcile().ok).toBe(true);
+    const duplicate = submitPaperAtomicBundle(req.decisionIds, 'owner');
+    expect(duplicate.ok).toBe(false);
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM orders WHERE purpose='ENTRY'")!.n).toBe(2);
+  });
+  it('rolls back ALL fills, positions, stops, fees and bundle links if second leg fails after the first writes', () => {
+    run("CREATE TRIGGER block_second_bundle_leg BEFORE INSERT ON bundle_entry_links WHEN NEW.leg_index=1 BEGIN SELECT RAISE(ABORT,'INJECTED_SECOND_LEG_FAILURE'); END");
+    const result = submitPaperAtomicBundle(req.decisionIds, 'owner');
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('BUNDLE_TRANSACTION_FAILED');
+    for (const table of ['orders', 'fills', 'positions', 'bundle_executions', 'bundle_entry_links']) {
+      expect(get<{ n: number }>('SELECT COUNT(*) n FROM ' + table)!.n, table).toBe(0);
+    }
+    // The initial owner deposit remains; the failed transaction cannot debit cash.
+    expect(get<{ n: number }>('SELECT COUNT(*) n FROM ledger_entries')!.n).toBe(1);
+    expect(reconcile().ok).toBe(true);
+  });
+  it('blocks paper orders after a pause even for a previously stored valid decision pair', () => {
+    updateControl('owner', { emergency: true });
+    const result = submitPaperAtomicBundle(req.decisionIds, 'owner');
+    expect(result.ok).toBe(false);
+    expect(get<{ n: number }>('SELECT COUNT(*) n FROM bundle_executions')!.n).toBe(0);
   });
 });
 
