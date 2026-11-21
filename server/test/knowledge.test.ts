@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { freshDb, synthCandles } from './helpers.js';
 import { zip, docx, epub, pdf } from './kb-fixtures.js';
@@ -11,7 +11,7 @@ import { seedConcepts, conceptDetail, conflicts, addClaim, researchSpec, listCon
 import { search, ask, citation, ftsQuery, matchConcepts } from '../src/knowledge/search.js';
 import { embedder, claudeReasoner, fenceSafe } from '../src/knowledge/providers.js';
 import { config } from '../src/config.js';
-import { storeCandles, runExperiment, experimentDetail, ljungBox, acf, chiSquareSurvival, performanceMetrics } from '../src/knowledge/research.js';
+import { researchCandles, storeCandles, runExperiment, experimentDetail, ljungBox, acf, chiSquareSurvival, performanceMetrics } from '../src/knowledge/research.js';
 import { memoryOverview } from '../src/knowledge/memory.js';
 import { strategyKnowledge, knowledgeForAssistant } from '../src/knowledge/integration.js';
 import { PRIORITY_CATALOG, DISCIPLINES, CONCEPT_CARDS } from '../src/knowledge/taxonomy.js';
@@ -282,6 +282,17 @@ describe('research laboratory', () => {
     for (let i = 0; i < n; i++) { const r = (rnd() - 0.5) * 2 * v; v = 0.0005 + 0.75 * v + 0.4 * Math.abs(r); const o = p, c = p * (1 + r); out.push({ t: t0 + i * step, o, h: Math.max(o, c) * 1.001, l: Math.min(o, c) * 0.999, c, v: 1000, closeTime: t0 + (i + 1) * step - 1 }); p = c; }
     storeCandles('TESTUSDT', '1h', out); return out;
   };
+  it('counts only closed candles toward the requested history size', async () => {
+    const history = synthCandles(3);
+    storeCandles('TESTUSDT', '1h', history);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(history[2].t + 1);
+    try {
+      const result = await researchCandles('TESTUSDT', '1h', 2);
+      expect(result.candles.map((bar) => bar.t)).toEqual([history[0].t, history[1].t]);
+    } finally {
+      clock.mockRestore();
+    }
+  });
   it('statistics helpers match known values', () => {
     expect(chiSquareSurvival(3.841, 1)).toBeCloseTo(0.05, 3);
     expect(chiSquareSurvival(18.307, 10)).toBeCloseTo(0.05, 3);

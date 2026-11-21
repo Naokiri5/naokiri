@@ -27,10 +27,10 @@ export function setStrategyStatus(actor: string, id: string, status: StrategySta
   setSetting('suspendedStrategies', [...susp]);
   audit(actor, 'strategy.status', { id, status, note });
 }
-export async function fetchHistory(symbol: string, interval: Interval, bars = 3000): Promise<Candle[]> {
+export async function fetchHistory(symbol: string, interval: Interval, bars = 3000, cutoff = Date.now()): Promise<Candle[]> {
   const duration = INTERVAL_MS[interval];
   // Freeze the last closed interval before the first request. Pagination can cross a candle boundary.
-  const closedThrough = Math.floor(Date.now() / duration) * duration;
+  const closedThrough = Math.floor(cutoff / duration) * duration;
   const out: Candle[] = []; let end = closedThrough - 1;
   while (out.length < bars) {
     const lim = Math.min(1000, bars - out.length);
