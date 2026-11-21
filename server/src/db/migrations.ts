@@ -113,6 +113,29 @@ const MIGRATIONS: string[] = [
   CREATE TABLE runtime_leases (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at INTEGER NOT NULL,
     renewed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   `,
+  // v6 — PAPER bundle association. The existing canonical order/fill/position/ledger
+  // tables remain authoritative. The bundle is only a transactional grouping.
+  `
+  CREATE TABLE bundle_executions (
+    id TEXT PRIMARY KEY,
+    environment TEXT NOT NULL CHECK(environment='PAPER'),
+    account TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK(mode='PAPER_ATOMIC'),
+    status TEXT NOT NULL CHECK(status IN ('RESERVED','FILLED')),
+    created_at INTEGER NOT NULL,
+    committed_at INTEGER,
+    UNIQUE(environment,account,idempotency_key)
+  );
+  CREATE TABLE bundle_entry_links (
+    bundle_id TEXT NOT NULL REFERENCES bundle_executions(id),
+    leg_index INTEGER NOT NULL,
+    decision_id TEXT NOT NULL,
+    order_id TEXT NOT NULL UNIQUE REFERENCES orders(id),
+    PRIMARY KEY(bundle_id,leg_index)
+  );
+  CREATE INDEX bundle_entries_by_decision ON bundle_entry_links(decision_id);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
