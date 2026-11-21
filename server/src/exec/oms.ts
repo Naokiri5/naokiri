@@ -154,11 +154,12 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   }
   crashpoint('entry.committed');
   record('oms.submit', performance.now() - t0);
+  const plannedMaxLoss = fresh.sizing.plannedMaxLoss;
   // The single entry path publishes after commit. A PAPER bundle defers outward-facing
   // effects until the enclosing SQLite transaction commits *all* financial rows.
   const afterCommit = () => {
     journal('FILL', `BUY ${qty} ${s.asset} @ ${fill.price.toPrecision(6)} (${strat}) — stop ${s.stopLoss.toPrecision(6)}, slippage ${fill.impactBps.toFixed(1)}bps`, posId, { decisionId: s.id, fill, fee, risk: fresh, actor });
-    notify('INFO', `Paper entry: ${s.asset}`, `${qty} @ ${fill.price.toPrecision(6)}, stop ${s.stopLoss.toPrecision(6)}, planned max loss $${fresh.sizing.plannedMaxLoss}`, 'oms');
+    notify('INFO', `Paper entry: ${s.asset}`, `${qty} @ ${fill.price.toPrecision(6)}, stop ${s.stopLoss.toPrecision(6)}, planned max loss $${plannedMaxLoss}`, 'oms');
     bus.publish('order', { orderId, positionId: posId, status: 'FILLED' }); bus.publish('position', { positionId: posId });
   };
   if (deferred) deferred.push(afterCommit); else afterCommit();
