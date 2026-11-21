@@ -1,0 +1,2857 @@
+/**
+ *
+======================================================================
+======
+ * @file server/src/workers/agentDefinitions100.ts
+ * @repository https://github.com/Naokiri5/naokiri
+ * @description
+ * Complete 100-agent swarm definitions (AGT-001 through AGT-100) partitioned
+ * across 10 orthogonal evidence buckets with typed Float64Array feature slots.
+ *
+======================================================================
+======
+ */
+
+import {
+  AgentContextSnapshot,
+  AgentDefinition,
+  AssetSleeve,
+  MarketRegime,
+  RawAgentSignal,
+} from './AgentIntelligenceTypes.js';
+
+export const FEATURE_VECTOR_LENGTH = 97;
+
+export const enum FeatureSlot {
+ EMA_9 = 0,
+ EMA_21 = 1,
+ EMA_55 = 2,
+ DONCHIAN_20_HIGH = 3,
+ DONCHIAN_20_LOW = 4,
+ SUPERTREND_DIR = 5,
+ MACD_HIST = 6,
+ MACD_HIST_SLOPE = 7,
+ ADX_14 = 8,
+ PLUS_DI_14 = 9,
+ MINUS_DI_14 = 10,
+ HTF_BIAS = 11,
+ SESSION_VWAP = 12,
+ VWAP_SLOPE = 13,
+ OLS_SLOPE_BPS = 14,
+ OLS_R_SQUARED = 15,
+ ICHIMOKU_TENKAN = 16,
+ ICHIMOKU_KIJUN = 17,
+ ICHIMOKU_KUMO_TOP = 18,
+ EQUITIES_ORB_HIGH = 19,
+ EQUITIES_ORB_LOW = 20,
+ RELATIVE_STRENGTH_Z = 21,
+ SWING_STRUCTURE_CODE = 22,
+
+VWAP_SIGMA_DIST = 23,
+CONNORS_RSI_2 = 24,
+BB_PERCENT_B = 25,
+RETURN_Z_SCORE = 26,
+RSI14_BULL_DIV = 27,
+RSI14_BEAR_DIV = 28,
+KELTNER_POS = 29,
+FVG_EQUILIBRIUM_SIGNAL = 30,
+SWEEP_RECLAIM_SIGNAL = 31,
+PAIRS_RESIDUAL_Z = 32,
+POC_DIST_ATR = 33,
+MICROPRICE_SKEW_BPS = 34,
+QUEUE_DEPLETION_ASYM = 35,
+SPREAD_COMPRESSION_RATIO = 36,
+BID_WALL_DEPTH_RATIO = 37,
+WALL_ABSORPTION_SIGNAL = 38,
+BOOK_RELOAD_SKEW = 39,
+BOOK_SLOPE_CONVEXITY_DIFF = 40,
+ICEBERG_RELOAD_SIDE = 41,
+CANCEL_TO_FILL_RATIO = 42,
+LEAD_VENUE_MID_DIFF_BPS = 43,
+OFI_L5_ACCEL = 44,
+AGGRESSOR_SWEEP_TICKS = 45,
+BLOCK_PRINT_DELTA_Z = 46,
+FOOTPRINT_IMBALANCE_STACK = 47,
+TAPE_TPS_RATIO = 48,
+CLIMAX_EXHAUSTION_FLAG = 49,
+TICK_RULE_BUY_RATIO = 50,
+INTRABAR_DELTA_FLIP = 51,
+SOL_DEX_NET_FLOW_RATIO = 52,
+PERP_SPOT_BASIS_APR_PCT = 53,
+TOP_VS_RETAIL_LS_DIV = 54,
+LIQ_CLUSTER_MAGNET_DIR = 55,
+FUNDING_DELTA_1H = 56,
+SPOT_LEADS_PERP_CVD = 57,
+TTM_SQUEEZE_RELEASE = 58,
+ATR_EXPANSION_RATIO = 59,
+ATR_PERCENTILE_RANK = 60,
+IV_RV_SPREAD_PCT = 61,
+PARKINSON_EFFICIENCY = 62,
+GARCH_COND_VOL_SLOPE = 63,
+POST_OPEN_VOL_STABLE = 64,
+TAIL_KURTOSIS_DROP = 65,
+SPL_MINT_REVOKED = 66,
+SPL_FREEZE_REVOKED = 67,
+TOKEN2022_CLEAN_EXT = 68,
+LP_LOCKED_PCT = 69,
+HOLDER_GINI_COEFF = 70,
+
+    LP_TO_FDV_RATIO = 71,
+    JUPITER_SIM_TAX_BPS = 72,
+    DEPLOYER_HISTORY_SCORE = 73,
+    POST_GRADUATION_HOLD = 74,
+    LP_DELTA_15M_PCT = 75,
+    SMART_WALLET_NET_Z = 76,
+    FRESH_WHALE_BUY_COUNT = 77,
+    UNIQUE_MAKER_GROWTH_RATIO = 78,
+    CEX_NET_FLOW_Z = 79,
+    DARK_POOL_BLOCK_DELTA_Z = 80,
+    INSIDER_CLUSTER_COUNT = 81,
+    LTH_ACCUM_FLAG = 82,
+    MM_INVENTORY_SKEW = 83,
+    BTC_MACRO_IMPULSE_Z = 84,
+    SOL_BTC_ROTATION_Z = 85,
+    EQUITY_RISK_ON_BREADTH = 86,
+    DXY_INVERSE_Z = 87,
+    PEAK_SESSION_ACTIVE = 88,
+    SECTOR_ROTATION_RANK = 89,
+    COINBASE_PREMIUM_BPS = 90,
+    STABLECOIN_MINT_INFLOW_Z = 91,
+    SPREAD_VS_30M_MEDIAN_MULT = 92,
+    EXTENSION_FROM_EMA_ATR = 93,
+    CROSS_ASSET_CONTAGION_CORR = 94,
+    FRICTION_TO_EDGE_RATIO = 95,
+    ORACLE_DISAGREEMENT_BPS = 96,
+}
+
+const ALL_TRADING_SLEEVES: readonly AssetSleeve[] = [
+  'futures',
+  'spot',
+  'stocks_etf',
+  'memecoin',
+];
+
+const CRYPTO_SLEEVES: readonly AssetSleeve[] = ['futures', 'spot', 'memecoin'];
+const CEX_AND_EQUITIES: readonly AssetSleeve[] = ['futures', 'spot', 'stocks_etf'];
+
+const TREND_AND_EXPANSION: readonly MarketRegime[] = [
+  'TRENDING',
+  'HIGH_VOL_EXPANSION',
+];
+
+const ALL_REGIMES: readonly MarketRegime[] = [
+ 'LOW_VOL_CHOP',
+ 'TRENDING',
+ 'HIGH_VOL_EXPANSION',
+ 'LIQUIDATION_CASCADE',
+
+];
+
+const ABSTAIN: RawAgentSignal = {
+  action: 'ABSTAIN',
+  rawConfidence: 0,
+  expectedEdgeBps: 0,
+  reasonCode: 'NO_TRIGGER',
+};
+
+function clamp(val: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, val));
+}
+
+function f(ctx: AgentContextSnapshot, slot: FeatureSlot, fallback = 0): number {
+  const v = ctx.features[slot];
+  return Number.isFinite(v) ? v : fallback;
+}
+
+export const ALL_100_AGENTS: readonly AgentDefinition[] = [
+ //
+======================================================================
+====
+ // BUCKET 1: MOMENTUM_TREND (AGT-001 .. AGT-012 — 12 Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-001',
+   name: 'EmaRibbonAlignmentAgent',
+   bucket: 'MOMENTUM_TREND',
+   allowedSleeves: ALL_TRADING_SLEEVES,
+   allowedRegimes: TREND_AND_EXPANSION,
+   requiredFeeds: ['L1_TICK'],
+   maxFeedAgeMs: 2_000,
+   evaluate: (ctx) => {
+     const ema9 = f(ctx, FeatureSlot.EMA_9);
+     const ema21 = f(ctx, FeatureSlot.EMA_21);
+     const ema55 = f(ctx, FeatureSlot.EMA_55);
+     if (ema9 <= 0 || ema21 <= 0 || ema55 <= 0) return ABSTAIN;
+     if (ctx.midPrice > ema9 && ema9 > ema21 && ema21 > ema55) {
+       const spreadPct = (ema9 - ema55) / ema55;
+       return {
+         action: 'BUY',
+         rawConfidence: clamp(0.60 + spreadPct * 18, 0.60, 0.86),
+         expectedEdgeBps: 24,
+         reasonCode: 'EMA_RIBBON_BULL_STACK',
+       };
+     }
+
+    if (ctx.midPrice < ema9 && ema9 < ema21 && ema21 < ema55) {
+      const spreadPct = (ema55 - ema9) / ema55;
+      return {
+        action: 'SELL',
+        rawConfidence: clamp(0.60 + spreadPct * 18, 0.60, 0.86),
+        expectedEdgeBps: 24,
+        reasonCode: 'EMA_RIBBON_BEAR_STACK',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-002',
+  name: 'DonchianChannelBreakoutAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L1_TICK', 'L2_BOOK'],
+  maxFeedAgeMs: 1_500,
+  evaluate: (ctx) => {
+    const dcHigh = f(ctx, FeatureSlot.DONCHIAN_20_HIGH);
+    const dcLow = f(ctx, FeatureSlot.DONCHIAN_20_LOW);
+    if (dcHigh <= 0 || dcLow <= 0) return ABSTAIN;
+    if (ctx.midPrice > dcHigh && ctx.ofiL5 > 0.15) {
+      return {
+        action: 'BUY',
+        rawConfidence: clamp(0.64 + ctx.ofiL5 * 0.25, 0.64, 0.88),
+        expectedEdgeBps: 30,
+        reasonCode: 'DONCHIAN_20_HIGH_BREAK',
+      };
+    }
+    if (ctx.midPrice < dcLow && ctx.ofiL5 < -0.15) {
+      return {
+        action: 'SELL',
+        rawConfidence: clamp(0.64 + Math.abs(ctx.ofiL5) * 0.25, 0.64, 0.88),
+        expectedEdgeBps: 30,
+        reasonCode: 'DONCHIAN_20_LOW_BREAK',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-003',
+  name: 'SupertrendDirectionAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    const stDir = f(ctx, FeatureSlot.SUPERTREND_DIR);
+    if (stDir >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.66,
+        expectedEdgeBps: 22,
+        reasonCode: 'SUPERTREND_BULL_ACTIVE',
+      };
+    }
+    if (stDir <= -1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.66,
+        expectedEdgeBps: 22,
+        reasonCode: 'SUPERTREND_BEAR_ACTIVE',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-004',
+  name: 'MacdHistogramImpulseAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    const macdHist = f(ctx, FeatureSlot.MACD_HIST);
+    const macdHistSlope = f(ctx, FeatureSlot.MACD_HIST_SLOPE);
+    if (macdHist > 0 && macdHistSlope > 0) {
+      return {
+        action: 'BUY',
+        rawConfidence: clamp(0.61 + macdHistSlope * 10, 0.61, 0.82),
+        expectedEdgeBps: 20,
+        reasonCode: 'MACD_HIST_ACCEL_UP',
+      };
+    }
+    if (macdHist < 0 && macdHistSlope < 0) {
+      return {
+        action: 'SELL',
+        rawConfidence: clamp(0.61 + Math.abs(macdHistSlope) * 10, 0.61, 0.82),
+        expectedEdgeBps: 20,
+
+     reasonCode: 'MACD_HIST_ACCEL_DOWN',
+   };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-005',
+  name: 'AdxTrendStrengthAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    const adx = f(ctx, FeatureSlot.ADX_14);
+    const plusDi = f(ctx, FeatureSlot.PLUS_DI_14);
+    const minusDi = f(ctx, FeatureSlot.MINUS_DI_14);
+    if (adx < 25 || Math.abs(plusDi - minusDi) < 6) return ABSTAIN;
+    return {
+      action: plusDi > minusDi ? 'BUY' : 'SELL',
+      rawConfidence: clamp(0.62 + (adx - 25) * 0.006, 0.62, 0.85),
+      expectedEdgeBps: 26,
+      reasonCode: `ADX_${adx.toFixed(0)}_DI_DOMINANCE`,
+    };
+  },
+},
+{
+  id: 'AGT-006',
+  name: 'HtfLtfConfluenceAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    const htfBias = f(ctx, FeatureSlot.HTF_BIAS);
+    if (htfBias >= 1 && ctx.ofiL5 > 0.1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.72,
+        expectedEdgeBps: 28,
+        reasonCode: 'HTF_1H_4H_BULL_ALIGNED',
+      };
+    }
+    if (htfBias <= -1 && ctx.ofiL5 < -0.1) {
+      return {
+        action: 'SELL',
+
+     rawConfidence: 0.72,
+     expectedEdgeBps: 28,
+     reasonCode: 'HTF_1H_4H_BEAR_ALIGNED',
+   };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-007',
+  name: 'VwapTrendHoldAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['TRENDING'],
+  requiredFeeds: ['L1_TICK', 'TRADE_TAPE'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+    const vwap = f(ctx, FeatureSlot.SESSION_VWAP);
+    const vwapSlope = f(ctx, FeatureSlot.VWAP_SLOPE);
+    if (vwap <= 0) return ABSTAIN;
+    if (ctx.midPrice > vwap && vwapSlope > 0) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 19,
+        reasonCode: 'ABOVE_RISING_SESSION_VWAP',
+      };
+    }
+    if (ctx.midPrice < vwap && vwapSlope < 0) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 19,
+        reasonCode: 'BELOW_FALLING_SESSION_VWAP',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-008',
+  name: 'LinearRegressionSlopeAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ['TRENDING'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+
+    const olsSlopeBps = f(ctx, FeatureSlot.OLS_SLOPE_BPS);
+    const rSquared = f(ctx, FeatureSlot.OLS_R_SQUARED);
+    if (rSquared < 0.65 || Math.abs(olsSlopeBps) < 1.5) return ABSTAIN;
+    return {
+      action: olsSlopeBps > 0 ? 'BUY' : 'SELL',
+      rawConfidence: clamp(0.58 + rSquared * 0.25, 0.60, 0.84),
+      expectedEdgeBps: 21,
+      reasonCode: `OLS_SLOPE_R2_${rSquared.toFixed(2)}`,
+    };
+  },
+},
+{
+  id: 'AGT-009',
+  name: 'IchimokuCloudBreakoutAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    const tenkan = f(ctx, FeatureSlot.ICHIMOKU_TENKAN);
+    const kijun = f(ctx, FeatureSlot.ICHIMOKU_KIJUN);
+    const kumoTop = f(ctx, FeatureSlot.ICHIMOKU_KUMO_TOP);
+    if (tenkan <= 0 || kijun <= 0 || kumoTop <= 0) return ABSTAIN;
+    if (ctx.midPrice > kumoTop && tenkan > kijun) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 23,
+        reasonCode: 'ICHIMOKU_KUMO_BULL_CROSS',
+      };
+    }
+    if (ctx.midPrice < kumoTop && tenkan < kijun) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 23,
+        reasonCode: 'ICHIMOKU_KUMO_BEAR_CROSS',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-010',
+  name: 'OpeningRangeBreakoutEquitiesAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: ['stocks_etf'],
+
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['EQUITIES_FEED', 'L1_TICK'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+    const orbHigh = f(ctx, FeatureSlot.EQUITIES_ORB_HIGH);
+    const orbLow = f(ctx, FeatureSlot.EQUITIES_ORB_LOW);
+    if (orbHigh <= 0 || orbLow <= 0) return ABSTAIN;
+    if (ctx.midPrice > orbHigh && ctx.cvdDelta1m > 0) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.70,
+        expectedEdgeBps: 27,
+        reasonCode: 'US_EQUITIES_ORB_HIGH_BREAK',
+      };
+    }
+    if (ctx.midPrice < orbLow && ctx.cvdDelta1m < 0) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.70,
+        expectedEdgeBps: 27,
+        reasonCode: 'US_EQUITIES_ORB_LOW_BREAK',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-011',
+  name: 'RelativeStrengthLeaderAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    const rsZScore = f(ctx, FeatureSlot.RELATIVE_STRENGTH_Z);
+    if (rsZScore >= 1.5) {
+      return {
+        action: 'BUY',
+        rawConfidence: clamp(0.61 + rsZScore * 0.06, 0.61, 0.83),
+        expectedEdgeBps: 24,
+        reasonCode: `RS_LEADER_Z_${rsZScore.toFixed(1)}`,
+      };
+    }
+    if (rsZScore <= -1.5) {
+      return {
+        action: 'SELL',
+        rawConfidence: clamp(0.61 + Math.abs(rsZScore) * 0.06, 0.61, 0.83),
+
+     expectedEdgeBps: 24,
+     reasonCode: `RS_LAGGARD_Z_${rsZScore.toFixed(1)}`,
+   };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-012',
+  name: 'HigherHighHigherLowStructureAgent',
+  bucket: 'MOMENTUM_TREND',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ['TRENDING'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    const swingCode = f(ctx, FeatureSlot.SWING_STRUCTURE_CODE);
+    if (swingCode >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 25,
+        reasonCode: 'SWING_HH_HL_STRUCTURE',
+      };
+    }
+    if (swingCode <= -1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 25,
+        reasonCode: 'SWING_LH_LL_STRUCTURE',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+
+ //
+======================================================================
+====
+ // BUCKET 2: MEAN_REVERSION (AGT-013 .. AGT-022 — 10 Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-013',
+   name: 'VwapTwoSigmaStretchAgent',
+   bucket: 'MEAN_REVERSION',
+
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP'],
+  requiredFeeds: ['L1_TICK', 'TRADE_TAPE'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+    const vwapSigma = f(ctx, FeatureSlot.VWAP_SIGMA_DIST);
+    if (vwapSigma <= -2.0 && ctx.ofiL5 > 0.05) {
+      return {
+        action: 'BUY',
+        rawConfidence: clamp(0.63 + Math.abs(vwapSigma + 2.0) * 0.1, 0.63, 0.85),
+        expectedEdgeBps: 22,
+        reasonCode: `VWAP_STRETCH_${vwapSigma.toFixed(2)}SIGMA_LONG`,
+      };
+    }
+    if (vwapSigma >= 2.0 && ctx.ofiL5 < -0.05) {
+      return {
+        action: 'SELL',
+        rawConfidence: clamp(0.63 + (vwapSigma - 2.0) * 0.1, 0.63, 0.85),
+        expectedEdgeBps: 22,
+        reasonCode: `VWAP_STRETCH_${vwapSigma.toFixed(2)}SIGMA_SHORT`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-014',
+  name: 'ConnorsRsi2ExtremeAgent',
+  bucket: 'MEAN_REVERSION',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    const rsi2 = f(ctx, FeatureSlot.CONNORS_RSI_2, 50);
+    if (rsi2 <= 8) {
+      return {
+        action: 'BUY',
+        rawConfidence: clamp(0.65 + (8 - rsi2) * 0.02, 0.65, 0.84),
+        expectedEdgeBps: 20,
+        reasonCode: `CONNORS_RSI2_${rsi2.toFixed(1)}_OVERSOLD`,
+      };
+    }
+    if (rsi2 >= 92) {
+      return {
+        action: 'SELL',
+        rawConfidence: clamp(0.65 + (rsi2 - 92) * 0.02, 0.65, 0.84),
+        expectedEdgeBps: 20,
+
+     reasonCode: `CONNORS_RSI2_${rsi2.toFixed(1)}_OVERBOUGHT`,
+   };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-015',
+  name: 'BollingerBandFadeAgent',
+  bucket: 'MEAN_REVERSION',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    const pctB = f(ctx, FeatureSlot.BB_PERCENT_B, 0.5);
+    if (pctB <= 0.02) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 18,
+        reasonCode: 'BB_LOWER_BAND_FADE',
+      };
+    }
+    if (pctB >= 0.98) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 18,
+        reasonCode: 'BB_UPPER_BAND_FADE',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-016',
+  name: 'ZScoreReturnRevertAgent',
+  bucket: 'MEAN_REVERSION',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP', 'LIQUIDATION_CASCADE'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+    const retZ = f(ctx, FeatureSlot.RETURN_Z_SCORE);
+    if (retZ <= -2.2) {
+      return {
+        action: 'BUY',
+
+     rawConfidence: clamp(0.62 + Math.abs(retZ + 2.2) * 0.09, 0.62, 0.85),
+     expectedEdgeBps: 24,
+     reasonCode: `RETURN_Z_${retZ.toFixed(2)}_REVERT`,
+   };
+    }
+    if (retZ >= 2.2) {
+      return {
+        action: 'SELL',
+        rawConfidence: clamp(0.62 + (retZ - 2.2) * 0.09, 0.62, 0.85),
+        expectedEdgeBps: 24,
+        reasonCode: `RETURN_Z_${retZ.toFixed(2)}_REVERT`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-017',
+  name: 'RsiDivergenceReversalAgent',
+  bucket: 'MEAN_REVERSION',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ['LOW_VOL_CHOP', 'TRENDING'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    if (f(ctx, FeatureSlot.RSI14_BULL_DIV) >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 25,
+        reasonCode: 'RSI14_BULLISH_DIVERGENCE',
+      };
+    }
+    if (f(ctx, FeatureSlot.RSI14_BEAR_DIV) >= 1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 25,
+        reasonCode: 'RSI14_BEARISH_DIVERGENCE',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-018',
+  name: 'KeltnerChannelMeanRevertAgent',
+  bucket: 'MEAN_REVERSION',
+
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    const kcPos = f(ctx, FeatureSlot.KELTNER_POS);
+    if (kcPos <= -1.15) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.63,
+        expectedEdgeBps: 19,
+        reasonCode: 'KELTNER_LOWER_EXHAUSTION',
+      };
+    }
+    if (kcPos >= 1.15) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.63,
+        expectedEdgeBps: 19,
+        reasonCode: 'KELTNER_UPPER_EXHAUSTION',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-019',
+  name: 'FairValueGapFillAgent',
+  bucket: 'MEAN_REVERSION',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ['LOW_VOL_CHOP', 'TRENDING'],
+  requiredFeeds: ['L1_TICK', 'L2_BOOK'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+    const fvgSignal = f(ctx, FeatureSlot.FVG_EQUILIBRIUM_SIGNAL);
+    if (fvgSignal >= 1 && ctx.ofiL5 > 0.08) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.69,
+        expectedEdgeBps: 26,
+        reasonCode: 'BULLISH_FVG_EQUILIBRIUM_TAP',
+      };
+    }
+    if (fvgSignal <= -1 && ctx.ofiL5 < -0.08) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.69,
+        expectedEdgeBps: 26,
+
+     reasonCode: 'BEARISH_FVG_EQUILIBRIUM_TAP',
+   };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-020',
+  name: 'LiquiditySweepReclaimAgent',
+  bucket: 'MEAN_REVERSION',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ['LOW_VOL_CHOP', 'LIQUIDATION_CASCADE'],
+  requiredFeeds: ['L1_TICK', 'TRADE_TAPE'],
+  maxFeedAgeMs: 1_500,
+  evaluate: (ctx) => {
+    const sweepReclaim = f(ctx, FeatureSlot.SWEEP_RECLAIM_SIGNAL);
+    if (sweepReclaim >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.74,
+        expectedEdgeBps: 31,
+        reasonCode: 'STOP_HUNT_LOW_RECLAIM',
+      };
+    }
+    if (sweepReclaim <= -1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.74,
+        expectedEdgeBps: 31,
+        reasonCode: 'STOP_HUNT_HIGH_REJECT',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-021',
+  name: 'IntradayPairsSpreadRevertAgent',
+  bucket: 'MEAN_REVERSION',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    const pairZ = f(ctx, FeatureSlot.PAIRS_RESIDUAL_Z);
+    if (pairZ <= -2.1) {
+      return {
+        action: 'BUY',
+
+     rawConfidence: 0.66,
+     expectedEdgeBps: 21,
+     reasonCode: `PAIRS_RESIDUAL_Z_${pairZ.toFixed(2)}`,
+   };
+    }
+    if (pairZ >= 2.1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.66,
+        expectedEdgeBps: 21,
+        reasonCode: `PAIRS_RESIDUAL_Z_${pairZ.toFixed(2)}`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-022',
+  name: 'VolumeProfilePocMagnetAgent',
+  bucket: 'MEAN_REVERSION',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP'],
+  requiredFeeds: ['L1_TICK', 'TRADE_TAPE'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    const pocDistAtr = f(ctx, FeatureSlot.POC_DIST_ATR);
+    if (pocDistAtr <= -1.4 && ctx.cvdDelta1m > 0) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 20,
+        reasonCode: 'REVERT_TO_SESSION_POC_UP',
+      };
+    }
+    if (pocDistAtr >= 1.4 && ctx.cvdDelta1m < 0) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 20,
+        reasonCode: 'REVERT_TO_SESSION_POC_DOWN',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+
+ //
+======================================================================
+====
+ // BUCKET 3: L2_MICROSTRUCTURE (AGT-023 .. AGT-034 — 12 Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-023',
+   name: 'TopOfBookObiSkewAgent',
+   bucket: 'L2_MICROSTRUCTURE',
+   allowedSleeves: CEX_AND_EQUITIES,
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['L2_BOOK'],
+   maxFeedAgeMs: 1_000,
+   evaluate: (ctx) => {
+     if (ctx.spreadBps > 18) return ABSTAIN;
+     if (ctx.ofiL5 >= 0.34) {
+       return {
+         action: 'BUY',
+         rawConfidence: clamp(0.62 + ctx.ofiL5 * 0.28, 0.62, 0.88),
+         expectedEdgeBps: 18,
+         reasonCode: `L5_OBI_BID_DOMINANCE_${ctx.ofiL5.toFixed(2)}`,
+       };
+     }
+     if (ctx.ofiL5 <= -0.34) {
+       return {
+         action: 'SELL',
+         rawConfidence: clamp(0.62 + Math.abs(ctx.ofiL5) * 0.28, 0.62, 0.88),
+         expectedEdgeBps: 18,
+         reasonCode: `L5_OBI_ASK_DOMINANCE_${ctx.ofiL5.toFixed(2)}`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-024',
+   name: 'MicroPriceLeadAgent',
+   bucket: 'L2_MICROSTRUCTURE',
+   allowedSleeves: CEX_AND_EQUITIES,
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['L2_BOOK'],
+   maxFeedAgeMs: 1_000,
+   evaluate: (ctx) => {
+     const microSkewBps = f(ctx, FeatureSlot.MICROPRICE_SKEW_BPS);
+     if (microSkewBps >= 2.2) {
+       return {
+
+     action: 'BUY',
+     rawConfidence: clamp(0.63 + microSkewBps * 0.03, 0.63, 0.84),
+     expectedEdgeBps: 16,
+     reasonCode: `MICROPRICE_LEAD_UP_${microSkewBps.toFixed(1)}BPS`,
+   };
+    }
+    if (microSkewBps <= -2.2) {
+      return {
+        action: 'SELL',
+        rawConfidence: clamp(0.63 + Math.abs(microSkewBps) * 0.03, 0.63, 0.84),
+        expectedEdgeBps: 16,
+        reasonCode: `MICROPRICE_LEAD_DOWN_${microSkewBps.toFixed(1)}BPS`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-025',
+  name: 'QueueDepletionAsymmetryAgent',
+  bucket: 'L2_MICROSTRUCTURE',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L2_BOOK'],
+  maxFeedAgeMs: 1_000,
+  evaluate: (ctx) => {
+    const qDepletion = f(ctx, FeatureSlot.QUEUE_DEPLETION_ASYM);
+    if (qDepletion >= 0.45) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 19,
+        reasonCode: 'ASK_QUEUE_RAPID_DEPLETION',
+      };
+    }
+    if (qDepletion <= -0.45) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 19,
+        reasonCode: 'BID_QUEUE_RAPID_DEPLETION',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-026',
+
+  name: 'SpreadCompressionVelocityAgent',
+  bucket: 'L2_MICROSTRUCTURE',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP', 'TRENDING'],
+  requiredFeeds: ['L2_BOOK'],
+  maxFeedAgeMs: 1_000,
+  evaluate: (ctx) => {
+    const spreadComp = f(ctx, FeatureSlot.SPREAD_COMPRESSION_RATIO);
+    if (spreadComp >= 0.4 && Math.abs(ctx.ofiL5) >= 0.25) {
+      return {
+        action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 17,
+        reasonCode: 'SPREAD_COMPRESSION_DIRECTIONAL',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-027',
+  name: 'BidWallSupportAnchorAgent',
+  bucket: 'L2_MICROSTRUCTURE',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP', 'TRENDING'],
+  requiredFeeds: ['L2_BOOK'],
+  maxFeedAgeMs: 1_200,
+  evaluate: (ctx) => {
+    const wallRatio = f(ctx, FeatureSlot.BID_WALL_DEPTH_RATIO);
+    if (wallRatio >= 3.5 && ctx.ofiL5 > 0.12) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 20,
+        reasonCode: `BID_WALL_${wallRatio.toFixed(1)}X_SUPPORT`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-028',
+  name: 'AskWallAbsorptionBreakAgent',
+  bucket: 'L2_MICROSTRUCTURE',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L2_BOOK', 'TRADE_TAPE'],
+  maxFeedAgeMs: 1_000,
+
+  evaluate: (ctx) => {
+    const wallAbsorb = f(ctx, FeatureSlot.WALL_ABSORPTION_SIGNAL);
+    if (wallAbsorb >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.73,
+        expectedEdgeBps: 26,
+        reasonCode: 'ASK_WALL_ABSORBED_BREAKOUT',
+      };
+    }
+    if (wallAbsorb <= -1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.73,
+        expectedEdgeBps: 26,
+        reasonCode: 'BID_WALL_ABSORBED_BREAKDOWN',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-029',
+  name: 'BookDepthReplenishmentAgent',
+  bucket: 'L2_MICROSTRUCTURE',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['L2_BOOK'],
+  maxFeedAgeMs: 1_000,
+  evaluate: (ctx) => {
+    const reloadSkew = f(ctx, FeatureSlot.BOOK_RELOAD_SKEW);
+    if (reloadSkew >= 0.40) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 18,
+        reasonCode: 'PASSIVE_BID_RELOAD_DOMINANT',
+      };
+    }
+    if (reloadSkew <= -0.40) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 18,
+        reasonCode: 'PASSIVE_ASK_RELOAD_DOMINANT',
+      };
+    }
+    return ABSTAIN;
+
+  },
+},
+{
+  id: 'AGT-030',
+  name: 'OrderBookSlopeConvexityAgent',
+  bucket: 'L2_MICROSTRUCTURE',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['TRENDING', 'LOW_VOL_CHOP'],
+  requiredFeeds: ['L2_BOOK'],
+  maxFeedAgeMs: 1_200,
+  evaluate: (ctx) => {
+    const slopeDiff = f(ctx, FeatureSlot.BOOK_SLOPE_CONVEXITY_DIFF);
+    if (slopeDiff >= 0.35) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.62,
+        expectedEdgeBps: 16,
+        reasonCode: 'L2_BID_SLOPE_STEEPER',
+      };
+    }
+    if (slopeDiff <= -0.35) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.62,
+        expectedEdgeBps: 16,
+        reasonCode: 'L2_ASK_SLOPE_STEEPER',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-031',
+  name: 'HiddenIcebergReloadDetectorAgent',
+  bucket: 'L2_MICROSTRUCTURE',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['L2_BOOK', 'TRADE_TAPE'],
+  maxFeedAgeMs: 1_000,
+  evaluate: (ctx) => {
+    const icebergSide = f(ctx, FeatureSlot.ICEBERG_RELOAD_SIDE);
+    if (icebergSide >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.71,
+        expectedEdgeBps: 23,
+        reasonCode: 'ICEBERG_BID_ACCUMULATION',
+      };
+
+    }
+    if (icebergSide <= -1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.71,
+        expectedEdgeBps: 23,
+        reasonCode: 'ICEBERG_ASK_DISTRIBUTION',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-032',
+  name: 'QuoteStuffingFilterMomentumAgent',
+  bucket: 'L2_MICROSTRUCTURE',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L2_BOOK'],
+  maxFeedAgeMs: 1_000,
+  evaluate: (ctx) => {
+    const cancelToFill = f(ctx, FeatureSlot.CANCEL_TO_FILL_RATIO, 10);
+    if (cancelToFill < 4.0 && Math.abs(ctx.ofiL5) >= 0.30) {
+      return {
+        action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+        rawConfidence: 0.66,
+        expectedEdgeBps: 19,
+        reasonCode: 'LOW_NOISE_AUTHENTIC_L2_SHIFT',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-033',
+  name: 'CrossVenueLeadLagMidAgent',
+  bucket: 'L2_MICROSTRUCTURE',
+  allowedSleeves: CRYPTO_SLEEVES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['L2_BOOK'],
+  maxFeedAgeMs: 800,
+  evaluate: (ctx) => {
+    const leadDiffBps = f(ctx, FeatureSlot.LEAD_VENUE_MID_DIFF_BPS);
+    if (leadDiffBps >= 5.0 && leadDiffBps <= 28.0) {
+      return {
+        action: 'BUY',
+        rawConfidence: clamp(0.65 + leadDiffBps * 0.008, 0.65, 0.85),
+        expectedEdgeBps: leadDiffBps * 0.75,
+
+         reasonCode: `LEAD_VENUE_PREMIUM_${leadDiffBps.toFixed(1)}BPS`,
+       };
+        }
+        if (leadDiffBps <= -5.0 && leadDiffBps >= -28.0) {
+          return {
+            action: 'SELL',
+            rawConfidence: clamp(0.65 + Math.abs(leadDiffBps) * 0.008, 0.65, 0.85),
+            expectedEdgeBps: Math.abs(leadDiffBps) * 0.75,
+            reasonCode: `LEAD_VENUE_DISCOUNT_${leadDiffBps.toFixed(1)}BPS`,
+          };
+        }
+        return ABSTAIN;
+      },
+    },
+    {
+      id: 'AGT-034',
+      name: 'EffectiveSpreadImpactEdgeAgent',
+      bucket: 'L2_MICROSTRUCTURE',
+      allowedSleeves: CEX_AND_EQUITIES,
+      allowedRegimes: ALL_REGIMES,
+      requiredFeeds: ['L2_BOOK'],
+      maxFeedAgeMs: 1_000,
+      evaluate: (ctx) => {
+        if (ctx.spreadBps <= 4.0 && ctx.liquidityUsd >= 250_000 && Math.abs(ctx.ofiL5) >= 0.28)
+{
+       return {
+         action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+         rawConfidence: 0.64,
+         expectedEdgeBps: 17,
+         reasonCode: 'ULTRA_TIGHT_SPREAD_OBI_EDGE',
+       };
+        }
+        return ABSTAIN;
+      },
+    },
+
+ //
+======================================================================
+====
+ // BUCKET 4: ORDERFLOW_CVD_OFI (AGT-035 .. AGT-046 — 12 Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-035',
+   name: 'Cvd1mImpulseBreakoutAgent',
+   bucket: 'ORDERFLOW_CVD_OFI',
+   allowedSleeves: ALL_TRADING_SLEEVES,
+
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 1_200,
+  evaluate: (ctx) => {
+    if (ctx.cvdDelta1m >= 25_000 && ctx.ofiL5 > 0.15) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 24,
+        reasonCode: 'CVD_1M_AGGRESSOR_SURGE_UP',
+      };
+    }
+    if (ctx.cvdDelta1m <= -25_000 && ctx.ofiL5 < -0.15) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 24,
+        reasonCode: 'CVD_1M_AGGRESSOR_SURGE_DOWN',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-036',
+  name: 'CvdPriceAbsorptionDivergenceAgent',
+  bucket: 'ORDERFLOW_CVD_OFI',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP', 'LIQUIDATION_CASCADE'],
+  requiredFeeds: ['TRADE_TAPE', 'L1_TICK'],
+  maxFeedAgeMs: 1_500,
+  evaluate: (ctx) => {
+    const priceReturnBps = f(ctx, FeatureSlot.RETURN_Z_SCORE) * 10;
+    if (priceReturnBps <= -12 && ctx.cvdDelta1m > 15_000) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.72,
+        expectedEdgeBps: 27,
+        reasonCode: 'LIMIT_BUY_ABSORPTION_DIVERGENCE',
+      };
+    }
+    if (priceReturnBps >= 12 && ctx.cvdDelta1m < -15_000) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.72,
+        expectedEdgeBps: 27,
+        reasonCode: 'LIMIT_SELL_ABSORPTION_DIVERGENCE',
+      };
+
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-037',
+  name: 'MultiLevelOfiAccelerationAgent',
+  bucket: 'ORDERFLOW_CVD_OFI',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['L2_BOOK', 'TRADE_TAPE'],
+  maxFeedAgeMs: 1_000,
+  evaluate: (ctx) => {
+    const ofiAccel = f(ctx, FeatureSlot.OFI_L5_ACCEL);
+    if (ctx.ofiL5 > 0.22 && ofiAccel > 0.18) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 21,
+        reasonCode: 'L5_OFI_SECOND_DERIVATIVE_UP',
+      };
+    }
+    if (ctx.ofiL5 < -0.22 && ofiAccel < -0.18) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 21,
+        reasonCode: 'L5_OFI_SECOND_DERIVATIVE_DOWN',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-038',
+  name: 'AggressorSweepClusterAgent',
+  bucket: 'ORDERFLOW_CVD_OFI',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 1_000,
+  evaluate: (ctx) => {
+    const sweepTicks = f(ctx, FeatureSlot.AGGRESSOR_SWEEP_TICKS);
+    if (sweepTicks >= 3) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.69,
+        expectedEdgeBps: 23,
+
+      reasonCode: `AGGRESSOR_UP_SWEEP_${sweepTicks.toFixed(0)}TICKS`,
+    };
+     }
+     if (sweepTicks <= -3) {
+       return {
+         action: 'SELL',
+         rawConfidence: 0.69,
+         expectedEdgeBps: 23,
+         reasonCode: `AGGRESSOR_DOWN_SWEEP_${Math.abs(sweepTicks).toFixed(0)}
+TICKS`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-039',
+   name: 'VpinInformedFlowAlignmentAgent',
+   bucket: 'ORDERFLOW_CVD_OFI',
+   allowedSleeves: CEX_AND_EQUITIES,
+   allowedRegimes: TREND_AND_EXPANSION,
+   requiredFeeds: ['TRADE_TAPE'],
+   maxFeedAgeMs: 1_200,
+   evaluate: (ctx) => {
+     if (ctx.vpin >= 0.55 && ctx.vpin <= 0.76 && Math.abs(ctx.cvdDelta1m) > 10_000) {
+       return {
+         action: ctx.cvdDelta1m > 0 ? 'BUY' : 'SELL',
+         rawConfidence: 0.66,
+         expectedEdgeBps: 22,
+         reasonCode: `INFORMED_VPIN_${ctx.vpin.toFixed(2)}_ALIGNED`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-040',
+   name: 'LargeBlockPrintDeltaAgent',
+   bucket: 'ORDERFLOW_CVD_OFI',
+   allowedSleeves: CEX_AND_EQUITIES,
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['TRADE_TAPE'],
+   maxFeedAgeMs: 1_500,
+   evaluate: (ctx) => {
+     const blockDeltaZ = f(ctx, FeatureSlot.BLOCK_PRINT_DELTA_Z);
+     if (blockDeltaZ >= 1.8) {
+       return {
+         action: 'BUY',
+
+     rawConfidence: 0.70,
+     expectedEdgeBps: 24,
+     reasonCode: 'P95_BLOCK_BUY_DOMINANCE',
+   };
+    }
+    if (blockDeltaZ <= -1.8) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.70,
+        expectedEdgeBps: 24,
+        reasonCode: 'P95_BLOCK_SELL_DOMINANCE',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-041',
+  name: 'FootprintImbalanceStackAgent',
+  bucket: 'ORDERFLOW_CVD_OFI',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 1_500,
+  evaluate: (ctx) => {
+    const stackCount = f(ctx, FeatureSlot.FOOTPRINT_IMBALANCE_STACK);
+    if (stackCount >= 3) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 22,
+        reasonCode: `FOOTPRINT_3X_BUY_STACK_${stackCount.toFixed(0)}`,
+      };
+    }
+    if (stackCount <= -3) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 22,
+        reasonCode: `FOOTPRINT_3X_SELL_STACK_${Math.abs(stackCount).toFixed(0)}`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-042',
+  name: 'TapeVelocitySurgeAgent',
+
+  bucket: 'ORDERFLOW_CVD_OFI',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 1_000,
+  evaluate: (ctx) => {
+    const tpsRatio = f(ctx, FeatureSlot.TAPE_TPS_RATIO);
+    if (tpsRatio >= 2.5 && Math.abs(ctx.ofiL5) >= 0.25) {
+      return {
+        action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 20,
+        reasonCode: `TAPE_VELOCITY_${tpsRatio.toFixed(1)}X_SURGE`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-043',
+  name: 'ExhaustionClimaxFadeAgent',
+  bucket: 'ORDERFLOW_CVD_OFI',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP', 'LIQUIDATION_CASCADE'],
+  requiredFeeds: ['TRADE_TAPE', 'L1_TICK'],
+  maxFeedAgeMs: 1_500,
+  evaluate: (ctx) => {
+    const climaxFlag = f(ctx, FeatureSlot.CLIMAX_EXHAUSTION_FLAG);
+    if (climaxFlag >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 23,
+        reasonCode: 'SELL_VOLUME_CLIMAX_EXHAUSTION',
+      };
+    }
+    if (climaxFlag <= -1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 23,
+        reasonCode: 'BUY_VOLUME_CLIMAX_EXHAUSTION',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+
+  id: 'AGT-044',
+  name: 'TickRuleBuyRatioAgent',
+  bucket: 'ORDERFLOW_CVD_OFI',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 1_500,
+  evaluate: (ctx) => {
+    const buyRatio = f(ctx, FeatureSlot.TICK_RULE_BUY_RATIO, 0.5);
+    if (buyRatio >= 0.68) {
+      return {
+        action: 'BUY',
+        rawConfidence: clamp(0.60 + (buyRatio - 0.68) * 0.9, 0.60, 0.84),
+        expectedEdgeBps: 19,
+        reasonCode: `LEE_READY_BUY_RATIO_${(buyRatio * 100).toFixed(0)}PCT`,
+      };
+    }
+    if (buyRatio <= 0.32) {
+      return {
+        action: 'SELL',
+        rawConfidence: clamp(0.60 + (0.32 - buyRatio) * 0.9, 0.60, 0.84),
+        expectedEdgeBps: 19,
+        reasonCode: `LEE_READY_SELL_RATIO_${((1 - buyRatio) * 100).toFixed(0)}PCT`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-045',
+  name: 'DeltaNeutralizeReclaimAgent',
+  bucket: 'ORDERFLOW_CVD_OFI',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['TRENDING', 'LOW_VOL_CHOP'],
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 1_500,
+  evaluate: (ctx) => {
+    const deltaFlip = f(ctx, FeatureSlot.INTRABAR_DELTA_FLIP);
+    if (deltaFlip >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.66,
+        expectedEdgeBps: 21,
+        reasonCode: 'INTRABAR_DELTA_FLIP_POSITIVE',
+      };
+    }
+    if (deltaFlip <= -1) {
+      return {
+
+     action: 'SELL',
+     rawConfidence: 0.66,
+     expectedEdgeBps: 21,
+     reasonCode: 'INTRABAR_DELTA_FLIP_NEGATIVE',
+   };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-046',
+  name: 'SolanaDexSwapFlowImbalanceAgent',
+  bucket: 'ORDERFLOW_CVD_OFI',
+  allowedSleeves: ['memecoin', 'spot'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['TRADE_TAPE', 'SOLANA_RPC'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+    const dexNetFlowRatio = f(ctx, FeatureSlot.SOL_DEX_NET_FLOW_RATIO);
+    if (dexNetFlowRatio >= 0.42 && ctx.organicVolumeRatio >= 0.65) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.71,
+        expectedEdgeBps: 38,
+        reasonCode: `SOL_DEX_ORGANIC_BUY_FLOW_${dexNetFlowRatio.toFixed(2)}`,
+      };
+    }
+    if (dexNetFlowRatio <= -0.42) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.71,
+        expectedEdgeBps: 38,
+        reasonCode: `SOL_DEX_SELL_FLOW_${dexNetFlowRatio.toFixed(2)}`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+
+ //
+======================================================================
+====
+ // BUCKET 5: DERIVATIVES_FUNDING_OI (AGT-047 .. AGT-056 — 10 Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-047',
+
+   name: 'NegativeFundingShortSqueezeAgent',
+   bucket: 'DERIVATIVES_FUNDING_OI',
+   allowedSleeves: ['futures', 'spot'],
+   allowedRegimes: ['TRENDING', 'HIGH_VOL_EXPANSION', 'LIQUIDATION_CASCADE'],
+   requiredFeeds: ['PERP_FUNDING', 'TRADE_TAPE'],
+   maxFeedAgeMs: 10_000,
+   evaluate: (ctx) => {
+     if (ctx.fundingRate8h <= -0.0005 && ctx.oiDeltaPct15m >= 1.5 && ctx.cvdDelta1m > 0) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.75,
+         expectedEdgeBps: 34,
+         reasonCode: `NEG_FUNDING_${(ctx.fundingRate8h * 100).toFixed(3)}
+PCT_SQUEEZE`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-048',
+   name: 'PositiveFundingLongFlushAgent',
+   bucket: 'DERIVATIVES_FUNDING_OI',
+   allowedSleeves: ['futures', 'spot'],
+   allowedRegimes: ['TRENDING', 'HIGH_VOL_EXPANSION', 'LIQUIDATION_CASCADE'],
+   requiredFeeds: ['PERP_FUNDING', 'TRADE_TAPE'],
+   maxFeedAgeMs: 10_000,
+   evaluate: (ctx) => {
+     if (ctx.fundingRate8h >= 0.0008 && ctx.oiDeltaPct15m >= 1.5 && ctx.cvdDelta1m < 0) {
+       return {
+         action: 'SELL',
+         rawConfidence: 0.74,
+         expectedEdgeBps: 32,
+         reasonCode: `HIGH_FUNDING_${(ctx.fundingRate8h * 100).toFixed(3)}
+PCT_FLUSH`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-049',
+   name: 'OiExpansionTrendConfirmAgent',
+   bucket: 'DERIVATIVES_FUNDING_OI',
+   allowedSleeves: ['futures'],
+   allowedRegimes: TREND_AND_EXPANSION,
+   requiredFeeds: ['PERP_FUNDING', 'L1_TICK'],
+   maxFeedAgeMs: 8_000,
+
+  evaluate: (ctx) => {
+    if (ctx.oiDeltaPct15m >= 2.2 && Math.abs(ctx.ofiL5) >= 0.2) {
+      return {
+        action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+        rawConfidence: 0.69,
+        expectedEdgeBps: 26,
+        reasonCode: `OI_EXPANSION_${ctx.oiDeltaPct15m.toFixed(1)}PCT_NEW_MONEY`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-050',
+  name: 'OiContractionShortCoverAgent',
+  bucket: 'DERIVATIVES_FUNDING_OI',
+  allowedSleeves: ['futures'],
+  allowedRegimes: ['LOW_VOL_CHOP', 'LIQUIDATION_CASCADE'],
+  requiredFeeds: ['PERP_FUNDING'],
+  maxFeedAgeMs: 8_000,
+  evaluate: (ctx) => {
+    if (ctx.oiDeltaPct15m <= -2.5 && ctx.cvdDelta1m > 0) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 21,
+        reasonCode: 'OI_DROP_SHORT_COVER_BOUNCE',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-051',
+  name: 'PerpSpotBasisPremiumAgent',
+  bucket: 'DERIVATIVES_FUNDING_OI',
+  allowedSleeves: ['futures', 'spot'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['PERP_FUNDING', 'L1_TICK'],
+  maxFeedAgeMs: 8_000,
+  evaluate: (ctx) => {
+    const basisAprPct = f(ctx, FeatureSlot.PERP_SPOT_BASIS_APR_PCT);
+    if (basisAprPct <= -8.0) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 23,
+        reasonCode: `BACKWARDATION_BASIS_${basisAprPct.toFixed(1)}PCT`,
+
+   };
+    }
+    if (basisAprPct >= 28.0) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 21,
+        reasonCode: `OVERHEATED_CONTANGO_${basisAprPct.toFixed(1)}PCT`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-052',
+  name: 'LongShortAccountRatioContrarianAgent',
+  bucket: 'DERIVATIVES_FUNDING_OI',
+  allowedSleeves: ['futures'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['PERP_FUNDING'],
+  maxFeedAgeMs: 15_000,
+  evaluate: (ctx) => {
+    const topVsRetailDiv = f(ctx, FeatureSlot.TOP_VS_RETAIL_LS_DIV);
+    if (topVsRetailDiv >= 0.35) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 24,
+        reasonCode: 'TOP_TRADERS_LONG_VS_RETAIL_SHORT',
+      };
+    }
+    if (topVsRetailDiv <= -0.35) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 24,
+        reasonCode: 'TOP_TRADERS_SHORT_VS_RETAIL_LONG',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-053',
+  name: 'LiquidationClusterMagnetAgent',
+  bucket: 'DERIVATIVES_FUNDING_OI',
+  allowedSleeves: ['futures'],
+  allowedRegimes: TREND_AND_EXPANSION,
+
+  requiredFeeds: ['PERP_FUNDING', 'L1_TICK'],
+  maxFeedAgeMs: 5_000,
+  evaluate: (ctx) => {
+    const liqMagnetDir = f(ctx, FeatureSlot.LIQ_CLUSTER_MAGNET_DIR);
+    if (liqMagnetDir >= 1 && ctx.ofiL5 > 0.15) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.70,
+        expectedEdgeBps: 28,
+        reasonCode: 'SHORT_LIQ_CLUSTER_MAGNET_ABOVE',
+      };
+    }
+    if (liqMagnetDir <= -1 && ctx.ofiL5 < -0.15) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.70,
+        expectedEdgeBps: 28,
+        reasonCode: 'LONG_LIQ_CLUSTER_MAGNET_BELOW',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-054',
+  name: 'PostCascadeReboundAgent',
+  bucket: 'DERIVATIVES_FUNDING_OI',
+  allowedSleeves: ['futures', 'spot'],
+  allowedRegimes: ['LIQUIDATION_CASCADE'],
+  requiredFeeds: ['PERP_FUNDING', 'TRADE_TAPE'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    if (ctx.oiDeltaPct15m <= -5.0 && ctx.ofiL5 > 0.25 && ctx.spreadBps < 20) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.74,
+        expectedEdgeBps: 36,
+        reasonCode: 'POST_LIQ_CASCADE_STABILIZATION',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-055',
+  name: 'FundingVelocitySpikeAgent',
+  bucket: 'DERIVATIVES_FUNDING_OI',
+  allowedSleeves: ['futures'],
+
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['PERP_FUNDING'],
+  maxFeedAgeMs: 10_000,
+  evaluate: (ctx) => {
+    const fundingDelta1h = f(ctx, FeatureSlot.FUNDING_DELTA_1H);
+    if (fundingDelta1h <= -0.0003) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 20,
+        reasonCode: 'FUNDING_VELOCITY_DROP_SHORT_CROWDING',
+      };
+    }
+    if (fundingDelta1h >= 0.0003) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 20,
+        reasonCode: 'FUNDING_VELOCITY_SPIKE_LONG_CROWDING',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-056',
+  name: 'CvdPerpVsSpotDivergenceAgent',
+  bucket: 'DERIVATIVES_FUNDING_OI',
+  allowedSleeves: ['futures', 'spot'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['PERP_FUNDING', 'TRADE_TAPE'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    const spotLeadsPerp = f(ctx, FeatureSlot.SPOT_LEADS_PERP_CVD);
+    if (spotLeadsPerp >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.71,
+        expectedEdgeBps: 25,
+        reasonCode: 'SPOT_CVD_LEADING_PERP_UP',
+      };
+    }
+    if (spotLeadsPerp <= -1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.71,
+        expectedEdgeBps: 25,
+        reasonCode: 'SPOT_CVD_LEADING_PERP_DOWN',
+
+   };
+    }
+    return ABSTAIN;
+  },
+},
+
+ //
+======================================================================
+====
+ // BUCKET 6: VOLATILITY_REGIME (AGT-057 .. AGT-064 — 8 Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-057',
+   name: 'TtmSqueezeReleaseAgent',
+   bucket: 'VOLATILITY_REGIME',
+   allowedSleeves: ALL_TRADING_SLEEVES,
+   allowedRegimes: ['LOW_VOL_CHOP', 'HIGH_VOL_EXPANSION'],
+   requiredFeeds: ['L1_TICK'],
+   maxFeedAgeMs: 2_500,
+   evaluate: (ctx) => {
+     const squeezeRelease = f(ctx, FeatureSlot.TTM_SQUEEZE_RELEASE);
+     if (squeezeRelease >= 1) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.71,
+         expectedEdgeBps: 28,
+         reasonCode: 'TTM_SQUEEZE_RELEASE_BULL',
+       };
+     }
+     if (squeezeRelease <= -1) {
+       return {
+         action: 'SELL',
+         rawConfidence: 0.71,
+         expectedEdgeBps: 28,
+         reasonCode: 'TTM_SQUEEZE_RELEASE_BEAR',
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-058',
+   name: 'AtrExpansionBreakoutAgent',
+   bucket: 'VOLATILITY_REGIME',
+   allowedSleeves: ALL_TRADING_SLEEVES,
+   allowedRegimes: ['HIGH_VOL_EXPANSION', 'TRENDING'],
+
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+    const atrRatio = f(ctx, FeatureSlot.ATR_EXPANSION_RATIO, 1.0);
+    if (atrRatio >= 1.35 && Math.abs(ctx.ofiL5) >= 0.25) {
+      return {
+        action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+        rawConfidence: 0.66,
+        expectedEdgeBps: 25,
+        reasonCode: `ATR_EXPANSION_${atrRatio.toFixed(2)}X`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-059',
+  name: 'VolatilityCompressionCoilAgent',
+  bucket: 'VOLATILITY_REGIME',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['LOW_VOL_CHOP'],
+  requiredFeeds: ['L1_TICK', 'L2_BOOK'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+    const atrPctRank = f(ctx, FeatureSlot.ATR_PERCENTILE_RANK, 50);
+    if (atrPctRank <= 15 && Math.abs(ctx.ofiL5) >= 0.30) {
+      return {
+        action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 22,
+        reasonCode: `VOL_COIL_P${atrPctRank.toFixed(0)}_IGNITION`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-060',
+  name: 'RealizedVsImpliedVolSpreadAgent',
+  bucket: 'VOLATILITY_REGIME',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 5_000,
+  evaluate: (ctx) => {
+    const ivRvSpread = f(ctx, FeatureSlot.IV_RV_SPREAD_PCT);
+    if (ivRvSpread >= 8.0 && Math.abs(ctx.ofiL5) >= 0.22) {
+      return {
+
+     action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+     rawConfidence: 0.63,
+     expectedEdgeBps: 20,
+     reasonCode: 'IMPLIED_VOL_EXPANSION_PRICED',
+   };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-061',
+  name: 'ParkinsonRangeEfficiencyAgent',
+  bucket: 'VOLATILITY_REGIME',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    const efficiency = f(ctx, FeatureSlot.PARKINSON_EFFICIENCY);
+    if (efficiency >= 0.68) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.66,
+        expectedEdgeBps: 21,
+        reasonCode: 'HIGH_DIRECTIONAL_VOL_EFFICIENCY_UP',
+      };
+    }
+    if (efficiency <= -0.68) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.66,
+        expectedEdgeBps: 21,
+        reasonCode: 'HIGH_DIRECTIONAL_VOL_EFFICIENCY_DOWN',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-062',
+  name: 'GarchConditionalVolForecastAgent',
+  bucket: 'VOLATILITY_REGIME',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ['HIGH_VOL_EXPANSION', 'TRENDING'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    const garchSlope = f(ctx, FeatureSlot.GARCH_COND_VOL_SLOPE);
+
+    if (garchSlope > 0.15 && Math.abs(ctx.cvdDelta1m) > 12_000) {
+      return {
+        action: ctx.cvdDelta1m > 0 ? 'BUY' : 'SELL',
+        rawConfidence: 0.62,
+        expectedEdgeBps: 19,
+        reasonCode: 'GARCH_CONDITIONAL_VOL_BREAKOUT',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-063',
+  name: 'OpeningVolNormalizationAgent',
+  bucket: 'VOLATILITY_REGIME',
+  allowedSleeves: ['stocks_etf', 'futures'],
+  allowedRegimes: ['TRENDING', 'LOW_VOL_CHOP'],
+  requiredFeeds: ['EQUITIES_FEED', 'L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    if (f(ctx, FeatureSlot.POST_OPEN_VOL_STABLE) >= 1 && Math.abs(ctx.ofiL5) >= 0.2) {
+      return {
+        action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 18,
+        reasonCode: 'POST_OPEN_VOL_NORMALIZED_TREND',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-064',
+  name: 'TailRiskKurtosisStabilizerAgent',
+  bucket: 'VOLATILITY_REGIME',
+  allowedSleeves: CRYPTO_SLEEVES,
+  allowedRegimes: ['LIQUIDATION_CASCADE', 'HIGH_VOL_EXPANSION'],
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_500,
+  evaluate: (ctx) => {
+    if (f(ctx, FeatureSlot.TAIL_KURTOSIS_DROP) >= 1 && ctx.ofiL5 > 0.2) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 22,
+        reasonCode: 'TAIL_KURTOSIS_NORMALIZING_LONG',
+      };
+    }
+
+     return ABSTAIN;
+   },
+ },
+
+ //
+======================================================================
+====
+ // BUCKET 7: ONCHAIN_SOLANA_SAFETY (AGT-065 .. AGT-074 — 10 Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-065',
+   name: 'SplMintAuthorityRevokedAgent',
+   bucket: 'ONCHAIN_SOLANA_SAFETY',
+   allowedSleeves: ['memecoin'],
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['SOLANA_RPC'],
+   maxFeedAgeMs: 5_000,
+   evaluate: (ctx) => {
+     if (f(ctx, FeatureSlot.SPL_MINT_REVOKED) >= 1 && ctx.ofiL5 > 0.15) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.64,
+         expectedEdgeBps: 30,
+         reasonCode: 'SPL_MINT_AUTHORITY_NONE_VERIFIED',
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-066',
+   name: 'SplFreezeAuthorityRevokedAgent',
+   bucket: 'ONCHAIN_SOLANA_SAFETY',
+   allowedSleeves: ['memecoin'],
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['SOLANA_RPC'],
+   maxFeedAgeMs: 5_000,
+   evaluate: (ctx) => {
+     if (f(ctx, FeatureSlot.SPL_FREEZE_REVOKED) >= 1 && ctx.ofiL5 > 0.15) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.64,
+         expectedEdgeBps: 30,
+         reasonCode: 'SPL_FREEZE_AUTHORITY_NONE_VERIFIED',
+       };
+     }
+
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-067',
+  name: 'Token2022ExtensionAuditAgent',
+  bucket: 'ONCHAIN_SOLANA_SAFETY',
+  allowedSleeves: ['memecoin'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['SOLANA_RPC'],
+  maxFeedAgeMs: 5_000,
+  evaluate: (ctx) => {
+    if (f(ctx, FeatureSlot.TOKEN2022_CLEAN_EXT) >= 1 && ctx.cvdDelta1m > 0) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.66,
+        expectedEdgeBps: 32,
+        reasonCode: 'TOKEN2022_EXTENSIONS_CLEAN',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-068',
+  name: 'LpBurnLockVerificationAgent',
+  bucket: 'ONCHAIN_SOLANA_SAFETY',
+  allowedSleeves: ['memecoin'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['SOLANA_RPC'],
+  maxFeedAgeMs: 5_000,
+  evaluate: (ctx) => {
+    const lpLockedPct = f(ctx, FeatureSlot.LP_LOCKED_PCT);
+    if (lpLockedPct >= 90 && ctx.liquidityUsd >= 60_000) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 35,
+        reasonCode: `LP_LOCKED_${lpLockedPct.toFixed(0)}PCT_SAFE`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-069',
+  name: 'HolderDistributionGiniAgent',
+  bucket: 'ONCHAIN_SOLANA_SAFETY',
+
+  allowedSleeves: ['memecoin'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['SOLANA_RPC'],
+  maxFeedAgeMs: 8_000,
+  evaluate: (ctx) => {
+    const gini = f(ctx, FeatureSlot.HOLDER_GINI_COEFF, 1);
+    if (ctx.top10HolderPct <= 18 && gini <= 0.72) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 33,
+        reasonCode: `HEALTHY_HOLDER_TOP10_${ctx.top10HolderPct.toFixed(1)}PCT`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-070',
+  name: 'PoolDepthToMcapRatioAgent',
+  bucket: 'ONCHAIN_SOLANA_SAFETY',
+  allowedSleeves: ['memecoin'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['SOLANA_RPC'],
+  maxFeedAgeMs: 5_000,
+  evaluate: (ctx) => {
+    const lpToMcap = f(ctx, FeatureSlot.LP_TO_FDV_RATIO);
+    if (ctx.liquidityUsd >= 75_000 && lpToMcap >= 0.08) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 31,
+        reasonCode: 'STRONG_LP_TO_FDV_RATIO',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-071',
+  name: 'JupiterSimulatedRoundTripTaxAgent',
+  bucket: 'ONCHAIN_SOLANA_SAFETY',
+  allowedSleeves: ['memecoin'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['SOLANA_RPC'],
+  maxFeedAgeMs: 4_000,
+  evaluate: (ctx) => {
+    const simTaxBps = f(ctx, FeatureSlot.JUPITER_SIM_TAX_BPS, 999);
+
+     if (simTaxBps <= 100 && ctx.ofiL5 > 0.1) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.66,
+         expectedEdgeBps: 34,
+         reasonCode: `JUPITER_SIM_TAX_${simTaxBps.toFixed(0)}BPS_OK`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-072',
+   name: 'DeployerWalletHistoryScoreAgent',
+   bucket: 'ONCHAIN_SOLANA_SAFETY',
+   allowedSleeves: ['memecoin'],
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['SOLANA_RPC'],
+   maxFeedAgeMs: 10_000,
+   evaluate: (ctx) => {
+     if (f(ctx, FeatureSlot.DEPLOYER_HISTORY_SCORE) >= 0.80) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.65,
+         expectedEdgeBps: 29,
+         reasonCode: 'DEPLOYER_HISTORY_CLEAN',
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-073',
+   name: 'BondingCurveGraduationMomentumAgent',
+   bucket: 'ONCHAIN_SOLANA_SAFETY',
+   allowedSleeves: ['memecoin'],
+   allowedRegimes: TREND_AND_EXPANSION,
+   requiredFeeds: ['SOLANA_RPC', 'TRADE_TAPE'],
+   maxFeedAgeMs: 4_000,
+   evaluate: (ctx) => {
+     if (f(ctx, FeatureSlot.POST_GRADUATION_HOLD) >= 1 && ctx.organicVolumeRatio >=
+0.70) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.72,
+         expectedEdgeBps: 42,
+         reasonCode: 'RAYDIUM_GRADUATION_ORGANIC_HOLD',
+       };
+
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-074',
+  name: 'DexPoolLiquidityGrowthAgent',
+  bucket: 'ONCHAIN_SOLANA_SAFETY',
+  allowedSleeves: ['memecoin', 'spot'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['SOLANA_RPC'],
+  maxFeedAgeMs: 5_000,
+  evaluate: (ctx) => {
+    const lpDelta15mPct = f(ctx, FeatureSlot.LP_DELTA_15M_PCT);
+    if (lpDelta15mPct >= 4.0) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 32,
+        reasonCode: `LP_POOL_GROWING_${lpDelta15mPct.toFixed(1)}PCT`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+
+ //
+======================================================================
+====
+ // BUCKET 8: SMART_MONEY_WHALE (AGT-075 .. AGT-082 — 8 Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-075',
+   name: 'SmartWalletNetAccumulationAgent',
+   bucket: 'SMART_MONEY_WHALE',
+   allowedSleeves: CRYPTO_SLEEVES,
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['SOLANA_RPC', 'TRADE_TAPE'],
+   maxFeedAgeMs: 6_000,
+   evaluate: (ctx) => {
+     const smartNetZ = f(ctx, FeatureSlot.SMART_WALLET_NET_Z);
+     if (smartNetZ >= 1.7) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.73,
+         expectedEdgeBps: 35,
+
+     reasonCode: `SMART_WALLET_ACCUM_Z_${smartNetZ.toFixed(1)}`,
+   };
+    }
+    if (smartNetZ <= -1.7) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.73,
+        expectedEdgeBps: 35,
+        reasonCode: `SMART_WALLET_DISTRIB_Z_${smartNetZ.toFixed(1)}`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-076',
+  name: 'FreshWhaleWalletInflowAgent',
+  bucket: 'SMART_MONEY_WHALE',
+  allowedSleeves: ['memecoin', 'spot'],
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['SOLANA_RPC'],
+  maxFeedAgeMs: 6_000,
+  evaluate: (ctx) => {
+    const freshWhaleBuys = f(ctx, FeatureSlot.FRESH_WHALE_BUY_COUNT);
+    if (freshWhaleBuys >= 3 && ctx.organicVolumeRatio >= 0.65) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.69,
+        expectedEdgeBps: 33,
+        reasonCode: `FRESH_WHALE_INFLOWS_${freshWhaleBuys.toFixed(0)}`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-077',
+  name: 'OrganicUniqueTraderGrowthAgent',
+  bucket: 'SMART_MONEY_WHALE',
+  allowedSleeves: ['memecoin', 'spot'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 5_000,
+  evaluate: (ctx) => {
+    const uniqueMakerGrowth = f(ctx, FeatureSlot.UNIQUE_MAKER_GROWTH_RATIO);
+    if (ctx.organicVolumeRatio >= 0.76 && uniqueMakerGrowth >= 1.25) {
+      return {
+        action: 'BUY',
+
+     rawConfidence: 0.67,
+     expectedEdgeBps: 29,
+     reasonCode: 'ORGANIC_UNIQUE_WALLET_SURGE',
+   };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-078',
+  name: 'ExchangeNetOutflowWhaleAgent',
+  bucket: 'SMART_MONEY_WHALE',
+  allowedSleeves: ['spot', 'futures'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 15_000,
+  evaluate: (ctx) => {
+    const cexNetFlowZ = f(ctx, FeatureSlot.CEX_NET_FLOW_Z);
+    if (cexNetFlowZ <= -1.8) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 26,
+        reasonCode: 'CEX_WHALE_COLD_OUTFLOW_SURGE',
+      };
+    }
+    if (cexNetFlowZ >= 2.0) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 26,
+        reasonCode: 'CEX_WHALE_INFLOW_SELL_PRESSURE',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-079',
+  name: 'InstitutionalBlockSweepEquitiesAgent',
+  bucket: 'SMART_MONEY_WHALE',
+  allowedSleeves: ['stocks_etf'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['EQUITIES_FEED', 'TRADE_TAPE'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    const darkPoolDelta = f(ctx, FeatureSlot.DARK_POOL_BLOCK_DELTA_Z);
+    if (darkPoolDelta >= 1.6) {
+
+   return {
+     action: 'BUY',
+     rawConfidence: 0.71,
+     expectedEdgeBps: 24,
+     reasonCode: 'INSTITUTIONAL_BLOCK_ACCUMULATION',
+   };
+    }
+    if (darkPoolDelta <= -1.6) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.71,
+        expectedEdgeBps: 24,
+        reasonCode: 'INSTITUTIONAL_BLOCK_DISTRIBUTION',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-080',
+  name: 'InsiderClusterCoordinatedBuyAgent',
+  bucket: 'SMART_MONEY_WHALE',
+  allowedSleeves: ['memecoin'],
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['SOLANA_RPC'],
+  maxFeedAgeMs: 5_000,
+  evaluate: (ctx) => {
+    const clusterCount = f(ctx, FeatureSlot.INSIDER_CLUSTER_COUNT);
+    if (clusterCount >= 3 && ctx.top10HolderPct <= 22) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.74,
+        expectedEdgeBps: 38,
+        reasonCode: `HIGH_SHARPE_WALLET_CLUSTER_${clusterCount.toFixed(0)}`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-081',
+  name: 'DormantSupplyReactivationAgent',
+  bucket: 'SMART_MONEY_WHALE',
+  allowedSleeves: ['spot', 'futures'],
+  allowedRegimes: ['TRENDING', 'LOW_VOL_CHOP'],
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 15_000,
+  evaluate: (ctx) => {
+
+    const lthAccum = f(ctx, FeatureSlot.LTH_ACCUM_FLAG);
+    if (lthAccum >= 1) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 22,
+        reasonCode: 'LONG_TERM_HOLDER_ACCUMULATION',
+      };
+    }
+    if (lthAccum <= -1) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 22,
+        reasonCode: 'LONG_TERM_HOLDER_DISTRIBUTION',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-082',
+  name: 'MarketMakerInventorySkewAgent',
+  bucket: 'SMART_MONEY_WHALE',
+  allowedSleeves: CRYPTO_SLEEVES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['L2_BOOK', 'TRADE_TAPE'],
+  maxFeedAgeMs: 3_000,
+  evaluate: (ctx) => {
+    const mmSkew = f(ctx, FeatureSlot.MM_INVENTORY_SKEW);
+    if (mmSkew >= 0.45) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 21,
+        reasonCode: 'MM_INVENTORY_NET_LONG_SKEW',
+      };
+    }
+    if (mmSkew <= -0.45) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.65,
+        expectedEdgeBps: 21,
+        reasonCode: 'MM_INVENTORY_NET_SHORT_SKEW',
+      };
+    }
+    return ABSTAIN;
+  },
+
+},
+
+ //
+======================================================================
+====
+ // BUCKET 9: CROSS_ASSET_MACRO (AGT-083 .. AGT-090 — 8 Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-083',
+   name: 'BtcDominanceBetaLeadAgent',
+   bucket: 'CROSS_ASSET_MACRO',
+   allowedSleeves: CRYPTO_SLEEVES,
+   allowedRegimes: TREND_AND_EXPANSION,
+   requiredFeeds: ['L1_TICK', 'MACRO_CLOCK'],
+   maxFeedAgeMs: 5_000,
+   evaluate: (ctx) => {
+     const btcImpulse = f(ctx, FeatureSlot.BTC_MACRO_IMPULSE_Z);
+     if (btcImpulse >= 1.5) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.67,
+         expectedEdgeBps: 24,
+         reasonCode: 'BTC_MACRO_IMPULSE_TAILWIND',
+       };
+     }
+     if (btcImpulse <= -1.5) {
+       return {
+         action: 'SELL',
+         rawConfidence: 0.67,
+         expectedEdgeBps: 24,
+         reasonCode: 'BTC_MACRO_IMPULSE_HEADWIND',
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-084',
+   name: 'SolanaEcosystemBetaRotationAgent',
+   bucket: 'CROSS_ASSET_MACRO',
+   allowedSleeves: ['memecoin', 'spot'],
+   allowedRegimes: TREND_AND_EXPANSION,
+   requiredFeeds: ['L1_TICK', 'SOLANA_RPC'],
+   maxFeedAgeMs: 5_000,
+   evaluate: (ctx) => {
+     if (f(ctx, FeatureSlot.SOL_BTC_ROTATION_Z) >= 1.4) {
+
+   return {
+     action: 'BUY',
+     rawConfidence: 0.66,
+     expectedEdgeBps: 26,
+     reasonCode: 'SOL_BTC_ROTATION_OUTPERFORMANCE',
+   };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-085',
+  name: 'SpyQqqRiskOnRegimeAgent',
+  bucket: 'CROSS_ASSET_MACRO',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ['TRENDING', 'LOW_VOL_CHOP'],
+  requiredFeeds: ['MACRO_CLOCK'],
+  maxFeedAgeMs: 10_000,
+  evaluate: (ctx) => {
+    const equityBreadth = f(ctx, FeatureSlot.EQUITY_RISK_ON_BREADTH);
+    if (equityBreadth >= 0.65) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 19,
+        reasonCode: 'SPY_QQQ_RISK_ON_BREADTH',
+      };
+    }
+    if (equityBreadth <= -0.65) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.64,
+        expectedEdgeBps: 19,
+        reasonCode: 'SPY_QQQ_RISK_OFF_BREADTH',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-086',
+  name: 'DxyYieldInverseImpulseAgent',
+  bucket: 'CROSS_ASSET_MACRO',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['MACRO_CLOCK'],
+  maxFeedAgeMs: 15_000,
+  evaluate: (ctx) => {
+
+    const dxyZ = f(ctx, FeatureSlot.DXY_INVERSE_Z);
+    if (dxyZ <= -1.6) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.63,
+        expectedEdgeBps: 18,
+        reasonCode: 'DXY_WEAKNESS_LIQUIDITY_TAILWIND',
+      };
+    }
+    if (dxyZ >= 1.6) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.63,
+        expectedEdgeBps: 18,
+        reasonCode: 'DXY_SPIKE_LIQUIDITY_HEADWIND',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-087',
+  name: 'SessionLiquidityWindowBoostAgent',
+  bucket: 'CROSS_ASSET_MACRO',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['MACRO_CLOCK'],
+  maxFeedAgeMs: 10_000,
+  evaluate: (ctx) => {
+    if (f(ctx, FeatureSlot.PEAK_SESSION_ACTIVE) >= 1 && Math.abs(ctx.ofiL5) >= 0.25) {
+      return {
+        action: ctx.ofiL5 > 0 ? 'BUY' : 'SELL',
+        rawConfidence: 0.63,
+        expectedEdgeBps: 18,
+        reasonCode: 'PEAK_SESSION_LIQUIDITY_WINDOW',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-088',
+  name: 'SectorRotationMomentumAgent',
+  bucket: 'CROSS_ASSET_MACRO',
+  allowedSleeves: ['stocks_etf'],
+  allowedRegimes: TREND_AND_EXPANSION,
+  requiredFeeds: ['EQUITIES_FEED', 'MACRO_CLOCK'],
+  maxFeedAgeMs: 10_000,
+
+  evaluate: (ctx) => {
+    const sectorRank = f(ctx, FeatureSlot.SECTOR_ROTATION_RANK);
+    if (sectorRank >= 0.85) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 21,
+        reasonCode: 'TOP_DECILE_SECTOR_ROTATION',
+      };
+    }
+    if (sectorRank <= 0.15) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.67,
+        expectedEdgeBps: 21,
+        reasonCode: 'BOTTOM_DECILE_SECTOR_ROTATION',
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-089',
+  name: 'CrossExchangeArbitrageLeadAgent',
+  bucket: 'CROSS_ASSET_MACRO',
+  allowedSleeves: CRYPTO_SLEEVES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 2_000,
+  evaluate: (ctx) => {
+    const coinbasePremiumBps = f(ctx, FeatureSlot.COINBASE_PREMIUM_BPS);
+    if (coinbasePremiumBps >= 8.0) {
+      return {
+        action: 'BUY',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 22,
+        reasonCode: `US_SPOT_PREMIUM_${coinbasePremiumBps.toFixed(1)}BPS`,
+      };
+    }
+    if (coinbasePremiumBps <= -8.0) {
+      return {
+        action: 'SELL',
+        rawConfidence: 0.68,
+        expectedEdgeBps: 22,
+        reasonCode: `US_SPOT_DISCOUNT_${coinbasePremiumBps.toFixed(1)}BPS`,
+      };
+    }
+    return ABSTAIN;
+
+   },
+ },
+ {
+   id: 'AGT-090',
+   name: 'StablecoinMintInflowTailwindAgent',
+   bucket: 'CROSS_ASSET_MACRO',
+   allowedSleeves: CRYPTO_SLEEVES,
+   allowedRegimes: ['TRENDING', 'LOW_VOL_CHOP'],
+   requiredFeeds: ['MACRO_CLOCK'],
+   maxFeedAgeMs: 30_000,
+   evaluate: (ctx) => {
+     if (f(ctx, FeatureSlot.STABLECOIN_MINT_INFLOW_Z) >= 1.5) {
+       return {
+         action: 'BUY',
+         rawConfidence: 0.63,
+         expectedEdgeBps: 20,
+         reasonCode: 'STABLECOIN_NET_MINT_INFLOW',
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+
+ //
+======================================================================
+====
+ // BUCKET 10: ADVERSARIAL_CRITIC (AGT-091 .. AGT-100 — 10 Red-Team Veto
+Agents)
+ //
+======================================================================
+====
+ {
+   id: 'AGT-091',
+   name: 'LiquidityCliffTrapCritic',
+   bucket: 'ADVERSARIAL_CRITIC',
+   allowedSleeves: ALL_TRADING_SLEEVES,
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['L2_BOOK'],
+   maxFeedAgeMs: 1_500,
+   isRedTeamCritic: true,
+   evaluate: (ctx) => {
+     if (ctx.overheadLiquidityWallR > 0 && ctx.overheadLiquidityWallR < 0.85) {
+       return {
+         action: 'VETO',
+         rawConfidence: 0.91,
+         expectedEdgeBps: 0,
+         reasonCode: `OPPOSING_WALL_AT_${ctx.overheadLiquidityWallR.toFixed(2)}R`,
+       };
+
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-092',
+  name: 'VpinToxicityCascadeCritic',
+  bucket: 'ADVERSARIAL_CRITIC',
+  allowedSleeves: CEX_AND_EQUITIES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['TRADE_TAPE', 'L2_BOOK'],
+  maxFeedAgeMs: 1_000,
+  isRedTeamCritic: true,
+  evaluate: (ctx) => {
+    if (ctx.vpin >= 0.78 && ctx.spreadBps > 15) {
+      return {
+        action: 'VETO',
+        rawConfidence: 0.93,
+        expectedEdgeBps: 0,
+        reasonCode: `TOXIC_FLOW_VPIN_${ctx.vpin.toFixed(2)}`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-093',
+  name: 'WashVolumeEntropyCritic',
+  bucket: 'ADVERSARIAL_CRITIC',
+  allowedSleeves: ['memecoin', 'spot'],
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['TRADE_TAPE'],
+  maxFeedAgeMs: 3_000,
+  isRedTeamCritic: true,
+  evaluate: (ctx) => {
+    if (ctx.organicVolumeRatio < 0.55) {
+      return {
+        action: 'VETO',
+        rawConfidence: 0.90,
+        expectedEdgeBps: 0,
+        reasonCode: `WASH_VOLUME_RATIO_${ctx.organicVolumeRatio.toFixed(2)}`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-094',
+
+   name: 'SolanaHolderConcentrationCritic',
+   bucket: 'ADVERSARIAL_CRITIC',
+   allowedSleeves: ['memecoin'],
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['SOLANA_RPC'],
+   maxFeedAgeMs: 5_000,
+   isRedTeamCritic: true,
+   evaluate: (ctx) => {
+     if (ctx.top10HolderPct > 25 || ctx.liquidityUsd < 50_000) {
+       return {
+         action: 'VETO',
+         rawConfidence: 0.96,
+         expectedEdgeBps: 0,
+         reasonCode: `SOL_CONCENTRATION_${ctx.top10HolderPct.toFixed(1)}PCT`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-095',
+   name: 'FundingCrowdingSqueezeCritic',
+   bucket: 'ADVERSARIAL_CRITIC',
+   allowedSleeves: ['futures'],
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['PERP_FUNDING'],
+   maxFeedAgeMs: 10_000,
+   isRedTeamCritic: true,
+   evaluate: (ctx) => {
+     if (Math.abs(ctx.fundingRate8h) >= 0.0012 && Math.abs(ctx.oiDeltaPct15m) >= 4.5) {
+       return {
+         action: 'VETO',
+         rawConfidence: 0.84,
+         expectedEdgeBps: 0,
+         reasonCode: `EXTREME_FUNDING_OI_${(ctx.fundingRate8h * 100).toFixed(3)}
+PCT`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-096',
+   name: 'SpreadShockVacuumCritic',
+   bucket: 'ADVERSARIAL_CRITIC',
+   allowedSleeves: ALL_TRADING_SLEEVES,
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['L2_BOOK'],
+
+  maxFeedAgeMs: 1_000,
+  isRedTeamCritic: true,
+  evaluate: (ctx) => {
+    const spreadMultiple = f(ctx, FeatureSlot.SPREAD_VS_30M_MEDIAN_MULT, 1.0);
+    if (spreadMultiple >= 2.2) {
+      return {
+        action: 'VETO',
+        rawConfidence: 0.92,
+        expectedEdgeBps: 0,
+        reasonCode: `SPREAD_VACUUM_${spreadMultiple.toFixed(1)}X_MEDIAN`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-097',
+  name: 'ParabolicExhaustionTopTickCritic',
+  bucket: 'ADVERSARIAL_CRITIC',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['L1_TICK'],
+  maxFeedAgeMs: 1_500,
+  isRedTeamCritic: true,
+  evaluate: (ctx) => {
+    const extensionAtr = Math.abs(f(ctx, FeatureSlot.EXTENSION_FROM_EMA_ATR));
+    if (extensionAtr >= 4.2) {
+      return {
+        action: 'VETO',
+        rawConfidence: 0.89,
+        expectedEdgeBps: 0,
+        reasonCode: `PARABOLIC_EXTENSION_${extensionAtr.toFixed(1)}ATR`,
+      };
+    }
+    return ABSTAIN;
+  },
+},
+{
+  id: 'AGT-098',
+  name: 'CorrelatedDrawdownContagionCritic',
+  bucket: 'ADVERSARIAL_CRITIC',
+  allowedSleeves: ALL_TRADING_SLEEVES,
+  allowedRegimes: ALL_REGIMES,
+  requiredFeeds: ['MACRO_CLOCK'],
+  maxFeedAgeMs: 5_000,
+  isRedTeamCritic: true,
+  evaluate: (ctx) => {
+    const contagionCorr = f(ctx, FeatureSlot.CROSS_ASSET_CONTAGION_CORR);
+
+     if (contagionCorr >= 0.88) {
+       return {
+         action: 'VETO',
+         rawConfidence: 0.86,
+         expectedEdgeBps: 0,
+         reasonCode: `CORRELATED_DUMP_CONTAGION_${contagionCorr.toFixed(2)}`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-099',
+   name: 'SlippageExceedsEdgeCritic',
+   bucket: 'ADVERSARIAL_CRITIC',
+   allowedSleeves: ALL_TRADING_SLEEVES,
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['L2_BOOK'],
+   maxFeedAgeMs: 1_200,
+   isRedTeamCritic: true,
+   evaluate: (ctx) => {
+     const frictionToEdgeRatio = f(ctx, FeatureSlot.FRICTION_TO_EDGE_RATIO);
+     if (frictionToEdgeRatio > 0.45) {
+       return {
+         action: 'VETO',
+         rawConfidence: 0.94,
+         expectedEdgeBps: 0,
+         reasonCode: `FRICTION_RATIO_${(frictionToEdgeRatio * 100).toFixed(0)}
+PCT_TOO_HIGH`,
+       };
+     }
+     return ABSTAIN;
+   },
+ },
+ {
+   id: 'AGT-100',
+   name: 'StaleOrDivergentOracleCritic',
+   bucket: 'ADVERSARIAL_CRITIC',
+   allowedSleeves: ALL_TRADING_SLEEVES,
+   allowedRegimes: ALL_REGIMES,
+   requiredFeeds: ['L1_TICK'],
+   maxFeedAgeMs: 1_000,
+   isRedTeamCritic: true,
+   evaluate: (ctx) => {
+     const oracleDisagreementBps = Math.abs(f(ctx,
+FeatureSlot.ORACLE_DISAGREEMENT_BPS));
+     if (oracleDisagreementBps > 30) {
+       return {
+
+          action: 'VETO',
+          rawConfidence: 0.95,
+          expectedEdgeBps: 0,
+          reasonCode: `CROSS_VENUE_DISAGREEMENT_$
+{oracleDisagreementBps.toFixed(1)}BPS`,
+        };
+      }
+      return ABSTAIN;
+    },
+  },
+];
+
+if (ALL_100_AGENTS.length !== 100) {
+  throw new Error(
+    `SWARM_DEFINITION_MISMATCH: Expected 100 agents, loaded $
+{ALL_100_AGENTS.length}`
+  );
+}
