@@ -146,6 +146,10 @@ describe('MIA 5 PDF 97-slot compatibility (research only, no duplicate swarm)', 
     });
     expect(rejected.values.every(v => v === null)).toBe(true);
     expect(projectMia5SwarmResearchFeatures(null, null, true).availableCount).toBe(0);
+    const cold = new FeatureEngine(); cold.ingest(synthCandles(1));
+    expect(projectMia5SwarmResearchFeatures(cold.last, cold.research, true)).toMatchObject({
+      availableCount: 0, missingCount: 97, status: 'UNVERIFIED', tradeEligible: false,
+    });
   });
   it('stays deterministic after duplicate/overlapping market data and never uses mismatched research', () => {
     const bars = synthCandles(300);
