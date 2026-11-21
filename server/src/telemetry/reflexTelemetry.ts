@@ -45,7 +45,7 @@ export interface ReflexHealthSnapshot {
   healthy: boolean;
   stalled: boolean;
   warmingUp: boolean;
-  state: ReflexWorkerStateValue;
+  state: 'INIT' | 'WARMING_UP' | 'HEALTHY' | 'DEGRADED_LATENCY' | 'HALTED';
   heartbeatSeq: string;
   heartbeatAgeMs: number | null;
   tickCount: string;
@@ -92,7 +92,11 @@ export function readReflexTelemetry(
     version: 'mia5-reflex-telemetry-v1',
     healthy: beat > 0n && hasTicks && !stalled &&
       state === ReflexWorkerState.HEALTHY && p99 <= REFLEX_BUDGET_NS,
-    stalled, warmingUp, state,
+    stalled, warmingUp,
+    state: state === ReflexWorkerState.WARMING_UP ? 'WARMING_UP' :
+      state === ReflexWorkerState.HEALTHY ? 'HEALTHY' :
+      state === ReflexWorkerState.DEGRADED_LATENCY ? 'DEGRADED_LATENCY' :
+      state === ReflexWorkerState.HALTED ? 'HALTED' : 'INIT',
     heartbeatSeq: Atomics.load(view, ReflexSlot.HEARTBEAT_SEQ).toString(),
     heartbeatAgeMs: age === null ? null : ms(age),
     tickCount: Atomics.load(view, ReflexSlot.TICK_COUNT).toString(),
