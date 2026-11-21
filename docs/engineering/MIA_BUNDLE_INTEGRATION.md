@@ -57,22 +57,22 @@ Requires authenticated session and the existing \`x-mia-csrf: 1\` header. Input:
 }
 \`\`\`
 
-Two to five **distinct, stored decision IDs**. The browser must not supply quantity, stop price, risk approval, balance or signer settings. The server derives all of them from real MIA records. A stored decision must still be eligible, but preflight can only deny risk — it never creates orders. Responses include reason codes, aggregate cash/risk totals and explicit \`canSubmit: false\`. Paper is the only environment with a preview; TESTNET and LIVE return fail-closed availability. PAPER_ATOMIC remains denied until its *actual* transactional OMS commit exists.
+Two to five **distinct, stored decision IDs**. The browser must not supply quantity, stop price, risk approval, balance or signer settings. The server derives all of them from real MIA records. A stored decision must still be eligible, but preflight can only deny risk — it never creates orders. Responses include reason codes, aggregate cash/risk totals and explicit \`canSubmit: false\`. Paper is the only environment with a preview; TESTNET and LIVE return fail-closed availability. PAPER_ATOMIC has a separately reviewed PAPER-only execution endpoint. The read-only preview can never submit an order by itself.
 
 The PAPER ledger uses simulated quote amounts currently treated as paper USD by the existing OMS. The preview only supports the current Binance spot USDT-quoted flow; it does not perform foreign-exchange or real settlement conversion. Monetary comparison uses a conservative 1e6 integer scale, not a claim to exchange-native precision.
 
 ## Safety invariants
 
-1. Existing \`submitEntry()\`, \`monitorPositions()\`, \`evaluateRisk()\`, canonical ledger, schema, sign-in and G01–G14 remain unchanged.
+1. The existing \`submitEntry()\` financial-write logic, \`monitorPositions()\`, \`evaluateRisk()\`, canonical ledger, sign-in and G01–G14 remain authoritative. The OMS entry function now supports deferred post-commit events; append-only migration v6 provides bundle grouping metadata.
 2. A failed single-leg canonical risk gate cannot be upgraded to allow by the bundle layer.
 3. Aggregated new position count, estimated cash+fee commitments, total planned losses and pairwise correlation can veto a proposed basket.
 4. Pending entries with no durable cash reservations block approval; unknown/incomplete marks or failed portfolio reconciliation block approval.
 5. Paused, emergency or non-PAPER modes block PAPER bundle approval. Browser input cannot claim a safer environment, policy version, quantity, reservation or signer.
-6. No asynchronous network, signer, venue order, real funds, wallet permissions or second risk engine; \`canSubmit\` is always false.
+6. No real exchange network call, signer, venue order, real funds, wallet permissions or second risk engine. \`canSubmit\` is always false **for the preflight assessment**. PAPER-only execution is a separate step-up protected path.
 7. Do not call independent exchange orders atomic. Jito constraints and chain-specific inclusion proof require a separately reviewed adapter.
 8. The read-only preview cannot reserve cash or guarantee execution. PAPER execution independently checks risk and canonical account state under a single database writer lock; every entry, fill, stop and ledger row either commits or rolls back together.
 
-## Safe next phases (not implemented by this PR)
+## Current PAPER implementation and future phases
 
 **P2 — PAPER_ATOMIC (implemented in this draft):** `submitPaperAtomicBundle()` starts one outer SQLite transaction, rechecks bundle risk, links the existing individual entry OMS fills to group records, and defers external events until after commit. A failure in any leg rolls back all financial records. Only authenticated, step-up-verified owners may call the PAPER endpoint; automated bot scheduling is not enabled.
 
