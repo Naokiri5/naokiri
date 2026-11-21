@@ -7,6 +7,7 @@ import { audit } from '../core/audit.js';
 import { market } from '../market/store.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import type { Candle } from '../market/types.js';
+import { PAPER_ACCOUNT } from '../core/accounts.js';
 
 /** Part 18 lifecycle: RESEARCH → BACKTESTED → PAPER → (LIVE_CANDIDATE, gated) | SUSPENDED | RETIRED */
 export type StrategyStatus = 'RESEARCH' | 'BACKTESTED' | 'PAPER' | 'LIVE_CANDIDATE' | 'SUSPENDED' | 'RETIRED';
@@ -79,7 +80,12 @@ export function strategyStats(strategyId: string) {
 }
 /** Realized paper performance per strategy (Part 18.5 decay detection input). */
 export function paperStats(strategyId: string) {
-  const rows = all<{ realized_pnl: number; planned_risk: number }>("SELECT realized_pnl, planned_risk FROM positions WHERE strategy=? AND status='CLOSED'", strategyId);
+  // One PAPER account is authoritative. Closed positions from any other account must never
+  // affect the paper decay detector or the existing strategies dashboard.
+  const rows = all<{ realized_pnl: number; planned_risk: number }>(
+    "SELECT realized_pnl, planned_risk FROM positions WHERE account=? AND strategy=? AND status='CLOSED'",
+    PAPER_ACCOUNT, strategyId,
+  );
   if (!rows.length) return null;
   const rs = rows.map((r) => (r.planned_risk > 0 ? r.realized_pnl / r.planned_risk : 0));
   return { trades: rs.length, expectancyR: rs.reduce((a, b) => a + b, 0) / rs.length, winRate: rs.filter((r) => r > 0).length / rs.length };
