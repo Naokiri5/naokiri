@@ -93,7 +93,8 @@ export function assessPaperExpectancyCohort(rows: readonly ClosedPaperTrade[]): 
 }
 
 /** Account-scoped, deterministic, read-only query: no shadow_trades table or dual SQLite databases. */
-export function rollingPaperExpectancy(account = PAPER_ACCOUNT) {
+export function rollingPaperExpectancy() {
+  const account = PAPER_ACCOUNT; // Never let an optional caller label a non-paper account as PAPER evidence.
   const rows = all<ClosedPaperTrade>(`
     WITH ranked AS (
       SELECT id, market, strategy, instrument, realized_pnl, planned_risk, closed_at,
