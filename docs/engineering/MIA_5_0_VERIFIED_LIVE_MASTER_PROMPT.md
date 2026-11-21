@@ -268,6 +268,7 @@ Do not advertise guaranteed returns or fully operational LIVE trading without ve
 
 - The canonical venueOrderState.ts observational reducer rejects unsupported event kinds, status sources, statuses, uncertain reasons, invalid order sides and unsafe identity keys at runtime, before persisting any event as observed.
 - Its deduplication uses own-property access to avoid treating inherited object properties as authentic event/trade history.
+- The existing venue observation module also exposes toDeterministicVenueClientId: a non-executing, SHA-256-derived client ID with environment/account/sleeve/key scoping and strict Binance/OKX/Alpaca/Solana format validation. It does not reserve an intent, communicate with a signer or authorize any order; the future canonical OMS must persist uniqueness and reconcile uncertain network outcomes.
 - Existing liveAuthorizationAndOrderState.test.ts covers malformed and adversarial payloads. Existing trade-ID deduplication, cross-account protection, UNKNOWN-on-uncertainty and per-fill atomic units are preserved.
 - No new authorization route, risk decision, exchange POST, live signer, database table or second OMS has been created. The LIVE lock is unchanged.
 
