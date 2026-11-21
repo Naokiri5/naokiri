@@ -19,7 +19,7 @@
 - It reports observed sample size, win rate, average stored realized USD PnL, mean realized R (only with valid planned risk), and profit factor when losses exist.
 - Source thresholds from the patch: 30 observations, positive expectancy and `profit_factor >= 1.25`. `THRESHOLDS_MET_RESEARCH_ONLY` is **not trading eligibility**; insufficient/invalid/unmeasurable evidence never unlocks an order.
 - Only canonical `crypto:binance:` positions are labeled the existing `spot` sleeve; other markets remain unmapped, not falsely marked supported.
-- Existing `GET /api/portfolio` adds a `paperExpectancy` field. There is no new API route, engine, risk governor, job, wallet signer, provider dependency, or database migration.
+- Existing `GET /api/portfolio` adds a `paperExpectancy` field. The existing `lab/paperStats()` calculation is preserved for lifetime strategy-health diagnostics, but its query is now explicitly scoped to the canonical PAPER account to prevent cross-account contamination. There is no new API route, engine, risk governor, job, wallet signer, provider dependency, or database migration.
 - Tests prove account isolation, 30-row bound, stable repeatability, zero-loss denominator handling, invalid planned risk, unknown markets, and no writes.
 - This does **not** implement post-fill T+5s markouts, futures HMM/OFI/VPIN, vault recall, macro calendars, Alpaca brackets or live execution. Review separate draft PRs #84, #67, #95 and #82 rather than copying them.
 
