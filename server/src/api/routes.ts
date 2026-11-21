@@ -32,6 +32,7 @@ import { correlation } from '../portfolio/correlation.js';
 import { calendar, reconcile } from '../portfolio/calendar.js';
 import * as oms from '../exec/oms.js';
 import { previewBundle, bundleCapabilities } from '../exec/bundles/preview.js';
+import { getBundleStatus, listBundleStatuses } from '../exec/bundles/status.js';
 import { listIncidents, acknowledgeIncident, IncidentError } from '../exec/incidents.js';
 import { listJournal } from '../journal/journal.js';
 import { recentNews, refreshNews } from '../news/news.js';
@@ -330,10 +331,21 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/portfolio', async () => {
     const acct = accountState(); const pos = oms.listPositions();
     const curve = all<any>("SELECT closed_at t, realized_pnl p FROM positions WHERE status='CLOSED' ORDER BY closed_at"); let eq = acct.deposits; const equityCurve = curve.map((c) => ({ t: c.t, equity: (eq += c.p) }));
-    return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
+    return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), paperBundles: listBundleStatuses(20), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
   });
   // Bundle preflight is authenticated, CSRF-protected and strictly read-only.
   // There is no bundle submission endpoint or alternate risk/execution authority.
+  // Bundle status comes directly from the canonical orders/positions; no shadow ledger.
+  // Read-only views honor the existing owner session and never grant venue permission.
+  app.get('/api/trading/bundles', async (req) => {
+    const q = z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) }).strict().parse(req.query ?? {});
+    return { environment: 'PAPER' as const, bundles: listBundleStatuses(q.limit), readOnly: true, canPlaceRealOrders: false };
+  });
+  app.get('/api/trading/bundles/:id', async (req, reply) => {
+    const id = idOf(req);
+    const status = getBundleStatus(id);
+    return status ?? bad(reply, 404, 'bundle not found');
+  });
   app.get('/api/trading/bundles/capabilities', async () => bundleCapabilities());
   app.post('/api/trading/bundles/preview', async (req) => {
     limit(req, 'bundle', 'bundle preflight');
