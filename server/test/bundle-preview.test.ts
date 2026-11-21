@@ -4,7 +4,8 @@ import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
-import { submitPaperAtomicBundle } from '../src/exec/oms.js';
+import { submitPaperAtomicBundle, closePosition } from '../src/exec/oms.js';
+import { getBundleStatus, listBundleStatuses } from '../src/exec/bundles/status.js';
 import { reconcile } from '../src/portfolio/calendar.js';
 import { run, get, J } from '../src/db/db.js';
 import { previewBundle, bundleCapabilities } from '../src/exec/bundles/preview.js';
@@ -92,6 +93,64 @@ describe('MIA bundle preflight using canonical PAPER authority', () => {
     const duplicate = submitPaperAtomicBundle(req.decisionIds, 'owner');
     expect(duplicate.ok).toBe(false);
     expect(get<{ n: number }>("SELECT COUNT(*) n FROM orders WHERE purpose='ENTRY'")!.n).toBe(2);
+  });
+  it('synchronizes each PAPER bundle entry to canonical orders, open positions and recorded stops', () => {
+    expect(listBundleStatuses()).toEqual([]);
+    expect(getBundleStatus('unknown')).toBeNull();
+    const result = submitPaperAtomicBundle(req.decisionIds, 'owner');
+    expect(result.ok).toBe(true);
+    const projection = getBundleStatus(result.bundleId!);
+    expect(projection).toMatchObject({
+      bundleId: result.bundleId,
+      environment: 'PAPER',
+      accountId: PAPER_ACCOUNT,
+      entryState: 'FILLED',
+      phase: 'OPEN',
+      health: 'CONSISTENT',
+      counts: { legs: 2, entryFilled: 2, positionsOpen: 2, positionsClosed: 0 },
+      readOnly: true,
+      canPlaceRealOrders: false,
+    });
+    expect(projection!.observedEntryNotional).toBeGreaterThan(0);
+    expect(projection!.observedEntryFees).toBeGreaterThan(0);
+    expect(projection!.legs.every(l => l.protectiveStopRecorded &&
+      l.protection === 'OMS_MONITORED_NOT_EXCHANGE_NATIVE')).toBe(true);
+    expect(listBundleStatuses(10).map(r => r.bundleId)).toEqual([result.bundleId]);
+  });
+  it('derives partial and full closure from the ORIGINAL OMS without changing the persisted entry state', () => {
+    const result = submitPaperAtomicBundle(req.decisionIds, 'owner');
+    expect(result.ok).toBe(true);
+    const legs = getBundleStatus(result.bundleId!)!.legs;
+    expect(legs).toHaveLength(2);
+    closePosition('owner', legs[0].positionId!);
+    const partiallyClosed = getBundleStatus(result.bundleId!)!;
+    expect(partiallyClosed.entryState).toBe('FILLED');
+    expect(partiallyClosed.phase).toBe('PARTIALLY_CLOSED');
+    expect(partiallyClosed.counts).toMatchObject({ positionsOpen: 1, positionsClosed: 1 });
+    closePosition('owner', legs[1].positionId!);
+    const closed = getBundleStatus(result.bundleId!)!;
+    expect(closed.phase).toBe('CLOSED');
+    expect(closed.counts).toMatchObject({ positionsOpen: 0, positionsClosed: 2 });
+    expect(closed.observedRealizedPnl).toBeDefined();
+    expect(reconcile().ok).toBe(true);
+  });
+  it('flags a missing PAPER stop from canonical records without inventing protective coverage', () => {
+    const result = submitPaperAtomicBundle(req.decisionIds, 'owner');
+    expect(result.ok).toBe(true);
+    const positionId = getBundleStatus(result.bundleId!)!.legs[0].positionId!;
+    run("UPDATE orders SET status='CANCELLED' WHERE position_id=? AND purpose='PROTECTIVE_STOP'", positionId);
+    const projection = getBundleStatus(result.bundleId!)!;
+    expect(projection.phase).toBe('RECONCILIATION_REQUIRED');
+    expect(projection.health).toBe('NEEDS_ATTENTION');
+    expect(projection.legs[0].protection).toBe('MISSING_OR_MISMATCHED');
+    expect(projection.issues).toContain('LEG_0:PAPER_PROTECTIVE_STOP_MISSING_OR_MISMATCHED');
+  });
+  it('scopes read-only bundle lookups to the canonical PAPER account', () => {
+    const result = submitPaperAtomicBundle(req.decisionIds, 'owner');
+    expect(result.ok).toBe(true);
+    run("UPDATE bundle_executions SET account='other-account' WHERE id=?", result.bundleId);
+    expect(getBundleStatus(result.bundleId!)).toBeNull();
+    expect(listBundleStatuses()).toEqual([]);
   });
   it('rolls back ALL fills, positions, stops, fees and bundle links if second leg fails after the first writes', () => {
     run("CREATE TRIGGER block_second_bundle_leg BEFORE INSERT ON bundle_entry_links WHEN NEW.leg_index=1 BEGIN SELECT RAISE(ABORT,'INJECTED_SECOND_LEG_FAILURE'); END");
