@@ -94,7 +94,7 @@ test('Bot Account shows measured NEXUS outbox health and drops stale counts afte
   try {
     await ctx.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
     const p = await ctx.newPage();
-    const path = '**/api/fabric/outbox';
+    const path = /\/api\/fabric\/outbox\?view=summary$/;
     await p.clock.install();
     await p.goto('/bot');
     const card = p.locator('section').filter({ has: p.getByRole('heading', { name: 'NEXUS outbox health' }) });

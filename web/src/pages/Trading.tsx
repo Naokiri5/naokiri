@@ -38,7 +38,7 @@ interface OutboxHealth {
 }
 
 function OutboxHealthCard() {
-  const { data, error, updatedAt } = useApi<OutboxHealth>('/api/fabric/outbox', { every: 20_000 });
+  const { data, error, updatedAt } = useApi<OutboxHealth>('/api/fabric/outbox?view=summary', { every: 20_000 });
   const counts = data?.counts;
   const age = data?.oldestPendingAgeMs;
   const consumers = data?.consumers;

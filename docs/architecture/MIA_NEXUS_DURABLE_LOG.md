@@ -50,4 +50,4 @@ Mutation checks each make a test fail: removing the inbox check, the transaction
 
 - No other topic is durable yet. Order, fill and ledger events need a separate reviewed phase with the trading-risk reviewer.
 - No production consumers, retention/archival job, or dead-letter replay tool.
-- Bot Account shows outbox counts, oldest pending age and registered consumer count from the owner-authenticated health endpoint. Dead letters remain API evidence.
+- Bot Account reads counts, oldest pending age and registered consumers from the owner-authenticated `GET /api/fabric/outbox?view=summary`. The full endpoint continues to include dead-letter details for inspection.

@@ -4,7 +4,7 @@ import { knowledgeRoutes } from '../knowledge/routes.js';
 import { VikeNotConfiguredError } from '../providers/vike.js';
 import * as privy from '../security/privy.js';
 import { catalogSummary } from '../fabric/catalog.js';
-import { outboxHealth } from '../fabric/relay.js';
+import { outboxHealth, outboxSummary } from '../fabric/relay.js';
 import * as totp from '../security/totp.js';
 import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
 import { createBackup } from '../ops/backup.js';
@@ -522,7 +522,10 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
   // MIA NEXUS data fabric (N1): read-only topic catalog — owners, priorities, durability and honest status.
   app.get('/api/fabric/catalog', async () => catalogSummary());
-  app.get('/api/fabric/outbox', async () => outboxHealth()); // N2: measured delivery health + dead letters (owner session)
+  app.get('/api/fabric/outbox', async (req) => {
+    const { view } = z.object({ view: z.enum(['summary', 'full']).default('full') }).parse(req.query);
+    return view === 'summary' ? outboxSummary() : outboxHealth();
+  });
   // Guardian Shield (read-only telemetry; its only possible action is the opt-in risk-reducing pause).
   startGuardian();
   app.get('/api/security/guardian', async () => {
