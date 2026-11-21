@@ -49,6 +49,12 @@ Ownership stays with the single PAPER OMS. The persisted group \`entryState=FILL
 
 This projection is observational, so existing \`monitorPositions\`, manual exits, audit records and event fabric continue unmodified. Poll or refresh these views on position/order changes instead of installing a duplicate scheduler. **No real-money adapter, signer, linked exchange basket or automated bundle trigger is added by these routes.**
 
+### Portfolio integration and owner workflow
+
+The existing `web/src/pages/Trading.tsx` Portfolio view now displays each PAPER bundle's committed entry, derived position phase, recorded stop integrity, entry notional, fees and observed realized PnL. It refreshes on the existing `order` and `position` event topics; no parallel trading scheduler is installed.
+
+A PAPER-only execution console lets the authenticated owner select 2–5 stored `PAPER_TRADE` decisions, request a read-only risk preview, provide the established TOTP/passphrase step-up and explicitly confirm submission. The server still rechecks ALL authoritative risk conditions under a SQLite write lock. The UI cannot provide quantities, exchange addresses, direct wallet signatures, LIVE mode, or a bypass. Step-up input is cleared after use.
+
 ### POST /api/trading/bundles/paper/execute
 
 This owner-only, CSRF-protected, independently step-up-verified route accepts two to five stored PAPER decision IDs and runs `submitPaperAtomicBundle()`; it cannot accept a TESTNET or LIVE destination. Client input `{ "decisionIds": ["dec_01", "dec_02"], "password": "<redacted>" }` uses the existing sensitive-action verification. The route is manual only. A repeat or failed group cannot double debit the account.
