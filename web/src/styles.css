@@ -154,3 +154,21 @@ pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; margin: 
   .grouptabs { flex-wrap: nowrap; overflow-x: auto; } .grouptabs-title { display: none; } .grouptabs a { white-space: nowrap; min-height: 36px; display: inline-flex; align-items: center; }
   main { padding: 14px 16px 30px; } .g2, .g4 { grid-template-columns: 1fr; } .g6 { grid-template-columns: repeat(2, minmax(0,1fr)); } .top { padding: 8px 12px; } .fab { bottom: 70px; }
 }
+
+/* Privy wallet-first sign-in: replace the old passphrase card without changing dashboard layout. */
+.mia-wallet-login { min-height: 100vh; padding: 24px; display: grid; place-items: center; background:
+  radial-gradient(ellipse at 50% 0%, rgba(79,140,255,.13), transparent 45%),
+  radial-gradient(ellipse at 100% 100%, rgba(167,139,250,.09), transparent 60%), var(--bg); }
+.mia-wallet-card { width: min(450px,100%); padding: clamp(26px,5vw,42px); border-radius: 22px;
+  border: 1px solid var(--line2); background: var(--panel); box-shadow: 0 28px 85px rgba(0,0,0,.28); }
+.mia-wallet-mark { width: 48px; height: 48px; border-radius: 15px; display: grid; place-items: center; color: white;
+  font-size: 22px; font-weight: 750; background: linear-gradient(140deg,#315fca,#8e79eb); margin-bottom: 23px; }
+.mia-wallet-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .18em; color: var(--accent); margin-bottom: 9px; }
+.mia-wallet-card h1 { font-size: clamp(26px,5vw,32px); line-height: 1.15; margin: 0 0 14px; letter-spacing: -.03em; }
+.mia-wallet-card p { color: var(--muted); line-height: 1.65; margin: 0 0 20px; }
+.mia-wallet-button { width: 100%; min-height: 48px; font-size: 14px; font-weight: 650; margin-bottom: 9px; }
+.mia-wallet-security { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 18px; }
+.mia-wallet-security span { padding: 5px 8px; color: var(--muted); background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 6px; font-size: 10px; }
+.mia-wallet-card .hint { font-size: 11px; color: var(--faint); }
+@media (max-width: 480px) { .mia-wallet-login { padding: 12px; } .mia-wallet-card { padding: 25px 21px; } }
