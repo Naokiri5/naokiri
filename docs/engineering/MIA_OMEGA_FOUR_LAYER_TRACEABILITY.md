@@ -235,3 +235,8 @@ Suggested existing tests to extend by scope: `server/test/hunt-ranker.test.ts`, 
 - **LIVE:** planned cross-environment research parity; live-money execution and live-record UI **NOT IMPLEMENTED / LOCKED**.
 
 Links to detailed existing canonical documents: [TITAN HUNTER architecture](TITAN_HUNTER_ARCHITECTURE.md), [duplication audit](MIA_DUPLICATION_AUDIT.md), [NEXUS current vs target](../architecture/MIA_NEXUS_CURRENT_VS_TARGET.md), [DITAS implementation status](../ditas/IMPLEMENTATION_STATUS.md) and [Trader Joe Live milestones](../architecture/TRADER_JOE_LIVE.md).
+
+
+### Supplemental preserved TypeScript PDF review (MIA-CORE-01–06)
+
+The owner's **49-page proposed MIA 5.0 trading-core TypeScript PDF** is preserved without source edits and manually mapped to the existing canonical MIA code in [MIA 5.0 PDF TypeScript manual integration review](MIA_5_0_PDF_TYPESCRIPT_MANUAL_INTEGRATION_REVIEW.md), with [full PDF text transcription](sources/MIA_5_0_UNIFIED_CORE_PDF_VERBATIM.txt) and [unmodified TypeScript-only extraction](sources/MIA_5_0_UNIFIED_CORE_TYPESCRIPT_UNEDITED.ts.txt). These are documentation/source references **not installed code**. The proposed extra ledger, risk gate, paper/live OMS and orchestrator are not authorized replacements for the existing canonical systems. LIVE execution remains locked.

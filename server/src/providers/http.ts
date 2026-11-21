@@ -35,11 +35,12 @@ export const provider = (id: string) => registry.get(id);
 
 /** Simple token bucket per provider to respect documented public rate limits. */
 class Bucket {
-  private tokens: number; private last = Date.now();
+  // Quota replenishment uses elapsed time even when the system clock is corrected.
+  private tokens: number; private last = performance.now();
   constructor(private perMin: number) { this.tokens = perMin; }
   async take() {
     for (;;) {
-      const t = Date.now();
+      const t = performance.now();
       this.tokens = Math.min(this.perMin, this.tokens + ((t - this.last) / 60_000) * this.perMin);
       this.last = t;
       if (this.tokens >= 1) { this.tokens -= 1; return; }

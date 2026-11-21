@@ -1,5 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readCexActivity } from '../src/market/cexActivity.js';
+import { measureDepthExhaustion } from '../src/market/depthExhaustion.js';
+import type { Book } from '../src/providers/binance.js';
+import * as prints from '../src/whales/prints.js';
 import { QUALITY_LIMITS } from '../src/market/quality.js';
 import { market } from '../src/market/store.js';
 import { INTERVAL_MS, type Instrument, type Interval } from '../src/market/types.js';
@@ -148,5 +151,63 @@ describe('CEX activity research', () => {
     }
     expect(() => readCexActivity(instrument.id, asOf, NaN)).toThrow(RangeError);
     expect(() => readCexActivity(instrument.id, asOf, 0)).toThrow(RangeError);
+  });
+});
+
+describe('L2 exhaustion research on observed Binance spot depth and signed trades', () => {
+  const bookAt = asOf - 100;
+  const from = bookAt - 3_000;
+  const book: Book = {
+    ts: bookAt, source: 'BINANCE_SPOT_DEPTH_STREAM', lastUpdateId: 220,
+    bids: [[99.99, 2], [99.7, 900]], asks: [[100.01, 8], [100.3, 900]],
+  };
+  const trade = (id: number, ts: number, qty: number, buyerIsMaker: boolean) => ({
+    id, ts, price: 100, qty, buyerIsMaker, receivedAt: asOf, threshold: 100_000,
+  });
+  const tape = { source: 'BINANCE_SPOT_AGG_TRADES' as const, polledAt: asOf, trades: [
+    trade(10, from - 1, 500, false), trade(11, from, 2, false), trade(12, from + 300, 5, true), trade(13, bookAt, 500, false),
+  ] };
+
+  it('includes the observed flow in the existing instrument research report', () => {
+    market.reset();
+    const deep = seed();
+    deep.book = book;
+    const read = vi.spyOn(prints, 'readSpotTradeTape').mockReturnValue({ ...tape, firstId: 10, lastId: 13, contiguous: true });
+    try {
+      expect(readCexActivity(instrument.id, asOf).depthExhaustion).toMatchObject({ status: 'MEASURED', pressure: 'ASK_DEPTH_AND_SELLING' });
+      expect(read).toHaveBeenCalledWith(instrument.id, asOf);
+    } finally { read.mockRestore(); market.reset(); }
+  });
+
+  it('measures only in-band resting depth and the complete three-second signed quote window', () => {
+    expect(measureDepthExhaustion(book, tape, asOf)).toMatchObject({
+      status: 'MEASURED', pressure: 'ASK_DEPTH_AND_SELLING', bandBps: 15, depthRatioThreshold: 3,
+      bidDepthQuote: expect.closeTo(199.98), askDepthQuote: expect.closeTo(800.08), tradeCount: 2, takerDeltaQuote: -300,
+      firstCoverageId: 10, lastCoverageId: 13, flowStart: from, flowEndExclusive: bookAt,
+      bookSource: 'BINANCE_SPOT_DEPTH_STREAM', bookUpdateId: 220, tradeSource: 'BINANCE_SPOT_AGG_TRADES', polledAt: asOf,
+    });
+    const bidHeavy: Book = { ...book, bids: [[99.99, 60], [99.7, 1]] };
+    expect(measureDepthExhaustion(bidHeavy, tape, asOf)).toMatchObject({ pressure: 'NO_ALIGNMENT' });
+    const buying = tape.trades.map(t => ({ ...t, buyerIsMaker: !t.buyerIsMaker }));
+    expect(measureDepthExhaustion(bidHeavy, { ...tape, trades: buying }, asOf)).toMatchObject({ pressure: 'BID_DEPTH_AND_BUYING', takerDeltaQuote: 300 });
+  });
+
+  it('requires complete trade coverage, excludes future observations and detects sequence gaps', () => {
+    expect(measureDepthExhaustion(book, { ...tape, trades: tape.trades.slice(1) }, asOf)).toMatchObject({ reason: 'TRADE_WINDOW_INCOMPLETE' });
+    const gap = tape.trades.filter(t => t.id !== 11);
+    expect(measureDepthExhaustion(book, { ...tape, trades: gap }, asOf)).toMatchObject({ reason: 'TRADE_SEQUENCE_INVALID' });
+    const reordered = [...tape.trades, trade(14, bookAt - 1, 5, false)];
+    expect(measureDepthExhaustion(book, { ...tape, trades: reordered }, asOf)).toMatchObject({ reason: 'TRADE_SEQUENCE_INVALID' });
+    expect(measureDepthExhaustion(book, { ...tape, polledAt: asOf + 1 }, asOf)).toMatchObject({ reason: 'TRADE_TAPE_UNAVAILABLE' });
+    expect(measureDepthExhaustion(book, { ...tape, polledAt: asOf - 3_001 }, asOf)).toMatchObject({ reason: 'TRADE_TAPE_UNAVAILABLE' });
+    expect(measureDepthExhaustion(book, null, asOf)).toMatchObject({ reason: 'TRADE_TAPE_UNAVAILABLE' });
+  });
+
+  it('requires source and sequence provenance, fresh valid depth and visibility of the full band', () => {
+    expect(measureDepthExhaustion({ ...book, source: undefined }, tape, asOf)).toMatchObject({ reason: 'BOOK_PROVENANCE_MISSING' });
+    expect(measureDepthExhaustion({ ...book, lastUpdateId: 0 }, tape, asOf)).toMatchObject({ reason: 'BOOK_PROVENANCE_MISSING' });
+    expect(measureDepthExhaustion({ ...book, ts: asOf - 3_001 }, tape, asOf)).toMatchObject({ reason: 'BOOK_UNAVAILABLE' });
+    expect(measureDepthExhaustion({ ...book, bids: [[99.99, Number.MAX_VALUE]] }, tape, asOf)).toMatchObject({ reason: 'BOOK_UNAVAILABLE' });
+    expect(measureDepthExhaustion({ ...book, bids: [[99.99, 2]] }, tape, asOf)).toMatchObject({ reason: 'DEPTH_BAND_INCOMPLETE' });
   });
 });

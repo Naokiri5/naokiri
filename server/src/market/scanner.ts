@@ -62,7 +62,7 @@ export function buildContext(cand: Candidate): WorkerContext {
     impact: imp ? { spreadBps: imp.spreadBps, impactBps: imp.impactBps, depth1pct: imp.depth1pct, filledFully: imp.filledFully, bookImbalance: imp.bookImbalance } : null,
     intendedNotional: intended, feeRate: pol.feeRate,
     quality: assessQuality(cand.instrumentId), safety: assessCexAsset(cand.instrumentId),
-    news: newsContext(cand.base), prints: printContext(cand.instrumentId),
+    news: newsContext(cand.base), prints: printContext(cand.instrumentId, 3600_000, asOf),
     corrToBtc: cand.instrumentId.endsWith('BTCUSDT') ? null : correlation(cand.instrumentId, 'crypto:binance:BTCUSDT'),
     breadth: marketBreadth(),
     strategyStats: ss ? { trades: ss.trades, expectancyR: ss.expectancyR, profitFactor: ss.profitFactor } : null,

@@ -50,6 +50,7 @@ MIA is a **paper-trading only** market-intelligence app. Real-money execution, s
 ## Engineering
 | Document | Contents |
 |---|---|
+| [`engineering/MIA_5_0_PDF_TYPESCRIPT_MANUAL_INTEGRATION_REVIEW.md`](engineering/MIA_5_0_PDF_TYPESCRIPT_MANUAL_INTEGRATION_REVIEW.md) | **Unified PDF-to-MIA integration master:** preserved 49-page core, 104-page swarm and 59-page 100-agent PDF text; original source audit, 15 core safety findings, 17 canonical tickets, 7 swarm integration gates and verified research-only 97-slot compatibility status |
 | [`engineering/MIA_OMEGA_FOUR_LAYER_TRACEABILITY.md`](engineering/MIA_OMEGA_FOUR_LAYER_TRACEABILITY.md) | **Unified eight-priority PAPER/LIVE development plan:** reviewed code vs open PRs, canonical module owners, missing integrations, safety gates, tests and owner-review sequence (docs-only) |
 | [`engineering/CLAUDE_CODE_WORKFLOW.md`](engineering/CLAUDE_CODE_WORKFLOW.md) | AI-assisted development: agents, skills, review workflow |
 | [`engineering/audit-files.json`](engineering/audit-files.json) | machine-readable list of every tracked file and its review status (`node scripts/audit-inventory.mjs`) |

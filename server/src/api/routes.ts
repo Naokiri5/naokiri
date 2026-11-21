@@ -21,6 +21,7 @@ import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { summarizeTimeframes } from '../chart/timeframes.js';
+import { projectMia5SwarmResearchFeatures } from '../features/indicators.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -116,7 +117,7 @@ const httpError = (code: number, msg: string) => Object.assign(new Error(msg), {
 const isServerFault = (e: any) => e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError
   || /^ERR_SQLITE|^SQLITE/.test(String(e?.code ?? '')) || /SQLITE_|database is locked/i.test(String(e?.message ?? ''));
 // Per-session budgets for routes that call paid APIs, many upstream endpoints, or run long CPU work.
-const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2) };
+const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2), stream: limiter(120, 20) };
 
 export async function routes(app: FastifyInstance) {
   /**
@@ -306,6 +307,8 @@ export async function routes(app: FastifyInstance) {
   app.addHook('preClose', async () => { for (const end of [...openStreams]) end(); });
   app.get('/api/stream', (req, reply) => {
     if (streams >= 20) return bad(reply, 503, 'too many open live streams');
+    const { view } = z.object({ view: z.enum(['topics', 'full']).default('full') }).parse(req.query);
+    limit(req, 'stream', 'live stream connections');
     const token = tokenOf(req);
     reply.hijack(); // we own the raw socket from here; Fastify must not try to send a second response
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff', 'x-request-id': String(req.id) });
@@ -315,7 +318,10 @@ export async function routes(app: FastifyInstance) {
     const close = () => { if (closed) return; closed = true; streams--; openStreams.delete(close); bus.off('*', send); clearInterval(ka); endStream(reply.raw); };
     openStreams.add(close);
     const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
-    const send = (e: { topic: string; payload: unknown }) => write(`event: ${e.topic}\ndata: ${JSON.stringify(e.payload)}\n\n`);
+    const send = (e: { topic: string; payload: unknown }) => {
+      const data = view === 'topics' ? '{}' : JSON.stringify(e.payload);
+      write(`event: ${e.topic}\ndata: ${data}\n\n`);
+    };
     // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.
     const ka = setInterval(() => (auth.validSession(token) ? write(': ka\n\n') : close()), 20_000);
     bus.on('*', send);
@@ -356,7 +362,9 @@ export async function routes(app: FastifyInstance) {
     const timeframeAgreement = summarizeTimeframes(chartIntelligence, d);
     const selectedReading = timeframeAgreement.readings.find(reading => reading.timeframe === iv);
     const featuresResearch = selectedReading?.status === 'VALID' ? d?.engines[iv].research ?? null : null;
-    return { chartIntelligence, timeframeAgreement, featuresResearch, cexActivity: readCexActivity(i.id, chartIntelligence.asOf),
+    // 97-slot PDF compatibility is read-only: no second agent pool, fabricated feeds or order rights.
+    const swarmFeatureResearch = projectMia5SwarmResearchFeatures(d?.engines[iv].last ?? null, featuresResearch, selectedReading?.status === 'VALID');
+    return { chartIntelligence, timeframeAgreement, featuresResearch, swarmFeatureResearch, cexActivity: readCexActivity(i.id, chartIntelligence.asOf),
       instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
       quality: assessQuality(i.id), safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };

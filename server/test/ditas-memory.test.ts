@@ -91,6 +91,7 @@ describe('DITAS permanent decision memory', () => {
     seedInstrument('BTCUSDT', { drift: 0.001, seed: 19 });
     const cand = candidate(), ctx = buildContext(cand);
     const expectedTicker = structuredClone(ctx.ticker);
+    const expectedPrints = structuredClone(ctx.prints);
     const expectedBtc1h = { t: ctx.btc1h!.t, close: ctx.btc1h!.close, ema20: ctx.btc1h!.ema20 };
     const expectedBtc4h = { t: ctx.btc4h!.t, close: ctx.btc4h!.close, ema20: ctx.btc4h!.ema20 };
     Object.assign(ctx.ticker!, { withdrawalCredential: 'fixture-omitted-context-field' });
@@ -99,6 +100,8 @@ describe('DITAS permanent decision memory', () => {
     const event = recordOpportunity({ kind: 'PROPOSAL', instrumentId, strategyId: cand.strategyId, dedupeKey: 'fixture:exact-worker-context', reason: 'fixture evidence', candidate: cand, ctx });
     const snapshot = memoryDetail(event.id)!.snapshot!;
     expect(snapshot.context.ticker).toEqual(expectedTicker);
+    expect(snapshot.context.prints).toEqual(expectedPrints);
+    expect(snapshot.context.prints.evidence).toMatchObject({ source: 'BINANCE_SPOT_AGG_TRADES', asOf: ctx.asOf, sampleLimit: 20 });
     expect(snapshot.context.ticker.last).not.toBe(snapshot.ticker.last);
     expect(snapshot.context.btc1h).toMatchObject(expectedBtc1h); expect(snapshot.context.btc4h).toMatchObject(expectedBtc4h);
     expect(snapshot.context.btc1h).not.toHaveProperty('token');

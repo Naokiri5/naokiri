@@ -51,6 +51,19 @@ export interface BookActivity {
   };
 }
 
+export type DepthExhaustionResearch = {
+  status: 'UNAVAILABLE';
+  reason: 'BOOK_UNAVAILABLE' | 'BOOK_PROVENANCE_MISSING' | 'DEPTH_BAND_INCOMPLETE'
+    | 'TRADE_TAPE_UNAVAILABLE' | 'TRADE_WINDOW_INCOMPLETE' | 'TRADE_SEQUENCE_INVALID';
+} | {
+  status: 'MEASURED';
+  pressure: 'BID_DEPTH_AND_BUYING' | 'ASK_DEPTH_AND_SELLING' | 'NO_ALIGNMENT';
+  bookSource: 'BINANCE_SPOT_REST' | 'BINANCE_SPOT_DEPTH_STREAM'; bookAt: number; bookUpdateId: number;
+  bidDepthQuote: number; askDepthQuote: number; bandBps: number; depthRatioThreshold: number;
+  tradeSource: 'BINANCE_SPOT_AGG_TRADES'; polledAt: number; flowStart: number; flowEndExclusive: number;
+  firstCoverageId: number; lastCoverageId: number; tradeCount: number; takerDeltaQuote: number;
+};
+
 export interface CexActivityReport {
   schemaVersion: 1;
   instrumentId: string;
@@ -60,4 +73,5 @@ export interface CexActivityReport {
   quoteAsset: string | null;
   volume: VolumeWindow[];
   book: BookActivity;
+  depthExhaustion: DepthExhaustionResearch;
 }

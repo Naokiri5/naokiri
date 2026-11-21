@@ -59,5 +59,13 @@ export async function depth(symbol: string, limit = 100): Promise<Book> {
 export interface AggTrade { id: number; price: number; qty: number; ts: number; buyerIsMaker: boolean }
 export async function aggTrades(symbol: string, limit = 500): Promise<AggTrade[]> {
   const raw: any[] = await fetchProvider('binance', `${BASE}/aggTrades?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
-  return raw.map((a) => ({ id: +a.a, price: +a.p, qty: +a.q, ts: +a.T, buyerIsMaker: a.m === true }));
+  const trades: AggTrade[] = [];
+  for (const a of raw) {
+    if (!a || !Number.isSafeInteger(a.a) || a.a < 0 || !Number.isSafeInteger(a.T) || a.T <= 0 || typeof a.m !== 'boolean') continue;
+    if (!['string', 'number'].includes(typeof a.p) || !['string', 'number'].includes(typeof a.q)) continue;
+    const price = Number(a.p), qty = Number(a.q);
+    if (!Number.isFinite(price * qty) || price <= 0 || qty <= 0) continue;
+    trades.push({ id: a.a, price, qty, ts: a.T, buyerIsMaker: a.m });
+  }
+  return trades;
 }

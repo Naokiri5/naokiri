@@ -17,6 +17,8 @@ export function candleVwap(candles: readonly Candle[]): number {
 export interface FeatureSnapshot {
   t: number; n: number; close: number;
   ema9: number; ema20: number; ema50: number; ema200: number;
+  /** Research-only PDF slot compatibility metrics. */
+  ema21?: number; ema55?: number; macdHistSlope?: number;
   rsi14: number; atr14: number; atrPct: number;
   macd: number; macdSignal: number; macdHist: number;
   adx14: number; plusDI: number; minusDI: number;
@@ -61,6 +63,7 @@ export class FeatureEngine {
   readonly candles: Candle[] = [];
   private maxKeep = 400;
   private e9 = new Ema(9); private e20 = new Ema(20); private e50 = new Ema(50); private e200 = new Ema(200);
+  private e21 = new Ema(21); private e55 = new Ema(55); // research-only: no second feature engine
   private e12 = new Ema(12); private e26 = new Ema(26); private sig = new Ema(9);
   private gain = new Wilder(14); private loss = new Wilder(14); private atr = new Wilder(14);
   private pdm = new Wilder(14); private mdm = new Wilder(14); private adx = new Wilder(14);
@@ -84,6 +87,7 @@ export class FeatureEngine {
     this.candles.push(c); this.lastT = c.t;
     if (this.candles.length > this.maxKeep) this.candles.shift();
     this.e9.update(c.c); this.e20.update(c.c); this.e50.update(c.c); this.e200.update(c.c);
+    this.e21.update(c.c); this.e55.update(c.c);
     const m = this.e12.update(c.c) - this.e26.update(c.c);
     if (!Number.isNaN(m)) this.sig.update(m);
     if (prev) {
@@ -177,6 +181,9 @@ export class FeatureEngine {
     return {
       t: c.t, n, close: c.c,
       ema9: this.e9.v, ema20: this.e20.v, ema50: this.e50.v, ema200: this.e200.v,
+      ema21: this.e21.v, ema55: this.e55.v,
+      macdHistSlope: this.last && Number.isFinite(this.last.macdHist) && Number.isFinite(this.e12.v - this.e26.v - this.sig.v)
+        ? this.e12.v - this.e26.v - this.sig.v - this.last.macdHist : NaN,
       rsi14: Number.isNaN(this.gain.v) ? NaN : 100 - 100 / (1 + rs), atr14: this.atr.v, atrPct: this.atr.v / c.c,
       macd: this.e12.v - this.e26.v, macdSignal: this.sig.v, macdHist: this.e12.v - this.e26.v - this.sig.v,
       adx14: this.adx.v, plusDI: pdi, minusDI: mdi,
@@ -276,3 +283,175 @@ function ohlcVolatility(candles: readonly Candle[]) {
 function avg(xs: number[]) { return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN; }
 function sdev(xs: number[]) { if (xs.length < 2) return NaN; const m = avg(xs); return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / xs.length); }
 export const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
+
+/**
+ * MIA 5 PDF 97-slot compatibility projection — read-only research.
+ * The canonical FeatureEngine remains the only source for indicator values.
+ * Unavailable slots stay null; no second vector calculator or trading authority exists.
+ * Original PDF: docs/engineering/sources/MIA5_SWARM_MONOLITH_104P_PDF_VERBATIM.txt
+ */
+export const MIA5_SWARM_FEATURE_SLOTS = [
+  'EMA_9',
+  'EMA_21',
+  'EMA_55',
+  'DONCHIAN_20_HIGH',
+  'DONCHIAN_20_LOW',
+  'SUPERTREND_DIR',
+  'MACD_HIST',
+  'MACD_HIST_SLOPE',
+  'ADX_14',
+  'PLUS_DI_14',
+  'MINUS_DI_14',
+  'HTF_BIAS',
+  'SESSION_VWAP',
+  'VWAP_SLOPE',
+  'OLS_SLOPE_BPS',
+  'OLS_R_SQUARED',
+  'ICHIMOKU_TENKAN',
+  'ICHIMOKU_KIJUN',
+  'ICHIMOKU_KUMO_TOP',
+  'EQUITIES_ORB_HIGH',
+  'EQUITIES_ORB_LOW',
+  'RELATIVE_STRENGTH_Z',
+  'SWING_STRUCTURE_CODE',
+  'VWAP_SIGMA_DIST',
+  'CONNORS_RSI_2',
+  'BB_PERCENT_B',
+  'RETURN_Z_SCORE',
+  'RSI14_BULL_DIV',
+  'RSI14_BEAR_DIV',
+  'KELTNER_POS',
+  'FVG_EQUILIBRIUM_SIGNAL',
+  'SWEEP_RECLAIM_SIGNAL',
+  'PAIRS_RESIDUAL_Z',
+  'POC_DIST_ATR',
+  'MICROPRICE_SKEW_BPS',
+  'QUEUE_DEPLETION_ASYM',
+  'SPREAD_COMPRESSION_RATIO',
+  'BID_WALL_DEPTH_RATIO',
+  'WALL_ABSORPTION_SIGNAL',
+  'BOOK_RELOAD_SKEW',
+  'BOOK_SLOPE_CONVEXITY_DIFF',
+  'ICEBERG_RELOAD_SIDE',
+  'CANCEL_TO_FILL_RATIO',
+  'LEAD_VENUE_MID_DIFF_BPS',
+  'OFI_L5_ACCEL',
+  'AGGRESSOR_SWEEP_TICKS',
+  'BLOCK_PRINT_DELTA_Z',
+  'FOOTPRINT_IMBALANCE_STACK',
+  'TAPE_TPS_RATIO',
+  'CLIMAX_EXHAUSTION_FLAG',
+  'TICK_RULE_BUY_RATIO',
+  'INTRABAR_DELTA_FLIP',
+  'SOL_DEX_NET_FLOW_RATIO',
+  'PERP_SPOT_BASIS_APR_PCT',
+  'TOP_VS_RETAIL_LS_DIV',
+  'LIQ_CLUSTER_MAGNET_DIR',
+  'FUNDING_DELTA_1H',
+  'SPOT_LEADS_PERP_CVD',
+  'TTM_SQUEEZE_RELEASE',
+  'ATR_EXPANSION_RATIO',
+  'ATR_PERCENTILE_RANK',
+  'IV_RV_SPREAD_PCT',
+  'PARKINSON_EFFICIENCY',
+  'GARCH_COND_VOL_SLOPE',
+  'POST_OPEN_VOL_STABLE',
+  'TAIL_KURTOSIS_DROP',
+  'SPL_MINT_REVOKED',
+  'SPL_FREEZE_REVOKED',
+  'TOKEN2022_CLEAN_EXT',
+  'LP_LOCKED_PCT',
+  'HOLDER_GINI_COEFF',
+  'LP_TO_FDV_RATIO',
+  'JUPITER_SIM_TAX_BPS',
+  'DEPLOYER_HISTORY_SCORE',
+  'POST_GRADUATION_HOLD',
+  'LP_DELTA_15M_PCT',
+  'SMART_WALLET_NET_Z',
+  'FRESH_WHALE_BUY_COUNT',
+  'UNIQUE_MAKER_GROWTH_RATIO',
+  'CEX_NET_FLOW_Z',
+  'DARK_POOL_BLOCK_DELTA_Z',
+  'INSIDER_CLUSTER_COUNT',
+  'LTH_ACCUM_FLAG',
+  'MM_INVENTORY_SKEW',
+  'BTC_MACRO_IMPULSE_Z',
+  'SOL_BTC_ROTATION_Z',
+  'EQUITY_RISK_ON_BREADTH',
+  'DXY_INVERSE_Z',
+  'PEAK_SESSION_ACTIVE',
+  'SECTOR_ROTATION_RANK',
+  'COINBASE_PREMIUM_BPS',
+  'STABLECOIN_MINT_INFLOW_Z',
+  'SPREAD_VS_30M_MEDIAN_MULT',
+  'EXTENSION_FROM_EMA_ATR',
+  'CROSS_ASSET_CONTAGION_CORR',
+  'FRICTION_TO_EDGE_RATIO',
+  'ORACLE_DISAGREEMENT_BPS',
+] as const;
+
+export interface Mia5SwarmResearchProjection {
+  schemaVersion: 'mia5-pdf-97-research-v1';
+  totalSlots: 97;
+  sourceCandleOpenAt: number | null;
+  sourceTimeframeValid: boolean;
+  availableCount: number;
+  availableSlotIds: number[];
+  values: (number | null)[];
+  missingCount: number;
+  tradeEligible: false;
+  status: 'UNVERIFIED' | 'PARTIAL';
+}
+
+/** A valid timeframe is required. Valid data is NOT a trading permission or calibrated vote. */
+export function projectMia5SwarmResearchFeatures(
+  snapshot: FeatureSnapshot | null,
+  advanced: AdvancedIndicatorSnapshot | null,
+  timeframeValid: boolean,
+): Mia5SwarmResearchProjection {
+  const values: (number | null)[] = Array.from({ length: MIA5_SWARM_FEATURE_SLOTS.length }, () => null);
+  const allowed = timeframeValid && snapshot != null && Number.isFinite(snapshot.t);
+  if (allowed) {
+    const f = snapshot!;
+    const set = (id: number, value: number | null | undefined) => {
+      if (value != null && Number.isFinite(value)) values[id] = value;
+    };
+    // Slot IDs match the PDF. Existing EMA20/EMA50 are not substitutes for EMA21/EMA55.
+    set(0, f.ema9);
+    set(1, f.ema21);
+    set(2, f.ema55);
+    set(6, f.macdHist);
+    set(7, f.macdHistSlope);
+    set(8, f.adx14);
+    set(9, f.plusDI);
+    set(10, f.minusDI);
+    set(25, f.bbPctB);
+    if (advanced && advanced.candleOpenAt === f.t) {
+      set(16, advanced.ichimoku.conversion9);
+      set(17, advanced.ichimoku.base26);
+      // The PDF's cloud-top slot is a projected series, not a current-time value.
+    }
+    if (Number.isFinite(f.atr14) && f.atr14 > 0 && Number.isFinite(f.ema20)) {
+      set(29, (f.close - f.ema20) / (2.25 * f.atr14)); // PDF KELTNER_POS
+    }
+    if (Number.isFinite(f.atr14) && f.atr14 > 0 && f.ema21 != null && Number.isFinite(f.ema21)) {
+      set(93, (f.close - f.ema21) / f.atr14); // PDF EXTENSION_FROM_EMA_ATR
+    }
+    // Existing Donchian snapshots exclude the current bar. PDF slots include it, so do
+    // not silently relabel existing donchHigh20/Low20 as matching the PDF semantics.
+    // All missing L2, Solana, derivatives, oracle and macro inputs remain unknown.
+  }
+  const availableSlotIds = values.flatMap((value, id) => value === null ? [] : [id]);
+  return {
+    schemaVersion: 'mia5-pdf-97-research-v1',
+    totalSlots: 97,
+    sourceCandleOpenAt: allowed ? snapshot!.t : null,
+    sourceTimeframeValid: !!allowed,
+    availableCount: availableSlotIds.length,
+    availableSlotIds,
+    values,
+    missingCount: 97 - availableSlotIds.length,
+    tradeEligible: false,
+    status: allowed && availableSlotIds.length > 0 ? 'PARTIAL' : 'UNVERIFIED',
+  };
+}

@@ -243,6 +243,10 @@ test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', 
         bidShare1pct: 0.75, exit: { conservativeBaseCapacity: 12 },
         impactCurve: [{ side: 'sell', requestedQuote: 50000, filledFully: false }],
       },
+      depthExhaustion: { status: 'MEASURED', pressure: 'ASK_DEPTH_AND_SELLING', bookSource: 'BINANCE_SPOT_DEPTH_STREAM',
+        bookAt: 43200000, bookUpdateId: 220, bandBps: 15, depthRatioThreshold: 3, bidDepthQuote: 200, askDepthQuote: 810,
+        tradeSource: 'BINANCE_SPOT_AGG_TRADES', polledAt: 43200100, flowStart: 43197000, flowEndExclusive: 43200000,
+        firstCoverageId: 10, lastCoverageId: 13, tradeCount: 2, takerDeltaQuote: -300 },
     },
     featuresResearch: {
       candleOpenAt: 39600000, wma20: 104, hma20: 106, keltner: null, parabolicSar: null,
@@ -277,6 +281,8 @@ test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', 
   await expect(activity.getByRole('row', { name: /5m/ })).toContainText('Unavailable');
   await expect(activity.getByRole('row', { name: /1h/ })).toContainText('2.00×');
   await expect(page.getByRole('row', { name: /sell 50,000/ })).toContainText('Insufficient visible depth');
+  await expect(page.getByText('Ask depth and taker selling aligned')).toBeVisible();
+  await expect(page.getByText('-300.00 USDT · 2 aggregate trades')).toBeVisible();
   await page.unroute('**/api/instrument/CHARTFIXTURE?interval=1h');
 });
 
