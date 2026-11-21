@@ -19,7 +19,7 @@ const makeReport = (id: string, instrumentId: string, price: number): DecisionRe
   takeProfit: [{ price: price * 1.05, fraction: 1, r: 1.5 }],
   consensus: { id: 'consensus_' + id, state: 'STRONG_CONSENSUS', support: 1, opposition: 0, expiresAt: new Date(Date.now() + 30_000).toISOString() },
   decision: 'PAPER_TRADE', opportunity: { score: 70, version: 'v', factors: [], missing: [] },
-} as DecisionReport);
+} as unknown as DecisionReport);
 const save = (r: DecisionReport) => run(
   'INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)',
   r.id, r.candidateId, r.instrumentId, 'crypto', 'LONG', r.strategy.id, r.decision, 70, Date.now(), J(r),
