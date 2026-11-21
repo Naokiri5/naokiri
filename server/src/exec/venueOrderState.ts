@@ -151,7 +151,8 @@ export function reduceVenueOrder(
   if (!Number.isSafeInteger(event.at) || event.at < current.recordedAt)
     throw new Error('INVALID_EVENT_TIME');
   const fingerprint = JSON.stringify(event);
-  const previous = current.processedEvents[event.eventId];
+  const previous = Object.hasOwn(current.processedEvents, event.eventId)
+    ? current.processedEvents[event.eventId] : undefined;
   if (previous !== undefined) {
     if (previous !== fingerprint) throw new Error('EVENT_ID_COLLISION');
     return current as VenueOrderProjection;
@@ -161,7 +162,9 @@ export function reduceVenueOrder(
   // Deduplicate by VENUE trade ID (not just transport event ID) even if the
   // order has since become terminal; never add the same quantity twice.
   if (event.kind === 'FILL') {
-    const previousFill = current.fillsByTradeId[event.venueTradeId];
+    safeId(event.venueTradeId, 'VENUE_TRADE_ID');
+    const previousFill = Object.hasOwn(current.fillsByTradeId, event.venueTradeId)
+      ? current.fillsByTradeId[event.venueTradeId] : undefined;
     if (previousFill !== undefined) {
       if (previousFill !== event.quantityUnits) throw new Error('TRADE_ID_CONFLICT');
       return {
@@ -205,7 +208,8 @@ export function reduceVenueOrder(
     next.reconciliationRequired = true;
   } else if (event.kind === 'FILL') {
     safeId(event.venueTradeId, 'VENUE_TRADE_ID');
-    const prior = next.fillsByTradeId[event.venueTradeId];
+    const prior = Object.hasOwn(next.fillsByTradeId, event.venueTradeId)
+      ? next.fillsByTradeId[event.venueTradeId] : undefined;
     if (prior !== undefined) {
       if (prior !== event.quantityUnits) throw new Error('TRADE_ID_CONFLICT');
       return { ...next, reconciliationRequired: current.reconciliationRequired };
