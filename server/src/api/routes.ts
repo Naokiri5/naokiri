@@ -346,6 +346,18 @@ export async function routes(app: FastifyInstance) {
     return previewBundle(b);
   });
 
+  // Explicit owner PAPER-only submission; all legs use the existing OMS in one
+  // DB transaction. No route or parameter can select TESTNET/LIVE here.
+  app.post('/api/trading/bundles/paper/execute', async (req) => {
+    limit(req, 'bundle', 'paper bundle execution');
+    const b = z.object({
+      decisionIds: z.array(ID).min(2).max(5),
+      password: PW.optional(),
+      otp: z.string().regex(/^\d{6}$/).optional(),
+    }).strict().parse(req.body ?? {});
+    stepUp(req, b);
+    return oms.submitPaperAtomicBundle(b.decisionIds, 'owner');
+  });
   app.get('/api/orders', async () => oms.listOrders(300));
   app.post('/api/orders/:id/approve', async (req) => oms.decideApproval(idOf(req), true));
   app.post('/api/orders/:id/reject', async (req) => oms.decideApproval(idOf(req), false));
