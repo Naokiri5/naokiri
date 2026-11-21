@@ -132,6 +132,92 @@ export function Risk() {
   </Page>;
 }
 
+/**
+ * Manual PAPER-only bundle workflow. Source choices are persisted MIA decisions;
+ * the server re-evaluates canonical risk under the SQLite lock on execution.
+ * No browser-supplied quantities, market orders, signer, or LIVE route.
+ */
+function PaperBundleConsole({ onExecuted }: { onExecuted: () => void }) {
+  const { data: decisions, error: decisionsError, reload: reloadDecisions } = useApi('/api/decisions?decision=PAPER_TRADE', {
+    topics: ['decision', 'order'], every: 30_000,
+  });
+  const [ids, setIds] = useState<string[]>([]);
+  const [stepUpProof, setStepUpProof] = useState('');
+  const [preview, setPreview] = useState<any>(null);
+  const [execution, setExecution] = useState<any>(null);
+  const options = (decisions ?? []).slice(0, 16);
+  const isValid = ids.length >= 2 && ids.length <= 5;
+  const toggle = (id: string) => {
+    setPreview(null);
+    setExecution(null);
+    setIds(old => old.includes(id) ? old.filter(x => x !== id) : old.length < 5 ? [...old, id] : old);
+  };
+  return <Card title="PAPER bundle execution · owner approval" flush>
+    <div className="col" style={{ padding: 12, gap: 12 }}>
+      <div className="hint">Select 2–5 stored PAPER decisions. MIA checks each leg and their combined capital, risk, correlation and protection before any simulated order is recorded. Orders are committed together or all rolled back. LIVE, TESTNET and Solana Jito submissions are not available here.</div>
+      <ErrorLine e={decisionsError} />
+      {options.length ? <div className="tablewrap" style={{ maxHeight: 220 }}>
+        <table><thead><tr><th>Select</th><th>Instrument</th><th>Strategy</th><th>Score</th><th>Decision</th></tr></thead>
+          <tbody>{options.map((d: any) => <tr key={d.id}><td><input type="checkbox"
+            aria-label={'Include ' + d.instrument + ' in paper bundle'}
+            checked={ids.includes(d.id)}
+            disabled={!ids.includes(d.id) && ids.length >= 5}
+            onChange={() => toggle(d.id)} /></td>
+            <td>{d.instrument.split(':')[2] ?? d.instrument}</td>
+            <td>{d.strategy}</td>
+            <td>{d.score ?? '—'}</td>
+            <td><Badge v={d.decision} /></td>
+          </tr>)}</tbody>
+        </table>
+      </div> : <Empty>No stored PAPER_TRADE decisions to bundle. MIA must first produce current, eligible decisions.</Empty>}
+      <div className="row">
+        <span className="hint">{ids.length}/5 selected (minimum 2)</span>
+        <Action label="Preview basket risk" disabled={!isValid}
+          run={async () => {
+            const result = await api('/api/trading/bundles/preview', {
+              body: { environment: 'PAPER', mode: 'PAPER_ATOMIC', decisionIds: ids },
+            });
+            setExecution(null);
+            setPreview(result);
+          }} />
+      </div>
+      {preview && <div className="hint" role="status">
+        Preflight: <Badge v={preview.approved ? 'APPROVED FOR PAPER REVIEW' : 'DENIED'} tone={preview.approved ? 'b-good' : 'b-bad'} />
+        {preview.reasonCodes?.length ? <div>{preview.reasonCodes.join(' · ')}</div> : null}
+        <div>A preview does not place orders or reserve funds. MIA independently rechecks risk at submission.</div>
+      </div>}
+      <div className="row">
+        <StepUp value={stepUpProof} onChange={setStepUpProof} />
+        <Action className="primary" label="Execute PAPER bundle"
+          disabled={!isValid || !preview?.approved || !stepUpProof}
+          confirm={'Submit ' + ids.length + ' simulated PAPER entries as one atomic bundle? No real funds are used.'}
+          run={async () => {
+            try {
+              const result = await api('/api/trading/bundles/paper/execute', {
+                body: { decisionIds: ids, password: stepUpProof },
+              });
+              setExecution(result);
+              if (!result.ok) throw new Error(result.reason ?? 'PAPER bundle rejected');
+              setIds([]);
+              setPreview(null);
+              onExecuted();
+              reloadDecisions();
+            } finally {
+              setStepUpProof('');
+            }
+          }} />
+      </div>
+      {execution && <div className="hint" role="status">
+        <Badge v={execution.ok ? 'PAPER BUNDLE RECORDED' : 'NOT EXECUTED'} tone={execution.ok ? 'b-good' : 'b-bad'} />
+        {execution.bundleId ? <span className="mono"> {execution.bundleId}</span> : null}
+        {execution.reason ? <div>{execution.reason}</div> : null}
+        {execution.warning ? <div>{execution.warning}</div> : null}
+      </div>}
+      <div className="hint">The PAPER bot does not automatically submit bundle orders. Only owner step-up can execute this workflow. Existing independent stops continue managing each position after entry.</div>
+    </div>
+  </Card>;
+}
+
 export function Portfolio() {
   const { data, error, reload } = useApi('/api/portfolio', { topics: ['position', 'order'], every: 20_000 });
   const a = data?.account;
@@ -144,6 +230,8 @@ export function Portfolio() {
     <Card title="Realized equity curve">{data?.equityCurve.length > 1 ? <Sparkline values={data.equityCurve.map((x: any) => x.equity)} height={120} /> : <Empty>Curve appears after closed paper trades.</Empty>}</Card>
     <div style={{ height: 14 }} />
     <PositionsTable rows={data?.open ?? []} onChange={reload} />
+    <div style={{ height: 14 }} />
+    <PaperBundleConsole onExecuted={reload} />
     <div style={{ height: 14 }} />
     <Card title={'PAPER bundle executions (' + (data?.paperBundles?.length ?? 0) + ')'} flush>
       {data?.paperBundles?.length ? <div className="tablewrap"><table><thead><tr>
