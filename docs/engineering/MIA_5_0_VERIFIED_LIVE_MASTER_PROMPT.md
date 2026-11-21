@@ -244,3 +244,48 @@ Provide a traceable 50-feature audit, minimal-diff TypeScript, append-only migra
 Start from the safe modules added on this branch: exec/liveReadiness.ts and exec/venueOrderState.ts. They demonstrate truthful live blockers and pure event handling, NOT executing/admitting an order. The next independently reviewed milestone is a durable TESTNET OMS. Leave production LIVE locked until every independent gate and legal/broker eligibility condition is met.
 
 Do not advertise guaranteed returns or fully operational LIVE trading without verified venue executions, audited safeguards and approved capital authorization.
+
+---
+
+## MIA5 2026-11-22 hardening PDF delta — actual repository ownership
+
+**Source:** The uploaded 25-page “MIA 5.0 — Unified Hardening Documentation, TypeScript Catalog & Master Agent Prompt”, archived as parsed text at docs/source-archive/MIA5_HARDENING_25P_PARSED_SOURCE.txt. Also consider the uploaded 35-page Hive specification and the related PR #91/#93. These are proposed specifications, not evidence that the named modules are currently implemented.
+
+### Use the existing modules, not the proposed duplicates
+
+| PDF names | Existing canonical MIA | Engineering decision |
+| --- | --- | --- |
+| auth/privyWalletGuard.ts | server/src/security/privy.ts and server/src/api/auth.ts | Extend existing owner authentication; no second sign-in, session store or inferred wallet signing authority |
+| CanonicalRiskGate.evaluateAndReserveIntent | server/src/risk/gate.ts evaluateRisk(), risk/policy.ts, exec/oms.ts | Preserve sole trading risk owner; extend only through tested existing transaction, risk and OMS boundaries |
+| better-sqlite3 and mia_ledger.sqlite | Node DatabaseSync from node:sqlite, server/src/db/db.ts tx(), existing mia.db migrations | Do not add a second DB file/library or competing order-intent ledger |
+| PaperOmsAdapter / LiveOmsAdapter | server/src/exec/oms.ts and server/src/exec/environment.ts | Keep PAPER OMS; TESTNET preflight and LIVE remain locked pending certification |
+| buildMiaServer / reconcileStartupIntents | server/src/index.ts buildApp(), main.ts, ops/lease.ts, exec/venueOrderState.ts | Add durable venue reconciliation only after a real account-scoped intent journal and venue source exist |
+| AGT-001..100, 10 orthogonal buckets | server/src/workers/registry.ts, runtime.ts and signed QCI in qci/coordinator.ts | No second voting registry; the existing 100 workers run in 11 correlated evidence domains |
+| 97-slot Hive engine | Prior work on PR #91/#93 | Review and reuse; do not copy the Hive implementation into a duplicate live-certification stack |
+| risk/gate.test.ts | server/test/risk.test.ts, oms.test.ts, liveAuthorizationAndOrderState.test.ts, and other existing suites | Run actual tests, not the PDF's assumed paths |
+
+### Implemented in this PR
+
+- The canonical venueOrderState.ts observational reducer rejects unsupported event kinds, status sources, statuses, uncertain reasons, invalid order sides and unsafe identity keys at runtime, before persisting any event as observed.
+- Its deduplication uses own-property access to avoid treating inherited object properties as authentic event/trade history.
+- Existing liveAuthorizationAndOrderState.test.ts covers malformed and adversarial payloads. Existing trade-ID deduplication, cross-account protection, UNKNOWN-on-uncertainty and per-fill atomic units are preserved.
+- No new authorization route, risk decision, exchange POST, live signer, database table or second OMS has been created. The LIVE lock is unchanged.
+
+### Objective: MIA autonomy with minimum routine owner action
+
+1. Continuously gather validated, timestamped market evidence via one fabric and one scanner, 100 existing workers, QCI and recorded decisions. Abstain when feeds are stale, inconsistent or non-independent. FAST and DEEP share intelligence and risk authority.
+2. Evaluate decisions through a single deterministic, portfolio-aware risk policy. Never let an agent, LLM, frontend, backtest or manual path skip the canonical risk/OMS boundary; preserve stops, cost limits, concentration, daily/weekly breakers, account isolation and idempotency.
+3. Once a venue is separately certified, persist order intent BEFORE exchange network access. Never blindly retry timeouts or 5xx outcomes. Reconcile by account, client-order ID, venue trade IDs and actual partial fills before exposing more capital.
+4. Automatically recover only safe observational tasks (feeds, scanning, bounded restart after verified liveness); back off and alert on repeat failures. HALT and request human review when financial state, ownership, balance or protection is unknown. Never auto-arm LIVE on startup or silently expand limits.
+5. Keep normal in-envelope scanning and position management autonomous after certification, with owner actions reserved for initial account enrollment, policy authorization, critical incidents, revocation and changes in risk capacity.
+6. Validate outcomes net of fees, slippage and realized fills with genuine backtests, holdouts and production-like soak. Do not claim 100% accurate trades or profitable execution from static contracts or synthetic tests.
+
+### Merge and release checklist
+
+- Compare PR branch heads, base branches, dependencies and overlapping files against current main. An open PR is not a shipped feature. Preserve existing integrations with PR #91/#93 (Hive), #98 (order state), #101 (decision overlays) and #106 (paper bundles).
+- Run exact-head npm ci, typecheck, production build, server/web tests, relevant E2E, secrets scan and high-severity dependency audit. Capture evidence for *this* SHA, not an earlier successful commit.
+- Audit issuer/wallet ownership proof, CSRF, idempotency, race conditions, durable replay, uncertain sends, protective exits, loss caps, migration conflicts and rollback.
+- Require independent security and financial-risk review before merge or release. A PR marked non-mergeable, missing exact-head CI or Vercel rate-limited is NOT READY.
+- LIVE remains blocked until G01–G14, independent certifications, real TESTNET order/fill lifecycle, restricted signer, durable reconciliation, operational monitoring and explicit owner-bound authorization are verified. A read-only readiness report is never execution authority.
+
+**Prime directive:** Do not replace the established architecture merely to match a proposed TypeScript catalog. Prefer narrow verified enhancements of actual canonical owners, with regression coverage and truthful operational status.
