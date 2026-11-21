@@ -22,6 +22,19 @@ export function std(xs: number[]) {
   const m = mean(xs);
   return Math.sqrt(xs.reduce((a, b) => a + (b - m) ** 2, 0) / (xs.length - 1));
 }
+/** Pearson coefficient of aligned observations. Constant series have no defined correlation. */
+export function pearsonCorrelation(pairs: readonly (readonly [number, number])[]): number | null {
+  if (!pairs.length) return null;
+  const mx = pairs.reduce((sum, [x]) => sum + x, 0) / pairs.length;
+  const my = pairs.reduce((sum, [, y]) => sum + y, 0) / pairs.length;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (const [x, y] of pairs) {
+    sxy += (x - mx) * (y - my);
+    sxx += (x - mx) ** 2;
+    syy += (y - my) ** 2;
+  }
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : null;
+}
 export function quantile(sorted: number[], q: number) {
   if (!sorted.length) return NaN;
   const pos = (sorted.length - 1) * q; const lo = Math.floor(pos); const hi = Math.ceil(pos);

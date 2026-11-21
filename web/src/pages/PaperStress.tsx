@@ -19,6 +19,9 @@ interface StressReport {
   tailRisk?: { status: 'ESTIMATED' | 'UNAVAILABLE' | 'NO_EXPOSURE'; horizon: '4H'; confidence: number;
     observations: number; varLoss: number | null; expectedShortfallLoss: number | null;
     worstObservedLoss: number | null; maxObservedLossPctEquity: number | null;
+    correlatedPeers?: { minimumCorrelation: number; observations: number; holdings: Array<{
+      instrument: string; weightedPeerValue: number; strongestPeer: { instrument: string; correlation: number } | null;
+    }> } | null;
     effectiveHoldings: number | null; reason: string | null; note: string; authority: 'RESEARCH_ONLY' };
 }
 
@@ -57,6 +60,17 @@ export function PaperStress() {
             <tr><td>Worst observed 4h loss</td><td className="num">{data.tailRisk.worstObservedLoss == null ? '—' : fmt.num(data.tailRisk.worstObservedLoss)}</td></tr>
           </tbody>
         </table></div>}
+      </section>}
+      {data.tailRisk && 'correlatedPeers' in data.tailRisk && <section aria-label="Correlated paper holdings">
+        <h3>Correlated paper holdings</h3>
+        {data.tailRisk.correlatedPeers ? <>
+          <p className="hint">Each row weights the marked value of other long holdings by their positive correlation above {data.tailRisk.correlatedPeers.minimumCorrelation}. The estimate uses {data.tailRisk.correlatedPeers.observations} aligned 4-hour log returns. Rows can include the same peer.</p>
+          <div className="tablewrap"><table><thead><tr><th>Holding</th><th className="num">Weighted peer value (USDT)</th><th>Strongest qualifying peer</th></tr></thead>
+            <tbody>{data.tailRisk.correlatedPeers.holdings.map(row => <tr key={row.instrument}>
+              <td>{row.instrument}</td><td className="num">{fmt.num(row.weightedPeerValue)}</td>
+              <td>{row.strongestPeer ? `${row.strongestPeer.instrument} (${fmt.num(row.strongestPeer.correlation, 2)})` : 'None'}</td>
+            </tr>)}</tbody></table></div>
+        </> : <p className="hint">{data.tailRisk.status === 'NO_EXPOSURE' ? 'No open paper holdings.' : 'Unknown. This estimate requires two marked holdings with sufficiently long, variable and aligned return histories.'}</p>}
       </section>}
     </> : <Empty>Loading paper stress estimates…</Empty>}
   </Card>;

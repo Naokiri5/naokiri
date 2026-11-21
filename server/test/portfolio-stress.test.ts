@@ -34,6 +34,10 @@ describe('paper portfolio scenario stress', () => {
     // seedInstrument supplies enough closed 4h candles; a valid research estimate is expected.
     expect(result.tailRisk).toMatchObject({ status: 'ESTIMATED', horizon: '4H', authority: 'RESEARCH_ONLY' });
     expect(result.tailRisk.observations).toBeGreaterThanOrEqual(90);
+    expect(result.tailRisk.correlatedPeers).toMatchObject({ observations: 96, holdings: [
+      { instrument: BTC, weightedPeerValue: expect.closeTo(100), strongestPeer: { instrument: ETH } },
+      { instrument: ETH, weightedPeerValue: expect.closeTo(200), strongestPeer: { instrument: BTC } },
+    ] });
     expect(result.tailRisk.varLoss).toBeGreaterThanOrEqual(0);
     expect(result.positions).toEqual([
       { instrument: BTC, qty: 2, positionCount: 1, mark: 100, markAt: NOW, value: 200, equityPct: expect.closeTo(100 / 3), reason: null },

@@ -314,6 +314,31 @@ test('risk center shows research-only paper scenarios', async () => {
   await expect(page.getByRole('row', { name: /USDT cash depeg/ })).toContainText('MODELED');
 });
 
+test('paper risk research shows measured peer exposure and marks missing correlation unknown', async () => {
+  const path = '**/api/risk/stress';
+  let comparable = true;
+  await page.route(path, route => route.fulfill({ json: {
+    asOf: Date.now(), baselineEquity: 300, scenarios: [], note: 'Research fixture.',
+    tailRisk: { status: 'ESTIMATED', horizon: '4H', confidence: 0.95, observations: 100,
+      varLoss: 4, expectedShortfallLoss: 5, worstObservedLoss: 6, note: 'Paper research.',
+      correlatedPeers: comparable ? { minimumCorrelation: 0.35, observations: 96, holdings: [
+        { instrument: 'A', weightedPeerValue: 120, strongestPeer: { instrument: 'B', correlation: 0.6 } },
+        { instrument: 'B', weightedPeerValue: 60, strongestPeer: { instrument: 'A', correlation: 0.6 } },
+      ] } : null,
+    },
+  } }));
+  try {
+    await page.goto('/risk');
+    const peers = page.getByRole('region', { name: 'Correlated paper holdings' });
+    await expect(peers.getByRole('row', { name: /A 120\.00 B \(0\.60\)/ })).toBeVisible();
+    await expect(peers).toContainText('96 aligned 4-hour log returns');
+    comparable = false;
+    await page.reload();
+    await expect(peers).toContainText('Unknown.');
+    await expect(peers.getByRole('table')).toHaveCount(0);
+  } finally { await page.unroute(path); }
+});
+
 test('decision record displays a recorded paper rejection separately from strategy and risk', async () => {
   const url = '**/api/decisions/omega-fixture';
   await page.route(url, route => route.fulfill({ json: {
