@@ -21,6 +21,7 @@ import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { summarizeTimeframes } from '../chart/timeframes.js';
+import { projectMia5SwarmResearchFeatures } from '../features/indicators.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -356,7 +357,9 @@ export async function routes(app: FastifyInstance) {
     const timeframeAgreement = summarizeTimeframes(chartIntelligence, d);
     const selectedReading = timeframeAgreement.readings.find(reading => reading.timeframe === iv);
     const featuresResearch = selectedReading?.status === 'VALID' ? d?.engines[iv].research ?? null : null;
-    return { chartIntelligence, timeframeAgreement, featuresResearch, cexActivity: readCexActivity(i.id, chartIntelligence.asOf),
+    // 97-slot PDF compatibility is read-only: no second agent pool, fabricated feeds or order rights.
+    const swarmFeatureResearch = projectMia5SwarmResearchFeatures(d?.engines[iv].last ?? null, featuresResearch, selectedReading?.status === 'VALID');
+    return { chartIntelligence, timeframeAgreement, featuresResearch, swarmFeatureResearch, cexActivity: readCexActivity(i.id, chartIntelligence.asOf),
       instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
       quality: assessQuality(i.id), safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };
