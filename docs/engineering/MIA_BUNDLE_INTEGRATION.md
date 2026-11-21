@@ -37,6 +37,18 @@ This integration is additive. The source archive is historical reference text an
 
 Owner-authenticated read-only status describing supported preview modes and currently locked order-placement adapters. Never implies real-money certification.
 
+### Live bundle-to-portfolio synchronization (read-only)
+
+Three views derive status from the **existing** orders, fills, positions, OMS-monitored stop records and protection incidents:
+
+- \`GET /api/trading/bundles?limit=30\`: recent PAPER groups, authenticated and bounded to 100.
+- \`GET /api/trading/bundles/:id\`: account-scoped detail for all child entry orders, fills, monitored stops and position states (404 if not found).
+- \`GET /api/portfolio\`: adds \`paperBundles\` with up to 20 latest groups without altering canonical account, open/closed positions, ledger or external wallets.
+
+Ownership stays with the single PAPER OMS. The persisted group \`entryState=FILLED\` means the entry transaction committed, **not** that its positions are still open or that the group has been closed. \`phase\` is derived each read: \`OPEN\`, \`PARTIALLY_CLOSED\`, \`CLOSED\` or \`RECONCILIATION_REQUIRED\`. A missing canonical fill/position, mismatched active OMS stop, or open protection incident sets \`health=NEEDS_ATTENTION\`. Totals for entry notional, entry fees and observed realized PnL use the existing records; no synthetic bundle PnL or secondary accounting table is introduced. \`protectiveStopRecorded\` means a monitored PAPER stop row matches position size and trigger; it **does not** promise a fill or exchange-native stop.
+
+This projection is observational, so existing \`monitorPositions\`, manual exits, audit records and event fabric continue unmodified. Poll or refresh these views on position/order changes instead of installing a duplicate scheduler. **No real-money adapter, signer, linked exchange basket or automated bundle trigger is added by these routes.**
+
 ### POST /api/trading/bundles/paper/execute
 
 This owner-only, CSRF-protected, independently step-up-verified route accepts two to five stored PAPER decision IDs and runs `submitPaperAtomicBundle()`; it cannot accept a TESTNET or LIVE destination. Client input `{ "decisionIds": ["dec_01", "dec_02"], "password": "<redacted>" }` uses the existing sensitive-action verification. The route is manual only. A repeat or failed group cannot double debit the account.
@@ -95,7 +107,7 @@ The PAPER ledger uses simulated quote amounts currently treated as paper USD by 
 
 | Environment | Preview | Execution |
 | --- | --- | --- |
-| PAPER | Server-side canonical evidence preview | Owner-initiated PAPER_ATOMIC submit implemented in this draft, pending CI and review |
+| PAPER | Canonical risk preview plus read-only grouped lifecycle and portfolio status | Owner-initiated PAPER_ATOMIC submission on PR branch; production merge/deploy pending |
 | TESTNET | Explicit lock state | Not implemented |
 | LIVE | Explicit lock state | Locked by existing G01–G14 and signing requirements |
 
