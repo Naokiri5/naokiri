@@ -143,7 +143,7 @@ export function failedThinkingAnalysis(
   error: unknown,
   enforcement: ThinkEnforcement,
   preference: ThinkPreference,
-): Pick<ThinkingAnalysis, 'version' | 'authority' | 'canAuthorizeTrade' | 'preference' | 'enforcement' | 'route' | 'routeReasons' | 'wouldAbstain' | 'deep' | 'dataTransport' | 'dataQuality' | 'evidence'> {
+): ThinkingAnalysis {
   const code = error instanceof Error ? error.name : 'UNKNOWN';
   return {
     version: 'mia-think-observer-v1', authority: 'EXPLANATION_ONLY', canAuthorizeTrade: false,
