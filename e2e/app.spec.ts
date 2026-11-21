@@ -155,6 +155,9 @@ test('Lab batch retries rate limits and reports partial results', async ({ brows
   try {
     await context.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
     const lab = await context.newPage();
+    const now = Date.now();
+    await lab.clock.install({ time: now });
+    await lab.clock.pauseAt(now + 60_000);
     const attempted: string[] = [];
     await lab.route('**/api/lab', async route => {
       const response = await route.fetch();
@@ -172,6 +175,9 @@ test('Lab batch retries rate limits and reports partial results', async ({ brows
     await lab.getByRole('button', { name: 'Run first 3 symbols' }).click();
     await expect(lab.getByRole('status').filter({ hasText: 'Waiting for the rate limit' })).toBeVisible();
     await expect(lab.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
+    await lab.clock.runFor(999);
+    expect(attempted).toEqual(['BTCUSDT']);
+    await lab.clock.runFor(1);
     await expect.poll(() => attempted).toEqual(['BTCUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT']);
     await expect(lab.getByText(/2 of 3 backtests completed.*ETHUSDT.*upstream market-data provider unavailable/)).toBeVisible();
     await expect(lab.getByRole('button', { name: 'Run first 3 symbols' })).toBeEnabled();
