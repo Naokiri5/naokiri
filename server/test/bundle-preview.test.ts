@@ -71,6 +71,16 @@ describe('MIA bundle preflight using canonical PAPER authority', () => {
     expect(() => previewBundle({ ...req, decisionIds: ['decision_btc', 'decision_btc'] })).toThrow(/DISTINCT/);
     expect(() => previewBundle({ ...req, decisionIds: ['decision_btc', 'does_not_exist'] })).toThrow(/NOT_FOUND/);
   });
+  it('rejects two decision IDs targeting the same PAPER instrument before financial writes', () => {
+    const first = get<{ report: string }>("SELECT report FROM decisions WHERE id='decision_btc'")!;
+    const second = get<{ report: string }>("SELECT report FROM decisions WHERE id='decision_eth'")!;
+    const btc = JSON.parse(first.report);
+    const eth = JSON.parse(second.report);
+    eth.instrumentId = btc.instrumentId;
+    run("UPDATE decisions SET instrument=?,report=? WHERE id='decision_eth'", btc.instrumentId, J(eth));
+    expect(() => previewBundle(req)).toThrow(/DUPLICATE_OR_MISSING_INSTRUMENT/);
+    expect(get<{ n: number }>('SELECT COUNT(*) n FROM orders')!.n).toBe(0);
+  });
   it('pause and emergency never grant a bundle exception', () => {
     updateControl('owner', { pausedNewOrders: true });
     expect(previewBundle(req).reasonCodes).toContain('EMERGENCY_OR_PAUSE_ACTIVE');
