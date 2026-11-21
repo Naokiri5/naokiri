@@ -39,8 +39,8 @@ export function toDeterministicVenueClientId(
 ): { canonical: string; venueClientOrderId: string } {
   if (input.environment !== 'TESTNET' && input.environment !== 'LIVE')
     throw new Error('CLIENT_ID_ENVIRONMENT_INVALID');
-  if (typeof input.accountId !== 'string' || !ID.test(input.accountId) ||
-      typeof input.idempotencyKey !== 'string' ||
+  safeId(input.accountId, 'ACCOUNT');
+  if (typeof input.idempotencyKey !== 'string' ||
       input.idempotencyKey.trim().length === 0 || input.idempotencyKey.length > 256)
     throw new Error('CLIENT_ID_INPUT_INVALID');
   if (!['futures', 'spot', 'memecoin', 'yield', 'stocks_etf'].includes(input.sleeve))
