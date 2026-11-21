@@ -95,6 +95,12 @@ export async function routes(app: FastifyInstance) {
   app.setErrorHandler((err: any, req, reply) => {
     if (err instanceof z.ZodError) return reply.code(400).send({ error: err.issues.map((i) => `${i.path.join('.') || 'input'}: ${i.message}`).join('; ') });
     if (err instanceof RateLimitError) return reply.code(429).header('retry-after', String(err.retryAfterSec)).send({ error: err.message });
+    // This is an upstream identity verification outage, not an incorrect owner token or a MIA code crash.
+    // Preserve retryable 503 without echoing key material, JWTs or verifier internals to the browser.
+    if (err instanceof privy.PrivyVerificationUnavailable) {
+      req.log.warn({ requestId: req.id }, 'Privy identity verification service unavailable');
+      return reply.code(503).send({ error: 'Privy verification is unavailable. Retry when the service recovers.' });
+    }
     if (err instanceof ProviderError) {
       req.log.warn({ provider: err.providerId, status: err.status }, 'upstream provider failure');
       return reply.code(err.status === 404 ? 404 : err.status === 429 ? 503 : 502).send({ error: `upstream market-data provider unavailable (${err.providerId})` });
