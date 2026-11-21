@@ -59,7 +59,7 @@ describe('provider backoff', () => {
     expect(providerBlockedUntil('binance')).toBeGreaterThan(Date.now() + 100_000); // was ~1 s: the 120 s block was cut short
   });
   it('a request that waited for a rate-limit token re-checks a block set meanwhile and does not send', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date', 'performance'] });
     setRateLimit('binance', 1); // one request a minute: the second call waits for a token
     let sent = 0; let release!: (r: Response) => void;
     globalThis.fetch = (() => { sent++; return sent > 1 ? Promise.resolve(new Response('{}')) : new Promise<Response>((res) => { release = res; }); }) as typeof fetch;

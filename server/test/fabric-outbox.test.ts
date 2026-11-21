@@ -217,9 +217,18 @@ describe('fabric outbox route', () => {
     try {
       const cookie = String((await app.inject({ method: 'POST', url: '/api/auth/setup', headers: { 'content-type': 'application/json' }, payload: ownerSetupPayload('fabric outbox owner') })).headers['set-cookie']).split(';')[0];
       expect((await app.inject({ url: '/api/fabric/outbox' })).statusCode).toBe(401);
+      expect((await app.inject({ url: '/api/fabric/outbox?view=summary' })).statusCode).toBe(401);
       const j = (await app.inject({ url: '/api/fabric/outbox', headers: { cookie } })).json();
       expect(j.counts).toEqual({ PENDING: 0, DELIVERED: 0, NO_CONSUMER: 0, DEAD: 0 });
       expect(Array.isArray(j.consumers)).toBe(true);
+
+      append(1);
+      run("UPDATE fabric_outbox SET status='DEAD', attempts=1, last_error=?", 'fixture internal relay error');
+      const full = await app.inject({ url: '/api/fabric/outbox', headers: { cookie } });
+      expect(full.json().deadLetters).toMatchObject([{ lastError: 'fixture internal relay error' }]);
+      const summary = await app.inject({ url: '/api/fabric/outbox?view=summary', headers: { cookie } });
+      expect(summary.statusCode).toBe(200);
+      expect(summary.json()).toEqual({ counts: { PENDING: 0, DELIVERED: 0, NO_CONSUMER: 0, DEAD: 1 }, oldestPendingAgeMs: null, consumers: [] });
     } finally { await app.close(); }
   });
 });

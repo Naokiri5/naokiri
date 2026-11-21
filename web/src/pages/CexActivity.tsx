@@ -7,7 +7,7 @@ const percent = (ratio: number | null) => ratio === null ? '—' : fmt.num(ratio
 
 export function CexActivity({ report }: { report?: CexActivityReport }) {
   if (!report) return null;
-  const { volume, book } = report;
+  const { volume, book, depthExhaustion } = report;
   return <Card title="Sense · Spot volume and liquidity">
     <div className="col" style={{ gap: 12 }}>
       <div className="tablewrap"><table>
@@ -41,6 +41,16 @@ export function CexActivity({ report }: { report?: CexActivityReport }) {
         </table></div>
         <div className="hint">Estimates use one book snapshot. Prices and visible size may change before an order reaches the venue.</div>
       </> : <div className="hint">Order-book estimates unavailable · {explain(book.reason)}</div>}
+      {depthExhaustion?.status === 'MEASURED' ? <div className="col">
+        <b>L2 exhaustion research</b>
+        <div>{depthExhaustion.pressure === 'BID_DEPTH_AND_BUYING' ? 'Bid depth and taker buying aligned' :
+          depthExhaustion.pressure === 'ASK_DEPTH_AND_SELLING' ? 'Ask depth and taker selling aligned' : 'Depth and taker flow did not meet the alignment threshold'}</div>
+        <div className="kv">
+          <span>Bid / ask depth within {depthExhaustion.bandBps} bps</span><span>{fmt.num(depthExhaustion.bidDepthQuote)} / {fmt.num(depthExhaustion.askDepthQuote)} {report.quoteAsset}</span>
+          <span>3-second taker buy − sell</span><span>{fmt.num(depthExhaustion.takerDeltaQuote)} {report.quoteAsset} · {depthExhaustion.tradeCount} aggregate trades</span>
+        </div>
+        <div className="hint">The research threshold is {depthExhaustion.depthRatioThreshold}× opposing depth with taker flow in the same direction. {depthExhaustion.bookSource === 'BINANCE_SPOT_REST' ? 'REST' : 'Stream'} book update {depthExhaustion.bookUpdateId} at {fmt.time(depthExhaustion.bookAt)}. Flow window ended at {fmt.time(depthExhaustion.flowEndExclusive)}.</div>
+      </div> : depthExhaustion && <div className="hint">L2 exhaustion research unavailable · {explain(depthExhaustion.reason)}</div>}
     </div>
   </Card>;
 }

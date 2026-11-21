@@ -28,12 +28,14 @@ const feature = (f: any) => f ? pick(f, 't n close ema9 ema20 ema50 ema200 rsi14
 /** Explicit allowlist: no credentials, config, chats or unrestricted agent tool context. */
 function capture(instrumentId: string, interval: Interval, asOf: number, ctx?: WorkerContext) {
   const d = market.deep.get(instrumentId), t = market.tickers.get(instrumentId);
+  const book = d?.book;
   return {
     schemaVersion: 'ditas.snapshot.v2', asOf, instrumentId, interval, regime: classifyRegime(d?.engines[interval].last ?? null).regime,
     ticker: t ? pick(t, 'instrumentId symbol base quote last bid ask changePct quoteVolume high low open trades providerTs receivedAt source') : null,
     candles: Object.fromEntries((['15m', '1h', '4h'] as const).map(iv => [iv, d?.engines[iv].candles.map(c => pick(c, 't o h l c v qv n tbv closeTime')) ?? []])),
     features: Object.fromEntries((['15m', '1h', '4h'] as const).map(iv => [iv, feature(ctx ? ctx.f[iv] : d?.engines[iv].last)])),
-    book: d?.book ? { ts: d.book.ts, bids: d.book.bids.slice(0, 100), asks: d.book.asks.slice(0, 100) } : null,
+    book: book ? { ts: book.ts, bids: book.bids.slice(0, 100), asks: book.asks.slice(0, 100),
+      source: book.source ?? null, lastUpdateId: book.lastUpdateId != null && Number.isSafeInteger(book.lastUpdateId) && book.lastUpdateId > 0 ? book.lastUpdateId : null } : null,
     cross: Object.fromEntries(Object.entries(d?.cross ?? {}).map(([venue, q]) => [venue, pick(q, 'price bid ask ts venue')])), quality: ctx?.quality ?? assessQuality(instrumentId, interval, asOf),
     control: getControl(), fingerprint: ctx ? fingerprint(ctx, asOf) : null,
     context: ctx ? { asOf: ctx.asOf ?? null, breadth: ctx.breadth ?? null, frameQuality: ctx.frameQuality ?? null, btc1h: feature(ctx.btc1h), btc4h: feature(ctx.btc4h), ticker: ctx.ticker ? pick(ctx.ticker, 'last changePct quoteVolume trades high low') : null, safety: ctx.safety, impact: ctx.impact, news: ctx.news, prints: ctx.prints, corrToBtc: ctx.corrToBtc, feeRate: ctx.feeRate, intendedNotional: ctx.intendedNotional, strategyStats: ctx.strategyStats } : null,

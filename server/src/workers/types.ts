@@ -4,6 +4,7 @@ import type { Regime } from '../regime/regime.js';
 import type { DataQuality } from '../market/quality.js';
 import type { SafetyResult } from '../safety/safety.js';
 import type { Interval } from '../market/types.js';
+import type { LargePrintContext } from '../whales/prints.js';
 
 export type Stance = 'SUPPORT' | 'OPPOSE' | 'ABSTAIN';
 export type Domain = 'trend' | 'momentum' | 'volatility' | 'flow' | 'liquidity' | 'structure' | 'regime' | 'news' | 'onchain' | 'risk' | 'execution';
@@ -26,7 +27,7 @@ export interface WorkerContext {
   intendedNotional: number; feeRate: number;
   quality: DataQuality; safety: SafetyResult;
   news: { relevant: number; positive: number; negative: number; highImpactMacro: number; headlines: string[] } | null;
-  prints: { buyNotional: number; sellNotional: number; count: number } | null;
+  prints: LargePrintContext | null;
   corrToBtc: number | null;
   /** Market advance/decline breadth (optional: older snapshots and fixtures may not carry it). */
   breadth?: { universe: number; advancers: number; decliners: number; asOf: number | null } | null;

@@ -51,7 +51,7 @@ test('a malformed /api/shell response never blanks the app (CodeRabbit PR #9)', 
   const errors: string[] = []; page.on('pageerror', (e) => errors.push(e.message));
   await page.route('https://fonts.googleapis.com/**', (r) => r.fulfill({ contentType: 'text/css', body: '' }));
   await page.route('**/api/**', (r) => r.fulfill({ json: {} })); // every other API answers 200 {} (stays "signed in")
-  await page.route('**/api/stream', (r) => r.abort());
+  await page.route('**/api/stream?view=topics', (r) => r.abort());
   await page.route('**/api/auth/state', (r) => r.fulfill({ json: { setup: true, authenticated: true } }));
   await page.route('**/api/shell', (r) => r.fulfill({ json: {} })); // HTTP 200 without control/dataHealth
   const shell = page.waitForResponse('**/api/shell');

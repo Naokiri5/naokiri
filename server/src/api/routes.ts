@@ -4,7 +4,7 @@ import { knowledgeRoutes } from '../knowledge/routes.js';
 import { VikeNotConfiguredError } from '../providers/vike.js';
 import * as privy from '../security/privy.js';
 import { catalogSummary } from '../fabric/catalog.js';
-import { outboxHealth } from '../fabric/relay.js';
+import { outboxHealth, outboxSummary } from '../fabric/relay.js';
 import * as totp from '../security/totp.js';
 import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
 import { createBackup } from '../ops/backup.js';
@@ -117,7 +117,7 @@ const httpError = (code: number, msg: string) => Object.assign(new Error(msg), {
 const isServerFault = (e: any) => e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError
   || /^ERR_SQLITE|^SQLITE/.test(String(e?.code ?? '')) || /SQLITE_|database is locked/i.test(String(e?.message ?? ''));
 // Per-session budgets for routes that call paid APIs, many upstream endpoints, or run long CPU work.
-const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2) };
+const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2), stream: limiter(120, 20) };
 
 export async function routes(app: FastifyInstance) {
   /**
@@ -307,6 +307,8 @@ export async function routes(app: FastifyInstance) {
   app.addHook('preClose', async () => { for (const end of [...openStreams]) end(); });
   app.get('/api/stream', (req, reply) => {
     if (streams >= 20) return bad(reply, 503, 'too many open live streams');
+    const { view } = z.object({ view: z.enum(['topics', 'full']).default('full') }).parse(req.query);
+    limit(req, 'stream', 'live stream connections');
     const token = tokenOf(req);
     reply.hijack(); // we own the raw socket from here; Fastify must not try to send a second response
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff', 'x-request-id': String(req.id) });
@@ -316,7 +318,10 @@ export async function routes(app: FastifyInstance) {
     const close = () => { if (closed) return; closed = true; streams--; openStreams.delete(close); bus.off('*', send); clearInterval(ka); endStream(reply.raw); };
     openStreams.add(close);
     const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
-    const send = (e: { topic: string; payload: unknown }) => write(`event: ${e.topic}\ndata: ${JSON.stringify(e.payload)}\n\n`);
+    const send = (e: { topic: string; payload: unknown }) => {
+      const data = view === 'topics' ? '{}' : JSON.stringify(e.payload);
+      write(`event: ${e.topic}\ndata: ${data}\n\n`);
+    };
     // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.
     const ka = setInterval(() => (auth.validSession(token) ? write(': ka\n\n') : close()), 20_000);
     bus.on('*', send);
@@ -525,7 +530,10 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/security', async (req) => securityOverview(tokenOf(req)));
   // MIA NEXUS data fabric (N1): read-only topic catalog — owners, priorities, durability and honest status.
   app.get('/api/fabric/catalog', async () => catalogSummary());
-  app.get('/api/fabric/outbox', async () => outboxHealth()); // N2: measured delivery health + dead letters (owner session)
+  app.get('/api/fabric/outbox', async (req) => {
+    const { view } = z.object({ view: z.enum(['summary', 'full']).default('full') }).parse(req.query);
+    return view === 'summary' ? outboxSummary() : outboxHealth();
+  });
   // Guardian Shield (read-only telemetry; its only possible action is the opt-in risk-reducing pause).
   startGuardian();
   app.get('/api/security/guardian', async () => {

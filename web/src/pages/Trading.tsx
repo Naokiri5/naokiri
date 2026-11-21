@@ -20,13 +20,53 @@ const MODES = [
   ['OBSERVE', 'Observe', 'Scan and explain only. No orders.'],
   ['PAPER', 'Paper', 'Automatic paper entries/exits with live-book fills and real fees.'],
   ['APPROVAL', 'Approval', 'Bot prepares paper orders; you approve each one.'],
-  ['BOUNDED_LIVE', 'Bounded live', 'LOCKED — requires every release gate, an isolated signer and your explicit authorization.'],
+  ['BOUNDED_LIVE', 'Bounded live', 'Requires every release gate, an isolated signer and your explicit authorization.'],
 ];
+
+interface TradingEnvironments {
+  environments: {
+    environment: 'PAPER' | 'LIVE';
+    state: 'ACTIVE' | 'AVAILABLE' | 'LOCKED';
+    reasons: string[];
+  }[];
+}
+
+interface OutboxHealth {
+  counts: Record<'PENDING' | 'DELIVERED' | 'NO_CONSUMER' | 'DEAD', number>;
+  oldestPendingAgeMs: number | null;
+  consumers: unknown[];
+}
+
+function OutboxHealthCard() {
+  const { data, error, updatedAt } = useApi<OutboxHealth>('/api/fabric/outbox?view=summary', { every: 20_000 });
+  const counts = data?.counts;
+  const age = data?.oldestPendingAgeMs;
+  const consumers = data?.consumers;
+  const valid = counts && [counts.PENDING, counts.DELIVERED, counts.NO_CONSUMER, counts.DEAD]
+    .every(count => Number.isSafeInteger(count) && count >= 0) && Array.isArray(consumers)
+    && (counts.PENDING === 0 ? age === null : typeof age === 'number' && Number.isFinite(age) && age >= 0);
+  if (error !== null || (updatedAt !== null && !valid)) {
+    return <Card title="NEXUS outbox health"><ErrorLine e="Outbox health is unavailable." /></Card>;
+  }
+  if (!valid) return <Card title="NEXUS outbox health"><Empty>Loading outbox health…</Empty></Card>;
+  return <Card title="NEXUS outbox health"><div className="kv">
+    <span>Pending</span><span className="mono">{fmt.num(counts.PENDING, 0)}</span>
+    <span>Oldest pending</span><span className="mono">{typeof age === 'number' ? fmt.ago(Date.now() - age) : 'None'}</span>
+    <span>Delivered</span><span className="mono">{fmt.num(counts.DELIVERED, 0)}</span>
+    <span>No consumer</span><span><Badge v={fmt.num(counts.NO_CONSUMER, 0)} tone={counts.NO_CONSUMER ? 'b-warn' : 'b-neutral'} /></span>
+    <span>Dead letters</span><span><Badge v={fmt.num(counts.DEAD, 0)} tone={counts.DEAD ? 'b-bad' : 'b-neutral'} /></span>
+    <span>Registered consumers</span><span>{consumers.length ? fmt.num(consumers.length, 0) : 'No consumers registered'}</span>
+  </div></Card>;
+}
 
 export function Bot() {
   const { data, error, reload } = useApi('/api/bot', { topics: ['bot', 'order', 'position', 'mode'], every: 20_000 });
+  const environments = useApi<TradingEnvironments>('/api/trading/environments', { topics: ['mode'], every: 20_000 });
   const [pw, setPw] = useState(''); const [amt, setAmt] = useState('10000');
   const s = data?.status; const a = data?.account;
+  const environmentStatus = environments.error ? undefined : environments.data?.environments;
+  const paper = environmentStatus?.find(environment => environment.environment === 'PAPER');
+  const live = environmentStatus?.find(environment => environment.environment === 'LIVE');
   return <Page title="Bot Account" sub="Dedicated paper strategy allocation (Part 26). The bot can never withdraw, transfer, change destinations, raise its allocation or its own permissions.">
     <ErrorLine e={error} />
     <div className="grid g4" style={{ marginBottom: 14 }}>
@@ -36,9 +76,16 @@ export function Bot() {
       <Stat k="Decisions / entries" v={`${s?.decisionsTotal ?? 0} / ${s?.entriesToday ?? 0}`} s={s?.lastError ? <span className="err">{s.lastError}</span> : 'no engine errors'} />
     </div>
     <div className="grid g2">
-      <Card title="Automation mode (Part 26.2)"><div className="col">
+      <Card title="Automation mode (Part 26.2)" right={paper && <>
+        <span className="hint">Paper environment</span>
+        <span role="status" aria-label="Paper execution status"><Badge v={paper.state} title={paper.reasons.join(', ')} /></span>
+      </>}><div className="col">
         {MODES.map(([m, l, d]) => <label key={m} className="row" style={{ alignItems: 'flex-start', opacity: m === 'BOUNDED_LIVE' ? 0.6 : 1 }}><input type="radio" name="mode" checked={s?.mode === m} readOnly style={{ marginTop: 3 }} /><div style={{ flex: 1 }}><b>{l}</b> <span className="muted">— {d}</span></div>
-          {s?.mode !== m && (m === 'BOUNDED_LIVE' ? <Badge v="LOCKED" /> : <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, ...stepUpBody(pw) } }); reload(); } finally { setPw(''); } }} />)}</label>)}
+          {m === 'BOUNDED_LIVE' ? <Badge v={live?.state ?? 'LOCKED'} /> : s?.mode !== m && <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, ...stepUpBody(pw) } }); reload(); environments.reload(); } finally { setPw(''); } }} />}</label>)}
+        {live?.reasons.length ? <ul className="hint" aria-label="Live execution blockers" style={{ margin: 0 }}>
+          {live.reasons.map(reason => <li key={reason}>{reason}</li>)}
+        </ul> : null}
+        {environments.error && <ErrorLine e="Execution status could not be loaded." />}
         <StepUp value={pw} onChange={setPw} />
         {!s?.policyAccepted && <div className="hint warn">Accept a risk policy in the <Link to="/risk">Risk Center</Link> before paper execution.</div>}
         <div className="row"><Action className="danger" label="Pause new orders" run={async () => { await api('/api/emergency/pause', { body: {} }); reload(); }} />
@@ -53,6 +100,8 @@ export function Bot() {
         <div className="tablewrap" style={{ maxHeight: 180 }}><table><tbody>{(data?.ledger ?? []).slice(0, 30).map((l: any) => <tr key={l.id}><td className="faint">{fmt.ago(l.ts)}</td><td><Badge v={l.kind} /></td><td className="num">{fmt.usd(l.amount)}</td><td className="muted">{l.note}</td></tr>)}</tbody></table></div>
       </div></Card>
     </div>
+    <div style={{ height: 14 }} />
+    <OutboxHealthCard />
     <div style={{ height: 14 }} />
     <Card title={`Pending approvals (${data?.pending.length ?? 0})`} flush>{data?.pending.length ? <table><thead><tr><th>Created</th><th>Instrument</th><th className="num">Qty</th><th className="num">Stop</th><th>Decision</th><th /></tr></thead><tbody>{data.pending.map((o: any) => <tr key={o.id}><td className="faint">{fmt.ago(o.created_at)}</td><td>{o.instrument.split(':')[2]}</td><td className="num">{o.qty}</td><td className="num">{fmt.px(o.stop_price)}</td><td><Link to={`/decision/${o.decision_id}`}>explain</Link></td><td className="row"><Action className="primary sm" label="Approve" run={async () => { const r = await api(`/api/orders/${o.id}/approve`, { body: {} }); if (!r.ok) throw new Error(r.reason); reload(); }} /><Action className="sm" label="Reject" run={async () => { await api(`/api/orders/${o.id}/reject`, { body: {} }); reload(); }} /></td></tr>)}</tbody></table> : <Empty>No orders awaiting approval. Approvals expire with their consensus window (5 min).</Empty>}</Card>
     <div style={{ height: 14 }} />

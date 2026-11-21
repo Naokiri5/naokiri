@@ -25,7 +25,7 @@ const handlers = new Set<Handler>(); let es: EventSource | null = null;
 export const streamState = { connected: false, lastEventAt: 0 };
 const TOPICS = ['ticker', 'candle', 'scan', 'consensus', 'decision', 'order', 'position', 'risk', 'alert', 'news', 'whale', 'bot', 'health', 'mode', 'notification', 'knowledge'];
 export function connectStream() {
-  if (es) return; es = new EventSource('/api/stream');
+  if (es) return; es = new EventSource('/api/stream?view=topics');
   es.onopen = () => { streamState.connected = true; };
   es.onerror = () => { streamState.connected = false; };
   for (const t of TOPICS) es.addEventListener(t, (ev) => { streamState.lastEventAt = Date.now(); let p: any = null; try { p = JSON.parse((ev as MessageEvent).data); } catch { /* */ } handlers.forEach((h) => h(t, p)); });

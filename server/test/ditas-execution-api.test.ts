@@ -19,7 +19,9 @@ describe('paper execution API boundary', () => {
     }
     for (const limit of [1, 500]) {
       const result = await app.inject({ url: `/api/ditas/execution?limit=${limit}`, headers: { cookie } });
-      expect(result.statusCode).toBe(200); expect(result.json()).toMatchObject({ label: 'PAPER', orders: [] });
+      expect(result.statusCode).toBe(200);
+      expect(result.json()).toMatchObject({ label: 'PAPER', orders: [],
+        summary: { orderCount: 0, filledOrderCount: 0, comparableOrderCount: 0, meanCostIncludingFeesBps: null } });
     }
   });
 
@@ -31,6 +33,10 @@ describe('paper execution API boundary', () => {
     const result = await app.inject({ url: '/api/ditas/execution?limit=1', headers: { cookie } });
     expect(result.statusCode).toBe(200);
     expect(result.json().orders.map((o: { orderId: string }) => o.orderId)).toEqual(['new']);
+    expect(result.json()).toMatchObject({
+      orders: [{ orderId: 'new', feeBps: null, costIncludingFeesBps: null, liquidity: { maker: 0, taker: 0, unknown: 0 } }],
+      summary: { orderCount: 1, filledOrderCount: 0, comparableOrderCount: 0, meanCostIncludingFeesBps: null },
+    });
   });
 
 });

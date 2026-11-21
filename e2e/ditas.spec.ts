@@ -84,9 +84,14 @@ test('execution quality displays paper fills and preserves unknown and stale sta
     if (response === 'error') return route.fulfill({ status: 503, json: { error: 'Execution records unavailable' } });
     return route.fulfill({ json: {
       label: 'PAPER', limitations: ['Local timestamps do not measure exchange acknowledgement latency.'],
+      summary: response === 'empty'
+        ? { orderCount: 0, filledOrderCount: 0, comparableOrderCount: 0, meanCostIncludingFeesBps: null }
+        : { orderCount: 2, filledOrderCount: 1, comparableOrderCount: 1, meanCostIncludingFeesBps: 120 },
       orders: response === 'empty' ? [] : [
-        { orderId: 'order-filled', instrumentId: 'fixture:BTC', strategyId: 'trend', side: 'BUY', purpose: 'ENTRY', status: 'PARTIALLY_FILLED', requestedQty: 2, filledQty: 1, averageFillPrice: 101, expectedPrice: 100, adverseSlippageBps: 100, fees: 0.2, fillCount: 1, firstFillDelayMs: 5, lastRecordedFillDelayMs: 10, rejectReason: null },
-        { orderId: 'order-rejected', instrumentId: 'fixture:ETH', strategyId: null, side: 'SELL', purpose: 'EXIT', status: 'REJECTED', requestedQty: 1, filledQty: 0, averageFillPrice: null, expectedPrice: null, adverseSlippageBps: null, fees: 0, fillCount: 0, firstFillDelayMs: null, lastRecordedFillDelayMs: null, rejectReason: 'Insufficient depth' }
+        { orderId: 'order-filled', instrumentId: 'fixture:BTC', strategyId: 'trend', side: 'BUY', purpose: 'ENTRY', status: 'PARTIALLY_FILLED', requestedQty: 2, filledQty: 1, averageFillPrice: 101, expectedPrice: 100, adverseSlippageBps: 100, fees: 0.2, fillCount: 1, firstFillDelayMs: 5, lastRecordedFillDelayMs: 10, rejectReason: null,
+          feeBps: 19.8, costIncludingFeesBps: 120, liquidity: { maker: 0, taker: 1, unknown: 0 } },
+        { orderId: 'order-rejected', instrumentId: 'fixture:ETH', strategyId: null, side: 'SELL', purpose: 'EXIT', status: 'REJECTED', requestedQty: 1, filledQty: 0, averageFillPrice: null, expectedPrice: null, adverseSlippageBps: null, fees: 0, fillCount: 0, firstFillDelayMs: null, lastRecordedFillDelayMs: null, rejectReason: 'Insufficient depth',
+          feeBps: null, costIncludingFeesBps: null, liquidity: { maker: 0, taker: 0, unknown: 0 } }
       ]
     } });
   });
@@ -94,11 +99,17 @@ test('execution quality displays paper fills and preserves unknown and stale sta
   await expect(page.getByRole('heading', { name: 'DITAS · Decision intelligence' })).toBeVisible();
   expect(requests).toBe(0);
   await page.getByRole('tab', { name: 'Execution quality' }).click();
+  await expect(page.getByText('1 of 2 recent orders have recorded fills (1 with comparable costs).')).toBeVisible();
+  const mean = page.getByText(/Mean cost including fees per comparable order/);
+  await expect(mean).toContainText('120.0 bps');
   const filled = page.getByRole('row').filter({ hasText: 'order-filled' });
   await expect(filled).toContainText('trend');
   await expect(filled).toContainText('101.0000');
   await expect(filled).toContainText('100.0 bps');
   await expect(filled).toContainText('$0.2000');
+  await expect(filled).toContainText('19.8 bps of fill notional');
+  await expect(filled).toContainText('120.0 bps');
+  await expect(filled).toContainText('Maker 0 · Taker 1 · Unknown 0');
   await expect(filled).toContainText('1 fill');
   await expect(filled).toContainText('5 ms');
   await expect(filled).toContainText('10 ms');
@@ -108,6 +119,7 @@ test('execution quality displays paper fills and preserves unknown and stale sta
   await expect(rejected).toContainText('0 fills');
   await expect(rejected.getByRole('cell').nth(5)).toHaveText('—');
   await expect(rejected.getByRole('cell').nth(7)).toHaveText('n/a');
+  await expect(rejected.getByRole('cell').nth(9)).toHaveText('n/a');
   await expect(page.getByText(/Fill delays are local recording delays/)).toBeVisible();
   response = 'error';
   await page.getByRole('button', { name: 'Refresh' }).click();
@@ -117,6 +129,7 @@ test('execution quality displays paper fills and preserves unknown and stale sta
   response = 'empty';
   await page.getByRole('button', { name: 'Refresh' }).click();
   await expect(page.getByText('No paper orders yet.')).toBeVisible();
+  await expect(mean).toContainText('Unavailable');
   await expect(page.getByText('Refresh failed; the previous records are shown.')).toHaveCount(0);
 });
 

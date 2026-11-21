@@ -42,7 +42,7 @@ describe('streaming books wired into the market fabric', () => {
     expect(streamFresh(inst.id)).toBe(true);
 
     FakeWS.last!.send({ e: 'depthUpdate', E: Date.now(), s: 'STRM2USDT', U: 51, u: 52, b: [[String(last * 0.999), '9']], a: [] });
-    expect(market.deep.get(inst.id)!.book!).toMatchObject({ lastUpdateId: 52 });
+    expect(market.deep.get(inst.id)!.book!).toMatchObject({ lastUpdateId: 52, source: 'BINANCE_SPOT_DEPTH_STREAM' });
     expect(market.deep.get(inst.id)!.book!.bids[0][1]).toBe(9);
 
     // Same symbol set: the existing connection is kept, not restarted.

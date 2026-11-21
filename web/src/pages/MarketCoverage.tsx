@@ -7,6 +7,13 @@ interface Clock {
   offset: string;
 }
 
+const DATA_USAGE_LABELS = {
+  PAPER_SIMULATION_INPUT: 'Paper simulation input',
+  RESEARCH_ONLY: 'Research only',
+  REFERENCE_ONLY: 'Reference only',
+  UNAVAILABLE: 'Unavailable',
+};
+
 interface Coverage {
   asOf: number;
   displayClock: Clock;
@@ -14,6 +21,7 @@ interface Coverage {
   utcAnalysisSession: { label: string; startHourUtc: number; endHourUtc: number };
   markets: Array<{
     market: string;
+    dataUsage?: keyof typeof DATA_USAGE_LABELS;
     coverage: string;
     schedule: string;
     sources: Array<{ id: string; name: string; status: string }>;
@@ -31,7 +39,9 @@ export function MarketCoverage() {
         <div className="tablewrap"><table>
           <thead><tr><th>Market</th><th>Data coverage</th><th>Schedule</th><th>Provider status</th></tr></thead>
           <tbody>{data.markets.map(row => <tr key={row.market}>
-            <td>{row.market}</td><td>{row.coverage}</td><td>{row.schedule}</td>
+            <td>{row.market}</td>
+            <td>{row.dataUsage && <Badge v={DATA_USAGE_LABELS[row.dataUsage]} />} <span>{row.coverage}</span></td>
+            <td>{row.schedule}</td>
             <td>{row.sources.length ? row.sources.map(source => <div key={source.id}>{source.name} <Badge v={source.status} /></div>) : 'Unavailable'}</td>
           </tr>)}</tbody>
         </table></div>

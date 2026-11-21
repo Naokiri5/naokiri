@@ -42,7 +42,10 @@ export async function klines(symbol: string, interval: string, limit = 300): Pro
   return raw.map((k) => ({ t: +k[0], o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5], qv: +k[7], n: +k[8], tbv: +k[9], closeTime: +k[6] })); // numeric: a string timestamp would concatenate in candle-time math (MIA-PROV-004)
 }
 /** ts is stamped when the request STARTS (age is never understated by latency); lastUpdateId orders snapshots. */
-export interface Book { bids: [number, number][]; asks: [number, number][]; ts: number; lastUpdateId?: number }
+export interface Book {
+  bids: [number, number][]; asks: [number, number][]; ts: number; lastUpdateId?: number;
+  source?: 'BINANCE_SPOT_REST' | 'BINANCE_SPOT_DEPTH_STREAM';
+}
 export async function depth(symbol: string, limit = 100): Promise<Book> {
   const ts = Date.now();
   const raw = await fetchProvider('binance', `${BASE}/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
@@ -56,5 +59,13 @@ export async function depth(symbol: string, limit = 100): Promise<Book> {
 export interface AggTrade { id: number; price: number; qty: number; ts: number; buyerIsMaker: boolean }
 export async function aggTrades(symbol: string, limit = 500): Promise<AggTrade[]> {
   const raw: any[] = await fetchProvider('binance', `${BASE}/aggTrades?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
-  return raw.map((a) => ({ id: +a.a, price: +a.p, qty: +a.q, ts: +a.T, buyerIsMaker: a.m === true }));
+  const trades: AggTrade[] = [];
+  for (const a of raw) {
+    if (!a || !Number.isSafeInteger(a.a) || a.a < 0 || !Number.isSafeInteger(a.T) || a.T <= 0 || typeof a.m !== 'boolean') continue;
+    if (!['string', 'number'].includes(typeof a.p) || !['string', 'number'].includes(typeof a.q)) continue;
+    const price = Number(a.p), qty = Number(a.q);
+    if (!Number.isFinite(price * qty) || price <= 0 || qty <= 0) continue;
+    trades.push({ id: a.a, price, qty, ts: a.T, buyerIsMaker: a.m });
+  }
+  return trades;
 }

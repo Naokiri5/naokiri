@@ -1,4 +1,6 @@
 import { validateCandles } from '../chart/analysis.js';
+import { readSpotTradeTape } from '../whales/prints.js';
+import { measureDepthExhaustion } from './depthExhaustion.js';
 import { bookAge, bookImpact, QUALITY_LIMITS, walkBook } from './quality.js';
 import { market, type DeepState } from './store.js';
 import { INTERVAL_MS, type Candle } from './types.js';
@@ -138,5 +140,6 @@ export function readCexActivity(instrumentId: string, asOf = Date.now(), request
     volume: [unavailableVolume('5m', 'NO_CANDLE_FEED'), ...WINDOWS.map(spec =>
       supported ? readVolumeWindow(spec, deep, asOf) : unavailableVolume(spec.window, 'NO_CANDLE_FEED'))],
     book: readBook(deep, asOf, requestedSellBaseQty ?? null),
+    depthExhaustion: measureDepthExhaustion(deep?.book ?? null, supported ? readSpotTradeTape(instrumentId, asOf) : null, asOf),
   };
 }

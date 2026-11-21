@@ -79,12 +79,58 @@ test('BOUNDED LIVE cannot be enabled', async () => {
   const live = page.locator('label:has-text("Bounded live")');
   await expect(live.getByRole('button', { name: 'Switch' })).toHaveCount(0);
   await expect(live.getByText('LOCKED', { exact: true })).toBeVisible();
+  await expect(page.getByText(/NOT_CERTIFIED: no live venue adapter or isolated signer/)).toBeVisible();
+  await expect(page.getByLabel('Paper execution status')).toHaveText('ACTIVE');
   // The server still refuses it directly, even with the correct passphrase (the authoritative check).
   const r = await page.evaluate(async (pw) => { const res = await fetch('/api/control', { method: 'POST', headers: { 'content-type': 'application/json', 'x-mia-csrf': '1' }, body: JSON.stringify({ mode: 'BOUNDED_LIVE', password: pw }) }); return { status: res.status, body: await res.json() }; }, PW);
   expect(r.status).toBe(400); expect(r.body.error).toMatch(/BOUNDED_LIVE is locked/); // SAFE-01: refused in the core
   await page.reload(); await expect(page.locator('.mode')).toHaveText('PAPER');
   // the server's refusal (HTTP 400) is the expected outcome; the browser logs it as a failed resource
   const extra = errors.splice(before); expect(extra.every((e) => /status of 400/.test(e)), extra.join('\n')).toBe(true);
+});
+
+test('Bot Account shows measured NEXUS outbox health and drops stale counts after an error', async ({ browser }) => {
+  const ctx = await browser.newContext({ storageState: await page.context().storageState() });
+  try {
+    await ctx.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
+    const p = await ctx.newPage();
+    const path = /\/api\/fabric\/outbox\?view=summary$/;
+    await p.clock.install();
+    await p.goto('/bot');
+    const card = p.locator('section').filter({ has: p.getByRole('heading', { name: 'NEXUS outbox health' }) });
+    await expect(card).toContainText('No consumers registered');
+    await expect(card).toContainText(/Oldest pending\s*None/);
+
+    let unavailable = false;
+    await p.route(path, route => {
+      expect(route.request().method()).toBe('GET');
+      return unavailable ? route.fulfill({ status: 503, json: { error: 'internal endpoint details' } }) : route.fulfill({ json: {
+        counts: { PENDING: 3, DELIVERED: 5, NO_CONSUMER: 2, DEAD: 1 }, oldestPendingAgeMs: 45_000,
+        deadLetters: [{ lastError: 'internal relay failure details' }], consumers: [{ id: 'fixture', topics: ['ditas.outcome.recorded.v1'] }],
+      } });
+    });
+    await p.clock.fastForward('00:20');
+    await expect(card).toContainText(/Pending\s*3/);
+    await expect(card).toContainText(/Oldest pending\s*45s ago/);
+    await expect(card).toContainText(/Delivered\s*5/);
+    await expect(card).toContainText(/No consumer\s*2/);
+    await expect(card).toContainText(/Dead letters\s*1/);
+    await expect(card).toContainText(/Registered consumers\s*1/);
+    await expect(card).not.toContainText('internal relay failure details');
+    await expect(card.getByRole('button')).toHaveCount(0);
+
+    unavailable = true;
+    await p.clock.fastForward('00:20');
+    await expect(card.getByRole('alert')).toHaveText('Outbox health is unavailable.');
+    await expect(card).not.toContainText('Pending');
+    await expect(card).not.toContainText('internal endpoint details');
+
+    unavailable = false;
+    await p.clock.fastForward('00:20');
+    await expect(card).toContainText(/Pending\s*3/);
+  } finally {
+    await ctx.close();
+  }
 });
 
 test('status ribbon goes STALE (never green) when the server stops answering, then recovers', async ({ browser }) => {
@@ -197,6 +243,10 @@ test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', 
         bidShare1pct: 0.75, exit: { conservativeBaseCapacity: 12 },
         impactCurve: [{ side: 'sell', requestedQuote: 50000, filledFully: false }],
       },
+      depthExhaustion: { status: 'MEASURED', pressure: 'ASK_DEPTH_AND_SELLING', bookSource: 'BINANCE_SPOT_DEPTH_STREAM',
+        bookAt: 43200000, bookUpdateId: 220, bandBps: 15, depthRatioThreshold: 3, bidDepthQuote: 200, askDepthQuote: 810,
+        tradeSource: 'BINANCE_SPOT_AGG_TRADES', polledAt: 43200100, flowStart: 43197000, flowEndExclusive: 43200000,
+        firstCoverageId: 10, lastCoverageId: 13, tradeCount: 2, takerDeltaQuote: -300 },
     },
     featuresResearch: {
       candleOpenAt: 39600000, wma20: 104, hma20: 106, keltner: null, parabolicSar: null,
@@ -231,6 +281,8 @@ test('terminal displays timeframe conflicts, anchored VWAP and chart evidence', 
   await expect(activity.getByRole('row', { name: /5m/ })).toContainText('Unavailable');
   await expect(activity.getByRole('row', { name: /1h/ })).toContainText('2.00×');
   await expect(page.getByRole('row', { name: /sell 50,000/ })).toContainText('Insufficient visible depth');
+  await expect(page.getByText('Ask depth and taker selling aligned')).toBeVisible();
+  await expect(page.getByText('-300.00 USDT · 2 aggregate trades')).toBeVisible();
   await page.unroute('**/api/instrument/CHARTFIXTURE?interval=1h');
 });
 
@@ -283,6 +335,8 @@ test('market coverage uses the saved IANA timezone and shows unsupported venues'
   await expect(page.getByText(/Asia\/Manila/)).toBeVisible();
   await expect(page.getByRole('row', { name: /U.S. equities/ })).toContainText('PENDING CREDENTIALS');
   await expect(page.getByRole('row', { name: /Tokenized equities/ })).toContainText('Unavailable');
+  await expect(page.getByRole('row', { name: /Forex/ })).toContainText('Reference only');
+  await expect(page.getByRole('row', { name: /DEX tokens and memecoins/ })).toContainText('Research only');
   await page.goto('/calendar');
   await expect(page.getByText('Asia/Manila', { exact: true })).toBeVisible();
 });

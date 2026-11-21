@@ -43,7 +43,11 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     const coverage = (await app.inject({ url: '/api/markets/coverage', headers: H() })).json();
     expect(coverage.displayClock.timeZone).toBe('Asia/Manila');
     expect(coverage.markets).toEqual(expect.arrayContaining([
-      expect.objectContaining({ market: 'U.S. equities', sources: [expect.objectContaining({ status: 'PENDING_CREDENTIALS' })] }),
+      expect.objectContaining({ market: 'CEX crypto spot', dataUsage: 'PAPER_SIMULATION_INPUT' }),
+      expect.objectContaining({ market: 'DEX tokens and memecoins', dataUsage: 'RESEARCH_ONLY' }),
+      expect.objectContaining({ market: 'Forex', dataUsage: 'REFERENCE_ONLY' }),
+      expect.objectContaining({ market: 'U.S. equities', dataUsage: 'UNAVAILABLE', sources: [expect.objectContaining({ status: 'PENDING_CREDENTIALS' })] }),
+      expect.objectContaining({ market: 'ETFs', dataUsage: 'UNAVAILABLE' }),
       expect.objectContaining({ market: 'Tokenized equities', sources: [] }),
     ]));
     expect((await app.inject({ url: '/api/risk/stress', headers: H() })).json()).toMatchObject({

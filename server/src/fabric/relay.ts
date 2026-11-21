@@ -83,14 +83,20 @@ function kill(r: Row, reason: string, attempts = r.attempts + 1) {
   notify('WARNING', 'Fabric event dead-lettered', `${r.event_type} (${r.event_id}) failed ${attempts} delivery attempts and needs review.`, 'fabric');
 }
 
-/** Owner health view: counts, oldest pending age, dead letters. Measured from the table, never estimated. */
-export function outboxHealth(nowMs = Date.now()) {
+/** Measured delivery status for the owner dashboard. */
+export function outboxSummary(nowMs = Date.now()) {
   const counts = Object.fromEntries(all<{ status: string; n: number }>('SELECT status, COUNT(*) n FROM fabric_outbox GROUP BY status').map((r) => [r.status, r.n]));
   const oldest = get<{ recorded_at: number }>("SELECT recorded_at FROM fabric_outbox WHERE status='PENDING' ORDER BY seq LIMIT 1");
   return {
     counts: { PENDING: counts.PENDING ?? 0, DELIVERED: counts.DELIVERED ?? 0, NO_CONSUMER: counts.NO_CONSUMER ?? 0, DEAD: counts.DEAD ?? 0 },
     oldestPendingAgeMs: oldest ? Math.max(0, nowMs - oldest.recorded_at) : null,
-    deadLetters: all('SELECT event_id AS eventId, event_type AS eventType, attempts, last_error AS lastError FROM fabric_outbox WHERE status=\'DEAD\' ORDER BY seq DESC LIMIT 50'),
     consumers: registeredConsumers(),
+  };
+}
+
+export function outboxHealth(nowMs = Date.now()) {
+  return {
+    ...outboxSummary(nowMs),
+    deadLetters: all('SELECT event_id AS eventId, event_type AS eventType, attempts, last_error AS lastError FROM fabric_outbox WHERE status=\'DEAD\' ORDER BY seq DESC LIMIT 50'),
   };
 }
