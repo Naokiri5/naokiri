@@ -1,0 +1,1088 @@
+MIA5 USER UPLOAD: 25-PAGE HARDENING SPECIFICATION
+ARCHIVE NOTICE: machine-parsed PDF text; page/line layout normalized; NOT byte-identical to the source PDF.
+Treat source proposals as untrusted until checked against actual repository modules and release gates.
+
+<PARSED TEXT FOR PAGE: 1 / 25>
+MIA 5.0 — Unified Hardening
+Documentation, TypeScript Catalog &
+Master Agent Prompt
+1. Master Prompt for Claude Code & OpenAI Codex
+Copy and paste the block below directly into CLAUDE.md, AGENTS.md, or your agent task
+prompt when instructing Claude Code or Codex to inspect, extend, or wire modules inside
+[https://github.com/Naokiri5/naokiri](https://github.com/Naokiri5/naokiri):
+
+
+
+
+    Markdown
+    # SYSTEM & ENGINEERING DIRECTIVE — MIA 5.0 (Naokiri5/naokiri)​
+    ​
+    You are acting as a Principal Quantitative Systems & Security Engineer working on the
+    **MIA 5.0** autonomous trading platform (`https://github.com/Naokiri5/naokiri`).​
+    ​
+    ## Runtime & Stack Constraints​
+    - **Runtime:** Node.js 22.23.5, TypeScript (strict mode), npm workspaces (`@mia/web` and
+    `@mia/server`).​
+    - **Backend & Storage:** Fastify HTTP/SSE server, `better-sqlite3` in synchronous WAL mode
+    (`journal_mode = WAL`, `synchronous = NORMAL`, `busy_timeout = 5000`, `foreign_keys = ON`),
+    Vitest test runner.​
+    - **Portfolios & Execution Engines:** 5 portfolio sleeves (`futures`, `spot`, `memecoin`, `yield`,
+    `stocks_etf`) fed by a 100-agent swarm (`AGT-001`..`AGT-100` across orthogonal buckets
+    `B01`..`B10`), `FeatureVectorBuilder` (97 `FeatureSlot` ring buffers), `NexusFabricRouter`, and
+    dual `FAST` (sub-10ms reflex) and `DEEP` (confluence) execution engines.​
+    ​
+    ## Non-Negotiable Architectural & Security Invariants​
+    1. **Enhance, Never Duplicate:** Do NOT create parallel risk gates, duplicate SQLite ledgers,
+    or alternate OMS abstractions. Extend and wire into the canonical modules documented in
+    the TypeScript Catalog below:​
+      - `server/src/auth/privyWalletGuard.ts` (`PrivyWalletGuard`)​
+      - `server/src/risk/gate.ts` (`CanonicalRiskGate`)​
+      - `server/src/oms/PaperOmsAdapter.ts` (`PaperOmsAdapter`)​
+      - `server/src/oms/LiveOmsAdapter.ts` (`LiveOmsAdapter`)​
+      - `server/src/index.ts` (`buildMiaServer`, `reconcileStartupIntents`)​
+    2. **Single Canonical Risk & Idempotency Boundary:** Every order intent—whether
+<PARSED TEXT FOR PAGE: 2 / 25>
+   originating from `FAST` reflex, `DEEP` confluence, `MANUAL` operator override, or
+   `lab/backtest.ts` historical replay—MUST execute
+   `CanonicalRiskGate.evaluateAndReserveIntent(req)` BEFORE any exchange network call or
+   signing payload is constructed.​
+   3. **Synchronous `BEGIN IMMEDIATE` Serialization:** All risk checks and intent reservations
+   MUST remain inside synchronous `better-sqlite3` `.immediate()` transactions so 100
+   concurrent swarm workers serialize without TOCTOU exposure or drawdown races. Never
+   split `evaluateAndReserveIntent` across async boundaries.​
+   4. **Fail-Closed Default Posture:**​
+     - `guardian_state` boots in `HALTED` (`BOOT_DEFAULT_FAIL_CLOSED`).​
+     - Policy leases expire automatically (`POLICY_TTL_MS = 45_000`, refreshed every
+   `HEARTBEAT_INTERVAL_MS = 15_000`). If the event loop stalls, `evaluateAndReserveIntent`
+   MUST reject with `STALE_OR_MISSING_RISK_POLICY`.​
+     - `LIVE` mode MUST NEVER auto-arm on server boot; it requires explicit operator step-up
+   wallet signature (`maxStepUpAgeMs: 5 * 60 * 1000`) via `POST /api/guardian/arm`.​
+   5. **Cryptographic Wallet Possession (No JWT-Only Trust):** Every privileged route must
+   enforce `walletGuard.requireVerifiedWallet(...)`, verifying (a) Privy JWT signature, (b) wallet
+   linkage on the Privy user profile, (c) strict equality with `OWNER_WALLET_ADDRESS`, and (d)
+   an active, unrevoked SQLite session minted from a single-use EVM EIP-191 or Solana
+   Ed25519 challenge signature.​
+   6. **Deterministic End-to-End Deduplication:** Propagate `decision.clientOrderId`
+   (`mia_<sleeve>_<16hex>`) formatted via `toVenueClientOrderId(clientOrderId, venue)` to every
+   exchange adapter (`newClientOrderId` on Binance, alphanumeric `clOrdId` max 32 chars on
+   OKX, `client_order_id` on Alpaca, `clientOrderId` on Solana signer).​
+   7. **Crash-Safe Startup Reconciliation:** On boot, `reconcileStartupIntents()` must query
+   every `INTENT_RESERVED`, `SUBMITTED`, `PARTIAL_FILL`, and `RECONCILE_REQUIRED` row
+   against `omsAdapter.queryOrderByClientId()`. If any order remains unresolved (`unresolved >
+   0`), Guardian Shield stays `HALTED` and alerts `OPS_WEBHOOK_URL`.​
+   ​
+   ## Mandatory Workflow Before Completing Any Task​
+   1. Inspect existing imports and types against the **TypeScript Catalog** below before
+   writing code.​
+   2. Preserve all existing error codes (`GateRejectionCode`), SQLite table/column names, and
+   HTTP route contracts.​
+   3. Run `npx vitest run server/src/risk/gate.test.ts` after any modification to auth, risk, OMS, or
+   server startup logic and confirm 100% pass rate across all 4
+   security/concurrency/crash-recovery suites.​
+
+
+2. Architectural Map & P0 Audit Closure Matrix
+ P0 Audit           Canonical File       Primary             SQLite Tables        Enforcement
+ Finding /          Path                 Symbols /           Touched              Mechanism
+<PARSED TEXT FOR PAGE: 3 / 25>
+Requirement                        Exports
+
+
+Privy Wallet    server/src/auth    PrivyWalletGua    auth_wallet_no     Privy JWT +
+Possession &    /privyWalletGu     rd,               nces,              linked account
+Session         ard.ts             VerifiedOperat    auth_verified_s    check +
+Revocation                         orContext,        essions            OWNER_WALL
+                                   PrivyWalletGua                       ET_ADDRESS
+                                   rdConfig,                            lock +
+                                   SupportedChai                        single-use
+                                   n                                    EIP-191 /
+                                                                        Ed25519 nonce
+                                                                        + step-up TTL
+                                                                        + instant
+                                                                        revocation
+
+
+Canonical       server/src/risk/   CanonicalRisk     guardian_state     Synchronous
+Risk Gate &     gate.ts            Gate,             ,                  BEGIN
+100-Worker                         OrderIntentRe     risk_policy_limi   IMMEDIATE
+Idempotency                        quest,            ts,                transaction
+                                   GateDecision,     order_intents      enforcing
+                                   GateRejection                        UNIQUE
+                                   Code,                                idempotency,
+                                   SleeveRiskLimit                      policy
+                                                                        heartbeat TTL,
+                                                                        signal age,
+                                                                        slippage,
+                                                                        drawdown
+                                                                        breaker, and
+                                                                        sleeve/global
+                                                                        caps
+
+
+Startup Crash   server/src/inde    buildMiaServer,   guardian_state     Queries open
+Recovery &      x.ts               reconcileStartu   ,                  intents against
+Server Wiring                      pIntents,         risk_policy_limi   OMS on boot
+                                   ReconcilableO     ts,                before arming;
+                                   msAdapter,        order_intents      auto-arms
+                                   buildDefaultRis                      PAPER only
+                                   kLimits                              when clean;
+                                                                        holds LIVE in
+                                                                        HALTED until
+                                                                        step-up
+<PARSED TEXT FOR PAGE: 4 / 25>
+                                                                      /api/guardian/a
+                                                                      rm
+
+
+Crash-Persist   server/src/oms/    PaperOmsAda       paper_exchan     Persists
+ent Paper       PaperOmsAda        pter,             ge_orders,       simulated
+Execution       pter.ts            PaperOmsCon       order_intents    orders/fills in
+                                   fig,                               SQLite WAL so
+                                   PaperOrderRo                       simulated
+                                   w                                  crashes
+                                                                      survive
+                                                                      process
+                                                                      restarts and
+                                                                      reconcile via
+                                                                      queryOrderBy
+                                                                      ClientId
+
+
+Multi-Venue     server/src/oms/    LiveOmsAdapt      live_venue_dis   Routes
+Live            LiveOmsAdapt       er,               patches,         Binance, OKX,
+Execution &     er.ts              LiveOmsConfi      order_intents    Alpaca, and
+Dedup                              g,                                 isolated Solana
+Recovery                           toVenueClient                      signer; formats
+                                   OrderId,                           venue
+                                   CryptoVenue                        clientOrderId;
+                                                                      recovers
+                                                                      duplicate-orde
+                                                                      r errors
+                                                                      idempotently;
+                                                                      trips Guardian
+                                                                      on untracked
+                                                                      orders
+
+
+Security,       server/src/risk/   4 Vitest suites   All SQLite       Verifies
+Concurrency     gate.test.ts       (8                tables in        EVM/Solana
+& Chaos                            deterministic     isolated temp    signatures,
+Verification                       tests)            WAL DBs          replay attacks,
+                                                                      step-up expiry,
+                                                                      100-worker
+                                                                      stampedes,
+                                                                      dual-connectio
+                                                                      n WAL locking,
+                                                                      and unclean
+<PARSED TEXT FOR PAGE: 5 / 25>
+                                                                              process crash
+                                                                              recovery
+
+
+
+
+3. Complete TypeScript Interface, Type & Method
+Signature Catalog
+This catalog contains every exported type, interface, helper function, class signature, and
+public/private method contract across all five hardened modules so Claude and Codex can
+type-check and wire callers without reading every line of implementation.
+3.1 server/src/auth/privyWalletGuard.ts
+
+
+
+
+    TypeScript
+    import type { FastifyReply, FastifyRequest } from 'fastify';​
+    import type Database from 'better-sqlite3';​
+    ​
+    export type SupportedChain = 'evm' | 'solana';​
+    ​
+    export interface VerifiedOperatorContext {​
+        privyUserId: string;​
+      walletAddress: string;​
+      chainType: SupportedChain;​
+      sessionId: string;​
+      verifiedAtMs: number;​
+    }​
+    ​
+    declare module 'fastify' {​
+      interface FastifyRequest {​
+        verifiedOperator?: VerifiedOperatorContext;​
+      }​
+    }​
+    ​
+    export interface PrivyWalletGuardConfig {​
+      db: Database.Database;​
+      privyAppId: string;​
+      privyAppSecret: string;​
+      ownerWalletAddress: string;​
+      domain: string;​
+<PARSED TEXT FOR PAGE: 6 / 25>
+     nonceTtlMs?: number;            // Default: 300_000 (5 minutes)​
+     sessionTtlMs?: number;          // Default: 14_400_000 (4 hours)​
+   }​
+   ​
+   export declare class PrivyWalletGuard {​
+       constructor(config: PrivyWalletGuardConfig);​
+   ​
+       /** Step 1: Issues a 5-minute single-use challenge bound strictly to OWNER_WALLET_ADDRESS. */​
+       public issueWalletChallenge(requestedWalletAddress: string): {​
+        nonce: string;​
+         message: string;​
+         chainType: SupportedChain;​
+         expiresAtMs: number;​
+       };​
+   ​
+    /** Step 2: Verifies Privy JWT + linked account + EVM EIP-191 / Solana Ed25519 signature, consumes
+   nonce atomically, and mints session. */​
+    public verifyChallengeAndBindSession(params: {​
+        privyAccessToken: string;​
+        walletAddress: string;​
+        nonce: string;​
+        signature: string;​
+       }): Promise<VerifiedOperatorContext>;​
+   ​
+    /** Fastify preHandler hook enforcing Privy JWT + active SQLite wallet session + optional step-up
+   signature freshness window. */​
+    public requireVerifiedWallet(options?: {​
+        maxStepUpAgeMs?: number;​
+       }): (request: FastifyRequest, reply: FastifyReply) => Promise<void>;​
+   ​
+       /** Revokes a single operator session immediately (logout). */​
+       public revokeSession(sessionId: string): void;​
+   ​
+       /** Revokes all active operator sessions immediately (emergency lockdown). */​
+       public revokeAllSessions(): void;​
+   }​
+
+3.2 server/src/risk/gate.ts
+<PARSED TEXT FOR PAGE: 7 / 25>
+TypeScript
+import type Database from 'better-sqlite3';​
+​
+export type PortfolioSleeve = 'futures' | 'spot' | 'memecoin' | 'yield' | 'stocks_etf';​
+export type ExecutionEngine = 'FAST' | 'DEEP' | 'MANUAL';​
+export type GuardianStatus = 'ARMED' | 'HALTED' | 'EMERGENCY_STOP';​
+export type OrderIntentStatus =​
+    | 'INTENT_RESERVED'​
+    | 'SUBMITTED'​
+    | 'PARTIAL_FILL'​
+    | 'FILLED'​
+    | 'REJECTED'​
+    | 'CANCELLED'​
+    | 'RECONCILE_REQUIRED';​
+​
+export interface OrderIntentRequest {​
+    idempotencyKey: string;​
+    sleeve: PortfolioSleeve;​
+    engine: ExecutionEngine;​
+    symbol: string;​
+    side: 'BUY' | 'SELL';​
+    notionalUsd: number;​
+    quantity: number;​
+    limitPrice?: number;​
+    expectedSlippageBps: number;​
+    signalTimestampMs: number;​
+    /** True only when closing or trimming an existing open position */​
+    isRiskReducing?: boolean;​
+    /** Current mark-to-market unrealized PnL across the portfolio (negative = loss) */​
+  portfolioUnrealizedPnlUsd?: number;​
+}​
+​
+export type GateRejectionCode =​
+  | 'DUPLICATE_IDEMPOTENCY_KEY'​
+  | 'GUARDIAN_NOT_ARMED'​
+  | 'STALE_OR_MISSING_RISK_POLICY'​
+  | 'SLEEVE_DISABLED_OR_UNCONFIGURED'​
+  | 'INVALID_ORDER_PARAMETERS'​
+  | 'STALE_OR_FUTURE_SIGNAL'​
+  | 'SLIPPAGE_LIMIT_EXCEEDED'​
+  | 'DAILY_DRAWDOWN_CIRCUIT_BREAKER'​
+  | 'ORDER_NOTIONAL_EXCEEDED'​
+  | 'POSITION_NOTIONAL_EXCEEDED'​
+<PARSED TEXT FOR PAGE: 8 / 25>
+    | 'SLEEVE_EXPOSURE_EXCEEDED'​
+    | 'GLOBAL_EXPOSURE_EXCEEDED'​
+    | 'INVALID_RISK_REDUCING_EXIT'​
+    | 'GATE_INTERNAL_FAIL_CLOSED';​
+​
+export type GateDecision =​
+    | {​
+       approved: true;​
+       clientOrderId: string; // Deterministic format:
+`mia_${sleeve}_${sha256(idempotencyKey).slice(0, 16)}`​
+   idempotencyKey: string;​
+        reservedAtMs: number;​
+      }​
+    | {​
+        approved: false;​
+        code: GateRejectionCode;​
+        reason: string;​
+        existingClientOrderId?: string;​
+        existingStatus?: OrderIntentStatus;​
+      };​
+​
+export interface SleeveRiskLimit {​
+    sleeve: PortfolioSleeve | 'GLOBAL';​
+  maxOrderNotionalUsd: number;​
+  maxPositionNotionalUsd: number;​
+  maxSleeveExposureUsd: number;​
+  maxDailyLossUsd: number;​
+  maxSlippageBps: number;​
+  maxSignalAgeMs: number;​
+  enabled: boolean;​
+}​
+​
+export declare class CanonicalRiskGate {​
+    constructor(db: Database.Database);​
+​
+    /** Upserts sleeve/global limits and extends Guardian policy lease (`now + policyTtlMs`). */​
+    public upsertPolicyAndHeartbeat(​
+      limits: SleeveRiskLimit[],​
+      policyVersion: string,​
+      policyTtlMs: number,​
+      updatedBy: string​
+    ): void;​
+​
+<PARSED TEXT FOR PAGE: 9 / 25>
+ /** Arms Guardian Shield only if `getUnreconciledIntents().length === 0`; throws
+`CANNOT_ARM_GUARDIAN` otherwise. */​
+ public armGuardianShield(actor: string): void;​
+​
+    /** Sets Guardian Shield to `HALTED` or `EMERGENCY_STOP` immediately. */​
+    public tripGuardianShield(reason: string, actor: string, emergency?: boolean): void;​
+​
+ /**​
+  * Canonical single-entry evaluation & atomic reservation inside `BEGIN IMMEDIATE`.​
+  * Evaluation order:​
+  * 1. idempotencyKey format & duplicate lookup​
+  * 2. Guardian status === 'ARMED' & policy_expires_at_ms > now​
+  * 3. Sleeve & GLOBAL policy enabled check​
+  * 4. Positive finite notional/quantity, signal age [-2000ms, maxSignalAgeMs], slippage <=
+maxSlippageBps​
+  * 5. Daily UTC realized + unrealized drawdown check (auto-trips Guardian to HALTED on breach)​
+  * 6. Risk-reducing exit validation OR order/position/sleeve/global exposure cap checks​
+  * 7. Atomic INSERT into `order_intents` with status `'INTENT_RESERVED'`​
+  */​
+ public evaluateAndReserveIntent(req: OrderIntentRequest): GateDecision;​
+​
+    /** Transitions `'INTENT_RESERVED'` -> `'SUBMITTED'` with exchange order ID. */​
+    public recordExchangeSubmission(idempotencyKey: string, exchangeOrderId: string): void;​
+​
+ /** Transitions order to `'PARTIAL_FILL'` or `'FILLED'` with cumulative filled notional and realized
+PnL. */​
+ public recordFillUpdate(​
+     idempotencyKey: string,​
+     cumulativeFilledNotionalUsd: number,​
+     realizedPnlUsd: number,​
+     isFinalFill: boolean​
+    ): void;​
+​
+ /** Transitions `'INTENT_RESERVED'` -> `'REJECTED'` when exchange submission fails before
+acceptance. */​
+ public releaseFailedReservation(idempotencyKey: string, rejectionReason: string): void;​
+​
+  /** Returns all intents in `'INTENT_RESERVED' | 'SUBMITTED' | 'PARTIAL_FILL' |
+'RECONCILE_REQUIRED'`. */​
+  public getUnreconciledIntents(): Array<{​
+     idempotency_key: string;​
+     client_order_id: string;​
+     sleeve: PortfolioSleeve;​
+     symbol: string;​
+<PARSED TEXT FOR PAGE: 10 / 25>
+      status: OrderIntentStatus;​
+      exchange_order_id: string | null;​
+     }>;​
+   }​
+
+3.3 server/src/index.ts
+
+
+
+
+   TypeScript
+   import type Database from 'better-sqlite3';​
+   import type { FastifyInstance } from 'fastify';​
+   import type { PrivyWalletGuard } from './auth/privyWalletGuard';​
+   import type {​
+     CanonicalRiskGate,​
+     OrderIntentRequest,​
+     PortfolioSleeve,​
+     SleeveRiskLimit,​
+   } from './risk/gate';​
+   ​
+   export type TradingMode = 'PAPER' | 'LIVE';​
+   ​
+   export interface ExchangeOrderSnapshot {​
+     found: boolean;​
+     status: 'OPEN' | 'PARTIAL_FILL' | 'FILLED' | 'CANCELLED' | 'REJECTED';​
+     exchangeOrderId?: string;​
+     filledNotionalUsd: number;​
+     realizedPnlUsd: number;​
+   }​
+   ​
+   export interface ReconcilableOmsAdapter {​
+     readonly mode: TradingMode;​
+     queryOrderByClientId(​
+       sleeve: PortfolioSleeve,​
+       symbol: string,​
+       clientOrderId: string,​
+       exchangeOrderId: string | null​
+     ): Promise<ExchangeOrderSnapshot>;​
+     submitApprovedOrder(params: {​
+       clientOrderId: string;​
+       idempotencyKey: string;​
+<PARSED TEXT FOR PAGE: 11 / 25>
+      intent: OrderIntentRequest;​
+     }): Promise<{ exchangeOrderId: string }>;​
+     cancelAllOpenOrders(reason: string): Promise<void>;​
+   }​
+   ​
+   export interface EnvConfig {​
+     port: number;​
+     host: string;​
+     tradingMode: TradingMode;​
+     dbPath: string;​
+     corsOrigin: string;​
+     privyAppId: string;​
+     privyAppSecret: string;​
+     ownerWalletAddress: string;​
+     domain: string;​
+     opsWebhookUrl?: string;​
+   }​
+   ​
+   export declare function loadAndValidateEnv(): EnvConfig;​
+   export declare function buildDefaultRiskLimits(mode: TradingMode): SleeveRiskLimit[];​
+   export declare function reconcileStartupIntents(​
+     riskGate: CanonicalRiskGate,​
+     oms: ReconcilableOmsAdapter,​
+     logger: FastifyInstance['log']​
+   ): Promise<{ resolved: number; unresolved: number }>;​
+   ​
+   export declare function buildMiaServer(​
+     omsAdapter: ReconcilableOmsAdapter,​
+     overrideEnv?: EnvConfig​
+   ): Promise<{​
+       app: FastifyInstance;​
+    db: Database.Database;​
+    riskGate: CanonicalRiskGate;​
+    walletGuard: PrivyWalletGuard;​
+   }>;​
+
+3.4 server/src/oms/PaperOmsAdapter.ts
+
+
+
+
+   TypeScript
+   import type Database from 'better-sqlite3';​
+<PARSED TEXT FOR PAGE: 12 / 25>
+import type {​
+  ExchangeOrderSnapshot,​
+  ReconcilableOmsAdapter,​
+  TradingMode,​
+} from '../index';​
+import type {​
+  CanonicalRiskGate,​
+  OrderIntentRequest,​
+  PortfolioSleeve,​
+} from '../risk/gate';​
+​
+export interface PaperOmsConfig {​
+  db: Database.Database;​
+  riskGate: CanonicalRiskGate;​
+    /** Optional deterministic fill ratio (0.01 to 1.0) for partial-fill & crash testing */​
+    defaultFillRatio?: number;​
+    /** Simulated venue round-trip latency in ms (0 for synchronous backtest replay) */​
+    simulatedLatencyMs?: number;​
+    /** Optional mark-price provider for realistic PnL on closing trades */​
+  getMarkPrice?: (symbol: string) => number | undefined;​
+}​
+​
+export declare class PaperOmsAdapter implements ReconcilableOmsAdapter {​
+    public readonly mode: TradingMode; // 'PAPER'​
+    constructor(config: PaperOmsConfig);​
+​
+ /** Deduplicates by `clientOrderId`, applies adverse slippage, persists to
+`paper_exchange_orders`, and updates `riskGate`. */​
+ public submitApprovedOrder(params: {​
+     clientOrderId: string;​
+     idempotencyKey: string;​
+     intent: OrderIntentRequest;​
+    }): Promise<{ exchangeOrderId: string }>;​
+​
+ /** Simulates asynchronous fill completion on an open/partial paper order and updates `riskGate`.
+*/​
+ public settleOpenPaperOrder(​
+      clientOrderId: string,​
+      finalFilledNotionalUsd: number,​
+      realizedPnlUsd?: number​
+    ): void;​
+​
+    /** Queries persisted `paper_exchange_orders` by `clientOrderId` for startup crash reconciliation.
+<PARSED TEXT FOR PAGE: 13 / 25>
+   */​
+    public queryOrderByClientId(​
+         sleeve: PortfolioSleeve,​
+         symbol: string,​
+         clientOrderId: string,​
+         exchangeOrderId: string | null​
+       ): Promise<ExchangeOrderSnapshot>;​
+   ​
+    /** Atomically cancels all `'OPEN' | 'PARTIAL_FILL'` paper orders and reconciles filled vs unfilled
+   portions in `riskGate`. */​
+    public cancelAllOpenOrders(reason: string): Promise<void>;​
+   }​
+
+3.5 server/src/oms/LiveOmsAdapter.ts
+
+
+
+
+   TypeScript
+   import type Database from 'better-sqlite3';​
+   import type {​
+     ExchangeOrderSnapshot,​
+     ReconcilableOmsAdapter,​
+     TradingMode,​
+   } from '../index';​
+   import type {​
+     CanonicalRiskGate,​
+     OrderIntentRequest,​
+     PortfolioSleeve,​
+   } from '../risk/gate';​
+   ​
+   export type CryptoVenue = 'binance' | 'okx';​
+   ​
+   export interface LiveOmsConfig {​
+     db: Database.Database;​
+     riskGate: CanonicalRiskGate;​
+     preferredCryptoVenue?: CryptoVenue;​
+     requestTimeoutMs?: number;​
+     binance?: {​
+      apiKey: string;​
+      apiSecret: string;​
+      futuresBaseUrl?: string; // Default: 'https://fapi.binance.com'​
+<PARSED TEXT FOR PAGE: 14 / 25>
+    spotBaseUrl?: string; // Default: 'https://api.binance.com'​
+  };​
+  okx?: {​
+    apiKey: string;​
+    apiSecret: string;​
+    passphrase: string;​
+    baseUrl?: string;    // Default: 'https://www.okx.com'​
+  };​
+  alpaca?: {​
+    apiKey: string;​
+    apiSecret: string;​
+    baseUrl?: string;    // Default: 'https://api.alpaca.markets'​
+  };​
+  solana?: {​
+    rpcUrl: string;​
+    signerWebhookUrl: string;​
+    signerAuthToken: string;​
+  };​
+}​
+​
+/**​
+ * Formats canonical `clientOrderId` (`mia_<sleeve>_<16hex>`) for strict venue constraints:​
+ * - OKX `clOrdId`: alphanumeric only, max 32 chars​
+ * - Binance / Alpaca / Solana: max 36 chars (`[a-zA-Z0-9-_]`)​
+ */​
+export declare function toVenueClientOrderId(​
+  canonicalClientOrderId: string,​
+  venue: 'binance' | 'okx' | 'alpaca' | 'solana'​
+): string;​
+​
+export declare class LiveOmsAdapter implements ReconcilableOmsAdapter {​
+    public readonly mode: TradingMode; // 'LIVE'​
+    constructor(config: LiveOmsConfig);​
+​
+ /**​
+  * Routes by sleeve (`stocks_etf` -> Alpaca, `memecoin`/`yield` -> Solana signer, `futures`/`spot`
+-> Binance or OKX).​
+  * Logs dispatch in `live_venue_dispatches` before network egress and recovers idempotently on
+duplicate-order errors.​
+  */​
+ public submitApprovedOrder(params: {​
+     clientOrderId: string;​
+     idempotencyKey: string;​
+     intent: OrderIntentRequest;​
+<PARSED TEXT FOR PAGE: 15 / 25>
+         }): Promise<{ exchangeOrderId: string }>;​
+     ​
+      /**​
+       * Ingests exchange User Data WebSocket execution updates into `riskGate`.​
+       * Trips Guardian Shield to `EMERGENCY_STOP` if an untracked `clientOrderId` appears on the
+     owner account.​
+       */​
+      public handleVenueExecutionReport(report: {​
+          clientOrderId: string;​
+          exchangeOrderId: string;​
+          status: 'PARTIAL_FILL' | 'FILLED' | 'CANCELLED' | 'REJECTED';​
+          cumulativeFilledNotionalUsd: number;​
+          realizedPnlUsd: number;​
+          rejectionReason?: string;​
+         }): void;​
+     ​
+      /** Queries authoritative exchange order status by `venueClientOrderId` for startup reconciliation.
+     */​
+      public queryOrderByClientId(​
+           sleeve: PortfolioSleeve,​
+           symbol: string,​
+           clientOrderId: string,​
+           exchangeOrderId: string | null​
+         ): Promise<ExchangeOrderSnapshot>;​
+     ​
+      /** Cancels open orders across configured venues; trips Guardian Shield to `EMERGENCY_STOP` if
+     any venue fails. */​
+      public cancelAllOpenOrders(reason: string): Promise<void>;​
+     }​
+
+
+4. Canonical SQLite WAL Schema Catalog
+(mia_ledger.sqlite)
+All 7 tables below reside in ./data/mia_ledger.sqlite initialized with journal_mode = WAL,
+synchronous = NORMAL, busy_timeout = 5000, and foreign_keys = ON.
+
+
+
+
+     SQL
+     -- 1. Single-Use Wallet Possession Challenges (PrivyWalletGuard)​
+     CREATE TABLE IF NOT EXISTS auth_wallet_nonces (​
+      nonce TEXT PRIMARY KEY,​
+<PARSED TEXT FOR PAGE: 16 / 25>
+  wallet_address TEXT NOT NULL,​
+  chain_type TEXT NOT NULL,​
+  message TEXT NOT NULL,​
+  issued_at_ms INTEGER NOT NULL,​
+  expires_at_ms INTEGER NOT NULL,​
+  consumed_at_ms INTEGER​
+);​
+​
+-- 2. Verified Step-Up Operator Sessions (PrivyWalletGuard)​
+CREATE TABLE IF NOT EXISTS auth_verified_sessions (​
+  session_id TEXT PRIMARY KEY,​
+  privy_user_id TEXT NOT NULL,​
+  wallet_address TEXT NOT NULL,​
+  chain_type TEXT NOT NULL,​
+  verified_at_ms INTEGER NOT NULL,​
+  expires_at_ms INTEGER NOT NULL,​
+  revoked_at_ms INTEGER​
+);​
+​
+CREATE INDEX IF NOT EXISTS idx_auth_sessions_user_wallet​
+  ON auth_verified_sessions (privy_user_id, wallet_address, expires_at_ms);​
+​
+-- 3. Singleton Guardian Shield & Policy Lease State (CanonicalRiskGate)​
+CREATE TABLE IF NOT EXISTS guardian_state (​
+  id INTEGER PRIMARY KEY CHECK (id = 1),​
+  status TEXT NOT NULL,​
+  halt_reason TEXT,​
+  policy_version TEXT NOT NULL,​
+  policy_expires_at_ms INTEGER NOT NULL,​
+  updated_at_ms INTEGER NOT NULL,​
+  updated_by TEXT NOT NULL​
+);​
+​
+-- 4. Per-Sleeve & Global Risk Caps (CanonicalRiskGate)​
+CREATE TABLE IF NOT EXISTS risk_policy_limits (​
+  sleeve TEXT PRIMARY KEY,​
+  max_order_notional_usd REAL NOT NULL,​
+  max_position_notional_usd REAL NOT NULL,​
+  max_sleeve_exposure_usd REAL NOT NULL,​
+  max_daily_loss_usd REAL NOT NULL,​
+  max_slippage_bps INTEGER NOT NULL,​
+  max_signal_age_ms INTEGER NOT NULL,​
+  enabled INTEGER NOT NULL DEFAULT 1​
+<PARSED TEXT FOR PAGE: 17 / 25>
+);​
+​
+-- 5. Authoritative Order Intent & Exposure Ledger (CanonicalRiskGate)​
+CREATE TABLE IF NOT EXISTS order_intents (​
+  idempotency_key TEXT PRIMARY KEY,​
+  client_order_id TEXT UNIQUE NOT NULL,​
+  sleeve TEXT NOT NULL,​
+  engine TEXT NOT NULL,​
+  symbol TEXT NOT NULL,​
+  side TEXT NOT NULL,​
+  is_risk_reducing INTEGER NOT NULL DEFAULT 0,​
+  notional_usd REAL NOT NULL,​
+  quantity REAL NOT NULL,​
+  limit_price REAL,​
+  status TEXT NOT NULL,​
+  filled_notional_usd REAL NOT NULL DEFAULT 0,​
+  realized_pnl_usd REAL NOT NULL DEFAULT 0,​
+  signal_timestamp_ms INTEGER NOT NULL,​
+  created_at_ms INTEGER NOT NULL,​
+  updated_at_ms INTEGER NOT NULL,​
+  exchange_order_id TEXT,​
+  rejection_reason TEXT​
+);​
+​
+CREATE INDEX IF NOT EXISTS idx_order_intents_active_exposure​
+  ON order_intents (status, sleeve, symbol);​
+​
+CREATE INDEX IF NOT EXISTS idx_order_intents_daily_pnl​
+  ON order_intents (created_at_ms, status);​
+​
+-- 6. Crash-Persistent Simulated Exchange Ledger (PaperOmsAdapter)​
+CREATE TABLE IF NOT EXISTS paper_exchange_orders (​
+ exchange_order_id TEXT PRIMARY KEY,​
+ client_order_id TEXT UNIQUE NOT NULL,​
+ idempotency_key TEXT UNIQUE NOT NULL,​
+ sleeve TEXT NOT NULL,​
+ symbol TEXT NOT NULL,​
+ side TEXT NOT NULL,​
+ status TEXT NOT NULL,​
+ requested_notional_usd REAL NOT NULL,​
+ filled_notional_usd REAL NOT NULL DEFAULT 0,​
+ avg_fill_price REAL NOT NULL DEFAULT 0,​
+ realized_pnl_usd REAL NOT NULL DEFAULT 0,​
+<PARSED TEXT FOR PAGE: 18 / 25>
+      created_at_ms INTEGER NOT NULL,​
+      updated_at_ms INTEGER NOT NULL​
+    );​
+    ​
+    CREATE INDEX IF NOT EXISTS idx_paper_orders_status​
+      ON paper_exchange_orders (status, sleeve, symbol);​
+    ​
+    -- 7. Live Multi-Venue Dispatch Audit Trail (LiveOmsAdapter)​
+    CREATE TABLE IF NOT EXISTS live_venue_dispatches (​
+      client_order_id TEXT PRIMARY KEY,​
+      idempotency_key TEXT UNIQUE NOT NULL,​
+      venue TEXT NOT NULL,​
+      venue_client_order_id TEXT NOT NULL,​
+      sleeve TEXT NOT NULL,​
+      symbol TEXT NOT NULL,​
+      exchange_order_id TEXT,​
+      dispatched_at_ms INTEGER NOT NULL​
+    );​
+
+
+5. Fastify HTTP API & Security Route Contract
+(server/src/index.ts)
+ Method &         Auth             Step-Up           Request        Success        Error
+ Path             Middlewar        Window            Payload        Response       Codes
+                  e
+
+
+ GET /health      Public (no       None              None           200: { ok,     —
+                  secrets                                           mode,
+                  exposed)                                          guardianSta
+                                                                    tus,
+                                                                    policyVersio
+                                                                    n,
+                                                                    policyActiv
+                                                                    e,
+                                                                    unreconcile
+                                                                    dCount,
+                                                                    timestamp
+                                                                    Ms }
+
+
+ POST             Public           None              {              200: {         400
+ /api/auth/ch     (rate-limite                       walletAddre    nonce,         MISSING_W
+<PARSED TEXT FOR PAGE: 19 / 25>
+allenge        d 15/min)                  ss: string }   message,      ALLET_ADD
+                                                         chainType,    RESS, 403
+                                                         expiresAtM    UNAUTHOR
+                                                         s}            IZED_WALL
+                                                                       ET_ADDRES
+                                                                       S
+
+
+POST           Authorizati    Consumes    {              200: {        400, 401
+/api/auth/ve   on: Bearer     5m nonce    walletAddre    sessionId,    (WALLET_N
+rify           <privyJwt>                 ss, nonce,     walletAddre   OT_LINKED_
+                                          signature }    ss,           TO_PRIVY_U
+                                                         chainType,    SER,
+                                                         verifiedAtM   INVALID_OR
+                                                         s}            _EXPIRED_N
+                                                                       ONCE,
+                                                                       INVALID_W
+                                                                       ALLET_SIG
+                                                                       NATURE)
+
+
+POST           requireVerif   Standard    Headers:       200: {        401
+/api/auth/lo   iedWallet()    (4h)        Authorizati    revoked:
+gout                                      on,            true }
+                                          X-MIA-Wall
+                                          et-Session
+
+
+POST           requireVerif   5 minutes   Headers:       200: {        401, 403
+/api/auth/re   iedWallet({                Authorizati    revokedAll:   STEP_UP_SI
+voke-all       maxStepUp                  on,            true }        GNATURE_
+               AgeMs:                     X-MIA-Wall                   REQUIRED
+               300_000 })                 et-Session
+
+
+GET            requireVerif   Standard    Headers:       200: {        401, 403
+/api/guardia   iedWallet()    (4h)        Authorizati    mode,         WALLET_O
+n/status                                  on,            guardian,     WNER_MIS
+                                          X-MIA-Wall     limits,       MATCH
+                                          et-Session     unreconcile
+                                                         d}
+
+
+POST           requireVerif   5 minutes   Headers:       200: {        403
+/api/guardia   iedWallet({                Authorizati    armed:        STEP_UP_SI
+               maxStepUp                  on,            true, mode,   GNATURE_
+<PARSED TEXT FOR PAGE: 20 / 25>
+ n/arm           AgeMs:                      X-MIA-Wall     armedBy }       REQUIRED,
+                 300_000 })                  et-Session                     409
+                                                                            UNRECONC
+                                                                            ILED_INTEN
+                                                                            TS_PRESEN
+                                                                            T
+
+
+ POST            requireVerif   Standard     { reason?,     200: {          401, 403
+ /api/guardia    iedWallet()    (4h)         emergency      halted: true,
+ n/halt                                      ?,             emergency,
+                                             cancelOpe      reason }
+                                             nOrders? }
+
+
+ POST            requireVerif   Standard     OrderIntent    201: {          409
+ /api/orders/i   iedWallet()    (4h)         Request        approved:       DUPLICATE
+ ntent                                       (forced        true,           _IDEMPOTE
+                                             engine:        clientOrderI    NCY_KEY,
+                                             'MANUAL')      d,              422
+                                                            exchangeO       (GateReject
+                                                            rderId }        ionCode),
+                                                                            502
+                                                                            OMS_SUBM
+                                                                            ISSION_FAI
+                                                                            LED
+
+
+
+
+6. Execution, Venue Routing & Crash-Recovery
+Lifecycle
+6.1 Order Intent State Transitions
+ 1.​ INTENT_RESERVED: Written atomically inside
+     CanonicalRiskGate.evaluateAndReserveIntent() before any network call. Counts
+     immediately toward symbol, sleeve, and global exposure caps.
+ 2.​ SUBMITTED: Written via riskGate.recordExchangeSubmission() once the venue returns
+     an exchangeOrderId (or recovers an existing exchangeOrderId on duplicate
+     clientOrderId retry).
+ 3.​ PARTIAL_FILL / FILLED: Written via riskGate.recordFillUpdate() on immediate fill
+     (PaperOmsAdapter), WebSocket execution report
+     (LiveOmsAdapter.handleVenueExecutionReport), or startup reconciliation
+     (reconcileStartupIntents).
+ 4.​ REJECTED: Written via riskGate.releaseFailedReservation() ONLY when an
+<PARSED TEXT FOR PAGE: 21 / 25>
+    INTENT_RESERVED order fails before exchange acceptance or is confirmed absent on the
+    exchange during startup reconciliation.
+6.2 Sleeve-to-Venue Routing & clientOrderId Formatting
+ ●​ futures & spot: Routes to preferredCryptoVenue (binance using newClientOrderId up to
+    36 chars, or okx using alphanumeric clOrdId stripped of underscores/hyphens and sliced
+    to 32 chars).
+ ●​ stocks_etf: Routes to alpaca using client_order_id (up to 36 chars).
+ ●​ memecoin & yield: Routes to the isolated solana signer enclave (signerWebhookUrl)
+    using clientOrderId (up to 36 chars).
+6.3 Startup Boot & Reconciliation Sequence (buildMiaServer)
+ 1.​ Open ./data/mia_ledger.sqlite in WAL mode and initialize all schemas.
+ 2.​ Seed risk_policy_limits (1.0x caps in PAPER, 0.25x caps in LIVE) with a 45-second lease
+     (POLICY_TTL_MS = 45_000). Guardian Shield remains HALTED.
+ 3.​ Run reconcileStartupIntents() across all rows in INTENT_RESERVED, SUBMITTED,
+     PARTIAL_FILL, or RECONCILE_REQUIRED:
+ ○​ INTENT_RESERVED + not found on exchange → releaseFailedReservation() (resolved++).
+ ○​ SUBMITTED / PARTIAL_FILL + not found on exchange → unresolved++ (flags mismatch for
+      manual audit).
+ ○​ Found as FILLED on exchange → recordFillUpdate(..., true) (resolved++).
+ ○​ Found as CANCELLED / REJECTED on exchange → records partial fill if filledNotionalUsd
+      is greater than 0, otherwise releaseFailedReservation() (resolved++).
+ ○​ Still OPEN or PARTIAL_FILL on exchange → updates fill progress and increments
+      unresolved++.
+ 4.​ Post-Reconciliation Gate:
+ ○​ If unresolved is greater than 0 → trips Guardian Shield to HALTED and dispatches
+      webhook alert to OPS_WEBHOOK_URL.
+ ○​ Else if MIA_TRADING_MODE === 'PAPER' → calls
+      riskGate.armGuardianShield('startup_paper_auto_arm').
+ ○​ Else (MIA_TRADING_MODE === 'LIVE') → keeps Guardian Shield HALTED
+      (LIVE_MODE_AWAITING_OPERATOR_STEP_UP_ARM) until operator submits a fresh wallet
+      signature to POST /api/guardian/arm.
+7. Environment Configuration & Default Risk Limits
+7.1 Required & Optional .env Variables
+
+
+
+
+   Code snippet
+   # Core Runtime & Auth (Required — server throws FATAL_BOOT_ENV_MISSING if absent)​
+   MIA_TRADING_MODE=PAPER​
+   PORT=8787​
+<PARSED TEXT FOR PAGE: 22 / 25>
+   HOST=0.0.0.0​
+   MIA_LEDGER_DB_PATH=./data/mia_ledger.sqlite​
+   CORS_ORIGIN=https://mia.naokiri.dev​
+   MIA_DOMAIN=mia.naokiri.dev​
+   PRIVY_APP_ID=your_privy_app_id​
+   PRIVY_APP_SECRET=your_privy_app_secret​
+   OWNER_WALLET_ADDRESS=0xYourAuthorizedOperatorWalletOrSolanaPubkey​
+   ​
+   # Alerting & Venue Credentials (Required when MIA_TRADING_MODE=LIVE)​
+   OPS_WEBHOOK_URL=https://discord.com/api/webhooks/...​
+   MIA_CRYPTO_VENUE=binance​
+   BINANCE_API_KEY=​
+   BINANCE_API_SECRET=​
+   OKX_API_KEY=​
+   OKX_API_SECRET=​
+   OKX_PASSPHRASE=​
+   ALPACA_API_KEY=​
+   ALPACA_API_SECRET=​
+   SOLANA_RPC_URL=https://api.mainnet-beta.solana.com​
+   SOLANA_SIGNER_URL=​
+   SOLANA_SIGNER_TOKEN=​
+
+7.2 Sleeve Risk Limits (PAPER 1.0x vs. LIVE 0.25x Pilot Scale)
+ Sleeve     Max        Max         Max         Max         Max         Max
+            Order      Position    Sleeve      Daily       Slippage    Signal
+            (PAPER /   (PAPER /    Exposure    Loss                    Age
+            LIVE)      LIVE)       (PAPER /    (PAPER /
+                                   LIVE)       LIVE)
+
+
+ GLOBAL     $5,000 /   $8,000 /    $12,000 /   $1,000 /    50 bps      5,000 ms
+            $1,250     $2,000      $3,000      $250
+
+
+ futures    $2,500 /   $4,000 /    $5,000 /    $500 /      30 bps      3,000 ms
+            $625       $1,000      $1,250      $125
+
+
+ spot       $2,500 /   $4,000 /    $5,000 /    $400 /      40 bps      5,000 ms
+            $625       $1,000      $1,250      $100
+
+
+ memecoi    $500 /     $1,000 /    $1,500 /    $250 /      120 bps     2,000 ms
+ n          $125       $250        $375        $62.50
+<PARSED TEXT FOR PAGE: 23 / 25>
+  yield          $4,000 /       $6,000 /         $6,000 /         $150 /       25 bps      15,000
+                 $1,000         $1,500           $1,500           $37.50                   ms
+
+
+  stocks_e       $2,500 /       $4,000 /         $5,000 /         $350 /       25 bps      10,000
+  tf             $625           $1,000           $1,250           $87.50                   ms
+
+
+
+
+8. Vitest Verification Suite (server/src/risk/gate.test.ts)
+Run the full verification suite with:
+
+
+
+
+     Bash
+     npx vitest run server/src/risk/gate.test.ts​
+
+
+  Suite                                 Test Case                          Verified Security /
+                                                                           Reliability Guarantee
+
+
+  1. PrivyWalletGuard                   EVM EIP-191                        Verifies Privy JWT, linked
+                                        challenge-response &               wallet,
+                                        Fastify route injection            OWNER_WALLET_ADDRESS
+                                                                           match, EIP-191 signature,
+                                                                           and route preHandler
+                                                                           authorization
+
+
+  1. PrivyWalletGuard                   Solana Ed25519                     Verifies Base58 32-byte
+                                        challenge-response                 public key decoding and
+                                                                           SPKI Ed25519 signature
+                                                                           verification
+
+
+  1. PrivyWalletGuard                   Imposter blocks, forged            Rejects non-owner wallets
+                                        signatures & nonce replay          (UNAUTHORIZED_WALLET_
+                                                                           ADDRESS), unlinked Privy
+                                                                           accounts
+                                                                           (WALLET_NOT_LINKED_TO_
+                                                                           PRIVY_USER), wrong private
+                                                                           keys
+                                                                           (INVALID_WALLET_SIGNATU
+<PARSED TEXT FOR PAGE: 24 / 25>
+                                                   RE), and reused nonces
+                                                   (INVALID_OR_EXPIRED_NO
+                                                   NCE)
+
+
+1. PrivyWalletGuard    Step-up freshness window    Blocks /api/live/enable after
+                       & session revocation        5 minutes
+                                                   (STEP_UP_SIGNATURE_REQ
+                                                   UIRED) while permitting
+                                                   telemetry; revokeSession()
+                                                   immediately returns 401
+                                                   across all routes
+
+
+2. CanonicalRiskGate   Boot fail-closed & policy   Rejects on boot
+                       heartbeat expiration        (GUARDIAN_NOT_ARMED)
+                                                   and auto-blocks after 10s
+                                                   policy lease expiry
+                                                   (STALE_OR_MISSING_RISK_
+                                                   POLICY)
+
+
+2. CanonicalRiskGate   Signal age, slippage &      Enforces
+                       single-order caps           STALE_OR_FUTURE_SIGNAL
+                                                   ,
+                                                   SLIPPAGE_LIMIT_EXCEEDED
+                                                   , and
+                                                   ORDER_NOTIONAL_EXCEE
+                                                   DED
+
+
+2. CanonicalRiskGate   Risk-reducing exits vs.     Permits closing an open
+                       spoofed oversized exits     $2,000 position while
+                                                   rejecting a $3,500 spoofed
+                                                   exit
+                                                   (INVALID_RISK_REDUCING_
+                                                   EXIT)
+
+
+2. CanonicalRiskGate   Daily drawdown circuit      Combines realized +
+                       breaker                     unrealized PnL; auto-trips
+                                                   Guardian Shield to HALTED
+                                                   on breach
+                                                   (DAILY_DRAWDOWN_CIRC
+                                                   UIT_BREAKER)
+<PARSED TEXT FOR PAGE: 25 / 25>
+3. Concurrency Stress   100 concurrent identical   Approves strictly 1 order
+                        worker intents             and rejects 99 with
+                                                   DUPLICATE_IDEMPOTENCY
+                                                   _KEY
+
+
+3. Concurrency Stress   100 concurrent distinct    Approves strictly 5 × $1,000
+                        worker intents             orders up to the $5,000
+                                                   futures sleeve cap and
+                                                   rejects 95 with
+                                                   SLEEVE_EXPOSURE_EXCEE
+                                                   DED
+
+
+3. Concurrency Stress   Multi-connection SQLite    Two independent
+                        WAL serialization          better-sqlite3 connections
+                                                   race for the final $1,000
+                                                   slot; BEGIN IMMEDIATE
+                                                   guarantees 1 approval and 1
+                                                   rejection
+
+
+4. Crash Recovery       Unclean server crash       Blocks armGuardianShield()
+                        mid-reserved &             (CANNOT_ARM_GUARDIAN
+                        mid-partial-fill           ) until crash_reserved_1 is
+                                                   released and
+                                                   crash_partial_2 is settled,
+                                                   preserving $1,500 filled
+                                                   exposure
