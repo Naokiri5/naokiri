@@ -37,7 +37,7 @@ export interface ThinkingAnalysis {
     hypotheticalScenarios: ScenarioReport;
     calibration: 'NO_VALID_FORECAST';
   } | null;
-  dataTransport: 'EXISTING_VALIDATED_REST_POLLING';
+  dataTransport: 'CANONICAL_MIA_MARKET_FABRIC';
 }
 
 export interface ThinkInput {
@@ -97,7 +97,7 @@ export function analyzeThinking(input: Readonly<ThinkInput>): ThinkingAnalysis {
     preference, enforcement, route: routing.route, routeReasons: routing.reasons,
     wouldAbstain: routing.route === 'NO_TRADE',
     dataQuality: input.ctx.quality.status,
-    evidence, deep: null, dataTransport: 'EXISTING_VALIDATED_REST_POLLING',
+    evidence, deep: null, dataTransport: 'CANONICAL_MIA_MARKET_FABRIC',
   };
   if (enforcement === 'DISABLED' || routing.route !== 'DEEP') return result;
 
@@ -149,7 +149,7 @@ export function failedThinkingAnalysis(
     version: 'mia-think-observer-v1', authority: 'EXPLANATION_ONLY', canAuthorizeTrade: false,
     preference, enforcement, route: 'NO_TRADE',
     routeReasons: ['ADAPTIVE_THINKING_UNAVAILABLE', code.slice(0, 50)],
-    wouldAbstain: true, deep: null, dataTransport: 'EXISTING_VALIDATED_REST_POLLING',
+    wouldAbstain: true, deep: null, dataTransport: 'CANONICAL_MIA_MARKET_FABRIC',
     dataQuality: 'FAIL',
     evidence: {
       preference, marketDataValid: false, mandatoryCoverageComplete: false,
