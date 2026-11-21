@@ -1,8 +1,8 @@
 # MIA 5.x — Bundle Trading: canonical, gap-only integration
 
 **Branch:** feat/mia-bundle-canonical-preview-20261121  
-**Integration scope:** P1: authenticated read-only bundle preview and canonical aggregate-risk veto.  
-**Operational truth:** No bundle order placement, new financial ledger, signing, migration, automated bot trading, Jito execution, or new live adapter has been enabled. All existing single-entry PAPER order behavior is intentionally untouched.
+**Integration scope:** P1 canonical preview plus P2 owner-initiated atomic PAPER bundle execution using canonical OMS.  
+**Operational truth:** PAPER_ATOMIC execution is implemented for 2–5 existing PAPER decisions with step-up and an append-only v6 grouping migration. No second ledger, real orders, autonomous bundle scheduling, signer, TESTNET placement or LIVE orders were enabled. The existing single-entry OMS retains its behavior.
 
 ## Source preservation and identity
 
@@ -23,7 +23,7 @@ This integration is additive. The source archive is historical reference text an
 | Individual risk limits, correlation and sizing | risk/gate.ts, risk/policy.ts | Re-evaluate each candidate; aggregate only applies additional vetoes |
 | Portfolio exposure, cash and stops | portfolio/ledger.ts, portfolio/calendar.ts | Read canonical account and reconciliation; no shadow ledger |
 | Session, CSRF, throttling and mode | api/routes.ts, core/mode.ts | Reuse global protections; bundle routes are authenticated |
-| Single paper orders and protection | exec/oms.ts | Unchanged; batch submit cannot call single-order OMS in a loop |
+| Canonical paper orders and protection | exec/oms.ts | Extend with one outer transactional wrapper and deferred post-commit events; reuse existing individual entry writes |
 | Demo/live parity | exec/demoLiveParity.ts (standalone proposal) | Do not treat it as wired or certified |
 | Exchange reconciliation | open #64, #72; order reducer draft #97 | Review and adapt after dependency reconciliation, not wholesale import |
 | TESTNET provider | draft #92 | Validations only; do not claim simulated venue orders |
@@ -36,6 +36,14 @@ This integration is additive. The source archive is historical reference text an
 ### GET /api/trading/bundles/capabilities
 
 Owner-authenticated read-only status describing supported preview modes and currently locked order-placement adapters. Never implies real-money certification.
+
+### POST /api/trading/bundles/paper/execute
+
+This owner-only, CSRF-protected, independently step-up-verified route accepts two to five stored PAPER decision IDs and runs `submitPaperAtomicBundle()`; it cannot accept a TESTNET or LIVE destination. Client input `{ "decisionIds": ["dec_01", "dec_02"], "password": "<redacted>" }` uses the existing sensitive-action verification. The route is manual only. A repeat or failed group cannot double debit the account.
+
+### Durable metadata (migration v6)
+
+`bundle_executions` and `bundle_entry_links` are append-only migration additions with unique PAPER group identity and references to canonical orders; there is no competing order or money ledger. Resolve migration numbering when reconciling with stacked PR #45.
 
 ### POST /api/trading/bundles/preview
 
@@ -62,11 +70,11 @@ The PAPER ledger uses simulated quote amounts currently treated as paper USD by 
 5. Paused, emergency or non-PAPER modes block PAPER bundle approval. Browser input cannot claim a safer environment, policy version, quantity, reservation or signer.
 6. No asynchronous network, signer, venue order, real funds, wallet permissions or second risk engine; \`canSubmit\` is always false.
 7. Do not call independent exchange orders atomic. Jito constraints and chain-specific inclusion proof require a separately reviewed adapter.
-8. The current bundle preview does **not** reserve cash, serialize concurrent plans, create orders or guarantee execution. A past preflight cannot be reused as authorization.
+8. The read-only preview cannot reserve cash or guarantee execution. PAPER execution independently checks risk and canonical account state under a single database writer lock; every entry, fill, stop and ledger row either commits or rolls back together.
 
 ## Safe next phases (not implemented by this PR)
 
-**P2 — PAPER_ATOMIC execution:** Extract canonical paper-entry preparation and transactional commit from OMS so the current single-entry path and bundle path call the **same** financial-write helper. Prepare all fills, verify aggregate risk and account snapshot under a single SQLite \`BEGIN IMMEDIATE\` transaction, persist unique environment/account/bundle/leg reservation identities, write each canonical entry+fill+stop+ledger once, and publish events only after successful commit. If any leg fails, roll back all legs. Verify protective orders after commit; no speculative marks/fees. Do not naively loop \`submitEntry()\`.
+**P2 — PAPER_ATOMIC (implemented in this draft):** `submitPaperAtomicBundle()` starts one outer SQLite transaction, rechecks bundle risk, links the existing individual entry OMS fills to group records, and defers external events until after commit. A failure in any leg rolls back all financial records. Only authenticated, step-up-verified owners may call the PAPER endpoint; automated bot scheduling is not enabled.
 
 **P3 — TESTNET:** Review #92 and #97/#72 dependency branches, then add durable venue order ACK/partial/UNKNOWN/reconciliation tests with stable client order IDs. The existing \`order/test\` preflight is not placement.
 
@@ -87,8 +95,8 @@ The PAPER ledger uses simulated quote amounts currently treated as paper USD by 
 
 | Environment | Preview | Execution |
 | --- | --- | --- |
-| PAPER | Integrated via server-side canonical evidence | Single-order OMS unchanged; **bundle submit not implemented** |
+| PAPER | Server-side canonical evidence preview | Owner-initiated PAPER_ATOMIC submit implemented in this draft, pending CI and review |
 | TESTNET | Explicit lock state | Not implemented |
 | LIVE | Explicit lock state | Locked by existing G01–G14 and signing requirements |
 
-The P1 source integration exists in this branch; CI evidence and independent review must be obtained for the exact PR head before declaring it ready to merge.
+The P1/P2 PAPER integration is in this draft branch. CI evidence and independent review of the exact head are required before merging.
