@@ -6,6 +6,9 @@ import { getControl } from '../core/mode.js';
 import { withdrawalFrozen } from '../wallet/wallet.js';
 import { releaseGates } from '../qa/gates.js';
 import { sha256 } from '../core/util.js';
+import { authMode } from './stepUp.js';
+import { privyOwnerBound, privyOwnerFromEnv } from './privy.js';
+import { twoFactorEnrolled } from './totp.js';
 
 /** Security Center data. Reports whether secrets are configured — never their values. */
 export interface Check { id: string; area: string; name: string; status: 'PASS' | 'WARN' | 'FAIL' | 'INFO'; detail: string }
@@ -20,7 +23,14 @@ export function securityOverview(currentToken?: string) {
   const chain = verifyAuditChain(); const ctl = getControl(); const gates = releaseGates();
   const exposed = config.host === '0.0.0.0' || config.host === '::';
   const checks: Check[] = [
-    { id: 'AUTH-1', area: 'Authentication', name: 'Owner passphrase set (scrypt)', status: owner ? 'PASS' : 'FAIL', detail: owner ? `created ${new Date(owner.createdAt).toISOString()}` : 'not configured' },
+    { id: 'AUTH-1', area: 'Authentication', name: authMode() === 'privy' ? 'Privy owner identity' : 'Owner passphrase set (scrypt)',
+      status: authMode() === 'privy' ? (privyOwnerBound() ? 'PASS' : 'FAIL') : owner ? 'PASS' : 'FAIL',
+      detail: authMode() === 'privy'
+        ? (privyOwnerBound() ? 'Preprovisioned owner DID is bound in the database' : privyOwnerFromEnv() ? 'Owner DID provisioned but first verified login is pending' : 'No server-provisioned Privy owner DID')
+        : owner ? 'Local recovery owner configured' : 'not configured' },
+    { id: 'AUTH-2FA', area: 'Authentication', name: 'Independent owner step-up',
+      status: authMode() !== 'privy' || twoFactorEnrolled() ? 'PASS' : 'FAIL',
+      detail: twoFactorEnrolled() ? 'TOTP enrolled' : authMode() === 'privy' ? 'Required before sensitive actions are allowed' : 'Offline recovery mode' },
     { id: 'AUTH-2', area: 'Authentication', name: 'Failed logins (24h)', status: failed24h >= 10 ? 'FAIL' : failed24h > 0 ? 'WARN' : 'PASS', detail: `${failed24h} failed attempt(s); login, step-up and passphrase change share one limit: 5 per client (then 1 min, doubling) and 20 per server per 15 min` },
     { id: 'AUTH-3', area: 'Authentication', name: 'Active sessions', status: sessions.length > 3 ? 'WARN' : 'PASS', detail: `${sessions.length} active (12 h expiry, HttpOnly SameSite=Strict cookie)` },
     { id: 'NET-1', area: 'Network', name: 'Listening interface', status: exposed ? 'WARN' : 'PASS', detail: exposed ? `bound to ${config.host}:${config.port}${inContainer() ? ' (container detected — needed for port forwarding)' : ''}; use TLS before exposing beyond a trusted network` : `loopback only (${config.host}:${config.port})` },
