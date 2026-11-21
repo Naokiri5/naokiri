@@ -150,6 +150,36 @@ test('Lab promotion refuses a wrong passphrase, then succeeds; suspension needs 
   await strategy.getByRole('button', { name: 'Suspend', exact: true }).click(); await expect(strategy.getByText('SUSPENDED', { exact: true })).toBeVisible();
 });
 
+test('Lab batch retries rate limits and reports partial results', async ({ browser }) => {
+  const context = await browser.newContext({ storageState: await page.context().storageState() });
+  try {
+    await context.route('https://fonts.googleapis.com/**', route => route.fulfill({ contentType: 'text/css', body: '' }));
+    const lab = await context.newPage();
+    const attempted: string[] = [];
+    await lab.route('**/api/lab', async route => {
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...await response.json(), universe: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] } });
+    });
+    await lab.route('**/api/lab/backtest', async route => {
+      const { symbol } = route.request().postDataJSON();
+      attempted.push(symbol);
+      if (attempted.length === 1) return route.fulfill({ status: 429, headers: { 'retry-after': '1' }, json: { error: 'rate limit' } });
+      if (symbol === 'ETHUSDT') return route.fulfill({ status: 502, json: { error: 'upstream market-data provider unavailable (binance)' } });
+      return route.fulfill({ json: {} });
+    });
+
+    await lab.goto('/lab');
+    await lab.getByRole('button', { name: 'Run first 3 symbols' }).click();
+    await expect(lab.getByRole('status').filter({ hasText: 'Waiting for the rate limit' })).toBeVisible();
+    await expect(lab.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
+    await expect.poll(() => attempted).toEqual(['BTCUSDT', 'BTCUSDT', 'ETHUSDT', 'SOLUSDT']);
+    await expect(lab.getByText(/2 of 3 backtests completed.*ETHUSDT.*upstream market-data provider unavailable/)).toBeVisible();
+    await expect(lab.getByRole('button', { name: 'Run first 3 symbols' })).toBeEnabled();
+  } finally {
+    await context.close();
+  }
+});
+
 test('Intelligence quarantine release refuses a wrong passphrase, then succeeds', async () => {
   await page.goto('/intelligence');
   const worker = page.getByRole('row').filter({ has: page.getByRole('button', { name: 'Release', exact: true }) }).first();

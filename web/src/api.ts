@@ -3,12 +3,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 /** Auth mode is fetched from MIA's existing server-owned session endpoint. */
 export const authInfo: { mode: 'privy' | 'passphrase' } = { mode: 'privy' };
 
-export class ApiError extends Error { constructor(public status: number, msg: string) { super(msg); } }
-export async function api<T = any>(path: string, opts: { method?: string; body?: unknown } = {}): Promise<T> {
-  const res = await fetch(path, { method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'), headers: { 'content-type': 'application/json', 'x-mia-csrf': '1' }, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined, credentials: 'same-origin' });
+export class ApiError extends Error { constructor(public status: number, msg: string, public retryAfterSeconds?: number) { super(msg); } }
+export async function api<T = any>(path: string, opts: { method?: string; body?: unknown; signal?: AbortSignal } = {}): Promise<T> {
+  const res = await fetch(path, { method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'), headers: { 'content-type': 'application/json', 'x-mia-csrf': '1' }, body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined, credentials: 'same-origin', signal: opts.signal });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401) window.dispatchEvent(new Event('mia:unauthorized'));
-  if (!res.ok) throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
+  if (!res.ok) {
+    const retryAfter = res.headers.get('retry-after');
+    const retryAfterSeconds = retryAfter && /^\d+$/.test(retryAfter) ? Number(retryAfter) : undefined;
+    throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`, retryAfterSeconds);
+  }
   return data as T;
 }
 /** Raw file upload (Academy documents). Same auth/CSRF/error contract as `api`; bytes are sent unmodified. */
