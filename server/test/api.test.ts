@@ -67,6 +67,21 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(body.live.unmetGates).toContain('G07');
     expect(body.releaseSummary).toMatch(/live execution LOCKED/);
   });
+  it('bundle preview is owner-authenticated, CSRF protected and cannot submit or unlock LIVE', async () => {
+    expect((await app.inject({ url: '/api/trading/bundles/capabilities' })).statusCode).toBe(401);
+    const cap = await app.inject({ url: '/api/trading/bundles/capabilities', headers: H() });
+    expect(cap.statusCode).toBe(200);
+    expect(cap.json().environments.every((e: any) => e.canPlaceBundleOrders === false)).toBe(true);
+    const payload = { environment: 'LIVE', mode: 'MULTI_ASSET_BASKET', decisionIds: ['dec1', 'dec2'] };
+    expect((await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', payload })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', headers: { cookie }, payload })).statusCode).toBe(403);
+    const result = await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', headers: H(), payload });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ approved: false, canSubmit: false, environment: 'LIVE' });
+    expect(result.json().reasonCodes).toContain('LIVE_BUNDLE_SUBMISSION_NOT_CERTIFIED');
+    expect((await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', headers: H(), payload: { ...payload, decisionIds: ['x'] } })).statusCode).toBe(400);
+  });
+
   it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {
     const password = 'correct horse battery'; const id = STRATEGIES[0].id; const worker = WORKERS[0].id;
     const statusUrl = `/api/lab/strategy/${id}/status`; const releaseUrl = `/api/workers/${worker}/release`;
