@@ -71,6 +71,11 @@ export function previewBundle(input: BundlePreviewInput, now = Date.now()) {
     if (!row) throw new Error('BUNDLE_DECISION_NOT_FOUND');
     return P<DecisionReport>(row.report);
   });
+  // The canonical PAPER OMS permits only one open position per instrument.
+  // Do not pretend a multi-leg bundle can open that instrument twice.
+  const instruments = reports.map(r => r?.instrumentId);
+  if (instruments.some(x => !x) || new Set(instruments).size !== instruments.length)
+    throw new Error('BUNDLE_DUPLICATE_OR_MISSING_INSTRUMENT');
   // Only real decisions in the current paper pipeline may enter the preflight.
   const legs: BundleLeg[] = [];
   const evidence: LegRiskEvidence[] = [];
