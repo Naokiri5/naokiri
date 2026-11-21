@@ -83,7 +83,8 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     const execute = '/api/trading/bundles/paper/execute';
     expect((await app.inject({ method: 'POST', url: execute, payload: { decisionIds: ['d1', 'd2'] } })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url: execute, headers: { cookie }, payload: { decisionIds: ['d1', 'd2'] } })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'POST', url: execute, headers: H(), payload: { decisionIds: ['d1', 'd2'] } })).statusCode).toBe(403);
+    // Do not make a deliberate bad step-up attempt here: the shared lockout
+    // budget is tested separately in dedicated security tests.
     const noDecisions = await app.inject({ method: 'POST', url: execute, headers: H(), payload: { decisionIds: ['d1', 'd2'], password: 'correct horse battery' } });
     expect(noDecisions.statusCode).toBe(200);
     expect(noDecisions.json().ok).toBe(false);
