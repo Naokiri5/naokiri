@@ -48,12 +48,11 @@ export function strategyPassports() {
     const recent = all<{ realized_pnl: number; planned_risk: number; report: string | null }>(`SELECT p.realized_pnl, p.planned_risk, d.report FROM positions p LEFT JOIN decisions d ON d.id=p.decision_id
       WHERE p.account=? AND p.strategy=? AND p.status='CLOSED'
       ORDER BY p.closed_at DESC, p.id DESC LIMIT ?`, PAPER_ACCOUNT, s.id, WINDOW);
-    const valid: number[] = [], rolling30: number[] = [];
+    const valid: number[] = [];
     let unknownVersion = 0, otherVersion = 0, invalidRisk = 0;
-    // The most recent 30 CLOSED positions are the sample, not the most recent
-    // 30 *valid* positions: an unverifiable fill/version consumes a slot and
-    // prevents false "30 clean trades" certification using older history.
-    for (const [i, p] of recent.entries()) {
+    // Unlike the canonical read-only 30-trade cohort in portfolio/paperExpectancy.ts,
+    // passports project a 50-trade, strategy-version-specific DITAS diagnostic.
+    for (const p of recent) {
       let version: string | undefined;
       try { version = P<{ strategy?: { version?: string } }>(p.report)?.strategy?.version; } catch { /* malformed legacy evidence is unknown */ }
       if (!version) { unknownVersion++; continue; }
@@ -62,11 +61,9 @@ export function strategyPassports() {
       if (!(Number.isFinite(p.planned_risk) && p.planned_risk > 0 &&
         Number.isFinite(p.realized_pnl) && Number.isFinite(r))) { invalidRisk++; continue; }
       valid.push(r);
-      if (i < MIN_SAMPLES) rolling30.push(r);
     }
     // returnHealth computes drawdown sequentially; the SQL query is newest first.
     valid.reverse();
-    rolling30.reverse();
     const rules = RULES[s.id];
     return { id: s.id, name: s.name, version: s.version, description: s.description, suitableMarkets: ['crypto spot long-only'], timeframes: [s.interval], regimes: s.suitableRegimes,
       rules, positionSizing: 'Existing deterministic risk/gate.ts; agent agreement never increases budget.',
@@ -74,11 +71,6 @@ export function strategyPassports() {
       currentStatus: registry?.status ?? 'UNREGISTERED', ditasState: STATE[registry?.status ?? ''] ?? 'DISABLED', lifecycleMapping: 'Read-only mapping of existing strategy states; no additional approval is granted.',
       registryVersion: registry?.version ?? null, registryVersionMismatch: registry != null && registry.version !== s.version,
       outOfSample: strategyStats(s.id), paperHealth: { ...returnHealth(valid), windowClosedPositions: WINDOW, observedClosedPositions: recent.length, excludedUnknownVersion: unknownVersion, excludedOtherVersion: otherVersion, excludedInvalidRisk: invalidRisk },
-      rolling30Paper: { ...returnHealth(rolling30), windowClosedPositions: MIN_SAMPLES,
-        observedClosedPositions: Math.min(recent.length, MIN_SAMPLES),
-        complete: recent.length >= MIN_SAMPLES && rolling30.length === MIN_SAMPLES,
-        environment: 'PAPER' as const, evidence: 'CLOSED_POSITION_PROXY_NOT_VERIFIED_VENUE_FILLS' as const,
-        canAuthorizeLive: false as const, certification: 'NOT_CERTIFIED' as const },
       limitations: ['Historical paper outcomes without a linked strategy version are excluded from version-specific health.', 'Out-of-sample records are research evidence; promotion still requires explicit owner review.', 'Health intervals assume independent outcomes; regime clustering can invalidate that approximation.'] };
   });
 }
