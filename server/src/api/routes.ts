@@ -47,6 +47,7 @@ import { getControl, updateControl, displayMode } from '../core/mode.js';
 import { acceptPolicy, currentPolicy, DEFAULT_POLICY, policyHistory } from '../risk/policy.js';
 import { accountState, cashBalance, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio/ledger.js';
 import { portfolioStress } from '../portfolio/stress.js';
+import { rollingPaperExpectancy } from '../portfolio/paperExpectancy.js';
 import { correlation } from '../portfolio/correlation.js';
 import { calendar, calendarTimeZone, reconcile, setCalendarTimeZone, tzOffsetMin } from '../portfolio/calendar.js';
 import * as oms from '../exec/oms.js';
@@ -465,7 +466,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/portfolio', async () => {
     const acct = accountState(); const pos = oms.listPositions();
     const curve = all<{ t: number; p: number }>("SELECT closed_at t, realized_pnl p FROM positions WHERE account=? AND status='CLOSED' ORDER BY closed_at", PAPER_ACCOUNT); let eq = acct.deposits; const equityCurve = curve.map((c) => ({ t: c.t, equity: (eq += c.p) }));
-    return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
+    return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, paperExpectancy: rollingPaperExpectancy(), reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
   });
   app.get('/api/orders', async () => oms.listOrders(300));
   app.post('/api/orders/:id/approve', async (req) => oms.decideApproval(idOf(req), true));
