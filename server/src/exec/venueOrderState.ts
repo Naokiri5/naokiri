@@ -138,8 +138,27 @@ export function reduceVenueOrder(
     return current as VenueOrderProjection;
   }
   if (event.at < current.lastEventAt) throw new Error('OUT_OF_ORDER_EVENT_RECONCILIATION_REQUIRED');
-  if (FINAL.has(current.phase) && event.kind !== 'STATUS')
-    throw new Error('TERMINAL_ORDER_REQUIRES_EXPLICIT_RECONCILIATION');
+  // Venue streams may replay a previously confirmed fill under a new event ID.
+  // Deduplicate by VENUE trade ID (not just transport event ID) even if the
+  // order has since become terminal; never add the same quantity twice.
+  if (event.kind === 'FILL') {
+    const previousFill = current.fillsByTradeId[event.venueTradeId];
+    if (previousFill !== undefined) {
+      if (previousFill !== event.quantityUnits) throw new Error('TRADE_ID_CONFLICT');
+      return {
+        ...current,
+        processedEvents: { ...current.processedEvents, [event.eventId]: fingerprint },
+        version: current.version + 1,
+        lastEventAt: event.at,
+      };
+    }
+  }
+  if (FINAL.has(current.phase)) {
+    if (event.kind !== 'STATUS')
+      throw new Error('TERMINAL_ORDER_REQUIRES_EXPLICIT_RECONCILIATION');
+    if (event.venueStatus !== current.phase)
+      throw new Error('TERMINAL_STATUS_CONFLICT_REQUIRES_MANUAL_RECONCILIATION');
+  }
 
   const next: VenueOrderProjection = {
     ...current, scope: { ...current.scope },
@@ -204,8 +223,8 @@ export function reduceVenueOrder(
         next.phase = 'FILLED'; next.reconciliationRequired = false;
       }
     } else if (event.venueStatus === 'PARTIALLY_FILLED') {
-      next.phase = 'PARTIALLY_FILLED';
-      next.reconciliationRequired = false;
+      next.phase = known > 0n ? 'PARTIALLY_FILLED' : 'UNKNOWN';
+      next.reconciliationRequired = known === 0n;
     } else if (event.venueStatus === 'NEW') {
       next.phase = known ? 'PARTIALLY_FILLED' : 'ACKNOWLEDGED';
       next.reconciliationRequired = false;
