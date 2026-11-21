@@ -196,6 +196,13 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     const r = await app.inject({ url: '/api/instrument/CHARTUSDT?interval=1h', headers: { cookie } });
     expect(r.statusCode).toBe(200);
     expect(r.json().chartIntelligence).toMatchObject({ status: 'VALID', decision: 'NO TRADE', timeframe: '1h' });
+    expect(r.json().deepPrecision).toMatchObject({
+      version: 'mia-deep-precision-research-v1',
+      instrumentId: 'crypto:binance:CHARTUSDT',
+      canAuthorizeTrade: false, canSubmitOrder: false, canSignOrder: false,
+      qci: 'NOT_RUN_FOR_THIS_ZONE',
+      workerPlan: { registeredWorkers: 100, evidenceQuorum: 'NOT_EVALUATED' },
+    });
     expect((await app.inject({ url: '/api/instrument/CHARTUSDT?interval=1m', headers: { cookie } })).statusCode).toBe(400);
   });
   it('protects replay, validates intervals, and returns only the visible prefix', async () => {
