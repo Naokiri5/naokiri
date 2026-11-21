@@ -23,7 +23,7 @@ The PDF proposes modules 1–14 plus tests and operations. Many of its suggested
 | 9. `market/fabric.ts` | Canonical market fabric, optional stream in THINK branch | Preserve existing stream-gap and polling logic; no duplicate order-book store |
 | 10. `market/quality.ts` | Existing fail-closed data quality | Reused its quality checks; no fake WS sequence numbers |
 | 11. `qhef/qhef.ts` | Existing latency ring buffers | Added `think.review` record using existing metrics |
-| 12. `think-presenter.ts` | Existing decisions API and React intelligence pages | **Partial:** authenticated JSON at `GET /api/think`; full visual dashboard future PR |
+| 12. `think-presenter.ts` | Existing decisions API and React intelligence pages | **Integrated:** authenticated JSON at `GET /api/think` and an Adaptive THINK tab in the existing Decision Record screen; aggregate dashboard future PR |
 | 13. `decision/engine.ts` | Canonical decision engine | **Minimally extended** to persist diagnostics and optional abstention, never a second engine |
 | 14. `bot/bot.ts` | Existing leases, monitoring, and OMS dispatch | **Unchanged**; no new 50ms protection timer or duplicate scheduler |
 | Part IV CI/fault tests | Existing Vitest, E2E, architecture CI | **Added** tests; must pass branch CI before promotion |
@@ -70,7 +70,7 @@ There is **no** `MIA_TRADING_ENV=LIVE` switch, `MIA_THINK_LIVE_OWNER_UNLOCK` sho
 
 ### Observation
 
-`GET /api/think?limit=20` (existing authenticated owner session): mode/preference, recent deterministic route diagnostics, observed stage-latency samples. The existing `GET /api/decisions/:id` also includes optional `report.thinking`.
+`GET /api/think?limit=20` (existing authenticated owner session): mode/preference, recent deterministic route diagnostics, observed stage-latency samples. The existing `GET /api/decisions/:id` also includes optional `report.thinking`, shown in the new **Adaptive THINK** tab within `web/src/pages/Intel.tsx` (no duplicated page, chart or navigation system).
 
 DEEP scenarios are **hypothetical**, not executable plans or profitability predictions. Until valid OOS forecasting data is available, calibration is `NO_VALID_FORECAST` and probability is not invented. Unlike the PDF's proposed second `ReasonToTradeCertificate`, MIA's existing THINK certificate remains canonical.
 
