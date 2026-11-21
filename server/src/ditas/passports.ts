@@ -1,6 +1,7 @@
 import { STRATEGIES } from '../lab/strategies.js';
 import { strategyStats } from '../lab/lab.js';
 import { all, get, P } from '../db/db.js';
+import { PAPER_ACCOUNT } from '../core/accounts.js';
 
 const RULES: Record<string, { entry: string[]; stop: string; exit: string; dependencies: string[]; weaknesses: string[] }> = {
   trend_pullback: {
@@ -42,17 +43,30 @@ export function returnHealth(returns: number[]) {
 export function strategyPassports() {
   return STRATEGIES.map(s => {
     const registry = get<{ status: string; version: string }>('SELECT status, version FROM strategies WHERE id=?', s.id);
+    // Never blend PAPER and another account's trades into strategy-health or a
+    // 30-trade readiness sample. The canonical financial ledger remains owner.
     const recent = all<{ realized_pnl: number; planned_risk: number; report: string | null }>(`SELECT p.realized_pnl, p.planned_risk, d.report FROM positions p LEFT JOIN decisions d ON d.id=p.decision_id
-      WHERE p.strategy=? AND p.status='CLOSED' ORDER BY p.closed_at DESC LIMIT ?`, s.id, WINDOW);
-    const valid: number[] = []; let unknownVersion = 0, otherVersion = 0, invalidRisk = 0;
-    for (const p of recent.reverse()) {
+      WHERE p.account=? AND p.strategy=? AND p.status='CLOSED'
+      ORDER BY p.closed_at DESC, p.id DESC LIMIT ?`, PAPER_ACCOUNT, s.id, WINDOW);
+    const valid: number[] = [], rolling30: number[] = [];
+    let unknownVersion = 0, otherVersion = 0, invalidRisk = 0;
+    // The most recent 30 CLOSED positions are the sample, not the most recent
+    // 30 *valid* positions: an unverifiable fill/version consumes a slot and
+    // prevents false "30 clean trades" certification using older history.
+    for (const [i, p] of recent.entries()) {
       let version: string | undefined;
       try { version = P<{ strategy?: { version?: string } }>(p.report)?.strategy?.version; } catch { /* malformed legacy evidence is unknown */ }
       if (!version) { unknownVersion++; continue; }
       if (version !== s.version) { otherVersion++; continue; }
-      if (!(Number.isFinite(p.planned_risk) && p.planned_risk > 0 && Number.isFinite(p.realized_pnl))) { invalidRisk++; continue; }
-      valid.push(p.realized_pnl / p.planned_risk);
+      const r = p.realized_pnl / p.planned_risk;
+      if (!(Number.isFinite(p.planned_risk) && p.planned_risk > 0 &&
+        Number.isFinite(p.realized_pnl) && Number.isFinite(r))) { invalidRisk++; continue; }
+      valid.push(r);
+      if (i < MIN_SAMPLES) rolling30.push(r);
     }
+    // returnHealth computes drawdown sequentially; the SQL query is newest first.
+    valid.reverse();
+    rolling30.reverse();
     const rules = RULES[s.id];
     return { id: s.id, name: s.name, version: s.version, description: s.description, suitableMarkets: ['crypto spot long-only'], timeframes: [s.interval], regimes: s.suitableRegimes,
       rules, positionSizing: 'Existing deterministic risk/gate.ts; agent agreement never increases budget.',
@@ -60,6 +74,11 @@ export function strategyPassports() {
       currentStatus: registry?.status ?? 'UNREGISTERED', ditasState: STATE[registry?.status ?? ''] ?? 'DISABLED', lifecycleMapping: 'Read-only mapping of existing strategy states; no additional approval is granted.',
       registryVersion: registry?.version ?? null, registryVersionMismatch: registry != null && registry.version !== s.version,
       outOfSample: strategyStats(s.id), paperHealth: { ...returnHealth(valid), windowClosedPositions: WINDOW, observedClosedPositions: recent.length, excludedUnknownVersion: unknownVersion, excludedOtherVersion: otherVersion, excludedInvalidRisk: invalidRisk },
+      rolling30Paper: { ...returnHealth(rolling30), windowClosedPositions: MIN_SAMPLES,
+        observedClosedPositions: Math.min(recent.length, MIN_SAMPLES),
+        complete: recent.length >= MIN_SAMPLES && rolling30.length === MIN_SAMPLES,
+        environment: 'PAPER' as const, evidence: 'CLOSED_POSITION_PROXY_NOT_VERIFIED_VENUE_FILLS' as const,
+        canAuthorizeLive: false as const, certification: 'NOT_CERTIFIED' as const },
       limitations: ['Historical paper outcomes without a linked strategy version are excluded from version-specific health.', 'Out-of-sample records are research evidence; promotion still requires explicit owner review.', 'Health intervals assume independent outcomes; regime clustering can invalidate that approximation.'] };
   });
 }
