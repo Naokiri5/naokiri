@@ -71,7 +71,7 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect((await app.inject({ url: '/api/trading/bundles/capabilities' })).statusCode).toBe(401);
     const cap = await app.inject({ url: '/api/trading/bundles/capabilities', headers: H() });
     expect(cap.statusCode).toBe(200);
-    expect(cap.json().environments.every((e: any) => e.canPlaceBundleOrders === false)).toBe(true);
+    expect(cap.json().environments.filter((e: any) => e.environment !== 'PAPER').every((e: any) => e.canPlaceBundleOrders === false)).toBe(true);
     const payload = { environment: 'LIVE', mode: 'MULTI_ASSET_BASKET', decisionIds: ['dec1', 'dec2'] };
     expect((await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', payload })).statusCode).toBe(401);
     expect((await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', headers: { cookie }, payload })).statusCode).toBe(403);
@@ -80,6 +80,14 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(result.json()).toMatchObject({ approved: false, canSubmit: false, environment: 'LIVE' });
     expect(result.json().reasonCodes).toContain('LIVE_BUNDLE_SUBMISSION_NOT_CERTIFIED');
     expect((await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', headers: H(), payload: { ...payload, decisionIds: ['x'] } })).statusCode).toBe(400);
+    const execute = '/api/trading/bundles/paper/execute';
+    expect((await app.inject({ method: 'POST', url: execute, payload: { decisionIds: ['d1', 'd2'] } })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: execute, headers: { cookie }, payload: { decisionIds: ['d1', 'd2'] } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: execute, headers: H(), payload: { decisionIds: ['d1', 'd2'] } })).statusCode).toBe(403);
+    const noDecisions = await app.inject({ method: 'POST', url: execute, headers: H(), payload: { decisionIds: ['d1', 'd2'], password: 'correct horse battery' } });
+    expect(noDecisions.statusCode).toBe(200);
+    expect(noDecisions.json().ok).toBe(false);
+
   });
 
   it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {
