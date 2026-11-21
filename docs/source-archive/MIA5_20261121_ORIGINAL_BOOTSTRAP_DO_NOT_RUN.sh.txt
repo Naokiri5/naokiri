@@ -1,0 +1,3135 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SKIP_TESTS=false
+for arg in "$@"; do
+  case "$arg" in
+    --skip-tests)
+      SKIP_TESTS=true
+      ;;
+    *)
+      echo "Unknown argument: $arg" >&2
+      echo "Usage: $0 [--skip-tests]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# 1. Verify repository root structure
+if [[ ! -d "server" || ! -d "web" ]]; then
+  echo "ERROR: Must be executed from the root of Naokiri5/naokiri (expected ./server and ./web directories)." >&2
+  exit 1
+fi
+
+TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+TMP_STAGE="$(mktemp)"
+trap 'rm -f "$TMP_STAGE"' EXIT
+
+CREATED_COUNT=0
+UPDATED_COUNT=0
+UNCHANGED_COUNT=0
+
+compute_sha256() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file" | awk '{print $1}'
+  else
+    shasum -a 256 "$file" | awk '{print $1}'
+  fi
+}
+
+# Idempotent atomic writer: compares SHA-256 checksums and creates timestamped backups only on diff
+sync_file() {
+  local id="$1"
+  local target_path="$2"
+
+  cat > "$TMP_STAGE"
+  mkdir -p "$(dirname "$target_path")"
+
+  if [[ -f "$target_path" ]]; then
+    local existing_hash new_hash
+    existing_hash="$(compute_sha256 "$target_path")"
+    new_hash="$(compute_sha256 "$TMP_STAGE")"
+
+    if [[ "$existing_hash" == "$new_hash" ]]; then
+      printf "  [%-10s] UNCHANGED  -> %s\n" "$id" "$target_path"
+      UNCHANGED_COUNT=$((UNCHANGED_COUNT + 1))
+      return 0
+    fi
+
+    cp -p "$target_path" "${target_path}.bak.${TIMESTAMP}"
+    cp "$TMP_STAGE" "$target_path"
+    printf "  [%-10s] UPDATED    -> %s (backup: %s.bak.%s)\n" "$id" "$target_path" "$target_path" "$TIMESTAMP"
+    UPDATED_COUNT=$((UPDATED_COUNT + 1))
+  else
+    cp "$TMP_STAGE" "$target_path"
+    printf "  [%-10s] CREATED    -> %s\n" "$id" "$target_path"
+    CREATED_COUNT=$((CREATED_COUNT + 1))
+  fi
+}
+
+echo "============================================================================"
+echo " MIA 5.0 Dual-Engine Telemetry, OOM Supervisor & CI Bootstrap (Naokiri5/naokiri)"
+echo "============================================================================"
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-01: server/src/telemetry/FastReflexTelemetryLayout.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-01" "server/src/telemetry/FastReflexTelemetryLayout.ts" <<'EOF_MIA5_ID_01'
+export const REFLEX_BUDGET_NS = 10_000_000n;       // 10 ms hard execution ceiling
+export const REFLEX_STALL_TIMEOUT_NS = 50_000_000n; // 50 ms dead-worker tripwire
+export const REFLEX_WARMUP_TICKS = 5_000n;          // Reset JIT watermarks after warmup
+
+export const enum ReflexWorkerState {
+  INIT = 0n,
+  WARMING_UP = 1n,
+  HEALTHY = 2n,
+  DEGRADED_LATENCY = 3n,
+  HALTED = 4n,
+}
+
+export const enum ReflexSlot {
+  // Cache Line 0 (bytes 0..63): Liveness, Heartbeats & Breach Counters
+  HEARTBEAT_SEQ = 0,            // Monotonic counter incremented via Atomics.add
+  LAST_HEARTBEAT_NS = 1,        // process.hrtime.bigint() timestamp
+  WORKER_STATE = 2,             // ReflexWorkerState enum
+  TICK_COUNT = 3,               // Total frames evaluated
+  BREACH_COUNT = 4,             // Post-warmup frames exceeding 10 ms
+  RESERVED_0 = 5,
+  RESERVED_1 = 6,
+  RESERVED_2 = 7,
+
+  // Cache Line 1 (bytes 64..127): Nanosecond Latency Breakdown
+  WIRE_TO_DECISION_LAST_NS = 8, // ingressTs -> decision exit
+  WIRE_TO_DECISION_MAX_NS = 9,
+  WAKEUP_JITTER_LAST_NS = 10,   // ingressTs -> worker wakeup (SAB scheduling lag)
+  COMPUTE_ONLY_LAST_NS = 11,    // worker wakeup -> decision exit
+  COMPUTE_ONLY_MAX_NS = 12,
+  ELD_P99_NS = 13,              // Event-loop delay p99 (1 ms resolution)
+  ELD_MAX_NS = 14,              // Event-loop delay max
+  RESERVED_3 = 15,
+}
+
+export const TELEMETRY_SAB_BYTES = 16 * BigInt64Array.BYTES_PER_ELEMENT; // 128 bytes
+
+export function createReflexTelemetryBuffer(): SharedArrayBuffer {
+  return new SharedArrayBuffer(TELEMETRY_SAB_BYTES);
+}
+EOF_MIA5_ID_01
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-02: server/src/workers/fastReflexProfiler.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-02" "server/src/workers/fastReflexProfiler.ts" <<'EOF_MIA5_ID_02'
+import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
+import {
+  REFLEX_BUDGET_NS,
+  REFLEX_WARMUP_TICKS,
+  ReflexSlot,
+  ReflexWorkerState,
+} from '../telemetry/FastReflexTelemetryLayout.js';
+
+export class FastReflexProfiler {
+  private readonly view: BigInt64Array;
+  private readonly eld: IntervalHistogram;
+  private flushTimer: NodeJS.Timeout | null = null;
+  private warmupCleared = false;
+
+  constructor(telemetrySab: SharedArrayBuffer) {
+    this.view = new BigInt64Array(telemetrySab);
+    this.eld = monitorEventLoopDelay({ resolution: 1 }); // 1 ms resolution in ns
+  }
+
+  public start(): void {
+    this.eld.enable();
+    Atomics.store(this.view, ReflexSlot.WORKER_STATE, ReflexWorkerState.WARMING_UP);
+    this.pulseHeartbeat();
+
+    // Keep timer referenced when worker awaits Atomics.waitAsync as sole async handle
+    this.flushTimer = setInterval(() => {
+      this.pulseHeartbeat();
+
+      const rawP99 = this.eld.percentile(99);
+      const rawMax = this.eld.max;
+      const p99 = Number.isFinite(rawP99) ? BigInt(Math.round(rawP99)) : 0n;
+      const max = Number.isFinite(rawMax) ? BigInt(Math.round(rawMax)) : 0n;
+
+      Atomics.store(this.view, ReflexSlot.ELD_P99_NS, p99);
+      this.updateMaxWatermark(ReflexSlot.ELD_MAX_NS, max);
+
+      if (this.warmupCleared && p99 > REFLEX_BUDGET_NS) {
+        Atomics.store(
+          this.view,
+          ReflexSlot.WORKER_STATE,
+          ReflexWorkerState.DEGRADED_LATENCY,
+        );
+      }
+
+      this.eld.reset();
+    }, 250);
+  }
+
+  public stop(): void {
+    if (this.flushTimer) {
+      clearInterval(this.flushTimer);
+      this.flushTimer = null;
+    }
+    this.eld.disable();
+    Atomics.store(this.view, ReflexSlot.WORKER_STATE, ReflexWorkerState.HALTED);
+  }
+
+  /**
+   * Call immediately after System 1 finishes evaluating a ring-buffer frame
+   * (Base DEX liquidity-pull check, mempool snipe filter, or CEX L2 trigger).
+   */
+  public recordDecision(ingressTsNs: bigint, computeStartNs: bigint): void {
+    const nowNs = process.hrtime.bigint();
+    const wireToDecisionNs = nowNs - ingressTsNs;
+    const wakeupJitterNs = computeStartNs - ingressTsNs;
+    const computeOnlyNs = nowNs - computeStartNs;
+
+    Atomics.store(this.view, ReflexSlot.LAST_HEARTBEAT_NS, nowNs);
+    Atomics.add(this.view, ReflexSlot.HEARTBEAT_SEQ, 1n);
+    const prevTicks = Atomics.add(this.view, ReflexSlot.TICK_COUNT, 1n);
+
+    // Clear JIT warmup spikes once steady-state is reached
+    if (!this.warmupCleared && prevTicks + 1n >= REFLEX_WARMUP_TICKS) {
+      this.warmupCleared = true;
+      Atomics.store(this.view, ReflexSlot.WIRE_TO_DECISION_MAX_NS, 0n);
+      Atomics.store(this.view, ReflexSlot.COMPUTE_ONLY_MAX_NS, 0n);
+      Atomics.store(this.view, ReflexSlot.ELD_MAX_NS, 0n);
+      Atomics.store(this.view, ReflexSlot.WORKER_STATE, ReflexWorkerState.HEALTHY);
+    }
+
+    Atomics.store(this.view, ReflexSlot.WIRE_TO_DECISION_LAST_NS, wireToDecisionNs);
+    Atomics.store(this.view, ReflexSlot.WAKEUP_JITTER_LAST_NS, wakeupJitterNs);
+    Atomics.store(this.view, ReflexSlot.COMPUTE_ONLY_LAST_NS, computeOnlyNs);
+
+    this.updateMaxWatermark(ReflexSlot.WIRE_TO_DECISION_MAX_NS, wireToDecisionNs);
+    this.updateMaxWatermark(ReflexSlot.COMPUTE_ONLY_MAX_NS, computeOnlyNs);
+
+    if (this.warmupCleared && wireToDecisionNs > REFLEX_BUDGET_NS) {
+      Atomics.add(this.view, ReflexSlot.BREACH_COUNT, 1n);
+      Atomics.store(
+        this.view,
+        ReflexSlot.WORKER_STATE,
+        ReflexWorkerState.DEGRADED_LATENCY,
+      );
+    }
+  }
+
+  public pulseHeartbeat(): void {
+    Atomics.store(this.view, ReflexSlot.LAST_HEARTBEAT_NS, process.hrtime.bigint());
+    Atomics.add(this.view, ReflexSlot.HEARTBEAT_SEQ, 1n);
+  }
+
+  public resetWatermarks(): void {
+    Atomics.store(this.view, ReflexSlot.WIRE_TO_DECISION_MAX_NS, 0n);
+    Atomics.store(this.view, ReflexSlot.COMPUTE_ONLY_MAX_NS, 0n);
+    Atomics.store(this.view, ReflexSlot.ELD_MAX_NS, 0n);
+    Atomics.store(this.view, ReflexSlot.BREACH_COUNT, 0n);
+    if (this.warmupCleared) {
+      Atomics.store(this.view, ReflexSlot.WORKER_STATE, ReflexWorkerState.HEALTHY);
+    }
+  }
+
+  /**
+   * Lock-free compare-and-swap (CAS) max watermark update.
+   */
+  private updateMaxWatermark(slot: ReflexSlot, candidateNs: bigint): void {
+    let current = Atomics.load(this.view, slot);
+    while (candidateNs > current) {
+      const prev = Atomics.compareExchange(this.view, slot, current, candidateNs);
+      if (prev === current) break;
+      current = prev;
+    }
+  }
+}
+EOF_MIA5_ID_02
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-03: server/src/workers/fastReflexWorker.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-03" "server/src/workers/fastReflexWorker.ts" <<'EOF_MIA5_ID_03'
+import { workerData, parentPort } from 'node:worker_threads';
+import { FastReflexProfiler } from './fastReflexProfiler.js';
+
+export interface ReflexWorkerInitData {
+  ingressRingSab: SharedArrayBuffer;
+  telemetrySab: SharedArrayBuffer;
+}
+
+const { ingressRingSab, telemetrySab } = workerData as ReflexWorkerInitData;
+const profiler = new FastReflexProfiler(telemetrySab);
+
+// Header view: [0] = writeSeq, [1] = lastIngressTsNs
+const ingressHeader = new BigInt64Array(ingressRingSab, 0, 2);
+let lastProcessedSeq = Atomics.load(ingressHeader, 0);
+
+async function runReflexLoop(): Promise<void> {
+  profiler.start();
+
+  while (true) {
+    const currentSeq = Atomics.load(ingressHeader, 0);
+
+    if (currentSeq === lastProcessedSeq) {
+      // Non-blocking wait so background heartbeat timers and parentPort control messages still fire
+      const waitRes = Atomics.waitAsync(ingressHeader, 0, currentSeq, 50);
+      if (waitRes.async) {
+        await waitRes.value;
+      }
+      continue;
+    }
+
+    const computeStartNs = process.hrtime.bigint();
+    const ingressTsNs = Atomics.load(ingressHeader, 1);
+    lastProcessedSeq = currentSeq;
+
+    // --- System 1 Hot Path (Base DEX liquidity-pull check / mempool filter / CEX L2 trigger) ---
+    evaluateReflexTick(ingressRingSab, currentSeq);
+    // -----------------------------------------------------------------------------------------
+
+    profiler.recordDecision(ingressTsNs, computeStartNs);
+  }
+}
+
+function evaluateReflexTick(_ringSab: SharedArrayBuffer, _seq: bigint): void {
+  // Read pre-allocated TypedArray slots directly; zero JSON.parse or object allocation
+}
+
+parentPort?.on('message', (msg: { type: string }) => {
+  if (msg.type === 'RESET_WATERMARKS') {
+    profiler.resetWatermarks();
+  } else if (msg.type === 'SHUTDOWN') {
+    profiler.stop();
+    process.exit(0);
+  }
+});
+
+void runReflexLoop();
+EOF_MIA5_ID_03
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-04: server/src/nexus/readReflexTelemetry.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-04" "server/src/nexus/readReflexTelemetry.ts" <<'EOF_MIA5_ID_04'
+import {
+  REFLEX_BUDGET_NS,
+  REFLEX_STALL_TIMEOUT_NS,
+  ReflexSlot,
+  ReflexWorkerState,
+} from '../telemetry/FastReflexTelemetryLayout.js';
+
+export interface ReflexHealthSnapshot {
+  healthy: boolean;
+  stalled: boolean;
+  warmingUp: boolean;
+  state: bigint;
+  heartbeatSeq: bigint;
+  heartbeatAgeMs: number;
+  tickCount: bigint;
+  breachCount: bigint;
+  wireToDecisionLastMs: number;
+  wireToDecisionMaxMs: number;
+  wakeupJitterLastMs: number;
+  computeOnlyLastMs: number;
+  computeOnlyMaxMs: number;
+  eldP99Ms: number;
+}
+
+const NS_PER_MS = 1_000_000;
+
+export function readReflexTelemetry(telemetrySab: SharedArrayBuffer): ReflexHealthSnapshot {
+  const view = new BigInt64Array(telemetrySab);
+  const nowNs = process.hrtime.bigint();
+
+  const lastHeartbeatNs = Atomics.load(view, ReflexSlot.LAST_HEARTBEAT_NS);
+  const state = Atomics.load(view, ReflexSlot.WORKER_STATE);
+  const heartbeatSeq = Atomics.load(view, ReflexSlot.HEARTBEAT_SEQ);
+  const tickCount = Atomics.load(view, ReflexSlot.TICK_COUNT);
+  const breachCount = Atomics.load(view, ReflexSlot.BREACH_COUNT);
+
+  const wireLastNs = Atomics.load(view, ReflexSlot.WIRE_TO_DECISION_LAST_NS);
+  const wireMaxNs = Atomics.load(view, ReflexSlot.WIRE_TO_DECISION_MAX_NS);
+  const jitterLastNs = Atomics.load(view, ReflexSlot.WAKEUP_JITTER_LAST_NS);
+  const computeLastNs = Atomics.load(view, ReflexSlot.COMPUTE_ONLY_LAST_NS);
+  const computeMaxNs = Atomics.load(view, ReflexSlot.COMPUTE_ONLY_MAX_NS);
+  const eldP99Ns = Atomics.load(view, ReflexSlot.ELD_P99_NS);
+
+  const ageNs = lastHeartbeatNs > 0n ? nowNs - lastHeartbeatNs : 0n;
+  const stalled = lastHeartbeatNs > 0n && ageNs > REFLEX_STALL_TIMEOUT_NS;
+  const warmingUp = state === ReflexWorkerState.WARMING_UP;
+
+  const healthy =
+    !stalled &&
+    (state === ReflexWorkerState.HEALTHY || warmingUp) &&
+    eldP99Ns <= REFLEX_BUDGET_NS;
+
+  return {
+    healthy,
+    stalled,
+    warmingUp,
+    state,
+    heartbeatSeq,
+    heartbeatAgeMs: Number(ageNs) / NS_PER_MS,
+    tickCount,
+    breachCount,
+    wireToDecisionLastMs: Number(wireLastNs) / NS_PER_MS,
+    wireToDecisionMaxMs: Number(wireMaxNs) / NS_PER_MS,
+    wakeupJitterLastMs: Number(jitterLastNs) / NS_PER_MS,
+    computeOnlyLastMs: Number(computeLastNs) / NS_PER_MS,
+    computeOnlyMaxMs: Number(computeMaxNs) / NS_PER_MS,
+    eldP99Ms: Number(eldP99Ns) / NS_PER_MS,
+  };
+}
+EOF_MIA5_ID_04
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-05: server/src/risk/UnifiedRiskGovernor.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-05" "server/src/risk/UnifiedRiskGovernor.ts" <<'EOF_MIA5_ID_05'
+import { EventEmitter } from 'node:events';
+import type { OpsWebhookNotifier } from '../alerts/OpsWebhookNotifier.js';
+
+export type System1TripReason =
+  | 'SYSTEM1_HEARTBEAT_LOSS'
+  | 'SYSTEM1_LATENCY_DEGRADED'
+  | 'SYSTEM1_WORKER_EXIT';
+
+export interface System1BreakerState {
+  tripped: boolean;
+  reason: System1TripReason | null;
+  trippedAt: number | null;
+  details: Record<string, unknown>;
+}
+
+export type System2TripReason =
+  | 'SYSTEM2_OOM_CRASH'
+  | 'SYSTEM2_WORKER_EXIT'
+  | 'SYSTEM2_MAX_RESPAWNS_EXCEEDED';
+
+export interface System2BreakerState {
+  tripped: boolean;
+  reason: System2TripReason | null;
+  trippedAt: number | null;
+  details: Record<string, unknown>;
+}
+
+export class UnifiedRiskGovernor extends EventEmitter {
+  private dailyDrawdownHalted = false;
+
+  private system1Breaker: System1BreakerState = {
+    tripped: false,
+    reason: null,
+    trippedAt: null,
+    details: {},
+  };
+
+  private system2Breaker: System2BreakerState = {
+    tripped: false,
+    reason: null,
+    trippedAt: null,
+    details: {},
+  };
+
+  public isDailyDrawdownHalted(): boolean {
+    return this.dailyDrawdownHalted;
+  }
+
+  public setDailyDrawdownHalted(halted: boolean): void {
+    this.dailyDrawdownHalted = halted;
+  }
+
+  // --- System 1 Circuit Breaker ---
+
+  public tripSystem1CircuitBreaker(
+    reason: System1TripReason,
+    details: Record<string, unknown> = {},
+  ): void {
+    // Avoid duplicate alert storms while already tripped on the same fault
+    if (this.system1Breaker.tripped && this.system1Breaker.reason === reason) {
+      return;
+    }
+
+    this.system1Breaker = {
+      tripped: true,
+      reason,
+      trippedAt: Date.now(),
+      details,
+    };
+
+    // Keep ExitSupervisor active so open positions still execute stop-loss / TP waterfalls
+    this.emit('risk:system1_tripped', this.system1Breaker);
+  }
+
+  public resetSystem1CircuitBreaker(): void {
+    this.system1Breaker = {
+      tripped: false,
+      reason: null,
+      trippedAt: null,
+      details: {},
+    };
+    this.emit('risk:system1_reset');
+  }
+
+  public canOpenSystem1Entry(): boolean {
+    return !this.system1Breaker.tripped && !this.isDailyDrawdownHalted();
+  }
+
+  public getSystem1BreakerState(): System1BreakerState {
+    return { ...this.system1Breaker };
+  }
+
+  // --- System 2 Circuit Breaker ---
+
+  public tripSystem2CircuitBreaker(
+    reason: System2TripReason,
+    details: Record<string, unknown> = {},
+  ): void {
+    if (this.system2Breaker.tripped && this.system2Breaker.reason === reason) {
+      return;
+    }
+
+    this.system2Breaker = {
+      tripped: true,
+      reason,
+      trippedAt: Date.now(),
+      details,
+    };
+
+    this.emit('risk:system2_tripped', this.system2Breaker);
+  }
+
+  public resetSystem2CircuitBreaker(): void {
+    if (!this.system2Breaker.tripped) return;
+
+    this.system2Breaker = {
+      tripped: false,
+      reason: null,
+      trippedAt: null,
+      details: {},
+    };
+
+    this.emit('risk:system2_reset');
+  }
+
+  public canOpenSystem2Entry(): boolean {
+    return !this.system2Breaker.tripped && !this.isDailyDrawdownHalted();
+  }
+
+  public getSystem2BreakerState(): System2BreakerState {
+    return { ...this.system2Breaker };
+  }
+
+  // --- Webhook Notifier Binding ---
+
+  public bindAlertNotifier(
+    notifier: OpsWebhookNotifier,
+    cooldowns: { system1Ms?: number; system2OomMs?: number } = {},
+  ): () => void {
+    const s1CooldownMs = cooldowns.system1Ms ?? 60_000;
+    const s2OomCooldownMs = cooldowns.system2OomMs ?? 120_000;
+
+    const onSystem1Tripped = (state: System1BreakerState): void => {
+      const reason = state.reason ?? 'UNKNOWN';
+      const isStallOrCrash =
+        reason === 'SYSTEM1_HEARTBEAT_LOSS' || reason === 'SYSTEM1_WORKER_EXIT';
+
+      notifier.notify({
+        dedupeKey: `RISK_S1_${reason}`,
+        severity: isStallOrCrash ? 'CRITICAL' : 'WARNING',
+        title: isStallOrCrash
+          ? 'System 1 Fast Reflex Stall / Exit'
+          : 'System 1 Latency Budget Degraded',
+        summary:
+          'UnifiedRiskGovernor halted new System 1 entries. ExitSupervisor remains active for open positions.',
+        cooldownMs: s1CooldownMs,
+        fields: {
+          Reason: reason,
+          HeartbeatAgeMs:
+            typeof state.details.heartbeatAgeMs === 'number'
+              ? state.details.heartbeatAgeMs.toFixed(1)
+              : undefined,
+          LastSeq: state.details.lastSeq as string | undefined,
+          EldP99Ms:
+            typeof state.details.eldP99Ms === 'number'
+              ? state.details.eldP99Ms.toFixed(2)
+              : undefined,
+          ExitCode: state.details.exitCode as number | undefined,
+        },
+      });
+    };
+
+    const onSystem1Reset = (): void => {
+      notifier.clearCooldown('RISK_S1_SYSTEM1_HEARTBEAT_LOSS');
+      notifier.clearCooldown('RISK_S1_SYSTEM1_LATENCY_DEGRADED');
+      notifier.clearCooldown('RISK_S1_SYSTEM1_WORKER_EXIT');
+
+      notifier.notify({
+        dedupeKey: 'RISK_S1_RECOVERY',
+        severity: 'RECOVERY',
+        title: 'System 1 Circuit Breaker Reset',
+        summary: 'Fast Reflex Engine entries re-enabled.',
+        bypassCooldown: true,
+      });
+    };
+
+    const onSystem2Tripped = (state: System2BreakerState): void => {
+      const reason = state.reason ?? 'UNKNOWN';
+      // Exhaustion is handled with dedicated supervisor context by NexusFabricRouter
+      if (reason === 'SYSTEM2_MAX_RESPAWNS_EXCEEDED') {
+        return;
+      }
+
+      notifier.notify({
+        dedupeKey: `RISK_S2_${reason}`,
+        severity: 'WARNING',
+        title: 'System 2 Deep Confluence Worker Crash',
+        summary:
+          'System 2 entries paused while NexusFabricRouter schedules an exponential backoff respawn.',
+        cooldownMs: s2OomCooldownMs,
+        fields: {
+          Reason: reason,
+          Generation: state.details.generation as number | undefined,
+          Attempt: state.details.attempt as number | undefined,
+          ErrorCode: state.details.code as string | undefined,
+        },
+      });
+    };
+
+    const onSystem2Reset = (): void => {
+      notifier.clearCooldown('RISK_S2_SYSTEM2_OOM_CRASH');
+      notifier.clearCooldown('RISK_S2_SYSTEM2_WORKER_EXIT');
+      notifier.clearCooldown('NEXUS_S2_RESPAWN_EXHAUSTED');
+    };
+
+    this.on('risk:system1_tripped', onSystem1Tripped);
+    this.on('risk:system1_reset', onSystem1Reset);
+    this.on('risk:system2_tripped', onSystem2Tripped);
+    this.on('risk:system2_reset', onSystem2Reset);
+
+    return () => {
+      this.off('risk:system1_tripped', onSystem1Tripped);
+      this.off('risk:system1_reset', onSystem1Reset);
+      this.off('risk:system2_tripped', onSystem2Tripped);
+      this.off('risk:system2_reset', onSystem2Reset);
+    };
+  }
+}
+EOF_MIA5_ID_05
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-06: server/src/nexus/NexusFabricRouter.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-06" "server/src/nexus/NexusFabricRouter.ts" <<'EOF_MIA5_ID_06'
+import { EventEmitter } from 'node:events';
+import { Worker } from 'node:worker_threads';
+import {
+  createReflexTelemetryBuffer,
+  REFLEX_BUDGET_NS,
+  ReflexWorkerState,
+} from '../telemetry/FastReflexTelemetryLayout.js';
+import {
+  readReflexTelemetry,
+  type ReflexHealthSnapshot,
+} from './readReflexTelemetry.js';
+import type {
+  System2TripReason,
+  UnifiedRiskGovernor,
+} from '../risk/UnifiedRiskGovernor.js';
+import type { OpsWebhookNotifier } from '../alerts/OpsWebhookNotifier.js';
+
+export interface ReflexTelemetryDto {
+  ts: number;
+  healthy: boolean;
+  stalled: boolean;
+  warmingUp: boolean;
+  stateLabel: 'INIT' | 'WARMING_UP' | 'HEALTHY' | 'DEGRADED_LATENCY' | 'HALTED';
+  heartbeatSeq: string;
+  heartbeatAgeMs: number;
+  tickCount: string;
+  breachCount: string;
+  wireToDecisionLastMs: number;
+  wireToDecisionMaxMs: number;
+  wakeupJitterLastMs: number;
+  computeOnlyLastMs: number;
+  computeOnlyMaxMs: number;
+  eldP99Ms: number;
+  budgetMs: number;
+}
+
+export interface DeepSupervisorConfig {
+  baseBackoffMs: number;
+  maxBackoffMs: number;
+  maxRespawnAttempts: number;
+  stabilityWindowMs: number;
+}
+
+export interface DeepRespawnScheduledEvent {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason: System2TripReason;
+}
+
+export interface DeepRecoveredEvent {
+  attempt: number;
+  generation: number;
+  threadId: number;
+}
+
+export interface DeepSupervisorSnapshot {
+  ready: boolean;
+  generation: number;
+  threadId: number | null;
+  respawnAttempts: number;
+  maxRespawnAttempts: number;
+  pendingBackoffMs: number | null;
+  nextRespawnAt: number | null;
+  exhausted: boolean;
+  lastRecovery: DeepRecoveredEvent | null;
+}
+
+const STATE_LABELS: Record<string, ReflexTelemetryDto['stateLabel']> = {
+  [ReflexWorkerState.INIT.toString()]: 'INIT',
+  [ReflexWorkerState.WARMING_UP.toString()]: 'WARMING_UP',
+  [ReflexWorkerState.HEALTHY.toString()]: 'HEALTHY',
+  [ReflexWorkerState.DEGRADED_LATENCY.toString()]: 'DEGRADED_LATENCY',
+  [ReflexWorkerState.HALTED.toString()]: 'HALTED',
+};
+
+const DEFAULT_DEEP_SUPERVISOR_CONFIG: DeepSupervisorConfig = {
+  baseBackoffMs: 500,
+  maxBackoffMs: 15_000,
+  maxRespawnAttempts: 5,
+  stabilityWindowMs: 10_000,
+};
+
+export class NexusFabricRouter extends EventEmitter {
+  private readonly telemetrySab: SharedArrayBuffer;
+  private readonly ingressRingSab: SharedArrayBuffer;
+  private readonly riskGovernor: UnifiedRiskGovernor;
+  private readonly deepConfig: DeepSupervisorConfig;
+
+  private fastWorker: Worker | null = null;
+  private watchdogTimer: NodeJS.Timeout | null = null;
+  private consecutiveDegradedSamples = 0;
+  private lastSnapshot: ReflexTelemetryDto | null = null;
+
+  // System 2 Supervisor State
+  private deepWorker: Worker | null = null;
+  private deepWorkerUrl: URL | null = null;
+  private deepMaxOldGenMb = 256;
+  private deepWorkerGeneration = 0;
+  private deepRespawnAttempts = 0;
+  private deepRespawnTimer: NodeJS.Timeout | null = null;
+  private deepStabilityTimer: NodeJS.Timeout | null = null;
+  private deepReady = false;
+  private deepExhausted = false;
+  private pendingBackoffMs: number | null = null;
+  private nextRespawnAt: number | null = null;
+  private lastDeepRecovery: DeepRecoveredEvent | null = null;
+  private isShuttingDown = false;
+
+  constructor(
+    ingressRingSab: SharedArrayBuffer,
+    riskGovernor: UnifiedRiskGovernor,
+    deepSupervisorConfig: Partial<DeepSupervisorConfig> = {},
+  ) {
+    super();
+    this.ingressRingSab = ingressRingSab;
+    this.telemetrySab = createReflexTelemetryBuffer();
+    this.riskGovernor = riskGovernor;
+    this.deepConfig = {
+      ...DEFAULT_DEEP_SUPERVISOR_CONFIG,
+      ...deepSupervisorConfig,
+    };
+  }
+
+  // --- System 1 Fast Reflex Worker & Lock-Free Watchdog ---
+
+  public startFastReflexWorker(workerScriptUrl: URL): void {
+    this.fastWorker = new Worker(workerScriptUrl, {
+      workerData: {
+        ingressRingSab: this.ingressRingSab,
+        telemetrySab: this.telemetrySab,
+      },
+      resourceLimits: {
+        maxOldGenerationSizeMb: 256,
+        maxYoungGenerationSizeMb: 64,
+      },
+    });
+
+    this.fastWorker.on('exit', (code) => {
+      if (!this.isShuttingDown) {
+        this.riskGovernor.tripSystem1CircuitBreaker('SYSTEM1_WORKER_EXIT', {
+          exitCode: code,
+        });
+      }
+    });
+
+    this.watchdogTimer = setInterval(() => this.pollReflexHealth(), 100);
+    this.watchdogTimer.unref();
+  }
+
+  public getLatestReflexDto(): ReflexTelemetryDto | null {
+    return this.lastSnapshot;
+  }
+
+  public resetReflexWatermarks(): void {
+    this.fastWorker?.postMessage({ type: 'RESET_WATERMARKS' });
+    this.consecutiveDegradedSamples = 0;
+  }
+
+  private pollReflexHealth(): void {
+    const snap = readReflexTelemetry(this.telemetrySab);
+
+    // 1. Immediate escalation on dead/wedged System 1 thread (> 50 ms heartbeat gap)
+    if (snap.stalled) {
+      this.riskGovernor.tripSystem1CircuitBreaker('SYSTEM1_HEARTBEAT_LOSS', {
+        heartbeatAgeMs: snap.heartbeatAgeMs,
+        lastSeq: snap.heartbeatSeq.toString(),
+      });
+    } else if (!snap.warmingUp && !snap.healthy) {
+      // 2. Debounce latency degradation across 3 consecutive 100 ms polls (300 ms)
+      this.consecutiveDegradedSamples += 1;
+      if (this.consecutiveDegradedSamples >= 3) {
+        this.riskGovernor.tripSystem1CircuitBreaker('SYSTEM1_LATENCY_DEGRADED', {
+          eldP99Ms: snap.eldP99Ms,
+          wireToDecisionMaxMs: snap.wireToDecisionMaxMs,
+          breachCount: snap.breachCount.toString(),
+        });
+      }
+    } else {
+      this.consecutiveDegradedSamples = 0;
+    }
+
+    const dto = this.toDto(snap);
+    this.lastSnapshot = dto;
+    this.emit('reflex:telemetry', dto);
+  }
+
+  private toDto(snap: ReflexHealthSnapshot): ReflexTelemetryDto {
+    return {
+      ts: Date.now(),
+      healthy: snap.healthy,
+      stalled: snap.stalled,
+      warmingUp: snap.warmingUp,
+      stateLabel: STATE_LABELS[snap.state.toString()] ?? 'INIT',
+      heartbeatSeq: snap.heartbeatSeq.toString(),
+      heartbeatAgeMs: Number(snap.heartbeatAgeMs.toFixed(2)),
+      tickCount: snap.tickCount.toString(),
+      breachCount: snap.breachCount.toString(),
+      wireToDecisionLastMs: Number(snap.wireToDecisionLastMs.toFixed(3)),
+      wireToDecisionMaxMs: Number(snap.wireToDecisionMaxMs.toFixed(3)),
+      wakeupJitterLastMs: Number(snap.wakeupJitterLastMs.toFixed(3)),
+      computeOnlyLastMs: Number(snap.computeOnlyLastMs.toFixed(3)),
+      computeOnlyMaxMs: Number(snap.computeOnlyMaxMs.toFixed(3)),
+      eldP99Ms: Number(snap.eldP99Ms.toFixed(3)),
+      budgetMs: Number(REFLEX_BUDGET_NS) / 1_000_000,
+    };
+  }
+
+  // --- System 2 Deep Confluence Worker & OOM Respawn Supervisor ---
+
+  public startDeepConfluenceWorker(
+    workerScriptUrl: URL,
+    maxOldGenerationSizeMb = 256,
+  ): void {
+    this.deepWorkerUrl = workerScriptUrl;
+    this.deepMaxOldGenMb = maxOldGenerationSizeMb;
+    this.deepRespawnAttempts = 0;
+    this.deepExhausted = false;
+    this.spawnDeepWorkerInstance();
+  }
+
+  public isDeepWorkerReady(): boolean {
+    return this.deepReady && this.deepWorker !== null;
+  }
+
+  public getDeepRespawnAttempts(): number {
+    return this.deepRespawnAttempts;
+  }
+
+  public postToDeepWorker(message: unknown): boolean {
+    if (!this.deepWorker || !this.deepReady) return false;
+    this.deepWorker.postMessage(message);
+    return true;
+  }
+
+  public getDeepSupervisorSnapshot(): DeepSupervisorSnapshot {
+    return {
+      ready: this.deepReady && this.deepWorker !== null,
+      generation: this.deepWorkerGeneration,
+      threadId: this.deepWorker?.threadId ?? null,
+      respawnAttempts: this.deepRespawnAttempts,
+      maxRespawnAttempts: this.deepConfig.maxRespawnAttempts,
+      pendingBackoffMs: this.pendingBackoffMs,
+      nextRespawnAt: this.nextRespawnAt,
+      exhausted: this.deepExhausted,
+      lastRecovery: this.lastDeepRecovery,
+    };
+  }
+
+  public forceRespawnDeepWorker(): void {
+    if (this.isShuttingDown || !this.deepWorkerUrl) return;
+
+    if (this.deepRespawnTimer) {
+      clearTimeout(this.deepRespawnTimer);
+      this.deepRespawnTimer = null;
+    }
+    if (this.deepStabilityTimer) {
+      clearTimeout(this.deepStabilityTimer);
+      this.deepStabilityTimer = null;
+    }
+
+    this.deepRespawnAttempts = 0;
+    this.deepExhausted = false;
+    this.pendingBackoffMs = null;
+    this.nextRespawnAt = null;
+    this.riskGovernor.resetSystem2CircuitBreaker();
+
+    const previousWorker = this.deepWorker;
+    this.deepWorker = null;
+    this.deepReady = false;
+    void previousWorker?.terminate();
+
+    this.spawnDeepWorkerInstance();
+  }
+
+  private spawnDeepWorkerInstance(): void {
+    if (this.isShuttingDown || !this.deepWorkerUrl) return;
+
+    const generation = ++this.deepWorkerGeneration;
+    const attemptNumber = this.deepRespawnAttempts;
+    let crashHandled = false;
+    this.deepReady = false;
+
+    const worker = new Worker(this.deepWorkerUrl, {
+      workerData: {
+        ingressRingSab: this.ingressRingSab,
+        generation,
+      },
+      resourceLimits: {
+        maxOldGenerationSizeMb: this.deepMaxOldGenMb,
+        maxYoungGenerationSizeMb: 32,
+      },
+    });
+
+    this.deepWorker = worker;
+
+    const handleWorkerCrash = (
+      reason: System2TripReason,
+      details: Record<string, unknown>,
+    ): void => {
+      if (
+        this.isShuttingDown ||
+        crashHandled ||
+        generation !== this.deepWorkerGeneration
+      ) {
+        return;
+      }
+      crashHandled = true;
+      this.deepReady = false;
+      this.deepWorker = null;
+
+      if (this.deepStabilityTimer) {
+        clearTimeout(this.deepStabilityTimer);
+        this.deepStabilityTimer = null;
+      }
+
+      this.riskGovernor.tripSystem2CircuitBreaker(reason, {
+        ...details,
+        generation,
+        attempt: attemptNumber,
+      });
+
+      this.scheduleDeepRespawn(reason);
+    };
+
+    worker.on('message', (msg: { type?: string; [key: string]: unknown }) => {
+      if (generation !== this.deepWorkerGeneration || this.isShuttingDown) return;
+
+      if (msg?.type === 'READY') {
+        this.deepReady = true;
+        this.deepExhausted = false;
+        this.pendingBackoffMs = null;
+        this.nextRespawnAt = null;
+        this.riskGovernor.resetSystem2CircuitBreaker();
+
+        if (attemptNumber > 0) {
+          const recoveryEvt: DeepRecoveredEvent = {
+            attempt: attemptNumber,
+            generation,
+            threadId: worker.threadId,
+          };
+          this.lastDeepRecovery = recoveryEvt;
+          this.emit('nexus:deep_recovered', recoveryEvt);
+        }
+
+        // Reset backoff counter once worker proves stable across stabilityWindowMs
+        if (this.deepStabilityTimer) clearTimeout(this.deepStabilityTimer);
+        this.deepStabilityTimer = setTimeout(() => {
+          if (generation === this.deepWorkerGeneration && this.deepReady) {
+            this.deepRespawnAttempts = 0;
+          }
+        }, this.deepConfig.stabilityWindowMs);
+        this.deepStabilityTimer.unref();
+      } else {
+        this.emit('nexus:deep_message', msg);
+      }
+    });
+
+    worker.on('error', (err: NodeJS.ErrnoException) => {
+      const reason: System2TripReason =
+        err.code === 'ERR_WORKER_OUT_OF_MEMORY'
+          ? 'SYSTEM2_OOM_CRASH'
+          : 'SYSTEM2_WORKER_EXIT';
+
+      handleWorkerCrash(reason, {
+        code: err.code ?? 'UNKNOWN',
+        message: err.message,
+      });
+    });
+
+    worker.on('exit', (code) => {
+      if (code !== 0) {
+        handleWorkerCrash('SYSTEM2_WORKER_EXIT', { exitCode: code });
+      } else if (generation === this.deepWorkerGeneration) {
+        this.deepReady = false;
+        this.deepWorker = null;
+      }
+    });
+  }
+
+  private scheduleDeepRespawn(lastReason: System2TripReason): void {
+    if (this.isShuttingDown) return;
+
+    const nextAttempt = this.deepRespawnAttempts + 1;
+    if (nextAttempt > this.deepConfig.maxRespawnAttempts) {
+      this.deepExhausted = true;
+      this.pendingBackoffMs = null;
+      this.nextRespawnAt = null;
+
+      this.riskGovernor.tripSystem2CircuitBreaker(
+        'SYSTEM2_MAX_RESPAWNS_EXCEEDED',
+        {
+          attempts: this.deepRespawnAttempts,
+          maxRespawnAttempts: this.deepConfig.maxRespawnAttempts,
+          lastReason,
+        },
+      );
+      this.emit('nexus:deep_exhausted', {
+        attempts: this.deepRespawnAttempts,
+        lastReason,
+      });
+      return;
+    }
+
+    this.deepRespawnAttempts = nextAttempt;
+    const delayMs = Math.min(
+      this.deepConfig.maxBackoffMs,
+      this.deepConfig.baseBackoffMs * 2 ** (nextAttempt - 1),
+    );
+    this.pendingBackoffMs = delayMs;
+    this.nextRespawnAt = Date.now() + delayMs;
+
+    this.emit('nexus:deep_respawn_scheduled', {
+      attempt: nextAttempt,
+      maxAttempts: this.deepConfig.maxRespawnAttempts,
+      delayMs,
+      reason: lastReason,
+    } satisfies DeepRespawnScheduledEvent);
+
+    this.deepRespawnTimer = setTimeout(() => {
+      this.deepRespawnTimer = null;
+      this.spawnDeepWorkerInstance();
+    }, delayMs);
+    this.deepRespawnTimer.unref();
+  }
+
+  public bindAlertNotifier(
+    notifier: OpsWebhookNotifier,
+    cooldownMs = 300_000,
+  ): () => void {
+    const onDeepExhausted = (evt: {
+      attempts: number;
+      lastReason: System2TripReason;
+    }): void => {
+      notifier.notify({
+        dedupeKey: 'NEXUS_S2_RESPAWN_EXHAUSTED',
+        severity: 'CRITICAL',
+        title: 'System 2 OOM Respawn Budget Exhausted',
+        summary:
+          'deepConfluenceWorker hit max respawn retries and is locked offline. Manual inspection or dashboard reset required.',
+        cooldownMs,
+        fields: {
+          RespawnAttempts: `${evt.attempts} / ${this.deepConfig.maxRespawnAttempts}`,
+          LastFaultReason: evt.lastReason,
+          MaxOldGenMb: this.deepMaxOldGenMb,
+          LastGeneration: this.deepWorkerGeneration,
+        },
+      });
+    };
+
+    const onDeepRecovered = (evt: DeepRecoveredEvent): void => {
+      notifier.clearCooldown('NEXUS_S2_RESPAWN_EXHAUSTED');
+      notifier.clearCooldown('RISK_S2_SYSTEM2_OOM_CRASH');
+      notifier.clearCooldown('RISK_S2_SYSTEM2_WORKER_EXIT');
+
+      notifier.notify({
+        dedupeKey: `NEXUS_S2_RECOVERED_GEN_${evt.generation}`,
+        severity: 'RECOVERY',
+        title: 'System 2 Deep Confluence Worker Recovered',
+        summary:
+          'Replacement worker completed READY handshake; System 2 entries automatically re-enabled.',
+        bypassCooldown: true,
+        fields: {
+          Generation: evt.generation,
+          ThreadId: evt.threadId,
+          RecoveredOnAttempt: evt.attempt,
+        },
+      });
+    };
+
+    this.on('nexus:deep_exhausted', onDeepExhausted);
+    this.on('nexus:deep_recovered', onDeepRecovered);
+
+    return () => {
+      this.off('nexus:deep_exhausted', onDeepExhausted);
+      this.off('nexus:deep_recovered', onDeepRecovered);
+    };
+  }
+
+  public async shutdown(): Promise<void> {
+    this.isShuttingDown = true;
+
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+    if (this.deepRespawnTimer) {
+      clearTimeout(this.deepRespawnTimer);
+      this.deepRespawnTimer = null;
+    }
+    if (this.deepStabilityTimer) {
+      clearTimeout(this.deepStabilityTimer);
+      this.deepStabilityTimer = null;
+    }
+
+    this.fastWorker?.postMessage({ type: 'SHUTDOWN' });
+    this.deepWorker?.postMessage({ type: 'SHUTDOWN' });
+
+    await Promise.all([
+      this.fastWorker?.terminate(),
+      this.deepWorker?.terminate(),
+    ]);
+
+    this.fastWorker = null;
+    this.deepWorker = null;
+    this.deepReady = false;
+  }
+}
+EOF_MIA5_ID_06
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-07: server/src/alerts/OpsWebhookNotifier.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-07" "server/src/alerts/OpsWebhookNotifier.ts" <<'EOF_MIA5_ID_07'
+export type AlertSeverity = 'CRITICAL' | 'WARNING' | 'RECOVERY';
+
+export interface OpsAlertPayload {
+  dedupeKey: string;
+  severity: AlertSeverity;
+  title: string;
+  summary: string;
+  fields?: Record<string, string | number | boolean | null | undefined>;
+  cooldownMs?: number;
+  bypassCooldown?: boolean;
+}
+
+export interface OpsWebhookNotifierConfig {
+  telegramBotToken?: string;
+  telegramChatId?: string;
+  discordWebhookUrl?: string;
+  defaultCooldownMs?: number;
+  requestTimeoutMs?: number;
+  environmentLabel?: string;
+}
+
+const SEVERITY_META: Record<
+  AlertSeverity,
+  { emoji: string; discordColor: number }
+> = {
+  CRITICAL: { emoji: '🚨', discordColor: 0xef4444 }, // Rose-500
+  WARNING: { emoji: '⚠️', discordColor: 0xf59e0b },  // Amber-500
+  RECOVERY: { emoji: '✅', discordColor: 0x10b981 }, // Emerald-500
+};
+
+function escapeHtml(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+export class OpsWebhookNotifier {
+  private readonly telegramBotToken?: string;
+  private readonly telegramChatId?: string;
+  private readonly discordWebhookUrl?: string;
+  private readonly defaultCooldownMs: number;
+  private readonly requestTimeoutMs: number;
+  private readonly environmentLabel: string;
+  private readonly lastSentByKey = new Map<string, number>();
+  private readonly inFlight = new Set<Promise<void>>();
+
+  constructor(config: OpsWebhookNotifierConfig) {
+    this.telegramBotToken = config.telegramBotToken?.trim() || undefined;
+    this.telegramChatId = config.telegramChatId?.trim() || undefined;
+    this.discordWebhookUrl = config.discordWebhookUrl?.trim() || undefined;
+    this.defaultCooldownMs = config.defaultCooldownMs ?? 60_000;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? 4_000;
+    this.environmentLabel = config.environmentLabel ?? 'MIA-5.0';
+  }
+
+  public isConfigured(): boolean {
+    const hasTelegram = Boolean(this.telegramBotToken && this.telegramChatId);
+    const hasDiscord = Boolean(this.discordWebhookUrl);
+    return hasTelegram || hasDiscord;
+  }
+
+  /**
+   * Fire-and-forget dispatch with cooldown deduplication.
+   * Returns true if the alert was accepted for delivery, false if suppressed by cooldown.
+   */
+  public notify(alert: OpsAlertPayload): boolean {
+    const now = Date.now();
+    const cooldownMs = alert.cooldownMs ?? this.defaultCooldownMs;
+
+    if (!alert.bypassCooldown && cooldownMs > 0) {
+      const lastSentAt = this.lastSentByKey.get(alert.dedupeKey);
+      if (lastSentAt !== undefined && now - lastSentAt < cooldownMs) {
+        return false;
+      }
+    }
+
+    this.lastSentByKey.set(alert.dedupeKey, now);
+
+    if (!this.isConfigured()) {
+      return true;
+    }
+
+    const task = this.dispatchAll(alert, now).finally(() => {
+      this.inFlight.delete(task);
+    });
+    this.inFlight.add(task);
+
+    return true;
+  }
+
+  /**
+   * Clears cooldown for a fault key upon recovery so a subsequent trip fires immediately.
+   */
+  public clearCooldown(dedupeKey: string): void {
+    this.lastSentByKey.delete(dedupeKey);
+  }
+
+  /**
+   * Used during graceful shutdown or integration tests to await pending HTTP calls.
+   */
+  public async flush(): Promise<void> {
+    await Promise.allSettled([...this.inFlight]);
+  }
+
+  private async dispatchAll(
+    alert: OpsAlertPayload,
+    timestampMs: number,
+  ): Promise<void> {
+    const deliveries: Promise<void>[] = [];
+
+    if (this.telegramBotToken && this.telegramChatId) {
+      deliveries.push(this.sendTelegram(alert, timestampMs));
+    }
+    if (this.discordWebhookUrl) {
+      deliveries.push(this.sendDiscord(alert, timestampMs));
+    }
+
+    const results = await Promise.allSettled(deliveries);
+    for (const res of results) {
+      if (res.status === 'rejected') {
+        console.error('[OpsWebhookNotifier] Delivery failed:', res.reason);
+      }
+    }
+  }
+
+  private async sendTelegram(
+    alert: OpsAlertPayload,
+    timestampMs: number,
+  ): Promise<void> {
+    const meta = SEVERITY_META[alert.severity];
+    const fieldLines = Object.entries(alert.fields ?? {})
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(
+        ([k, v]) =>
+          `• <b>${escapeHtml(k)}:</b> <code>${escapeHtml(String(v))}</code>`,
+      );
+
+    const lines = [
+      `${meta.emoji} <b>[${escapeHtml(this.environmentLabel)}] ${escapeHtml(alert.title)}</b>`,
+      escapeHtml(alert.summary),
+      ...(fieldLines.length > 0 ? ['', ...fieldLines] : []),
+      '',
+      `<i>UTC: ${new Date(timestampMs).toISOString()}</i>`,
+    ];
+
+    const url = `https://api.telegram.org/bot${this.telegramBotToken}/sendMessage`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: this.telegramChatId,
+        text: lines.join('\n'),
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Telegram HTTP ${response.status}: ${body}`);
+    }
+  }
+
+  private async sendDiscord(
+    alert: OpsAlertPayload,
+    timestampMs: number,
+  ): Promise<void> {
+    const meta = SEVERITY_META[alert.severity];
+    const embedFields = Object.entries(alert.fields ?? {})
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(([name, value]) => ({
+        name,
+        value: `\`${String(value)}\``,
+        inline: true,
+      }));
+
+    const response = await fetch(this.discordWebhookUrl!, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: `${this.environmentLabel} Risk Supervisor`,
+        embeds: [
+          {
+            title: `${meta.emoji} ${alert.title}`,
+            description: alert.summary,
+            color: meta.discordColor,
+            fields: embedFields,
+            footer: { text: `${this.environmentLabel} · Key: ${alert.dedupeKey}` },
+            timestamp: new Date(timestampMs).toISOString(),
+          },
+        ],
+      }),
+      signal: AbortSignal.timeout(this.requestTimeoutMs),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Discord HTTP ${response.status}: ${body}`);
+    }
+  }
+}
+EOF_MIA5_ID_07
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-08: server/src/telemetry/telemetrySseRoute.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-08" "server/src/telemetry/telemetrySseRoute.ts" <<'EOF_MIA5_ID_08'
+import type { Router, Request, Response } from 'express';
+import type {
+  DeepRecoveredEvent,
+  DeepRespawnScheduledEvent,
+  DeepSupervisorSnapshot,
+  NexusFabricRouter,
+  ReflexTelemetryDto,
+} from '../nexus/NexusFabricRouter.js';
+import type {
+  System1BreakerState,
+  System2BreakerState,
+  UnifiedRiskGovernor,
+} from '../risk/UnifiedRiskGovernor.js';
+
+export type SupervisorEventKind =
+  | 'OOM_TRIP'
+  | 'RESPAWN_SCHEDULED'
+  | 'RECOVERED'
+  | 'EXHAUSTED'
+  | 'MANUAL_RESET';
+
+export interface SupervisorAuditEvent {
+  id: string;
+  ts: number;
+  kind: SupervisorEventKind;
+  summary: string;
+  details: Record<string, unknown>;
+}
+
+export interface DualEngineTelemetrySnapshot {
+  ts: number;
+  system1: {
+    telemetry: ReflexTelemetryDto | null;
+    breaker: System1BreakerState;
+  };
+  system2: {
+    supervisor: DeepSupervisorSnapshot;
+    breaker: System2BreakerState;
+    recentEvents: SupervisorAuditEvent[];
+  };
+}
+
+const MAX_AUDIT_EVENTS = 25;
+
+export function registerTelemetryRoutes(
+  router: Router,
+  nexus: NexusFabricRouter,
+  riskGovernor: UnifiedRiskGovernor,
+): void {
+  const recentEvents: SupervisorAuditEvent[] = [];
+  let auditSeq = 0;
+
+  const pushAuditEvent = (
+    kind: SupervisorEventKind,
+    summary: string,
+    details: Record<string, unknown> = {},
+  ): void => {
+    auditSeq += 1;
+    recentEvents.unshift({
+      id: `s2-evt-${auditSeq}`,
+      ts: Date.now(),
+      kind,
+      summary,
+      details,
+    });
+    if (recentEvents.length > MAX_AUDIT_EVENTS) {
+      recentEvents.length = MAX_AUDIT_EVENTS;
+    }
+  };
+
+  riskGovernor.on('risk:system2_tripped', (state: System2BreakerState) => {
+    pushAuditEvent(
+      'OOM_TRIP',
+      `System 2 circuit breaker tripped (${state.reason ?? 'UNKNOWN'})`,
+      state.details,
+    );
+  });
+
+  nexus.on('nexus:deep_respawn_scheduled', (evt: DeepRespawnScheduledEvent) => {
+    pushAuditEvent(
+      'RESPAWN_SCHEDULED',
+      `Respawn attempt #${evt.attempt}/${evt.maxAttempts} scheduled in ${evt.delayMs} ms`,
+      { ...evt },
+    );
+  });
+
+  nexus.on('nexus:deep_recovered', (evt: DeepRecoveredEvent) => {
+    pushAuditEvent(
+      'RECOVERED',
+      `System 2 recovered on Gen #${evt.generation} (thread #${evt.threadId}) after attempt #${evt.attempt}`,
+      { ...evt },
+    );
+  });
+
+  nexus.on(
+    'nexus:deep_exhausted',
+    (evt: { attempts: number; lastReason: string }) => {
+      pushAuditEvent(
+        'EXHAUSTED',
+        `System 2 respawn budget exhausted after ${evt.attempts} attempts (${evt.lastReason})`,
+        evt,
+      );
+    },
+  );
+
+  const buildSnapshot = (
+    reflexOverride?: ReflexTelemetryDto | null,
+  ): DualEngineTelemetrySnapshot => ({
+    ts: Date.now(),
+    system1: {
+      telemetry:
+        reflexOverride !== undefined
+          ? reflexOverride
+          : nexus.getLatestReflexDto(),
+      breaker: riskGovernor.getSystem1BreakerState(),
+    },
+    system2: {
+      supervisor: nexus.getDeepSupervisorSnapshot(),
+      breaker: riskGovernor.getSystem2BreakerState(),
+      recentEvents: [...recentEvents],
+    },
+  });
+
+  router.get('/api/telemetry/stream', (req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Prevent Nginx proxy buffering
+    res.flushHeaders?.();
+
+    let eventId = 0;
+    const writeSnapshot = (reflexOverride?: ReflexTelemetryDto | null): void => {
+      if (res.writableEnded) return;
+      eventId += 1;
+      const payload = buildSnapshot(reflexOverride);
+      res.write(
+        `id: ${eventId}\nevent: snapshot\ndata: ${JSON.stringify(payload)}\n\n`,
+      );
+    };
+
+    // Immediate initial snapshot on connect
+    writeSnapshot();
+
+    const onReflexTelemetry = (dto: ReflexTelemetryDto): void => {
+      writeSnapshot(dto);
+    };
+    const onSystem2StateChange = (): void => {
+      writeSnapshot();
+    };
+
+    nexus.on('reflex:telemetry', onReflexTelemetry);
+    nexus.on('nexus:deep_respawn_scheduled', onSystem2StateChange);
+    nexus.on('nexus:deep_recovered', onSystem2StateChange);
+    nexus.on('nexus:deep_exhausted', onSystem2StateChange);
+    riskGovernor.on('risk:system2_tripped', onSystem2StateChange);
+    riskGovernor.on('risk:system2_reset', onSystem2StateChange);
+
+    const keepAliveTimer = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(': ping\n\n');
+      }
+    }, 15_000);
+
+    req.on('close', () => {
+      clearInterval(keepAliveTimer);
+      nexus.off('reflex:telemetry', onReflexTelemetry);
+      nexus.off('nexus:deep_respawn_scheduled', onSystem2StateChange);
+      nexus.off('nexus:deep_recovered', onSystem2StateChange);
+      nexus.off('nexus:deep_exhausted', onSystem2StateChange);
+      riskGovernor.off('risk:system2_tripped', onSystem2StateChange);
+      riskGovernor.off('risk:system2_reset', onSystem2StateChange);
+      res.end();
+    });
+  });
+
+  router.post('/api/telemetry/reflex/reset', (_req: Request, res: Response) => {
+    nexus.resetReflexWatermarks();
+    riskGovernor.resetSystem1CircuitBreaker();
+    res.json({ ok: true });
+  });
+
+  router.post('/api/telemetry/deep/reset', (_req: Request, res: Response) => {
+    pushAuditEvent(
+      'MANUAL_RESET',
+      'Operator reset System 2 circuit breaker and triggered clean respawn',
+    );
+    nexus.forceRespawnDeepWorker();
+    res.json({ ok: true });
+  });
+}
+EOF_MIA5_ID_08
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-09: server/src/index.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-09" "server/src/index.ts" <<'EOF_MIA5_ID_09'
+import express from 'express';
+import { OpsWebhookNotifier } from './alerts/OpsWebhookNotifier.js';
+import { UnifiedRiskGovernor } from './risk/UnifiedRiskGovernor.js';
+import { NexusFabricRouter } from './nexus/NexusFabricRouter.js';
+import { registerTelemetryRoutes } from './telemetry/telemetrySseRoute.js';
+
+const app = express();
+app.use(express.json());
+
+const ingressRingSab = new SharedArrayBuffer(64 * 1024);
+
+const opsNotifier = new OpsWebhookNotifier({
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+  telegramChatId: process.env.TELEGRAM_CHAT_ID,
+  discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
+  defaultCooldownMs: Number(process.env.OPS_ALERT_COOLDOWN_MS ?? 60_000),
+  environmentLabel:
+    process.env.MIA_EXECUTION_MODE === 'LIVE' ? 'MIA-5.0 LIVE' : 'MIA-5.0 PAPER',
+});
+
+const riskGovernor = new UnifiedRiskGovernor();
+const nexusRouter = new NexusFabricRouter(ingressRingSab, riskGovernor);
+
+const unbindRiskAlerts = riskGovernor.bindAlertNotifier(opsNotifier, {
+  system1Ms: 60_000,     // Deduplicate S1 stall alerts for 60s
+  system2OomMs: 120_000, // Deduplicate transient S2 OOM warnings for 2m
+});
+const unbindNexusAlerts = nexusRouter.bindAlertNotifier(
+  opsNotifier,
+  300_000, // Deduplicate S2 exhaustion alerts for 5m
+);
+
+nexusRouter.startFastReflexWorker(
+  new URL('./workers/fastReflexWorker.js', import.meta.url),
+);
+nexusRouter.startDeepConfluenceWorker(
+  new URL('./workers/deepConfluenceWorker.js', import.meta.url),
+  Number(process.env.DEEP_WORKER_MAX_OLD_GEN_MB ?? 256),
+);
+
+registerTelemetryRoutes(app, nexusRouter, riskGovernor);
+
+app.get('/api/health', (_req, res) => {
+  res.json({
+    ok: true,
+    mode: process.env.MIA_EXECUTION_MODE ?? 'PAPER',
+    system1: nexusRouter.getLatestReflexDto()?.stateLabel ?? 'INIT',
+    system2Ready: nexusRouter.isDeepWorkerReady(),
+  });
+});
+
+const port = Number(process.env.PORT ?? 3000);
+const server = app.listen(port, '0.0.0.0', () => {
+  console.log(`[MIA-5.0] Coordinator listening on 0.0.0.0:${port}`);
+});
+
+async function gracefulShutdown(signal: string): Promise<void> {
+  console.log(`[MIA-5.0] Received ${signal}, shutting down cleanly...`);
+  unbindRiskAlerts();
+  unbindNexusAlerts();
+  await nexusRouter.shutdown();
+  await opsNotifier.flush();
+  server.close(() => {
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', () => void gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => void gracefulShutdown('SIGINT'));
+EOF_MIA5_ID_09
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-10: web/src/components/ExecutionTelemetryPanel.tsx
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-10" "web/src/components/ExecutionTelemetryPanel.tsx" <<'EOF_MIA5_ID_10'
+import React, { useEffect, useState } from 'react';
+
+interface ReflexTelemetryDto {
+  ts: number;
+  healthy: boolean;
+  stalled: boolean;
+  warmingUp: boolean;
+  stateLabel: 'INIT' | 'WARMING_UP' | 'HEALTHY' | 'DEGRADED_LATENCY' | 'HALTED';
+  heartbeatSeq: string;
+  heartbeatAgeMs: number;
+  tickCount: string;
+  breachCount: string;
+  wireToDecisionLastMs: number;
+  wireToDecisionMaxMs: number;
+  wakeupJitterLastMs: number;
+  computeOnlyLastMs: number;
+  computeOnlyMaxMs: number;
+  eldP99Ms: number;
+  budgetMs: number;
+}
+
+interface BreakerState {
+  tripped: boolean;
+  reason: string | null;
+  trippedAt: number | null;
+  details: Record<string, unknown>;
+}
+
+interface DeepRecoveredEvent {
+  attempt: number;
+  generation: number;
+  threadId: number;
+}
+
+interface DeepSupervisorSnapshot {
+  ready: boolean;
+  generation: number;
+  threadId: number | null;
+  respawnAttempts: number;
+  maxRespawnAttempts: number;
+  pendingBackoffMs: number | null;
+  nextRespawnAt: number | null;
+  exhausted: boolean;
+  lastRecovery: DeepRecoveredEvent | null;
+}
+
+type SupervisorEventKind =
+  | 'OOM_TRIP'
+  | 'RESPAWN_SCHEDULED'
+  | 'RECOVERED'
+  | 'EXHAUSTED'
+  | 'MANUAL_RESET';
+
+interface SupervisorAuditEvent {
+  id: string;
+  ts: number;
+  kind: SupervisorEventKind;
+  summary: string;
+  details: Record<string, unknown>;
+}
+
+interface DualEngineTelemetrySnapshot {
+  ts: number;
+  system1: {
+    telemetry: ReflexTelemetryDto | null;
+    breaker: BreakerState;
+  };
+  system2: {
+    supervisor: DeepSupervisorSnapshot;
+    breaker: BreakerState;
+    recentEvents: SupervisorAuditEvent[];
+  };
+}
+
+export const ExecutionTelemetryPanel: React.FC = () => {
+  const [snapshot, setSnapshot] = useState<DualEngineTelemetrySnapshot | null>(
+    null,
+  );
+  const [streamStatus, setStreamStatus] = useState<
+    'CONNECTING' | 'LIVE' | 'DISCONNECTED'
+  >('CONNECTING');
+  const [resettingS1, setResettingS1] = useState(false);
+  const [resettingS2, setResettingS2] = useState(false);
+
+  useEffect(() => {
+    const es = new EventSource('/api/telemetry/stream', {
+      withCredentials: true,
+    });
+
+    es.onopen = () => setStreamStatus('LIVE');
+    es.onerror = () => setStreamStatus('DISCONNECTED');
+
+    const handleSnapshot = (event: MessageEvent<string>) => {
+      try {
+        const parsed = JSON.parse(event.data) as DualEngineTelemetrySnapshot;
+        setSnapshot(parsed);
+        setStreamStatus('LIVE');
+      } catch (err) {
+        console.error('Malformed dual-engine telemetry SSE frame:', err);
+      }
+    };
+
+    es.addEventListener('snapshot', handleSnapshot as EventListener);
+
+    return () => {
+      es.removeEventListener('snapshot', handleSnapshot as EventListener);
+      es.close();
+    };
+  }, []);
+
+  const handleResetSystem1 = async () => {
+    setResettingS1(true);
+    try {
+      await fetch('/api/telemetry/reflex/reset', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } finally {
+      setResettingS1(false);
+    }
+  };
+
+  const handleResetSystem2 = async () => {
+    setResettingS2(true);
+    try {
+      await fetch('/api/telemetry/deep/reset', {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } finally {
+      setResettingS2(false);
+    }
+  };
+
+  const s1 = snapshot?.system1.telemetry ?? null;
+  const s1Breaker = snapshot?.system1.breaker;
+  const s2 = snapshot?.system2.supervisor ?? null;
+  const s2Breaker = snapshot?.system2.breaker;
+  const s2Events = snapshot?.system2.recentEvents ?? [];
+
+  const budgetPct = s1
+    ? Math.min(100, (s1.wireToDecisionLastMs / s1.budgetMs) * 100)
+    : 0;
+
+  const s2StatusLabel = !s2
+    ? 'INIT'
+    : s2.exhausted
+      ? 'EXHAUSTED'
+      : s2.pendingBackoffMs !== null
+        ? 'BACKOFF_RESPAWN'
+        : s2.ready
+          ? 'READY'
+          : 'STARTING';
+
+  return (
+    <div className="space-y-4">
+      {/* Top Stream Header */}
+      <div className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950 px-5 py-3 text-slate-100">
+        <div>
+          <h1 className="text-sm font-semibold tracking-tight">
+            MIA 5.0 — Dual-Engine Execution & Supervisor Telemetry
+          </h1>
+          <p className="text-xs text-slate-400">
+            NexusFabricRouter · SharedArrayBuffer Lock-Free Watchdog & Resource Isolation
+          </p>
+        </div>
+
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+            streamStatus === 'LIVE'
+              ? 'bg-emerald-500/15 text-emerald-400'
+              : 'bg-amber-500/15 text-amber-400'
+          }`}
+        >
+          SSE: {streamStatus}
+        </span>
+      </div>
+
+      {/* SYSTEM 1: Fast Reflex Engine */}
+      <section className="rounded-xl border border-slate-800 bg-slate-950 p-5 text-slate-100">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">
+              System 1 — Fast Reflex Engine
+            </h2>
+            <p className="text-xs text-slate-400">
+              Sub-10 ms Hot Path · Atomics Heartbeat Watchdog
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {s1 && (
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                  s1.stalled || s1Breaker?.tripped
+                    ? 'bg-rose-500/20 text-rose-400'
+                    : s1.healthy
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'bg-amber-500/20 text-amber-300'
+                }`}
+              >
+                {s1.stalled ? 'STALLED' : s1.stateLabel}
+              </span>
+            )}
+
+            <button
+              type="button"
+              onClick={handleResetSystem1}
+              disabled={resettingS1}
+              className="rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+            >
+              {resettingS1 ? 'Resetting...' : 'Reset Watermarks'}
+            </button>
+          </div>
+        </div>
+
+        {s1Breaker?.tripped && (
+          <div className="mb-4 rounded-lg border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-xs text-rose-200">
+            <strong>System 1 Breaker Tripped:</strong> Entries paused (
+            <code>{s1Breaker.reason}</code>). ExitSupervisor remains active for open positions.
+          </div>
+        )}
+
+        {!s1 ? (
+          <div className="py-6 text-center text-xs text-slate-500">
+            Awaiting first System 1 SharedArrayBuffer telemetry frame...
+          </div>
+        ) : (
+          <>
+            <div className="mb-4">
+              <div className="mb-1 flex justify-between text-xs">
+                <span className="text-slate-400">
+                  Wire-to-Decision Latency (Last / Max)
+                </span>
+                <span className="font-mono">
+                  {s1.wireToDecisionLastMs.toFixed(3)} ms /{' '}
+                  {s1.wireToDecisionMaxMs.toFixed(3)} ms
+                </span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                <div
+                  className={`h-full transition-all duration-150 ${
+                    s1.wireToDecisionLastMs > s1.budgetMs
+                      ? 'bg-rose-500'
+                      : 'bg-cyan-400'
+                  }`}
+                  style={{ width: `${budgetPct}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <MetricCard
+                label="SAB Wakeup Jitter"
+                value={`${s1.wakeupJitterLastMs.toFixed(3)} ms`}
+                sub="Atomics notify -> wake"
+              />
+              <MetricCard
+                label="Compute Only (Last / Max)"
+                value={`${s1.computeOnlyLastMs.toFixed(3)} ms`}
+                sub={`Max: ${s1.computeOnlyMaxMs.toFixed(3)} ms`}
+              />
+              <MetricCard
+                label="Event-Loop p99"
+                value={`${s1.eldP99Ms.toFixed(2)} ms`}
+                sub={`Heartbeat age: ${s1.heartbeatAgeMs.toFixed(1)} ms`}
+              />
+              <MetricCard
+                label="Ticks / >10ms Breaches"
+                value={Number(s1.tickCount).toLocaleString()}
+                sub={`Breaches: ${s1.breachCount} · Seq #${s1.heartbeatSeq}`}
+              />
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* SYSTEM 2: Deep Confluence Engine */}
+      <section className="rounded-xl border border-slate-800 bg-slate-950 p-5 text-slate-100">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">
+              System 2 — Deep Confluence Engine
+            </h2>
+            <p className="text-xs text-slate-400">
+              V8 Heap-Bounded Worker · Exponential Backoff OOM Supervisor
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span
+              className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                s2StatusLabel === 'READY'
+                  ? 'bg-emerald-500/20 text-emerald-300'
+                  : s2StatusLabel === 'EXHAUSTED'
+                    ? 'bg-rose-500/20 text-rose-400'
+                    : 'bg-amber-500/20 text-amber-300'
+              }`}
+            >
+              {s2StatusLabel}
+            </span>
+
+            <button
+              type="button"
+              onClick={handleResetSystem2}
+              disabled={resettingS2}
+              className="rounded-md border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-200 hover:bg-slate-800 disabled:opacity-50"
+            >
+              {resettingS2 ? 'Respawning...' : 'Reset & Respawn S2'}
+            </button>
+          </div>
+        </div>
+
+        {s2Breaker?.tripped && (
+          <div className="mb-4 rounded-lg border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-xs text-rose-200">
+            <strong>System 2 Breaker Tripped:</strong> New deep confluence entries paused (
+            <code>{s2Breaker.reason}</code>).
+            {s2?.exhausted
+              ? ' Retry budget exhausted — click "Reset & Respawn S2" after inspecting heap usage.'
+              : ' Automatic exponential backoff respawn in progress.'}
+          </div>
+        )}
+
+        {s2 && (
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <MetricCard
+              label="Active Worker Generation"
+              value={`Gen #${s2.generation}`}
+              sub={
+                s2.threadId !== null
+                  ? `worker_threads ID #${s2.threadId}`
+                  : 'No active thread'
+              }
+            />
+            <MetricCard
+              label="OOM Respawn Budget"
+              value={`${s2.respawnAttempts} / ${s2.maxRespawnAttempts}`}
+              sub={
+                s2.exhausted
+                  ? 'Retry ceiling reached'
+                  : 'Resets after stability window'
+              }
+            />
+            <MetricCard
+              label="Backoff Timer"
+              value={
+                s2.pendingBackoffMs !== null ? `${s2.pendingBackoffMs} ms` : 'Idle'
+              }
+              sub={
+                s2.nextRespawnAt
+                  ? `Scheduled ${new Date(s2.nextRespawnAt).toLocaleTimeString()}`
+                  : 'No pending restart'
+              }
+            />
+            <MetricCard
+              label="Last OOM Recovery"
+              value={
+                s2.lastRecovery
+                  ? `Gen #${s2.lastRecovery.generation}`
+                  : 'None recorded'
+              }
+              sub={
+                s2.lastRecovery
+                  ? `Attempt #${s2.lastRecovery.attempt} · Thread #${s2.lastRecovery.threadId}`
+                  : 'Zero crashes since boot'
+              }
+            />
+          </div>
+        )}
+
+        {/* System 2 Supervisor Audit Feed */}
+        <div>
+          <div className="mb-2 text-xs font-medium text-slate-400">
+            Supervisor Lifecycle & Recovery Log
+          </div>
+          {s2Events.length === 0 ? (
+            <div className="rounded-lg border border-slate-800/80 bg-slate-900/40 px-3 py-3 text-xs text-slate-500">
+              No OOM trips or respawn events recorded in this session.
+            </div>
+          ) : (
+            <ul className="max-h-44 space-y-1.5 overflow-y-auto rounded-lg border border-slate-800/80 bg-slate-900/40 p-2.5 text-xs">
+              {s2Events.map((evt) => (
+                <li
+                  key={evt.id}
+                  className="flex items-start justify-between gap-3 border-b border-slate-800/60 pb-1.5 last:border-none last:pb-0"
+                >
+                  <div className="flex items-center gap-2">
+                    <EventKindBadge kind={evt.kind} />
+                    <span className="text-slate-200">{evt.summary}</span>
+                  </div>
+                  <span className="shrink-0 font-mono text-[11px] text-slate-500">
+                    {new Date(evt.ts).toLocaleTimeString()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+};
+
+const EventKindBadge: React.FC<{ kind: SupervisorEventKind }> = ({ kind }) => {
+  const styles: Record<SupervisorEventKind, string> = {
+    OOM_TRIP: 'bg-rose-500/20 text-rose-300',
+    EXHAUSTED: 'bg-rose-600/30 text-rose-200',
+    RESPAWN_SCHEDULED: 'bg-amber-500/20 text-amber-300',
+    RECOVERED: 'bg-emerald-500/20 text-emerald-300',
+    MANUAL_RESET: 'bg-cyan-500/20 text-cyan-300',
+  };
+
+  return (
+    <span
+      className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${styles[kind]}`}
+    >
+      {kind}
+    </span>
+  );
+};
+
+const MetricCard: React.FC<{ label: string; value: string; sub: string }> = ({
+  label,
+  value,
+  sub,
+}) => (
+  <div className="rounded-lg border border-slate-800/80 bg-slate-900/60 p-3">
+    <div className="text-[11px] text-slate-400">{label}</div>
+    <div className="mt-1 font-mono text-sm font-semibold text-slate-100">
+      {value}
+    </div>
+    <div className="mt-0.5 font-mono text-[11px] text-slate-500">{sub}</div>
+  </div>
+);
+EOF_MIA5_ID_10
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-11: server/tests/miaChaosSuite.test.ts
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-11" "server/tests/miaChaosSuite.test.ts" <<'EOF_MIA5_ID_11'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { performance } from 'node:perf_hooks';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
+import {
+  createReflexTelemetryBuffer,
+  REFLEX_WARMUP_TICKS,
+  ReflexSlot,
+  ReflexWorkerState,
+} from '../src/telemetry/FastReflexTelemetryLayout.js';
+import { FastReflexProfiler } from '../src/workers/fastReflexProfiler.js';
+import { readReflexTelemetry } from '../src/nexus/readReflexTelemetry.js';
+import {
+  NexusFabricRouter,
+  type DeepRecoveredEvent,
+  type DeepRespawnScheduledEvent,
+} from '../src/nexus/NexusFabricRouter.js';
+import {
+  UnifiedRiskGovernor,
+  type System1BreakerState,
+  type System2BreakerState,
+} from '../src/risk/UnifiedRiskGovernor.js';
+import { OpsWebhookNotifier } from '../src/alerts/OpsWebhookNotifier.js';
+
+/**
+ * Builds an inline ESM worker URL that mirrors fastReflexWorker's SharedArrayBuffer
+ * heartbeat contract and supports deterministic OS-level thread freezing via Atomics.wait.
+ */
+function createChaosReflexWorkerUrl(): URL {
+  const workerSource = `
+    import { workerData, parentPort } from 'node:worker_threads';
+
+    const view = new BigInt64Array(workerData.telemetrySab);
+    const freezeLock = new Int32Array(new SharedArrayBuffer(4));
+
+    const SLOT_HEARTBEAT_SEQ = ${ReflexSlot.HEARTBEAT_SEQ};
+    const SLOT_LAST_HEARTBEAT_NS = ${ReflexSlot.LAST_HEARTBEAT_NS};
+    const SLOT_WORKER_STATE = ${ReflexSlot.WORKER_STATE};
+    const STATE_HEALTHY = ${ReflexWorkerState.HEALTHY}n;
+    const STATE_HALTED = ${ReflexWorkerState.HALTED}n;
+
+    function pulse() {
+      Atomics.store(view, SLOT_LAST_HEARTBEAT_NS, process.hrtime.bigint());
+      Atomics.add(view, SLOT_HEARTBEAT_SEQ, 1n);
+    }
+
+    Atomics.store(view, SLOT_WORKER_STATE, STATE_HEALTHY);
+    pulse();
+
+    const timer = setInterval(pulse, 10);
+
+    parentPort?.on('message', (msg) => {
+      if (msg?.type === 'CHAOS_FREEZE_EVENT_LOOP') {
+        // Blocks the OS thread completely: V8 timers, microtasks, and postMessage freeze
+        Atomics.wait(freezeLock, 0, 0, msg.durationMs);
+        pulse();
+      } else if (msg?.type === 'SHUTDOWN') {
+        clearInterval(timer);
+        Atomics.store(view, SLOT_WORKER_STATE, STATE_HALTED);
+        process.exit(0);
+      }
+    });
+  `;
+
+  return new URL(
+    `data:text/javascript;charset=utf-8,${encodeURIComponent(workerSource)}`,
+  );
+}
+
+/**
+ * Builds an inline ESM worker simulating deepConfluenceWorker.
+ * Allocates on-heap V8 Old Space arrays (not off-heap Buffers) on command
+ * to deterministically trigger ERR_WORKER_OUT_OF_MEMORY under resourceLimits,
+ * and evaluates confluence requests when healthy.
+ */
+function createChaosDeepWorkerUrl(): URL {
+  const workerSource = `
+    import { parentPort, threadId, workerData } from 'node:worker_threads';
+
+    const heapSink = [];
+
+    parentPort?.on('message', (msg) => {
+      if (msg?.type === 'CHAOS_EXHAUST_HEAP') {
+        while (true) {
+          // On-heap boxed elements allocate directly in V8 Old Generation
+          heapSink.push(new Array(65_536).fill(Math.random()));
+        }
+      } else if (msg?.type === 'EVALUATE_CONFLUENCE') {
+        parentPort?.postMessage({
+          type: 'CONFLUENCE_RESULT',
+          requestId: msg.requestId,
+          symbol: msg.symbol,
+          bias: 'BULLISH_VWAP_ATR_ALIGNED',
+          threadId,
+          generation: workerData.generation,
+        });
+      } else if (msg?.type === 'SHUTDOWN') {
+        process.exit(0);
+      }
+    });
+
+    parentPort?.postMessage({
+      type: 'READY',
+      threadId,
+      generation: workerData.generation,
+    });
+  `;
+
+  return new URL(
+    `data:text/javascript;charset=utf-8,${encodeURIComponent(workerSource)}`,
+  );
+}
+
+function waitForHealthyHeartbeat(
+  nexus: NexusFabricRouter,
+  timeoutMs = 1_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      nexus.off('reflex:telemetry', onTelemetry);
+      reject(new Error('Timed out waiting for initial HEALTHY reflex heartbeat'));
+    }, timeoutMs);
+
+    const onTelemetry = (dto: { healthy: boolean; stateLabel: string }) => {
+      if (dto.healthy && dto.stateLabel === 'HEALTHY') {
+        clearTimeout(timer);
+        nexus.off('reflex:telemetry', onTelemetry);
+        resolve();
+      }
+    };
+
+    nexus.on('reflex:telemetry', onTelemetry);
+  });
+}
+
+function waitForDeepReady(
+  nexus: NexusFabricRouter,
+  timeoutMs = 1_500,
+): Promise<DeepRecoveredEvent | void> {
+  if (nexus.isDeepWorkerReady()) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      nexus.off('nexus:deep_recovered', onRecovered);
+      reject(new Error('Timed out waiting for deepConfluenceWorker READY'));
+    }, timeoutMs);
+
+    const onRecovered = (evt: DeepRecoveredEvent) => {
+      clearTimeout(timer);
+      resolve(evt);
+    };
+
+    nexus.once('nexus:deep_recovered', onRecovered);
+  });
+}
+
+// ============================================================================
+// 1. Sub-10ms Steady-State Latency SLA Gate
+// ============================================================================
+describe('MIA 5.0 Latency SLA Gate — System 1 Sub-10ms Hot Path', () => {
+  it('maintains sub-10ms wire-to-decision latency and zero breaches across 2,000 post-warmup ticks', async () => {
+    const telemetrySab = createReflexTelemetryBuffer();
+    const profiler = new FastReflexProfiler(telemetrySab);
+
+    profiler.start();
+    try {
+      // 1. Warm up V8 JIT past REFLEX_WARMUP_TICKS (5,000 frames)
+      const warmupTotal = Number(REFLEX_WARMUP_TICKS);
+      for (let i = 0; i < warmupTotal; i += 1) {
+        const ingressNs = process.hrtime.bigint();
+        const computeStartNs = process.hrtime.bigint();
+        profiler.recordDecision(ingressNs, computeStartNs);
+      }
+
+      // 2. Evaluate 2,000 steady-state frames and assert strict < 10 ms ceiling
+      for (let i = 0; i < 2_000; i += 1) {
+        const ingressNs = process.hrtime.bigint();
+        const computeStartNs = process.hrtime.bigint();
+        Math.imul(i, 2654435761);
+        profiler.recordDecision(ingressNs, computeStartNs);
+      }
+
+      // Allow one 250 ms monitorEventLoopDelay flush window to populate ELD_P99_NS
+      await new Promise((r) => setTimeout(r, 275));
+
+      const snap = readReflexTelemetry(telemetrySab);
+      expect(snap.warmingUp).toBe(false);
+      expect(snap.state).toBe(ReflexWorkerState.HEALTHY);
+      expect(snap.healthy).toBe(true);
+      expect(snap.breachCount).toBe(0n);
+      expect(snap.wireToDecisionMaxMs).toBeLessThan(10);
+      expect(snap.computeOnlyMaxMs).toBeLessThan(10);
+      expect(snap.eldP99Ms).toBeLessThan(10);
+    } finally {
+      profiler.stop();
+    }
+  });
+});
+
+// ============================================================================
+// 2. System 1 SharedArrayBuffer Heartbeat Watchdog Chaos Test
+// ============================================================================
+describe('MIA 5.0 Chaos Suite — System 1 SharedArrayBuffer Heartbeat Watchdog', () => {
+  let ingressRingSab: SharedArrayBuffer;
+  let riskGovernor: UnifiedRiskGovernor;
+  let nexusRouter: NexusFabricRouter;
+
+  beforeEach(() => {
+    ingressRingSab = new SharedArrayBuffer(1024);
+    riskGovernor = new UnifiedRiskGovernor();
+    nexusRouter = new NexusFabricRouter(ingressRingSab, riskGovernor);
+  });
+
+  afterEach(async () => {
+    await nexusRouter.shutdown();
+  });
+
+  it('detects a frozen fastReflexWorker event loop and trips UnifiedRiskGovernor within 150 ms', async () => {
+    nexusRouter.startFastReflexWorker(createChaosReflexWorkerUrl());
+
+    // 1. Confirm healthy steady-state before injecting fault
+    await waitForHealthyHeartbeat(nexusRouter);
+    expect(riskGovernor.canOpenSystem1Entry()).toBe(true);
+
+    // 2. Align fault injection immediately after a watchdog poll tick
+    const freezeDurationMs = 300;
+    let freezeStartedAt = 0;
+
+    const breakerTripPromise = new Promise<System1BreakerState>((resolve, reject) => {
+      const slaGuard = setTimeout(() => {
+        reject(
+          new Error(
+            'SLA BREACH: UnifiedRiskGovernor did not trip within 150 ms of worker freeze',
+          ),
+        );
+      }, 150);
+
+      riskGovernor.once('risk:system1_tripped', (state: System1BreakerState) => {
+        clearTimeout(slaGuard);
+        resolve(state);
+      });
+    });
+
+    await new Promise<void>((resolve) => {
+      nexusRouter.once('reflex:telemetry', () => {
+        freezeStartedAt = performance.now();
+        (
+          nexusRouter as unknown as {
+            fastWorker: { postMessage: (msg: unknown) => void };
+          }
+        ).fastWorker.postMessage({
+          type: 'CHAOS_FREEZE_EVENT_LOOP',
+          durationMs: freezeDurationMs,
+        });
+        resolve();
+      });
+    });
+
+    // 3. Assert circuit breaker trips within 150 ms while worker is still frozen
+    const breakerState = await breakerTripPromise;
+    const detectionLatencyMs = performance.now() - freezeStartedAt;
+
+    expect(detectionLatencyMs).toBeLessThan(150);
+    expect(breakerState.tripped).toBe(true);
+    expect(breakerState.reason).toBe('SYSTEM1_HEARTBEAT_LOSS');
+    expect(Number(breakerState.details.heartbeatAgeMs)).toBeGreaterThan(50);
+
+    // 4. Verify new System 1 entries are blocked immediately
+    expect(riskGovernor.canOpenSystem1Entry()).toBe(false);
+    expect(nexusRouter.getLatestReflexDto()?.stalled).toBe(true);
+
+    // 5. Wait for the 300 ms freeze to expire and verify clean operator recovery
+    await new Promise((r) => setTimeout(r, freezeDurationMs + 50));
+    expect(nexusRouter.getLatestReflexDto()?.stalled).toBe(false);
+
+    riskGovernor.resetSystem1CircuitBreaker();
+    expect(riskGovernor.canOpenSystem1Entry()).toBe(true);
+  });
+});
+
+// ============================================================================
+// 3. System 2 Heap Exhaustion & SQLite WAL Isolation Chaos Test
+// ============================================================================
+describe('MIA 5.0 Chaos Suite — System 2 Heap Exhaustion & SQLite WAL Isolation', () => {
+  let ingressRingSab: SharedArrayBuffer;
+  let riskGovernor: UnifiedRiskGovernor;
+  let nexusRouter: NexusFabricRouter;
+  let tempDir: string;
+  let db: Database.Database;
+
+  beforeEach(() => {
+    ingressRingSab = new SharedArrayBuffer(1024);
+    riskGovernor = new UnifiedRiskGovernor();
+    nexusRouter = new NexusFabricRouter(ingressRingSab, riskGovernor);
+
+    tempDir = mkdtempSync(join(tmpdir(), 'mia-wal-chaos-'));
+    const dbPath = join(tempDir, 'mia_ledger_chaos.sqlite');
+    db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS canonical_positions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sleeve TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        qty REAL NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+    `);
+  });
+
+  afterEach(async () => {
+    await nexusRouter.shutdown();
+    if (db?.open) {
+      db.close();
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('isolates a deepConfluenceWorker OOM crash without halting fastReflexWorker or corrupting SQLite WAL', async () => {
+    nexusRouter.startFastReflexWorker(createChaosReflexWorkerUrl());
+    nexusRouter.startDeepConfluenceWorker(createChaosDeepWorkerUrl(), 48);
+
+    await waitForHealthyHeartbeat(nexusRouter);
+
+    const baselineDto = nexusRouter.getLatestReflexDto()!;
+    const baselineSeq = BigInt(baselineDto.heartbeatSeq);
+    expect(baselineDto.healthy).toBe(true);
+    expect(riskGovernor.canOpenSystem1Entry()).toBe(true);
+    expect(riskGovernor.canOpenSystem2Entry()).toBe(true);
+
+    const insertStmt = db.prepare(
+      'INSERT INTO canonical_positions (sleeve, symbol, qty, created_at) VALUES (?, ?, ?, ?)',
+    );
+    insertStmt.run('SYSTEM1_DEX', 'SOL/USDC', 12.5, Date.now());
+
+    const system2TripPromise = new Promise<System2BreakerState>((resolve) => {
+      riskGovernor.once('risk:system2_tripped', (state: System2BreakerState) => {
+        resolve(state);
+      });
+    });
+
+    (
+      nexusRouter as unknown as {
+        deepWorker: { postMessage: (msg: unknown) => void };
+      }
+    ).deepWorker.postMessage({ type: 'CHAOS_EXHAUST_HEAP' });
+
+    // Perform concurrent SQLite WAL transactions while System 2 hits OOM
+    for (let i = 0; i < 25; i += 1) {
+      insertStmt.run('SYSTEM1_CEX', 'BTCUSDT', 0.01 * (i + 1), Date.now());
+    }
+
+    const s2State = await system2TripPromise;
+    expect(s2State.tripped).toBe(true);
+    expect(s2State.reason).toBe('SYSTEM2_OOM_CRASH');
+    expect(s2State.details.code).toBe('ERR_WORKER_OUT_OF_MEMORY');
+    expect(riskGovernor.canOpenSystem2Entry()).toBe(false);
+
+    // Verify fastReflexWorker (System 1) remained uninterrupted throughout the crash
+    await new Promise((r) => setTimeout(r, 120));
+    const postCrashDto = nexusRouter.getLatestReflexDto()!;
+    expect(postCrashDto.healthy).toBe(true);
+    expect(postCrashDto.stalled).toBe(false);
+    expect(BigInt(postCrashDto.heartbeatSeq)).toBeGreaterThan(baselineSeq);
+    expect(riskGovernor.canOpenSystem1Entry()).toBe(true);
+
+    // Verify SQLite WAL integrity, checkpointing, and post-crash durability
+    insertStmt.run('SYSTEM1_DEX', 'ETH/USDC', 1.25, Date.now());
+
+    const integrity = db.pragma('integrity_check', { simple: true });
+    expect(integrity).toBe('ok');
+
+    const checkpoint = db.pragma('wal_checkpoint(TRUNCATE)') as Array<{
+      busy: number;
+      log: number;
+      checkpointed: number;
+    }>;
+    expect(checkpoint[0]?.busy).toBe(0);
+
+    const rowCount = db
+      .prepare('SELECT COUNT(*) as cnt FROM canonical_positions')
+      .get() as { cnt: number };
+    expect(rowCount.cnt).toBe(27);
+  });
+});
+
+// ============================================================================
+// 4. System 2 Exponential Backoff Respawn Supervisor Chaos Tests
+// ============================================================================
+describe('MIA 5.0 Chaos Suite — System 2 Exponential Backoff Respawn Supervisor', () => {
+  let ingressRingSab: SharedArrayBuffer;
+  let riskGovernor: UnifiedRiskGovernor;
+  let nexusRouter: NexusFabricRouter;
+
+  beforeEach(() => {
+    ingressRingSab = new SharedArrayBuffer(1024);
+    riskGovernor = new UnifiedRiskGovernor();
+    nexusRouter = new NexusFabricRouter(ingressRingSab, riskGovernor, {
+      baseBackoffMs: 40,
+      maxBackoffMs: 320,
+      maxRespawnAttempts: 3,
+      stabilityWindowMs: 220,
+    });
+  });
+
+  afterEach(async () => {
+    await nexusRouter.shutdown();
+  });
+
+  it('respawns deepConfluenceWorker with exponential backoff after OOM crashes and restores healthy System 2 execution', async () => {
+    nexusRouter.startFastReflexWorker(createChaosReflexWorkerUrl());
+    nexusRouter.startDeepConfluenceWorker(createChaosDeepWorkerUrl(), 48);
+
+    await waitForHealthyHeartbeat(nexusRouter);
+
+    await new Promise<void>((resolve) => {
+      const check = () =>
+        nexusRouter.isDeepWorkerReady() ? resolve() : setTimeout(check, 5);
+      check();
+    });
+
+    const baselineReflexSeq = BigInt(
+      nexusRouter.getLatestReflexDto()!.heartbeatSeq,
+    );
+
+    const initialEval = await new Promise<{ threadId: number; generation: number }>(
+      (resolve) => {
+        nexusRouter.once('nexus:deep_message', (msg) =>
+          resolve(msg as { threadId: number; generation: number }),
+        );
+        nexusRouter.postToDeepWorker({
+          type: 'EVALUATE_CONFLUENCE',
+          requestId: 'req-0',
+          symbol: 'SOL/USDC',
+        });
+      },
+    );
+    expect(initialEval.generation).toBe(1);
+
+    // --- CRASH #1: Expect 40 ms backoff (40 * 2^0) ---
+    const scheduledEvents: DeepRespawnScheduledEvent[] = [];
+    nexusRouter.on('nexus:deep_respawn_scheduled', (evt: DeepRespawnScheduledEvent) => {
+      scheduledEvents.push(evt);
+    });
+
+    const crash1At = performance.now();
+    const recovery1Promise = waitForDeepReady(nexusRouter);
+
+    const trip1Promise = new Promise<System2BreakerState>((resolve) => {
+      riskGovernor.once('risk:system2_tripped', resolve);
+    });
+
+    nexusRouter.postToDeepWorker({ type: 'CHAOS_EXHAUST_HEAP' });
+
+    const trip1State = await trip1Promise;
+    expect(trip1State.reason).toBe('SYSTEM2_OOM_CRASH');
+    expect(riskGovernor.canOpenSystem2Entry()).toBe(false);
+
+    const recovered1 = (await recovery1Promise) as DeepRecoveredEvent;
+    const recovery1ElapsedMs = performance.now() - crash1At;
+
+    expect(scheduledEvents[0]?.attempt).toBe(1);
+    expect(scheduledEvents[0]?.delayMs).toBe(40);
+    expect(recovery1ElapsedMs).toBeGreaterThanOrEqual(35);
+    expect(recovered1.generation).toBe(2);
+    expect(recovered1.threadId).not.toBe(initialEval.threadId);
+    expect(riskGovernor.canOpenSystem2Entry()).toBe(true);
+
+    // --- CRASH #2 (inside 220 ms stability window): Expect 80 ms backoff (40 * 2^1) ---
+    const crash2At = performance.now();
+    const recovery2Promise = waitForDeepReady(nexusRouter);
+
+    nexusRouter.postToDeepWorker({ type: 'CHAOS_EXHAUST_HEAP' });
+
+    const recovered2 = (await recovery2Promise) as DeepRecoveredEvent;
+    const recovery2ElapsedMs = performance.now() - crash2At;
+
+    expect(scheduledEvents).toHaveLength(2);
+    expect(scheduledEvents[1]?.attempt).toBe(2);
+    expect(scheduledEvents[1]?.delayMs).toBe(80);
+    expect(recovery2ElapsedMs).toBeGreaterThanOrEqual(75);
+    expect(recovered2.generation).toBe(3);
+    expect(recovered2.threadId).not.toBe(recovered1.threadId);
+    expect(riskGovernor.canOpenSystem2Entry()).toBe(true);
+
+    // --- Verify recovered System 2 worker actively processes confluence tasks ---
+    const postRecoveryEval = await new Promise<{
+      type: string;
+      requestId: string;
+      bias: string;
+      threadId: number;
+      generation: number;
+    }>((resolve) => {
+      nexusRouter.once('nexus:deep_message', (msg) =>
+        resolve(
+          msg as {
+            type: string;
+            requestId: string;
+            bias: string;
+            threadId: number;
+            generation: number;
+          },
+        ),
+      );
+      nexusRouter.postToDeepWorker({
+        type: 'EVALUATE_CONFLUENCE',
+        requestId: 'req-post-oom',
+        symbol: 'BTC/USDT',
+      });
+    });
+
+    expect(postRecoveryEval.type).toBe('CONFLUENCE_RESULT');
+    expect(postRecoveryEval.requestId).toBe('req-post-oom');
+    expect(postRecoveryEval.bias).toBe('BULLISH_VWAP_ATR_ALIGNED');
+    expect(postRecoveryEval.generation).toBe(3);
+
+    // --- Verify System 1 remained healthy throughout both crashes ---
+    const latestReflex = nexusRouter.getLatestReflexDto()!;
+    expect(latestReflex.healthy).toBe(true);
+    expect(latestReflex.stalled).toBe(false);
+    expect(BigInt(latestReflex.heartbeatSeq)).toBeGreaterThan(baselineReflexSeq);
+    expect(riskGovernor.canOpenSystem1Entry()).toBe(true);
+
+    // --- Verify stability window resets backoff attempt counter to 0 ---
+    await new Promise((r) => setTimeout(r, 260));
+    expect(nexusRouter.getDeepRespawnAttempts()).toBe(0);
+  });
+
+  it('locks System 2 circuit breaker into SYSTEM2_MAX_RESPAWNS_EXCEEDED after exhausting retry budget', async () => {
+    const tightRouter = new NexusFabricRouter(ingressRingSab, riskGovernor, {
+      baseBackoffMs: 15,
+      maxBackoffMs: 60,
+      maxRespawnAttempts: 2,
+      stabilityWindowMs: 2_000,
+    });
+
+    try {
+      tightRouter.startDeepConfluenceWorker(createChaosDeepWorkerUrl(), 48);
+
+      await new Promise<void>((resolve) => {
+        const check = () =>
+          tightRouter.isDeepWorkerReady() ? resolve() : setTimeout(check, 5);
+        check();
+      });
+
+      const exhaustedPromise = new Promise<{ attempts: number }>((resolve) => {
+        tightRouter.once('nexus:deep_exhausted', resolve);
+      });
+
+      // Crash #1 -> Respawn #1
+      const r1 = waitForDeepReady(tightRouter);
+      tightRouter.postToDeepWorker({ type: 'CHAOS_EXHAUST_HEAP' });
+      await r1;
+
+      // Crash #2 -> Respawn #2
+      const r2 = waitForDeepReady(tightRouter);
+      tightRouter.postToDeepWorker({ type: 'CHAOS_EXHAUST_HEAP' });
+      await r2;
+
+      // Crash #3 -> Exceeds maxRespawnAttempts (2), locks breaker permanently
+      tightRouter.postToDeepWorker({ type: 'CHAOS_EXHAUST_HEAP' });
+      const exhausted = await exhaustedPromise;
+
+      expect(exhausted.attempts).toBe(2);
+      expect(tightRouter.isDeepWorkerReady()).toBe(false);
+      expect(riskGovernor.canOpenSystem2Entry()).toBe(false);
+      expect(riskGovernor.getSystem2BreakerState().reason).toBe(
+        'SYSTEM2_MAX_RESPAWNS_EXCEEDED',
+      );
+    } finally {
+      await tightRouter.shutdown();
+    }
+  });
+});
+
+// ============================================================================
+// 5. Ops Webhook Alerts — Cooldown Deduplication & Recovery
+// ============================================================================
+describe('MIA 5.0 Ops Webhook Alerts — Cooldown Deduplication & Recovery', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends immediate Telegram + Discord alerts for S1 stalls and S2 OOM exhaustion with cooldown deduplication', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const notifier = new OpsWebhookNotifier({
+      telegramBotToken: '123456:test-token',
+      telegramChatId: '-100999888',
+      discordWebhookUrl: 'https://discord.com/api/webhooks/test/hook',
+      defaultCooldownMs: 60_000,
+      environmentLabel: 'MIA-5.0 TEST',
+    });
+
+    const riskGovernor = new UnifiedRiskGovernor();
+    const nexusRouter = new NexusFabricRouter(
+      new SharedArrayBuffer(1024),
+      riskGovernor,
+    );
+
+    const unbindRisk = riskGovernor.bindAlertNotifier(notifier, {
+      system1Ms: 60_000,
+    });
+    const unbindNexus = nexusRouter.bindAlertNotifier(notifier, 300_000);
+
+    try {
+      // 1. First System 1 stall fires 1 Telegram + 1 Discord request (2 fetch calls)
+      riskGovernor.tripSystem1CircuitBreaker('SYSTEM1_HEARTBEAT_LOSS', {
+        heartbeatAgeMs: 84.2,
+        lastSeq: '4091',
+      });
+      await notifier.flush();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      // 2. Reset sends RECOVERY notice (+2 calls = 4 total)
+      riskGovernor.resetSystem1CircuitBreaker();
+      await notifier.flush();
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+
+      // Direct notify collision within cooldown without reset is suppressed
+      const acceptedDuplicate = notifier.notify({
+        dedupeKey: 'RISK_S1_SYSTEM1_HEARTBEAT_LOSS',
+        severity: 'CRITICAL',
+        title: 'Duplicate S1 Stall',
+        summary: 'Should be suppressed',
+      });
+      expect(acceptedDuplicate).toBe(false);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+
+      // 3. System 2 OOM respawn exhaustion fires immediate CRITICAL alert (+2 calls = 6 total)
+      nexusRouter.emit('nexus:deep_exhausted', {
+        attempts: 5,
+        lastReason: 'SYSTEM2_OOM_CRASH',
+      });
+      await notifier.flush();
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+
+      // Second exhaustion emit inside 300s cooldown is deduplicated
+      nexusRouter.emit('nexus:deep_exhausted', {
+        attempts: 5,
+        lastReason: 'SYSTEM2_OOM_CRASH',
+      });
+      await notifier.flush();
+      expect(fetchMock).toHaveBeenCalledTimes(6);
+
+      const telegramCall = fetchMock.mock.calls[4];
+      const discordCall = fetchMock.mock.calls[5];
+      expect(String(telegramCall[0])).toContain('/sendMessage');
+      expect(String(discordCall[0])).toContain('discord.com/api/webhooks');
+      expect(String(discordCall[1]?.body)).toContain(
+        'System 2 OOM Respawn Budget Exhausted',
+      );
+    } finally {
+      unbindRisk();
+      unbindNexus();
+      await nexusRouter.shutdown();
+    }
+  });
+});
+EOF_MIA5_ID_11
+
+# ----------------------------------------------------------------------------
+# MIA5-ID-12: .github/workflows/mia-ci.yml
+# ----------------------------------------------------------------------------
+sync_file "MIA5-ID-12" ".github/workflows/mia-ci.yml" <<'EOF_MIA5_ID_12'
+name: MIA 5.0 CI — Latency, OOM Isolation, Docker & Smoke Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: mia-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '22'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  typecheck-and-build:
+    name: Typecheck & Build (@mia/server + @mia/web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install native build dependencies (better-sqlite3)
+        run: sudo apt-get update && sudo apt-get install -y python3 make g++
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Typecheck & build @mia/server and @mia/web
+        run: |
+          npm run build --workspace=@mia/server
+          npm run build --workspace=@mia/web
+
+  chaos-and-latency-gate:
+    name: Chaos Gate — Sub-10ms Reflex SLA & Worker OOM Isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install native build dependencies (better-sqlite3)
+        run: sudo apt-get update && sudo apt-get install -y python3 make g++
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Run miaChaosSuite.test.ts (Single-File CPU Isolation)
+        env:
+          NODE_ENV: test
+          MIA_EXECUTION_MODE: PAPER
+          NODE_OPTIONS: '--max-old-space-size=1024'
+        run: |
+          mkdir -p reports
+          npx --workspace=@mia/server vitest run tests/miaChaosSuite.test.ts \
+            --no-file-parallelism \
+            --bail=1 \
+            --reporter=verbose \
+            --reporter=junit \
+            --outputFile=reports/chaos-junit.xml
+
+      - name: Upload Chaos & Latency JUnit Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mia-chaos-latency-report
+          path: reports/chaos-junit.xml
+          retention-days: 14
+
+  docker-build:
+    name: Build & Push Production Docker Image
+    runs-on: ubuntu-latest
+    needs: [typecheck-and-build, chaos-and-latency-gate]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      primary_tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata (tags & labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push MIA 5.0 container image (main branch)
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export immutable Docker archive for smoke testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          tags: mia-5-smoke:${{ github.sha }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          outputs: type=docker,dest=/tmp/mia-5-image.tar
+
+      - name: Upload Docker archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mia-5-docker-image
+          path: /tmp/mia-5-image.tar
+          retention-days: 1
+
+  container-smoke-test:
+    name: Post-Build Container Smoke Test (PAPER + SSE + SQLite WAL)
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install native build dependencies (better-sqlite3)
+        run: sudo apt-get update && sudo apt-get install -y python3 make g++
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Download & load built Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: mia-5-docker-image
+          path: /tmp
+
+      - name: Load image into local Docker daemon
+        run: docker load -i /tmp/mia-5-image.tar
+
+      - name: Boot MIA 5.0 container in PAPER mode
+        run: |
+          mkdir -p "${{ runner.temp }}/mia-smoke-data"
+          chmod 0777 "${{ runner.temp }}/mia-smoke-data"
+
+          docker run -d \
+            --name mia-5-smoke \
+            -p 127.0.0.1:3000:3000 \
+            -v "${{ runner.temp }}/mia-smoke-data:/app/data" \
+            -e NODE_ENV=production \
+            -e PORT=3000 \
+            -e MIA_EXECUTION_MODE=PAPER \
+            -e SQLITE_DB_PATH=/app/data/mia_ledger.sqlite \
+            -e TCA_DB_PATH=/app/data/mia_tca.sqlite \
+            mia-5-smoke:${{ github.sha }}
+
+      - name: Wait for container HTTP listener readiness
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null --max-time 2 http://127.0.0.1:3000/api/health 2>/dev/null || \
+               curl -s -o /dev/null --max-time 2 http://127.0.0.1:3000/api/telemetry/stream; then
+              echo "Container HTTP listener ready on attempt ${i}"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Container failed to become ready within 30s"
+          docker logs mia-5-smoke
+          exit 1
+
+      - name: Verify /api/telemetry/stream SSE framing & dual-engine payload
+        run: |
+          node --input-type=module <<'EOF'
+          import assert from 'node:assert/strict';
+
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 8_000);
+
+          try {
+            const res = await fetch('http://127.0.0.1:3000/api/telemetry/stream', {
+              headers: { Accept: 'text/event-stream' },
+              signal: controller.signal,
+            });
+
+            assert.equal(res.status, 200, `Expected HTTP 200, got ${res.status}`);
+            const contentType = res.headers.get('content-type') ?? '';
+            assert.match(
+              contentType,
+              /text\/event-stream/i,
+              `Unexpected Content-Type: ${contentType}`,
+            );
+            assert.equal(
+              res.headers.get('x-accel-buffering'),
+              'no',
+              'Expected X-Accel-Buffering: no for unbuffered Nginx SSE',
+            );
+            assert.ok(res.body, 'SSE response body stream is missing');
+
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let parsedSnapshot = null;
+
+            while (!parsedSnapshot) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+
+              const frames = buffer.split('\n\n');
+              buffer = frames.pop() ?? '';
+
+              for (const frame of frames) {
+                const lines = frame.split('\n');
+                const eventLine = lines.find((l) => l.startsWith('event: '));
+                const dataLine = lines.find((l) => l.startsWith('data: '));
+                if (eventLine === 'event: snapshot' && dataLine) {
+                  parsedSnapshot = JSON.parse(dataLine.slice('data: '.length));
+                  break;
+                }
+              }
+            }
+
+            assert.ok(parsedSnapshot, 'Did not receive initial event: snapshot frame');
+            assert.equal(typeof parsedSnapshot.ts, 'number');
+            assert.ok(parsedSnapshot.system1, 'Missing system1 block in SSE snapshot');
+            assert.ok(parsedSnapshot.system2, 'Missing system2 block in SSE snapshot');
+            assert.equal(
+              typeof parsedSnapshot.system2.supervisor?.generation,
+              'number',
+              'Missing system2.supervisor.generation',
+            );
+
+            console.log(
+              'Verified SSE snapshot frame:',
+              JSON.stringify({
+                ts: parsedSnapshot.ts,
+                s1State: parsedSnapshot.system1.telemetry?.stateLabel ?? 'PENDING',
+                s2Ready: parsedSnapshot.system2.supervisor?.ready,
+                s2Gen: parsedSnapshot.system2.supervisor?.generation,
+              }),
+            );
+          } finally {
+            clearTimeout(timeout);
+            controller.abort();
+          }
+          EOF
+
+      - name: Verify SQLite WAL mode & ledger integrity
+        env:
+          SMOKE_DATA_DIR: ${{ runner.temp }}/mia-smoke-data
+        run: |
+          node --input-type=module <<'EOF'
+          import assert from 'node:assert/strict';
+          import { existsSync } from 'node:fs';
+          import { join } from 'node:path';
+          import { createRequire } from 'node:module';
+
+          const require = createRequire(import.meta.url);
+          const Database = require('./server/node_modules/better-sqlite3');
+
+          const dbPath = join(process.env.SMOKE_DATA_DIR, 'mia_ledger.sqlite');
+          assert.ok(existsSync(dbPath), `SQLite ledger file missing at ${dbPath}`);
+
+          const db = new Database(dbPath, { readonly: true });
+          try {
+            const journalMode = db.pragma('journal_mode', { simple: true });
+            assert.equal(
+              String(journalMode).toLowerCase(),
+              'wal',
+              `Expected SQLite WAL mode, got ${journalMode}`,
+            );
+
+            const integrity = db.pragma('integrity_check', { simple: true });
+            assert.equal(integrity, 'ok', `SQLite integrity_check failed: ${integrity}`);
+
+            console.log(`Verified SQLite WAL active (journal_mode=${journalMode}, integrity=${integrity})`);
+          } finally {
+            db.close();
+          }
+          EOF
+
+      - name: Dump container logs on smoke test failure
+        if: failure()
+        run: docker logs --tail 200 mia-5-smoke || true
+
+      - name: Tear down smoke test container
+        if: always()
+        run: docker rm -f mia-5-smoke || true
+
+      - name: Send deployment summary via OpsWebhookNotifier
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GIT_SHA: ${{ github.sha }}
+          GIT_REF: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          npx --workspace=@mia/server tsx --input-type=module <<'EOF'
+          import { OpsWebhookNotifier } from './src/alerts/OpsWebhookNotifier.js';
+
+          const succeeded = process.env.JOB_STATUS === 'success';
+          const shortSha = (process.env.GIT_SHA ?? '').slice(0, 7);
+          const isMainPush = process.env.EVENT_NAME !== 'pull_request';
+
+          const notifier = new OpsWebhookNotifier({
+            telegramBotToken: process.env.TELEGRAM_BOT_TOKEN,
+            telegramChatId: process.env.TELEGRAM_CHAT_ID,
+            discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
+            environmentLabel: isMainPush ? 'MIA-5.0 CI/DEPLOY' : 'MIA-5.0 PR-GATE',
+          });
+
+          notifier.notify({
+            dedupeKey: `CI_SMOKE_${process.env.GIT_SHA}`,
+            severity: succeeded ? 'RECOVERY' : 'CRITICAL',
+            title: succeeded
+              ? 'MIA 5.0 Container Smoke Test Passed'
+              : 'MIA 5.0 Container Smoke Test Failed',
+            summary: succeeded
+              ? 'Sub-10ms chaos gate, PAPER container boot, unbuffered SSE stream, and SQLite WAL checks passed.'
+              : 'Post-build container smoke test failed. Review GitHub Actions logs before promoting image.',
+            bypassCooldown: true,
+            fields: {
+              Branch: process.env.GIT_REF,
+              Commit: shortSha,
+              RegistryPush: isMainPush ? 'ghcr.io (pushed)' : 'PR dry-run (not pushed)',
+              Checks: 'Latency <10ms | S2 OOM | SSE Snapshot | SQLite WAL',
+              RunUrl: process.env.RUN_URL,
+            },
+          });
+
+          await notifier.flush();
+          EOF
+EOF_MIA5_ID_12
+
+echo "----------------------------------------------------------------------------"
+echo " Sync Summary: ${CREATED_COUNT} created | ${UPDATED_COUNT} updated | ${UNCHANGED_COUNT} unchanged"
+echo "----------------------------------------------------------------------------"
+
+if [[ "$SKIP_TESTS" == "true" ]]; then
+  echo "Skipping Vitest chaos suite (--skip-tests specified)."
+  exit 0
+fi
+
+echo "Running MIA 5.0 Chaos & Sub-10ms Latency Suite (single-worker CPU isolation)..."
+NODE_ENV=test \
+MIA_EXECUTION_MODE=PAPER \
+NODE_OPTIONS='--max-old-space-size=1024' \
+npx --workspace=@mia/server vitest run tests/miaChaosSuite.test.ts \
+  --no-file-parallelism \
+  --bail=1 \
+  --reporter=verbose
+
+echo "============================================================================"
+echo " ALL MIA 5.0 SLA, HEARTBEAT FREEZE, OOM ISOLATION & WEBHOOK GATES PASSED"
+echo "============================================================================"
