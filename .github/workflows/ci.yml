@@ -121,3 +121,5 @@ jobs:
           grep -q 'unchanged: 12' /tmp/mia5-stage.log
       - name: Run isolated deterministic MIA5 chaos contract suite
         run: node scripts/mia5-safe-stage.mjs
+      - name: Audit canonical Hive coverage without trading authority
+        run: npm run audit:hive
