@@ -51,7 +51,9 @@ function result(
     state, action, reasons, missingEvidence,
     dataClassification: 'OBSERVED_HEURISTIC_NOT_CALIBRATED',
     enforcement: 'RISK_REDUCING_ONLY',
-    wouldAbstain: action === 'ABSTAIN',
+    // A request for deeper review is not a completed review; ENFORCED must
+    // defer entry until canonical thinking can establish safe evidence.
+    wouldAbstain: action !== 'OBSERVE',
     canAuthorizeTrade: false, canIncreaseRisk: false,
   };
 }
