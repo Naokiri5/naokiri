@@ -22,8 +22,10 @@ describe('MIA 5.0 canonical PAPER 30-trade expectancy (research only)', () => {
     const r = assessPaperExpectancyCohort(rows);
     expect(r).toMatchObject({
       sampleTrades: 30, winningTrades: 29, status: 'THRESHOLDS_MET_RESEARCH_ONLY',
-      rollingExpectancyUsd: 1.6, rollingExpectancyR: 0.16, profitFactor: 5.8,
     });
+    expect(r.rollingExpectancyUsd).toBeCloseTo(1.6);
+    expect(r.rollingExpectancyR).toBeCloseTo(0.16);
+    expect(r.profitFactor).toBeCloseTo(5.8);
   });
 
   it('does not interpret a zero-loss denominator as infinite proof of readiness', () => {
