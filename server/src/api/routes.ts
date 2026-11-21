@@ -6,6 +6,7 @@ import { buildCertificate } from '../decision/certificate.js';
 import { replayDecision, ReplayError } from '../ditas/replay.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
+import { liveReadinessReport } from '../exec/liveReadiness.js';
 import { BinanceSpotTestnet, testnetConfiguration } from '../exec/venues/binanceTestnet.js';
 import { marketIntegrations } from '../market/integrations.js';
 import { alpacaPaperAsset, oandaPracticePrice } from '../providers/regulatedBrokers.js';
@@ -136,6 +137,8 @@ export async function routes(app: FastifyInstance) {
   await vikeRoutes(app); // read-only Vike research (owner session required by the gate below)
   /** Paper/Testnet/Live share the account view but never financial state. Live stays LOCKED. */
   app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
+  /** Evidence-only G01-G14 live readiness. Never grants access or submits orders. */
+  app.get('/api/trading/live/readiness', async () => liveReadinessReport());
   // A separate Spot TESTNET diagnostics boundary. None of these routes can
   // create, amend or cancel a real or testnet order. Order/test only validates.
   app.get('/api/trading/testnet/status', async () => testnetConfiguration());
