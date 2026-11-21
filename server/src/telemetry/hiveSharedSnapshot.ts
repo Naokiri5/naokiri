@@ -107,7 +107,9 @@ export class HiveSharedSnapshotRouter {
         sourceSequence > 0x7fffffff ||
         !(vector instanceof Float64Array) || vector.length !== HIVE_FEATURE_SLOTS ||
         !vector.every(Number.isFinite)) return false;
+    if (symbolIndex >= this.indices.size) return false;
     const m = symbolIndex * HIVE_META_STRIDE;
+    if (sourceSequence <= Atomics.load(this.meta, m + META_SOURCE_SEQUENCE)) return false;
     const version = Atomics.load(this.meta, m + META_VERSION);
     if (version & 1) return false; // another writer has the slot
     if (Atomics.compareExchange(this.meta, m + META_VERSION, version, version + 1) !== version)
