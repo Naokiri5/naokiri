@@ -182,7 +182,7 @@ export async function routes(app: FastifyInstance) {
     );
   });
   app.post('/api/security/2fa/confirm', async (req) => {
-    const { otp } = z.object({ otp: z.string().regex(/^\\d{6}$/) }).strict().parse(req.body);
+    const { otp } = z.object({ otp: z.string().regex(/^\d{6}$/) }).strict().parse(req.body);
     return totp.confirmEnrollment(otp, 'session:' + sha256(tokenOf(req) ?? ''));
   });
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }
