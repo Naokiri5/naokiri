@@ -39,7 +39,7 @@ export async function goPlusSolanaRisk(mint: string): Promise<GoPlusRiskEvidence
   if (!validSolanaMint(mint)) throw new ProviderError('goplus', 'INVALID_SOLANA_MINT');
   const apiKey = process.env.GOPLUS_ACCESS_TOKEN?.trim();
   if (apiKey && /[\r\n]/.test(apiKey)) throw new ProviderError('goplus', 'INVALID_ACCESS_TOKEN');
-  const headers = apiKey ? { Authorization: 'Bearer ' + apiKey } : {};
+  const headers: Record<string, string> = apiKey ? { Authorization: 'Bearer ' + apiKey } : {};
   const query = new URLSearchParams({ contract_addresses: mint });
   const data = await fetchProvider('goplus',
     'https://api.gopluslabs.io/api/v1/solana/token_security?' + query,
