@@ -5,6 +5,10 @@ import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import * as auth from './auth.js';
+import * as privy from '../security/privy.js';
+import * as totp from '../security/totp.js';
+import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
+import { createBackup } from '../ops/backup.js';
 import { bus } from '../core/bus.js';
 import { market } from '../market/store.js';
 import { board, rejections, recentDecisions, analyzeInstrument, dexBoard } from '../market/scanner.js';
@@ -57,7 +61,16 @@ const COOKIE = 'mia_session';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
 const bad = (reply: FastifyReply, code: number, msg: string) => reply.code(code).send({ error: msg });
 /** Step-up shares the login brute-force limits (per client + global), so it can no longer be guessed freely. */
-const stepUp = (req: FastifyRequest, body: any) => auth.verifyPassphrase(body?.password, req.ip, 'step-up');
+const stepUp = (req: FastifyRequest, body: any) => verifyStepUp(
+  // Legacy API clients still use the "password" field for their step-up
+  // entry; in Privy mode that field is ONLY an authenticator code, never the
+  // original passphrase. Canonical verifier decides based on server auth mode.
+  authMode() === 'privy' ? { otp: body?.otp ?? body?.password } : { password: body?.password },
+  'session:' + sha256(tokenOf(req) ?? '')
+);
+const passphraseOnly = () => {
+  if (!passphraseSignInAllowed()) throw httpError(403, 'passphrase authentication is disabled; connect a wallet with Privy');
+};
 const PW = z.string().min(1).max(1024);
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
@@ -122,17 +135,56 @@ export async function routes(app: FastifyInstance) {
   // Readiness (unauthenticated, states and ages only): 200 when every check passes, 503 otherwise.
   app.get('/api/ready', async (_req, reply) => { const r = readiness(botStatus); return reply.code(r.ready ? 200 : 503).send(r); });
   app.get('/api/health', async () => ({ ok: true, version: '4.1.0', schema: SCHEMA_VERSION, setup: auth.isSetup(), offline: config.offline }));
-  app.get('/api/auth/state', async (req) => ({ setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)) }));
+  app.get('/api/auth/state', async (req) => ({
+    mode: authMode(), setup: auth.isSetup(), authenticated: auth.validSession(tokenOf(req)),
+    privy: privy.privyPublicConfig(),
+    ...(auth.validSession(tokenOf(req)) ? { stepUp: stepUpMethod() } : {}),
+  }));
   app.post('/api/auth/setup', async (req, reply) => {
     // First-run setup is only accepted from this machine: on a 0.0.0.0 bind any visitor could otherwise claim ownership.
     // Containers/Codespaces reach MIA through a port forwarder (never loopback), so they are allowed too.
+    passphraseOnly();
     if (!auth.isSetup() && !isLoopback(req.ip) && !inContainer() && process.env.MIA_ALLOW_REMOTE_SETUP !== '1') throw httpError(403, 'first-time setup must be done from the machine running MIA (open http://localhost:' + config.port + '/), or set MIA_ALLOW_REMOTE_SETUP=1');
     const { password } = z.object({ password: PW }).parse(req.body); auth.setupOwner(password); return issue(reply, auth.login(password, req.ip));
   });
-  app.post('/api/auth/login', async (req, reply) => { const { password } = z.object({ password: PW }).parse(req.body); return issue(reply, auth.login(password, req.ip)); });
+  app.post('/api/auth/login', async (req, reply) => {
+    passphraseOnly();
+    const { password } = z.object({ password: PW }).parse(req.body);
+    return issue(reply, auth.login(password, req.ip));
+  });
+  // Real Privy identity verification: never trust an address, a client-side
+  // "connected" flag, or a browser-supplied owner role.
+  app.post('/api/auth/privy/login', async (req, reply) => {
+    if (authMode() !== 'privy') throw httpError(403, 'wallet login is disabled in offline recovery mode');
+    const { accessToken } = z.object({ accessToken: z.string().min(20).max(4096) }).strict().parse(req.body);
+    const token = await privy.loginWithPrivy(accessToken, req.ip, { backup: () => { createBackup(); } });
+    return issue(reply, token);
+  });
+  app.get('/api/auth/privy/config', async () => privy.privyPublicConfig());
   const cookieFlags = `Path=/; HttpOnly; SameSite=Strict${config.secureCookie ? '; Secure' : ''}`;
   app.post('/api/auth/logout', async (req, reply) => { auth.logout(tokenOf(req)); reply.header('set-cookie', `${COOKIE}=; ${cookieFlags}; Max-Age=0`); return { ok: true }; });
-  app.post('/api/settings/password', async (req) => { const b = z.object({ current: PW, next: PW }).parse(req.body); auth.changePassword(b.current, b.next, req.ip); return { ok: true }; });
+  app.post('/api/settings/password', async (req) => {
+    passphraseOnly();
+    const b = z.object({ current: PW, next: PW }).parse(req.body);
+    auth.changePassword(b.current, b.next, req.ip); return { ok: true };
+  });
+  app.get('/api/security/2fa', async () => totp.twoFactorStatus());
+  app.post('/api/security/2fa/begin', async (req) => {
+    const input = z.object({
+      consoleCode: z.string().max(64).optional(), otp: z.string().max(16).optional(),
+      password: z.string().max(1024).optional(),
+    }).strict().parse(req.body ?? {});
+    // Never regard a proxy/forwarded source address as independent physical
+    // control of the server. Initial enrollment needs the server console code.
+    return totp.beginEnrollment(
+      { consoleCode: input.consoleCode, otp: input.otp, ...(passphraseSignInAllowed() ? { password: input.password } : {}) },
+      'session:' + sha256(tokenOf(req) ?? ''), { directLocal: false, log: (line) => app.log.warn(line) }
+    );
+  });
+  app.post('/api/security/2fa/confirm', async (req) => {
+    const { otp } = z.object({ otp: z.string().regex(/^\\d{6}$/) }).strict().parse(req.body);
+    return totp.confirmEnrollment(otp, 'session:' + sha256(tokenOf(req) ?? ''));
+  });
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }
 
   // ── live stream (SSE) ──
