@@ -135,11 +135,11 @@ export async function routes(app: FastifyInstance) {
   // create, amend or cancel a real or testnet order. Order/test only validates.
   app.get('/api/trading/testnet/status', async () => testnetConfiguration());
   app.get('/api/trading/testnet/account', async (req) => {
-    limit(req, 'analysis', 'testnet account read');
+    limit(req, 'analyze', 'testnet account read');
     return new BinanceSpotTestnet().account();
   });
   app.get('/api/trading/testnet/order/:id', async (req) => {
-    limit(req, 'analysis', 'testnet order lookup');
+    limit(req, 'analyze', 'testnet order lookup');
     const id = idOf(req);
     const q = z.object({ symbol: z.enum(['BTCUSDT', 'ETHUSDT']) }).strict().parse(req.query);
     return new BinanceSpotTestnet().orderStatus(q.symbol, id);
@@ -156,7 +156,7 @@ export async function routes(app: FastifyInstance) {
       password: PW,
     }).strict().parse(req.body);
     stepUp(req, body);
-    limit(req, 'analysis', 'testnet order validation');
+    limit(req, 'analyze', 'testnet order validation');
     return new BinanceSpotTestnet().validateOrderOnly(body);
   });
   // ── protection incidents (persistent; owner acknowledgement) ──
