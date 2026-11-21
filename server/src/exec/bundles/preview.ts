@@ -36,7 +36,7 @@ export function bundleCapabilities() {
     maxPreviewLegs: 5,
     modes: ['BATCH_BEST_EFFORT', 'SPLIT_ORDER', 'MULTI_ASSET_BASKET', 'COORDINATED_STRATEGY', 'PAPER_ATOMIC', 'SOLANA_JITO_ATOMIC'] as const,
     environments: [
-      { environment: 'PAPER', preview: true, canPlaceBundleOrders: false, reason: 'BUNDLE_ATOMIC_OMS_COMMIT_NOT_INSTALLED' },
+      { environment: 'PAPER', preview: true, canPlaceBundleOrders: true, reason: 'PAPER_ATOMIC_REQUIRES_OWNER_STEP_UP_AND_CANONICAL_RISK_APPROVAL' },
       { environment: 'TESTNET', preview: false, canPlaceBundleOrders: false, reason: 'TESTNET_ORDER_ADAPTER_NOT_CERTIFIED' },
       { environment: 'LIVE', preview: false, canPlaceBundleOrders: false, reason: 'LIVE_G01_G14_AND_SIGNER_NOT_CERTIFIED' },
     ],
@@ -153,7 +153,7 @@ export function previewBundle(input: BundlePreviewInput, now = Date.now()) {
     venue: {
       environment: 'PAPER', allowedVenues: ['binance-paper'],
       supportedModes: ['BATCH_BEST_EFFORT', 'SPLIT_ORDER', 'MULTI_ASSET_BASKET', 'COORDINATED_STRATEGY', 'PAPER_ATOMIC'],
-      maxLegs: 5, expiresAt: now + 2_000, paperTransactionalCommitAvailable: false,
+      maxLegs: 5, expiresAt: now + 2_000, paperTransactionalCommitAvailable: true,
       jitoAtomicExecutionCertified: false,
     },
     control: { mode: ctl.mode, emergency: ctl.emergency, pausedNewOrders: ctl.pausedNewOrders },
