@@ -65,14 +65,19 @@ test('DITAS remains usable on mobile', async ({ page }) => {
 });
 
 test('DITAS evaluates only the selected exact forecast cohort', async ({ page }) => {
-  const cohort = '["crypto","strategy-v1","1h"]';
-  await page.route(/\/api\/ditas(?:\?|$)/, route => {
+  const cohortKey = (strategy: string) => JSON.stringify(['crypto', strategy, '1.0.0', '1h', 'model-v1', 'prompt-v1', 'CLOSE_ABOVE_REFERENCE', 3, 12, 0]);
+  const cohort = cohortKey('fixture-strategy');
+  const otherCohort = cohortKey('other-strategy');
+  let releaseOther!: () => void;
+  const otherResponse = new Promise<void>(resolve => { releaseOther = resolve; });
+  await page.route(/\/api\/ditas(?:\?|$)/, async route => {
     const selected = new URL(route.request().url()).searchParams.get('cohort');
+    if (selected === otherCohort) await otherResponse;
     return route.fulfill({ json: {
       counts: { snapshots: 0, events: 0, twins: 0, forecasts: 100, outcomes: 100 },
       dataHealth: [], actual: { label: 'PAPER', orders: 0, fills: 0, closedPositions: 0, realizedPnl: 0, fees: 0 },
       controls: { mode: 'OBSERVE' }, events: [], fingerprints: [], twins: [], passports: [], coverage: [],
-      calibration: { status: selected ? 'EVALUATED' : 'UNCALIBRATED', sample: selected ? 100 : 0, brierScore: selected ? 0.25 : null, logLoss: selected ? 0.6931 : null, ece: selected ? 0 : null, bins: [], cohorts: [{ cohort, n: 100 }], uncertainty: [], note: 'Select an exact cohort. Evaluation does not prove a calibrated production model.' }
+      calibration: { cohort: selected, status: selected ? 'EVALUATED' : 'UNCALIBRATED', sample: selected ? 100 : 0, brierScore: selected === otherCohort ? 0.5 : selected ? 0.25 : null, logLoss: selected ? 0.6931 : null, ece: selected ? 0 : null, bins: [], cohorts: [{ cohort, n: 100 }, { cohort: otherCohort, n: 100 }], uncertainty: [], note: 'Select an exact cohort. Evaluation does not prove a calibrated production model.' }
     } });
   });
   await page.goto('/ditas');
@@ -83,4 +88,12 @@ test('DITAS evaluates only the selected exact forecast cohort', async ({ page })
   expect(new URL((await request).url()).searchParams.get('cohort')).toBe(cohort);
   await expect(page.getByText('EVALUATED', { exact: true })).toBeVisible();
   await expect(page.getByText('0.2500', { exact: true })).toBeVisible();
+  await page.getByLabel('Forecast cohort', { exact: true }).selectOption(otherCohort);
+  try {
+    await expect(page.getByText('0.2500', { exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Inspect calibration evidence' })).toBeDisabled();
+  } finally {
+    releaseOther();
+  }
+  await expect(page.getByText('0.5000', { exact: true })).toBeVisible();
 });

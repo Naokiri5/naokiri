@@ -170,9 +170,17 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect((await app.inject({ method: 'POST', url: '/api/chart/replay', headers: H(), payload: { ...payload, candles: Array(2001).fill(candles[0]) } })).statusCode).toBe(400);
   });
   it('repeated query keys and bad ids are rejected as validation errors, never leaked as database errors', async () => {
-    for (const url of ['/api/decisions?decision=a&decision=b', '/api/journal?kind=a&kind=b', '/api/markets/search?q=a&q=b', `/api/decisions/${'x'.repeat(200)}`]) {
+    const requests = [
+      { url: '/api/decisions?decision=a&decision=b', statuses: [400, 404] },
+      { url: '/api/journal?kind=a&kind=b', statuses: [400, 404] },
+      { url: '/api/markets/search?q=a&q=b', statuses: [400, 404] },
+      // Fastify can reject at parameter parsing (414) or fall through to the static app's API 404.
+      { url: `/api/decisions/${'x'.repeat(200)}`, statuses: [404, 414] },
+    ];
+    for (const { url, statuses } of requests) {
       const r = await app.inject({ url, headers: { cookie } });
-      expect([400, 404], url).toContain(r.statusCode); expect(r.body, url).not.toMatch(/named parameter|SQLITE|sqlite/i); // over-long path ids are 404 at the router
+      expect(statuses, url).toContain(r.statusCode);
+      expect(r.body, url).not.toMatch(/named parameter|SQLITE|sqlite/i);
     }
     const r = await app.inject({ method: 'POST', url: '/api/emergency/pause', headers: { cookie, 'x-mia-csrf': '1' }, payload: { unexpected: true } });
     expect(r.statusCode).toBe(400);

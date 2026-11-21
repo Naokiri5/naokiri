@@ -23,30 +23,38 @@ export function backtest(strat: StrategyDef, instrument: string, candles: Candle
   for (let i = 0; i < candles.length - 1; i++) {
     eng.ingest([candles[i]]);
     const next = candles[i + 1];
-    if (pos) {
-      const fills = stepExit(pos.st, next, slip);
-      for (const f of fills) { const px = f.reason === 'TARGET' ? f.price * (1 - slip) : f.price; pos.proceeds += px * f.qty; pos.fees += px * f.qty * costs.feeRate; }
-      if (pos.st.qtyLeft <= 1e-12) {
-        const risk = pos.st.entry - pos.st.initialStop; // per unit, qty=1
-        const pnl = pos.proceeds - pos.cost - pos.fees;
-        const reason = fills[fills.length - 1].reason;
-        trades.push({ entryT: pos.entryT, exitT: next.t, entry: pos.st.entry, exit: pos.proceeds, r: pnl / risk, reason, regime: pos.regime, segment: pos.entryT < splitAt ? 'IS' : 'OOS', bars: pos.st.barsHeld, mfe: pos.st.mfe, mae: pos.st.mae });
-        pos = null;
-      }
-      continue;
+    const entering = pos === null;
+    if (!pos) {
+      const f = eng.last;
+      if (!f || f.n < 210) continue;
+      const { regime } = classifyRegime(f);
+      if (!strat.suitableRegimes.includes(regime)) continue;
+      const sig = strat.generate(f);
+      if (!sig) continue;
+      const entry = next.o * (1 + slip);
+      if (sig.stop >= entry) continue;
+      const st = newExitState(entry, sig.stop, 1, sig.targets, sig.trailAfterR, sig.maxHoldBars);
+      pos = { st, entryT: next.t, regime, cost: entry, proceeds: 0, fees: entry * costs.feeRate };
     }
-    const f = eng.last; if (!f || f.n < 210) continue;
-    const reg = classifyRegime(f);
-    if (!strat.suitableRegimes.includes(reg.regime)) continue;
-    const sig = strat.generate(f); if (!sig) continue;
-    const entry = next.o * (1 + slip);
-    if (sig.stop >= entry) continue;
-    const st = newExitState(entry, sig.stop, 1, sig.targets, sig.trailAfterR, sig.maxHoldBars);
-    pos = { st, entryT: next.t, regime: reg.regime, cost: entry, proceeds: 0, fees: entry * costs.feeRate };
-    // the entry bar itself can hit stop/targets (bar opens at entry) — evaluate without counting a held bar
-    const fills = stepExit(st, { o: entry, h: next.h, l: next.l, c: next.c }, slip, false);
-    for (const fl of fills) { const px = fl.reason === 'TARGET' ? fl.price * (1 - slip) : fl.price; pos.proceeds += px * fl.qty; pos.fees += px * fl.qty * costs.feeRate; }
-    if (st.qtyLeft <= 1e-12) { trades.push({ entryT: next.t, exitT: next.t, entry, exit: pos.proceeds, r: (pos.proceeds - pos.cost - pos.fees) / (entry - st.initialStop), reason: fills[fills.length - 1].reason, regime: reg.regime, segment: next.t < splitAt ? 'IS' : 'OOS', bars: 0, mfe: st.mfe, mae: st.mae }); pos = null; }
+    // Stops and targets can execute on the entry candle without counting a held bar.
+    const bar = entering ? { ...next, o: pos.st.entry } : next;
+    const fills = stepExit(pos.st, bar, slip, !entering);
+    for (const fill of fills) {
+      const price = fill.reason === 'TARGET' ? fill.price * (1 - slip) : fill.price;
+      pos.proceeds += price * fill.qty;
+      pos.fees += price * fill.qty * costs.feeRate;
+    }
+    if (pos.st.qtyLeft <= 1e-12) {
+      const risk = pos.st.entry - pos.st.initialStop;
+      trades.push({
+        entryT: pos.entryT, exitT: next.t, entry: pos.st.entry, exit: pos.proceeds,
+        r: (pos.proceeds - pos.cost - pos.fees) / risk,
+        reason: fills[fills.length - 1].reason, regime: pos.regime,
+        segment: pos.entryT < splitAt ? 'IS' : 'OOS',
+        bars: pos.st.barsHeld, mfe: pos.st.mfe, mae: pos.st.mae,
+      });
+      pos = null;
+    }
   }
   const warnings: string[] = [];
   const oos = trades.filter((t) => t.segment === 'OOS');
