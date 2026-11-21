@@ -23,7 +23,8 @@ const OMS_CALLERS = new Map<string, readonly string[] | '*'>([
 ]);
 
 const READABLE_APIS = new Map<string, readonly string[]>([
-  ['core/mode.ts', ['getControl', 'displayMode']],
+  // Capability-display code may read the compile-time LIVE lock, but never updateControl.
+  ['core/mode.ts', ['getControl', 'displayMode', 'LIVE_EXECUTION_AVAILABLE']],
   // Claude's safety branch also reads the most recent valid policy for protective exits.
   ['risk/policy.ts', ['currentPolicy', 'exitPolicy', 'DEFAULT_POLICY', 'policyHistory', 'RiskPolicy']],
   ['portfolio/ledger.ts', ['PAPER_ACCOUNT', 'accountState', 'cashBalance', 'totalDeposits', 'openPositions', 'markPrice']],
