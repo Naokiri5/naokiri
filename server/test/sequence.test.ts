@@ -5,8 +5,8 @@ import { recentSequences, sequenceForDecision } from '../src/sequence/projection
 
 const putDecision = (id: string, report = '{"traceId":"trace-fixture"}') => {
   run(
-    \`INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,risk_decision,consensus_id,created_at,report)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)\`,
+    `INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,risk_decision,consensus_id,created_at,report)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     id, 'candidate-fixture', 'crypto:binance:TESTUSDT', 'crypto', 'LONG',
     'trend_pullback', 'PAPER_TRADE', 80, 'ALLOW', null, Date.now(), report,
   );
@@ -14,9 +14,9 @@ const putDecision = (id: string, report = '{"traceId":"trace-fixture"}') => {
 
 const putEntryOrder = (status: string) => {
   run(
-    \`INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,
+    `INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,
        status,purpose,decision_id,created_at,updated_at,filled_qty)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)\`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     'entry-order', 'entry-candidate-fixture', 'paper-bot', 'binance',
     'crypto:binance:TESTUSDT', 'BUY', 'MARKET', 2,
     status, 'ENTRY', 'decision-fixture', Date.now(), Date.now(),
@@ -26,17 +26,17 @@ const putEntryOrder = (status: string) => {
 
 const putPositionAndProtection = () => {
   run(
-    \`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,
+    `INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,
        entry_price,stop_price,initial_stop,targets,status,opened_at,planned_risk,decision_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)\`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     'position-fixture', 'paper-bot', 'crypto:binance:TESTUSDT',
     'crypto', 'LONG', 'trend_pullback', 2, 100, 95, 95, '{}',
     'OPEN', Date.now(), 10, 'decision-fixture',
   );
   run(
-    \`INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,
+    `INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,
        stop_price,status,purpose,position_id,created_at,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)\`,
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     'stop-order', 'stop-position-fixture', 'paper-bot', 'binance',
     'crypto:binance:TESTUSDT', 'SELL', 'STOP_MARKET', 2, 95,
     'ACTIVE', 'PROTECTIVE_STOP', 'position-fixture', Date.now(), Date.now(),
@@ -96,8 +96,8 @@ describe('sequence read-only projection (canonical records only)', () => {
     putEntryOrder('FILLED');
     putPositionAndProtection();
     run(
-      \`INSERT INTO protection_incidents(id,position_id,instrument,status,reason,opened_at,last_seen_at,last_notified_at,occurrences)
-         VALUES (?,?,?,?,?,?,?,?,?)\`,
+      `INSERT INTO protection_incidents(id,position_id,instrument,status,reason,opened_at,last_seen_at,last_notified_at,occurrences)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
       'incident-fixture', 'position-fixture', 'crypto:binance:TESTUSDT',
       'OPEN', 'stale executable book', Date.now(), Date.now(), Date.now(), 1,
     );
