@@ -14,8 +14,50 @@
  * in-flight order tracking; no external source code is copied.
  */
 import type { TradingEnvironment } from './environment.js';
+import { sha256 } from '../core/util.js';
 
 export type TrackedEnvironment = Exclude<TradingEnvironment, 'PAPER'>;
+
+/**
+ * Future venue client ID contract, not an order or permission.
+ * A stable source key is scoped by environment, account AND sleeve to prevent
+ * reusing an identifier for a different account or certification lane.
+ *
+ * Persistence must still put a UNIQUE constraint around the canonical key,
+ * and real exchange retries MUST reconcile uncertain outcomes before sending.
+ */
+export type AutonomySleeve = 'futures' | 'spot' | 'memecoin' | 'yield' | 'stocks_etf';
+export type SupportedVenueId = 'binance' | 'okx' | 'alpaca' | 'solana';
+export interface VenueClientOrderIdInput {
+  environment: TrackedEnvironment;
+  accountId: string;
+  sleeve: AutonomySleeve;
+  idempotencyKey: string;
+}
+export function toDeterministicVenueClientId(
+  input: Readonly<VenueClientOrderIdInput>, venue: SupportedVenueId,
+): { canonical: string; venueClientOrderId: string } {
+  if (input.environment !== 'TESTNET' && input.environment !== 'LIVE')
+    throw new Error('CLIENT_ID_ENVIRONMENT_INVALID');
+  if (typeof input.accountId !== 'string' || !ID.test(input.accountId) ||
+      typeof input.idempotencyKey !== 'string' ||
+      input.idempotencyKey.trim().length === 0 || input.idempotencyKey.length > 256)
+    throw new Error('CLIENT_ID_INPUT_INVALID');
+  if (!['futures', 'spot', 'memecoin', 'yield', 'stocks_etf'].includes(input.sleeve))
+    throw new Error('CLIENT_ID_SLEEVE_INVALID');
+  if (!['binance', 'okx', 'alpaca', 'solana'].includes(venue))
+    throw new Error('CLIENT_ID_VENUE_INVALID');
+  const fields = [input.environment, input.accountId, input.sleeve, input.idempotencyKey];
+  const digest = sha256(fields.map(x => x.length + ':' + x).join('|')).slice(0, 16);
+  const canonical = 'mia_' + input.sleeve + '_' + digest;
+  const venueClientOrderId = venue === 'okx' ? canonical.replace(/_/g, '') : canonical;
+  // Strictly enforce the narrower OKX alphanumeric (32 char) and the 36 char
+  // adapters without silent truncation, which could create collisions.
+  const valid = venue === 'okx' ? /^[a-zA-Z0-9]{1,32}$/ : /^[a-zA-Z0-9_-]{1,36}$/;
+  if (!valid.test(venueClientOrderId)) throw new Error('CLIENT_ID_VENUE_FORMAT_INVALID');
+  return { canonical, venueClientOrderId };
+}
+
 export type OrderPhase =
   | 'INTENT_RECORDED'
   | 'ACKNOWLEDGED'
