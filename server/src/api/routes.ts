@@ -6,6 +6,7 @@ import { buildCertificate } from '../decision/certificate.js';
 import { replayDecision, ReplayError } from '../ditas/replay.js';
 import { vikeRoutes } from '../research/vikeRoutes.js';
 import { environmentsOverview } from '../exec/environment.js';
+import { BinanceSpotTestnet, testnetConfiguration } from '../exec/venues/binanceTestnet.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -128,8 +129,36 @@ export async function routes(app: FastifyInstance) {
   await ditasRoutes(app);
   await knowledgeRoutes(app);
   await vikeRoutes(app); // read-only Vike research (owner session required by the gate below)
-  /** Paper/Live environments for the shared UI layout. Read-only; Live is reported as LOCKED, never as available. */
+  /** Paper/Testnet/Live share the account view but never financial state. Live stays LOCKED. */
   app.get('/api/trading/environments', async () => ({ environments: environmentsOverview() }));
+  // A separate Spot TESTNET diagnostics boundary. None of these routes can
+  // create, amend or cancel a real or testnet order. Order/test only validates.
+  app.get('/api/trading/testnet/status', async () => testnetConfiguration());
+  app.get('/api/trading/testnet/account', async (req) => {
+    limit(req, 'analyze', 'testnet account read');
+    return new BinanceSpotTestnet().account();
+  });
+  app.get('/api/trading/testnet/order/:id', async (req) => {
+    limit(req, 'analyze', 'testnet order lookup');
+    const id = idOf(req);
+    const q = z.object({ symbol: z.enum(['BTCUSDT', 'ETHUSDT']) }).strict().parse(req.query);
+    return new BinanceSpotTestnet().orderStatus(q.symbol, id);
+  });
+  app.post('/api/trading/testnet/validate-order', async (req) => {
+    // Risk-increasing operations must use owner step-up even though this
+    // endpoint is non-executing. Never accept credentials from the browser.
+    const body = z.object({
+      symbol: z.enum(['BTCUSDT', 'ETHUSDT']),
+      side: z.enum(['BUY', 'SELL']),
+      quantity: z.string().min(1).max(24),
+      price: z.string().min(1).max(24),
+      clientOrderId: z.string().min(1).max(36),
+      password: PW,
+    }).strict().parse(req.body);
+    stepUp(req, body);
+    limit(req, 'analyze', 'testnet order validation');
+    return new BinanceSpotTestnet().validateOrderOnly(body);
+  });
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
   app.post('/api/risk/incidents/:id/ack', async (req) => {
