@@ -99,6 +99,8 @@ describe('MIA 5.0 zero-copy shared storage with bounded consistent reads', () =>
     const input = new Float64Array(97).fill(0.25);
     expect(r.read(first)).toBeNull(); // never treat zero-initialized storage as data
     expect(r.publish(first, input, 42)).toBe(true);
+    expect(r.publish(first, input, 42)).toBe(false); // never replay a tick
+    expect(r.publish(first, input, 41)).toBe(false); // never regress source sequence
     const snap = r.read(first)!;
     expect(snap).toMatchObject({
       sequence: 2, sourceSequence: 42, authority: 'OBSERVATION_ONLY',
