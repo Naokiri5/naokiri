@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { freshDb } from './helpers.js';
+import { buildApp } from '../src/index.js';
 import { evaluateLiveReadiness, liveReadinessReport, type LiveReadinessFacts } from '../src/exec/liveReadiness.js';
 import { executionAdapter } from '../src/exec/environment.js';
 import { newVenueOrderProjection, reduceVenueOrder, type VenueOrderScope } from '../src/exec/venueOrderState.js';
@@ -72,6 +74,35 @@ describe('read-only live release witness (G01–G14)', () => {
     expect(x.canSignOrder).toBe(false);
     expect(x.blockers).toContainEqual({ code: 'READINESS_ONLY_NO_SIGNING_AUTHORITY' });
     expect(executionAdapter('LIVE').availability().state).toBe('LOCKED');
+  });
+});
+
+describe('Live readiness HTTP authority boundary', () => {
+  it('is owner-session protected and never grants signing or order execution', async () => {
+    freshDb();
+    const app = await buildApp();
+    try {
+      const unauth = await app.inject({ method: 'GET', url: '/api/trading/live/readiness' });
+      expect(unauth.statusCode).toBe(401);
+      const setup = await app.inject({
+        method: 'POST', url: '/api/auth/setup',
+        payload: { password: 'live readiness reporting only' },
+      });
+      expect(setup.statusCode).toBe(200);
+      const cookie = String(setup.headers['set-cookie']).split(';')[0]!;
+      const response = await app.inject({
+        method: 'GET', url: '/api/trading/live/readiness', headers: { cookie },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        environment: 'LIVE', permission: 'LOCKED',
+        canAuthorizeTrade: false, canSignOrder: false,
+        operationalReleaseCertified: false,
+      });
+      expect(JSON.stringify(response.json())).not.toMatch(/api[_-]?secret|private[_-]?key/i);
+    } finally {
+      await app.close();
+    }
   });
 });
 
