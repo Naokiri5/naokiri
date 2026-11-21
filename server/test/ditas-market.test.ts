@@ -79,6 +79,50 @@ describe('strategy passports and current-version health', () => {
     expect(health).toMatchObject({ samples: 1, expectancyR: 1, excludedUnknownVersion: 1, excludedOtherVersion: 1, status: 'INSUFFICIENT_SAMPLE' });
     expect(health.expectancyCi95).toBeNull();
   });
+  it('uses only canonical PAPER closes for the latest 30-trade research window', () => {
+    const seed = (id: string, account: string, closedAt: number, r: number, version = '1.0.0') => {
+      const decisionId = 'decision-' + id;
+      run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,created_at,report) VALUES (?,?,?,?,?,?,?,?,?)',
+        decisionId, id, 'fixture', 'crypto', 'LONG', 'trend_pullback', 'PAPER_TRADE', 1, J({ strategy: { version } }));
+      run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,realized_pnl,fees,planned_risk,decision_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        id, account, 'fixture', 'crypto', 'LONG', 'trend_pullback', 0, 100, 95, 95, '{}', 'CLOSED',
+        1, closedAt, r * 5, 0, 5, decisionId);
+    };
+    seed('old-profitable', 'paper-bot', 1, 100);
+    for (let i = 0; i < 30; i++) seed('paper-' + i, 'paper-bot', 100 + i, -0.25);
+    for (let i = 0; i < 5; i++) seed('live-' + i, 'live-account', 300 + i, 1000);
+    const p = strategyPassports()[0];
+    expect(p.paperHealth.samples).toBe(31);
+    expect(p.rolling30Paper).toMatchObject({
+      samples: 30, observedClosedPositions: 30, complete: true,
+      environment: 'PAPER', certification: 'NOT_CERTIFIED',
+      canAuthorizeLive: false, evidence: 'CLOSED_POSITION_PROXY_NOT_VERIFIED_VENUE_FILLS',
+    });
+    expect(p.rolling30Paper.expectancyR).toBeCloseTo(-0.25);
+    expect(p.paperHealth.expectancyR).toBeGreaterThan(0);
+    expect(get<{ status: string }>('SELECT status FROM strategies WHERE id=?', 'trend_pullback')!.status).toBe('RESEARCH');
+  });
+
+  it('does not backfill a malformed recent trade with older profitable trades', () => {
+    const seed = (i: number, version: string | null) => {
+      const id = 'paper-' + i, decisionId = version == null ? null : 'decision-' + id;
+      if (decisionId) run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,created_at,report) VALUES (?,?,?,?,?,?,?,?,?)',
+        decisionId, id, 'fixture', 'crypto', 'LONG', 'trend_pullback', 'PAPER_TRADE', 1, J({ strategy: { version } }));
+      run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,realized_pnl,fees,planned_risk,decision_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        id, 'paper-bot', 'fixture', 'crypto', 'LONG', 'trend_pullback', 0, 100, 95, 95, '{}',
+        'CLOSED', 1, 100 + i, 5, 0, 5, decisionId);
+    };
+    for (let i = 0; i < 30; i++) seed(i, '1.0.0');
+    seed(30, null); // newest close has no authenticated version
+    const p = strategyPassports()[0];
+    expect(p.paperHealth.samples).toBe(30);
+    expect(p.rolling30Paper).toMatchObject({
+      samples: 29, observedClosedPositions: 30, complete: false,
+      canAuthorizeLive: false, certification: 'NOT_CERTIFIED',
+      status: 'INSUFFICIENT_SAMPLE',
+    });
+  });
+
   it('requires sufficient outcomes before a degraded review and never promotes', () => {
     expect(returnHealth([-1])).toMatchObject({ status: 'INSUFFICIENT_SAMPLE', expectancyCi95: null });
     expect(returnHealth(Array(30).fill(-1))).toMatchObject({ status: 'DEGRADED_REVIEW', expectancyCi95: { low: -1, high: -1 } });
