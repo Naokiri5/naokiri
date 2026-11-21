@@ -111,10 +111,9 @@ export function validHiveMarketTick(tick: HiveMarketTick): boolean {
       tick.bidDepthL5 + tick.askDepthL5 <= 0 ||
       tick.tradeVolume <= 0 || tick.buyVolume + tick.sellVolume <= 0 ||
       tick.buyVolume + tick.sellVolume > tick.tradeVolume * (1 + 1e-9)) return false;
-  for (const optional of [tick.fundingRate, tick.openInterest, tick.onChainLiquidityUsd]) {
-    if (optional !== undefined && (!Number.isFinite(optional) || (
-      optional !== tick.fundingRate && optional < 0
-    ))) return false;
+  if (tick.fundingRate !== undefined && !Number.isFinite(tick.fundingRate)) return false;
+  for (const optional of [tick.openInterest, tick.onChainLiquidityUsd]) {
+    if (optional !== undefined && (!Number.isFinite(optional) || optional < 0)) return false;
   }
   return true;
 }
