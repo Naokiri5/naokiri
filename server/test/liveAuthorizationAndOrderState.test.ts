@@ -330,6 +330,7 @@ describe('deterministic account-scoped venue identity without execution', () => 
   it('rejects malformed future venue/financial scope inputs', () => {
     expect(() => toDeterministicVenueClientId({ ...base, idempotencyKey: '' }, 'binance')).toThrow();
     expect(() => toDeterministicVenueClientId({ ...base, accountId: '' }, 'binance')).toThrow();
+    expect(() => toDeterministicVenueClientId({ ...base, accountId: '__proto__' }, 'binance')).toThrow();
     expect(() => toDeterministicVenueClientId({ ...base, environment: 'PAPER' as never }, 'binance')).toThrow();
     expect(() => toDeterministicVenueClientId({ ...base, sleeve: 'unknown' as never }, 'binance')).toThrow();
     expect(() => toDeterministicVenueClientId(base, 'unsupported' as never)).toThrow();
