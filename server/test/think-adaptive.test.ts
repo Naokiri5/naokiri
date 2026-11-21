@@ -89,7 +89,7 @@ describe('adaptive THINK integration — real canonical modules', () => {
     const result = decide(cand, ctx, qci, null, 0);
     expect(result.thinking).toMatchObject({
       version: 'mia-think-observer-v1', authority: 'EXPLANATION_ONLY',
-      canAuthorizeTrade: false, enforcement: 'SHADOW', dataTransport: 'EXISTING_VALIDATED_REST_POLLING',
+      canAuthorizeTrade: false, enforcement: 'SHADOW', dataTransport: 'CANONICAL_MIA_MARKET_FABRIC',
     });
     expect(result.decision).not.toBe('PAPER_TRADE');
     const row = get<{ report: string }>('SELECT report FROM decisions WHERE id=?', result.id);
