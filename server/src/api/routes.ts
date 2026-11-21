@@ -31,6 +31,7 @@ import { accountState, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio
 import { correlation } from '../portfolio/correlation.js';
 import { calendar, reconcile } from '../portfolio/calendar.js';
 import * as oms from '../exec/oms.js';
+import { previewBundle, bundleCapabilities } from '../exec/bundles/preview.js';
 import { listIncidents, acknowledgeIncident, IncidentError } from '../exec/incidents.js';
 import { listJournal } from '../journal/journal.js';
 import { recentNews, refreshNews } from '../news/news.js';
@@ -83,7 +84,7 @@ const httpError = (code: number, msg: string) => Object.assign(new Error(msg), {
 const isServerFault = (e: any) => e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError
   || /^ERR_SQLITE|^SQLITE/.test(String(e?.code ?? '')) || /SQLITE_|database is locked/i.test(String(e?.message ?? ''));
 // Per-session budgets for routes that call paid APIs, many upstream endpoints, or run long CPU work.
-const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2) };
+const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), bundle: limiter(10, 5), instrument: limiter(60, 20), news: limiter(4, 2) };
 
 export async function routes(app: FastifyInstance) {
   /**
@@ -331,6 +332,20 @@ export async function routes(app: FastifyInstance) {
     const curve = all<any>("SELECT closed_at t, realized_pnl p FROM positions WHERE status='CLOSED' ORDER BY closed_at"); let eq = acct.deposits; const equityCurve = curve.map((c) => ({ t: c.t, equity: (eq += c.p) }));
     return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
   });
+  // Bundle preflight is authenticated, CSRF-protected and strictly read-only.
+  // There is no bundle submission endpoint or alternate risk/execution authority.
+  app.get('/api/trading/bundles/capabilities', async () => bundleCapabilities());
+  app.post('/api/trading/bundles/preview', async (req) => {
+    limit(req, 'bundle', 'bundle preflight');
+    const b = z.object({
+      environment: z.enum(['PAPER', 'TESTNET', 'LIVE']),
+      mode: z.enum(['BATCH_BEST_EFFORT', 'SPLIT_ORDER', 'MULTI_ASSET_BASKET',
+        'COORDINATED_STRATEGY', 'PAPER_ATOMIC', 'SOLANA_JITO_ATOMIC']),
+      decisionIds: z.array(ID).min(2).max(5),
+    }).strict().parse(req.body ?? {});
+    return previewBundle(b);
+  });
+
   app.get('/api/orders', async () => oms.listOrders(300));
   app.post('/api/orders/:id/approve', async (req) => oms.decideApproval(idOf(req), true));
   app.post('/api/orders/:id/reject', async (req) => oms.decideApproval(idOf(req), false));
