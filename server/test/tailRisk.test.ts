@@ -19,9 +19,27 @@ describe('historicalPortfolioTailRisk: readonly and fail-closed estimates', () =
     expect(result.expectedShortfallLoss!).toBeGreaterThanOrEqual(result.varLoss!);
     expect(result.effectiveHoldings).toBe(1);
   });
+  it('averages exactly the worst five losses at 95% with 100 observations', () => {
+    const prices = [...Array<number>(100).fill(128), 64];
+    const result = historicalPortfolioTailRisk([mk('BTCUSDT', 100, prices)], options);
+    expect(result).toMatchObject({ status: 'ESTIMATED', observations: 100, varLoss: 0, worstObservedLoss: 50 });
+    expect(result.expectedShortfallLoss).toBe(50 / 5);
+  });
+  it('weights the cutoff loss by half at 95% with 90 observations', () => {
+    const prices = [...Array<number>(86).fill(128), 112, 56, 28, 14, 7];
+    const result = historicalPortfolioTailRisk([mk('BTCUSDT', 100, prices)], options);
+    expect(result).toMatchObject({ status: 'ESTIMATED', observations: 90, varLoss: 12.5, worstObservedLoss: 50 });
+    expect(result.expectedShortfallLoss).toBeCloseTo((4 * 50 + 0.5 * 12.5) / 4.5, 12);
+  });
+  it('uses only the worst loss at 99% with 100 observations', () => {
+    const prices = [...Array<number>(99).fill(128), 112, 56];
+    const result = historicalPortfolioTailRisk([mk('BTCUSDT', 100, prices)], { ...options, confidence: 0.99 });
+    expect(result).toMatchObject({ status: 'ESTIMATED', observations: 100, varLoss: 12.5, worstObservedLoss: 50 });
+    expect(result.expectedShortfallLoss).toBe(50);
+  });
   it('does not invent a number on insufficient data', () => {
     const result = historicalPortfolioTailRisk([mk('BTCUSDT', 1000, priceSeries.slice(0, 60))], options);
-    expect(result).toMatchObject({ status: 'UNAVAILABLE', reason: 'INSUFFICIENT_HISTORY', varLoss: null });
+    expect(result).toMatchObject({ status: 'UNAVAILABLE', reason: 'INSUFFICIENT_HISTORY', varLoss: null, correlatedPeers: null });
   });
   it('rejects stale observations', () => {
     const old = mk('BTCUSDT', 1000, priceSeries);
@@ -53,5 +71,28 @@ describe('historicalPortfolioTailRisk: readonly and fail-closed estimates', () =
     expect(result.effectiveHoldings).toBe(2);
     expect(result.authority).toBe('RESEARCH_ONLY');
     expect(result.note).toContain('not a forecast');
+  });
+  it('weights other marked holdings by positive correlation on the latest 96 aligned returns', () => {
+    const paths = [[100], [100], [100]];
+    for (let i = 0; i < 100; i++) {
+      const x = i % 4 < 2 ? 0.01 : -0.01;
+      const y = i % 2 === 0 ? 0.01 : -0.01;
+      const increments = [x, i < 4 ? -x : 0.6 * x + 0.8 * y, -x];
+      paths.forEach((path, j) => path.push(path[path.length - 1] * Math.exp(increments[j])));
+    }
+    const result = historicalPortfolioTailRisk([
+      mk('A', 100, paths[0]), mk('B', 200, paths[1]), mk('C', 80, paths[2]),
+    ], options);
+    expect(result.correlatedPeers).toMatchObject({ minimumCorrelation: 0.35, observations: 96, holdings: [
+      { instrument: 'A', weightedPeerValue: expect.closeTo(120, 8), strongestPeer: { instrument: 'B', correlation: expect.closeTo(0.6, 10) } },
+      { instrument: 'B', weightedPeerValue: expect.closeTo(60, 8), strongestPeer: { instrument: 'A', correlation: expect.closeTo(0.6, 10) } },
+      { instrument: 'C', weightedPeerValue: 0, strongestPeer: null },
+    ] });
+  });
+  it('keeps the tail estimate when a peer coefficient cannot be measured', () => {
+    const first = mk('A', 100, priceSeries);
+    for (const holdings of [[first], [first, mk('B', 100, priceSeries.map(() => 50))]]) {
+      expect(historicalPortfolioTailRisk(holdings, options)).toMatchObject({ status: 'ESTIMATED', correlatedPeers: null });
+    }
   });
 });
