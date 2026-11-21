@@ -87,7 +87,10 @@ const asUnits = (v: string, allowZero: boolean): bigint => {
   return n;
 };
 function safeId(value: string, name: string) {
-  if (typeof value !== 'string' || !ID.test(value)) throw new Error('INVALID_' + name);
+  if (typeof value !== 'string' || !ID.test(value) ||
+      // These IDs become dictionary keys; prevent inherited-property collisions.
+      ['__proto__', 'constructor', 'prototype'].includes(value))
+    throw new Error('INVALID_' + name);
 }
 function validateScope(scope: VenueOrderScope) {
   if (scope.environment !== 'TESTNET' && scope.environment !== 'LIVE')
@@ -105,6 +108,8 @@ function scopeMatches(a: VenueOrderScope, b: VenueOrderScope) {
 export function newVenueOrderProjection(intent: VenueOrderIntent): VenueOrderProjection {
   validateScope(intent.scope);
   safeId(intent.instrumentId, 'INSTRUMENT');
+  if (intent.side !== 'BUY' && intent.side !== 'SELL')
+    throw new Error('INVALID_ORDER_SIDE');
   asUnits(intent.requestedUnits, false);
   if (!Number.isSafeInteger(intent.recordedAt) || intent.recordedAt <= 0)
     throw new Error('INVALID_INTENT_TIME');
@@ -127,8 +132,22 @@ export function newVenueOrderProjection(intent: VenueOrderIntent): VenueOrderPro
 export function reduceVenueOrder(
   current: Readonly<VenueOrderProjection>, event: Readonly<VenueOrderEvent>,
 ): VenueOrderProjection {
-  if (!scopeMatches(current.scope, event.scope)) throw new Error('ORDER_SCOPE_MISMATCH');
+  if (!event || typeof event !== 'object' || !('scope' in event) ||
+      !event.scope || !scopeMatches(current.scope, event.scope))
+    throw new Error('ORDER_SCOPE_MISMATCH');
   safeId(event.eventId, 'EVENT_ID');
+  // TypeScript types do not validate data arriving from a future exchange
+  // stream. Reject unknown discriminators BEFORE recording any event as seen.
+  if (event.kind !== 'ACK' && event.kind !== 'FILL' &&
+      event.kind !== 'UNCERTAIN' && event.kind !== 'STATUS')
+    throw new Error('UNKNOWN_VENUE_EVENT_KIND');
+  if (event.kind === 'UNCERTAIN' &&
+      !['TIMEOUT', 'CONNECTION_LOST', 'VENUE_5XX'].includes(event.reason))
+    throw new Error('INVALID_UNCERTAIN_REASON');
+  if (event.kind === 'STATUS' &&
+      (!['STREAM', 'REST_AND_TRADES'].includes(event.source) ||
+       !['NEW', 'PARTIALLY_FILLED', 'FILLED', 'CANCELED', 'REJECTED', 'EXPIRED'].includes(event.venueStatus)))
+    throw new Error('INVALID_VENUE_STATUS_EVIDENCE');
   if (!Number.isSafeInteger(event.at) || event.at < current.recordedAt)
     throw new Error('INVALID_EVENT_TIME');
   const fingerprint = JSON.stringify(event);
