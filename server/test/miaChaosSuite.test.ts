@@ -58,7 +58,7 @@ describe('MIA5 shared-memory telemetry — actual clock-domain semantics', () =>
       rec.recordSpan(1_000n, 2_000n, 500n);
       rec.recordSpan(3_000n, 3_000n + 20_000_000n, 2_000n);
       const s = readReflexTelemetry(rec.buffer, 20_003_001n);
-      expect(s.state).toBe(ReflexWorkerState.DEGRADED_LATENCY);
+      expect(s.state).toBe('DEGRADED_LATENCY');
       expect(s.healthy).toBe(false);
       expect(s.breachCount).toBe('1');
       expect(s.wireTimingObserved).toBe(true);
@@ -88,10 +88,10 @@ describe('MIA5 shared-memory telemetry — actual clock-domain semantics', () =>
       expect(() => rec.recordSpan(8n, 7n)).toThrow('REFLEX_CLOCK_ORDER_INVALID');
       rec.recordSpan(2n, 11_000_002n, 1n);
       expect(readReflexTelemetry(rec.buffer, 11_000_003n).state)
-        .toBe(ReflexWorkerState.DEGRADED_LATENCY);
+        .toBe('DEGRADED_LATENCY');
       rec.resetWatermarks();
       expect(readReflexTelemetry(rec.buffer, 11_000_004n).state)
-        .toBe(ReflexWorkerState.DEGRADED_LATENCY);
+        .toBe('DEGRADED_LATENCY');
     } finally {
       rec.stop();
     }
