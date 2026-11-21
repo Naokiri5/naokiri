@@ -3,7 +3,7 @@ import { freshDb } from './helpers.js';
 import { buildApp } from '../src/index.js';
 import { evaluateLiveReadiness, liveReadinessReport, type LiveReadinessFacts } from '../src/exec/liveReadiness.js';
 import { executionAdapter } from '../src/exec/environment.js';
-import { newVenueOrderProjection, reduceVenueOrder, type VenueOrderScope } from '../src/exec/venueOrderState.js';
+import { newVenueOrderProjection, reduceVenueOrder, toDeterministicVenueClientId, type VenueOrderScope } from '../src/exec/venueOrderState.js';
 
 const SHA = 'a'.repeat(40);
 const allGates = Array.from({ length: 14 }, (_, i) => ({
@@ -294,5 +294,44 @@ describe('MIA exchange order observation reducer: no orders sent', () => {
       ...ev('trade-evil', 1001), kind: 'FILL',
       venueTradeId: 'constructor', quantityUnits: '1',
     })).toThrow('INVALID_VENUE_TRADE_ID');
+  });
+});
+
+
+describe('deterministic account-scoped venue identity without execution', () => {
+  const base = {
+    environment: 'TESTNET' as const, accountId: 'acct-A',
+    sleeve: 'stocks_etf' as const, idempotencyKey: 'decision:42',
+  };
+  it('is stable across retries and obeys venue formats without truncation', () => {
+    const one = toDeterministicVenueClientId(base, 'okx');
+    expect(toDeterministicVenueClientId({ ...base }, 'okx')).toEqual(one);
+    expect(one.canonical).toMatch(/^mia_stocks_etf_[a-f0-9]{16}$/);
+    expect(one.venueClientOrderId).toMatch(/^[A-Za-z0-9]{1,32}$/);
+    for (const venue of ['binance', 'alpaca', 'solana'] as const) {
+      const result = toDeterministicVenueClientId(base, venue);
+      expect(result.canonical).toBe(one.canonical);
+      expect(result.venueClientOrderId).toBe(one.canonical);
+      expect(result.venueClientOrderId.length).toBeLessThanOrEqual(36);
+    }
+  });
+  it('separates accounts, environments and sleeves; never reuses an unrelated intent', () => {
+    const id = toDeterministicVenueClientId(base, 'binance').canonical;
+    for (const variant of [
+      { ...base, accountId: 'acct-B' },
+      { ...base, environment: 'LIVE' as const },
+      { ...base, sleeve: 'spot' as const },
+      { ...base, idempotencyKey: 'decision:43' },
+    ]) expect(toDeterministicVenueClientId(variant, 'binance').canonical).not.toBe(id);
+    const ids = new Set(Array.from({ length: 100 }, (_, i) =>
+      toDeterministicVenueClientId({ ...base, idempotencyKey: 'decision:' + i }, 'binance').canonical));
+    expect(ids.size).toBe(100);
+  });
+  it('rejects malformed future venue/financial scope inputs', () => {
+    expect(() => toDeterministicVenueClientId({ ...base, idempotencyKey: '' }, 'binance')).toThrow();
+    expect(() => toDeterministicVenueClientId({ ...base, accountId: '' }, 'binance')).toThrow();
+    expect(() => toDeterministicVenueClientId({ ...base, environment: 'PAPER' as never }, 'binance')).toThrow();
+    expect(() => toDeterministicVenueClientId({ ...base, sleeve: 'unknown' as never }, 'binance')).toThrow();
+    expect(() => toDeterministicVenueClientId(base, 'unsupported' as never)).toThrow();
   });
 });
