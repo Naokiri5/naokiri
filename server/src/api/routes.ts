@@ -338,6 +338,27 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/notifications/test', async () => ({ id: notify('INFO', 'Test notification', 'Delivery check from Settings', 'settings') }));
   app.get('/api/settings', async () => ({ notifyPrefs: getSetting('notifyPrefs', { telegramMinSeverity: 'WARNING', quietHoursUtc: null }), calendarTzOffsetMin: getSetting('calendarTzOffsetMin', 0), joe: { model: config.joeModel, llm: !!config.anthropicApiKey, tools: JOE_TOOL_NAMES }, telegram: { configured: !!config.telegramBotToken } }));
   app.post('/api/settings/notify', async (req) => { const b = z.object({ telegramMinSeverity: z.enum(['INFO', 'WARNING', 'CRITICAL']), quietHoursUtc: z.tuple([z.number().int().min(0).max(23), z.number().int().min(0).max(23)]).nullable() }).parse(req.body); setSetting('notifyPrefs', b); return { ok: true }; });
+  /** Read-only parity witness. Uses existing mode, policy and G01–G14 sources; NEVER authorizes a trade. */
+  app.get('/api/trading/parity', async () => {
+    const control = getControl();
+    const acceptedPolicy = !!currentPolicy();
+    const release = releaseGates();
+    return {
+      readOnly: true,
+      canonical: { market: 'server/src/market/fabric.ts', decision: 'server/src/decision/engine.ts',
+        risk: 'server/src/risk/gate.ts', mode: 'server/src/core/mode.ts',
+        paperOms: 'server/src/exec/oms.ts', release: 'server/src/qa/gates.ts' },
+      demo: { environment: 'DEMO', mode: 'PAPER', account: PAPER_ACCOUNT,
+        simulationOnly: true, botRunning: botStatus.running, policyAccepted: acceptedPolicy,
+        entryPermittedByControl: control.mode === 'PAPER' && !control.emergency &&
+          !control.pausedNewOrders && acceptedPolicy },
+      live: { environment: 'LIVE', mode: 'BOUNDED_LIVE', account: null,
+        canPlaceRealOrders: false, releaseEligible: release.liveAllowed,
+        unmetGates: release.gates.filter((g) => g.status !== 'PASS').map((g) => g.id),
+        reason: 'Certified live adapter, isolated signer, durable reservation and external authorization are not installed in this build.' },
+      releaseSummary: release.summary,
+    };
+  });
   app.get('/api/qa', async () => ({ ...releaseGates(), audit: verifyAuditChain() }));
   app.get('/api/audit', async () => recentAudit(200));
 
