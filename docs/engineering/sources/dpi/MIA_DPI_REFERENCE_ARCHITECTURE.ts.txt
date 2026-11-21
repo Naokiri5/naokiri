@@ -1,0 +1,311 @@
+/**
+ * MIA 5.x — DEEP PRECISION INTELLIGENCE
+ * Standalone, pure TypeScript design reference. NOT a trading engine.
+ *
+ * Intended integration: adapt into MIA's EXISTING THINK router, 100-worker
+ * registry, canonical QCI, market fabric, risk gate, decision engine and OMS.
+ * Do not install a competing risk authority or permit this module to trade.
+ *
+ * No financial returns, signal accuracy or fill prices are guaranteed.
+ */
+
+export type Market = 'FOREX' | 'CRYPTO_FUTURES' | 'LISTED_FUTURES' | 'STOCK' | 'ETF';
+export type TradingStyle = 'SCALPING' | 'DAY_TRADING';
+export type TradingLane = 'FAST' | 'DEEP' | 'NO_TRADE';
+export type Bias = 'LONG' | 'SHORT' | 'NO_TRADE';
+export type WorkerDomain =
+  | 'STRUCTURE' | 'MULTITIMEFRAME' | 'LIQUIDITY_ZONES' | 'MOMENTUM'
+  | 'VOLUME_FLOW' | 'VOLATILITY' | 'MACRO_SESSION' | 'FUTURES_CONTRACT'
+  | 'EQUITY_ETF' | 'PORTFOLIO_RISK' | 'ADVERSARIAL';
+export type SignalState = 'NO_TRADE' | 'OBSERVING' | 'ZONE_IDENTIFIED'
+  | 'ARMED' | 'TRIGGER_CONFIRMED';
+export type TradeLifecycle = 'OBSERVING' | 'ZONE_IDENTIFIED' | 'ARMED'
+  | 'TRIGGER_CONFIRMED' | 'RISK_AUTHORIZED' | 'SUBMISSION'
+  | 'ACKNOWLEDGED' | 'FILLED' | 'POSITION_MONITORING' | 'CLOSED'
+  | 'EXPIRED' | 'INVALIDATED' | 'RISK_DENIED' | 'UNKNOWN_EXECUTION'
+  | 'RECONCILIATION_REQUIRED';
+
+export interface MarketCapability {
+  market: Market;
+  instrumentId: string;
+  venueId: string;
+  tickSize: number;
+  sessionOpen: boolean;
+  halted: boolean;
+  /** Trusted backend provider, not browser input. */
+  sourceVerified: boolean;
+  /** A short setup cannot be sent if the venue cannot represent it. */
+  supportsShort: boolean;
+  /** Whether the real venue offers executable market/order-book evidence. */
+  executableDepthAvailable: boolean;
+  /** Broker/venue settlement and margin checks belong to canonical risk. */
+  certifiedExecution: boolean;
+}
+
+export interface ChartSnapshot {
+  snapshotId: string;
+  asOfMs: number;
+  lastConfirmedBarCloseMs: number;
+  /** From trusted, native market data—not pixels inferred from a chart screenshot. */
+  price: number;
+  spreadBps: number | null;
+  expectedSlippageBps: number | null;
+  feedQuality: 'PASS' | 'REVIEW' | 'FAIL';
+  sourceIds: readonly string[];
+  sessionName?: string;
+  timeframeAlignment: 'ALIGNED' | 'CONFLICT' | 'UNKNOWN';
+  crossTimeframeTrend: 'UP' | 'DOWN' | 'RANGE' | 'UNKNOWN';
+}
+
+/** Candidate zones are hypotheses; none represents an authorized limit order. */
+export interface PriceZone {
+  zoneId: string;
+  instrumentId: string;
+  bias: Exclude<Bias, 'NO_TRADE'>;
+  strategyId: string;
+  style: TradingStyle;
+  low: number;
+  high: number;
+  invalidationPrice: number;
+  protectiveStop: number;
+  proposedTarget: number;
+  createdAtMs: number;
+  expiresAtMs: number;
+  /** Must be supported by closed bars and immutable market evidence. */
+  observedOnConfirmedBars: boolean;
+  evidenceSnapshotId: string;
+}
+
+export interface WorkerPacket {
+  /** From existing registry, never construct another 100-member registry. */
+  workerId: string;
+  domain: WorkerDomain;
+  independenceGroup: string;
+  sourceIds: readonly string[];
+  evidenceAtMs: number;
+  view: 'SUPPORT' | 'CHALLENGE' | 'ABSTAIN';
+  hardVeto: boolean;
+  /** Only calibrated estimates may be called probabilities; no score here. */
+  rationaleCode: string;
+}
+
+/** Must come from existing QCI coordinator—do not recalculate quorum here. */
+export interface CanonicalQciEvidence {
+  decisionId: string;
+  state: 'PASS' | 'REVIEW' | 'VETO' | 'EXPIRED';
+  version: string;
+  expiresAtMs: number;
+  hardVetoPresent: boolean;
+  mandatoryDomainsCovered: boolean;
+}
+
+/** Actual risk permission must come from MIA's canonical risk/gate.ts. */
+export interface CanonicalRiskEvidence {
+  decision: 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
+  policyVersion: number | null;
+  reasonCodes: readonly string[];
+  evaluatedAtMs: number;
+  /** This is evidence, never trading authority granted by this module. */
+}
+
+export interface TriggerObservation {
+  atMs: number;
+  price: number;
+  /** Confirmed closed-bar or native tick signal; must be independently sourced. */
+  confirmed: boolean;
+  sourceSnapshotId: string;
+  /** Backend applies market-specific structure break/rejection rules. */
+  canonicalTriggerPassed: boolean;
+}
+
+export interface DpiSettings {
+  maxSnapshotAgeMs: number;
+  maxWorkerEvidenceAgeMs: number;
+  maxTriggerAgeMs: number;
+  maxSpreadBps: number;
+  maxExpectedSlippageBps: number;
+  minimumIndependentDomains: number;
+  /** Required worker identities MUST exist in MIA's own registry. */
+  registeredWorkerIds: readonly string[];
+  /** Whether this precise strategy is enabled in the existing strategy lab. */
+  strategyEnabled: boolean;
+}
+
+export interface PrecisionInput {
+  lane: TradingLane;
+  nowMs: number;
+  capability: MarketCapability;
+  snapshot: ChartSnapshot;
+  zone: PriceZone;
+  packets: readonly WorkerPacket[];
+  qci: CanonicalQciEvidence;
+  risk: CanonicalRiskEvidence;
+  trigger: TriggerObservation | null;
+  settings: DpiSettings;
+}
+
+export interface PrecisionAssessment {
+  version: 'mia-dpi-reference-v1';
+  signalState: SignalState;
+  zoneId: string;
+  instrumentId: string;
+  /** Advisory only; ALWAYS false, regardless of risk/trigger outcome. */
+  canAuthorizeTrade: false;
+  canSubmitOrder: false;
+  reasons: readonly string[];
+  observed: {
+    zoneTouched: boolean;
+    confirmedTrigger: boolean;
+    independentDomains: number;
+    seenWorkers: number;
+    expectedRewardRiskAtWorstZoneEdge: number | null;
+    spreadBps: number | null;
+    quoteAgeMs: number | null;
+  };
+  nextStep: 'NO_TRADE' | 'WAIT' | 'REQUEST_CANONICAL_RECHECK';
+}
+
+const finitePositive = (value: number): boolean => Number.isFinite(value) && value > 0;
+const within = (v: number, lo: number, hi: number): boolean => v >= lo && v <= hi;
+const finiteAge = (ts: number, now: number): number | null =>
+  Number.isSafeInteger(ts) && ts > 0 && Number.isSafeInteger(now) && now > 0 && ts <= now
+    ? now - ts : null;
+
+/** Strictly a deterministic evidence check: a passing result NEVER creates an order. */
+export function assessPrecisionZone(input: Readonly<PrecisionInput>): PrecisionAssessment {
+  const { zone, capability, snapshot, nowMs, settings, qci, risk, trigger, packets } = input;
+  const reasons: string[] = [];
+  const deny = (code: string) => { if (!reasons.includes(code)) reasons.push(code); };
+  const quoteAge = finiteAge(snapshot.asOfMs, nowMs);
+  let independentDomains = 0;
+
+  if (input.lane !== 'DEEP') deny('DEEP_LANE_REQUIRED');
+  if (zone.instrumentId !== capability.instrumentId) deny('INSTRUMENT_MISMATCH');
+  if (!capability.sourceVerified) deny('UNVERIFIED_MARKET_PROVIDER');
+  if (!capability.sessionOpen || capability.halted) deny('MARKET_CLOSED_OR_HALTED');
+  if (zone.bias === 'SHORT' && !capability.supportsShort) deny('SHORT_NOT_SUPPORTED');
+  if (!finitePositive(capability.tickSize)) deny('INVALID_TICK_SIZE');
+  if (!finitePositive(zone.low) || !finitePositive(zone.high) || zone.low > zone.high)
+    deny('INVALID_PRICE_ZONE');
+  if (!finitePositive(zone.protectiveStop) || !finitePositive(zone.proposedTarget) ||
+      !finitePositive(zone.invalidationPrice)) deny('INVALID_PROTECTION_OR_TARGET');
+  if (zone.bias === 'LONG' &&
+      (!(zone.protectiveStop < zone.low) || !(zone.proposedTarget > zone.high) ||
+       !(zone.invalidationPrice < zone.low))) deny('INVALID_LONG_GEOMETRY');
+  if (zone.bias === 'SHORT' &&
+      (!(zone.protectiveStop > zone.high) || !(zone.proposedTarget < zone.low) ||
+       !(zone.invalidationPrice > zone.high))) deny('INVALID_SHORT_GEOMETRY');
+  if (!Number.isSafeInteger(zone.createdAtMs) || zone.createdAtMs > nowMs ||
+      !Number.isSafeInteger(zone.expiresAtMs) || zone.expiresAtMs <= zone.createdAtMs ||
+      nowMs >= zone.expiresAtMs) deny('ZONE_EXPIRED_OR_INVALID_TIME');
+  if (!zone.observedOnConfirmedBars ||
+      snapshot.lastConfirmedBarCloseMs > nowMs ||
+      snapshot.lastConfirmedBarCloseMs <= 0 ||
+      snapshot.lastConfirmedBarCloseMs > snapshot.asOfMs ||
+      zone.evidenceSnapshotId !== snapshot.snapshotId)
+    deny('UNCONFIRMED_OR_UNMATCHED_CHART_EVIDENCE');
+  if (!finitePositive(snapshot.price)) deny('INVALID_MARKET_PRICE');
+  if (quoteAge === null || quoteAge > settings.maxSnapshotAgeMs)
+    deny('STALE_OR_FUTURE_DATED_MARKET_SNAPSHOT');
+  if (snapshot.feedQuality !== 'PASS' || snapshot.sourceIds.length === 0)
+    deny('INCOMPLETE_MARKET_EVIDENCE');
+  if (snapshot.timeframeAlignment !== 'ALIGNED' || snapshot.crossTimeframeTrend === 'UNKNOWN')
+    deny('MULTITIMEFRAME_CONFLICT_OR_UNKNOWN');
+  if (snapshot.spreadBps === null || !Number.isFinite(snapshot.spreadBps) ||
+      snapshot.spreadBps < 0 || snapshot.spreadBps > settings.maxSpreadBps)
+    deny('UNACCEPTABLE_OR_UNKNOWN_SPREAD');
+  if (snapshot.expectedSlippageBps === null || !Number.isFinite(snapshot.expectedSlippageBps) ||
+      snapshot.expectedSlippageBps < 0 || snapshot.expectedSlippageBps > settings.maxExpectedSlippageBps)
+    deny('UNACCEPTABLE_OR_UNKNOWN_SLIPPAGE');
+  if (!settings.strategyEnabled) deny('STRATEGY_DISABLED');
+  if (!Number.isSafeInteger(settings.minimumIndependentDomains) || settings.minimumIndependentDomains < 2)
+    deny('INVALID_WORKER_QUORUM_POLICY');
+  if (!Number.isSafeInteger(settings.maxSnapshotAgeMs) || settings.maxSnapshotAgeMs < 1 ||
+      !Number.isSafeInteger(settings.maxWorkerEvidenceAgeMs) || settings.maxWorkerEvidenceAgeMs < 1 ||
+      !Number.isSafeInteger(settings.maxTriggerAgeMs) || settings.maxTriggerAgeMs < 1 ||
+      !Number.isFinite(settings.maxSpreadBps) || settings.maxSpreadBps < 0 ||
+      !Number.isFinite(settings.maxExpectedSlippageBps) || settings.maxExpectedSlippageBps < 0)
+    deny('INVALID_PRECISION_SETTINGS');
+
+  const registered = new Set(settings.registeredWorkerIds);
+  if (!registered.size) deny('MIA_WORKER_REGISTRY_UNAVAILABLE');
+  const seenWorkers = new Set<string>();
+  const acceptedDomains = new Set<WorkerDomain>();
+  const independenceGroups = new Set<string>();
+  let adversarialPresent = false;
+  for (const p of packets) {
+    if (seenWorkers.has(p.workerId)) { deny('DUPLICATED_WORKER_ID'); continue; }
+    seenWorkers.add(p.workerId);
+    if (!registered.has(p.workerId)) { deny('UNKNOWN_WORKER_ID'); continue; }
+    const age = finiteAge(p.evidenceAtMs, nowMs);
+    if (age === null || age > settings.maxWorkerEvidenceAgeMs ||
+        !p.independenceGroup || !p.rationaleCode || !p.sourceIds.length) {
+      deny('WORKER_EVIDENCE_INCOMPLETE_OR_STALE'); continue;
+    }
+    if (p.hardVeto) deny('WORKER_HARD_VETO');
+    // Multiple workers sharing a common evidence source cannot inflate quorum.
+    if (independenceGroups.has(p.independenceGroup)) continue;
+    independenceGroups.add(p.independenceGroup);
+    acceptedDomains.add(p.domain);
+    if (p.domain === 'ADVERSARIAL') adversarialPresent = true;
+  }
+  independentDomains = acceptedDomains.size;
+  if (independentDomains < settings.minimumIndependentDomains ||
+      !acceptedDomains.has('STRUCTURE') || !acceptedDomains.has('MULTITIMEFRAME') ||
+      !adversarialPresent) deny('INSUFFICIENT_INDEPENDENT_WORKER_COVERAGE');
+  if (qci.state !== 'PASS' || qci.hardVetoPresent || !qci.mandatoryDomainsCovered ||
+      !qci.decisionId || qci.expiresAtMs <= nowMs)
+    deny('CANONICAL_QCI_NOT_APPROVED');
+  if (risk.decision !== 'ALLOW' || risk.policyVersion === null ||
+      risk.reasonCodes.length > 0 || finiteAge(risk.evaluatedAtMs, nowMs) === null)
+    deny('CANONICAL_RISK_NOT_ALLOW');
+
+  const reward = zone.bias === 'LONG'
+    ? zone.proposedTarget - zone.high : zone.low - zone.proposedTarget;
+  const loss = zone.bias === 'LONG'
+    ? zone.high - zone.protectiveStop : zone.protectiveStop - zone.low;
+  const rr = finitePositive(loss) && Number.isFinite(reward) && reward > 0
+    ? Number((reward / loss).toFixed(6)) : null;
+  if (rr === null) deny('REWARD_RISK_NOT_COMPUTABLE');
+  const touched = finitePositive(snapshot.price) &&
+    finitePositive(zone.low) && finitePositive(zone.high) &&
+    within(snapshot.price, zone.low, zone.high);
+  let triggerConfirmed = false;
+  if (trigger) {
+    const triggerAge = finiteAge(trigger.atMs, nowMs);
+    triggerConfirmed = trigger.confirmed && trigger.canonicalTriggerPassed &&
+      trigger.sourceSnapshotId === snapshot.snapshotId && triggerAge !== null &&
+      triggerAge <= settings.maxTriggerAgeMs && touched;
+    if (trigger.canonicalTriggerPassed && !triggerConfirmed)
+      deny('UNVERIFIED_OR_STALE_TRIGGER');
+  }
+  const state: SignalState = reasons.length ? 'NO_TRADE'
+    : triggerConfirmed ? 'TRIGGER_CONFIRMED'
+      : touched ? 'ARMED' : 'ZONE_IDENTIFIED';
+  return {
+    version: 'mia-dpi-reference-v1', signalState: state,
+    zoneId: zone.zoneId, instrumentId: zone.instrumentId,
+    canAuthorizeTrade: false, canSubmitOrder: false, reasons,
+    observed: {
+      zoneTouched: touched, confirmedTrigger: triggerConfirmed,
+      independentDomains, seenWorkers: seenWorkers.size,
+      expectedRewardRiskAtWorstZoneEdge: rr,
+      spreadBps: snapshot.spreadBps, quoteAgeMs: quoteAge,
+    },
+    nextStep: reasons.length ? 'NO_TRADE'
+      : triggerConfirmed ? 'REQUEST_CANONICAL_RECHECK' : 'WAIT',
+  };
+}
+
+/** Explicitly abstains if automated order authorization has not been separately certified. */
+export function describeExecutionBoundary(input: Readonly<PrecisionAssessment>) {
+  return {
+    chartAssessment: input.signalState,
+    recommendedNextStep: input.nextStep,
+    policy: 'CANONICAL_MIA_DECISION_QCI_RISK_OMS_AND_OWNER_AUTHORITY_ONLY' as const,
+    canSign: false as const,
+    canPlaceLiveOrder: false as const,
+    canPlaceDemoOrder: false as const,
+    note: 'This architecture reference observes and proposes; it neither allocates funds nor submits orders.' as const,
+  };
+}
