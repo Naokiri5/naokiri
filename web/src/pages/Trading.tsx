@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmt, useApi } from '../api';
+import { api, authInfo, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter } from '../ui';
 
 export const StepUp = ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
-  <input type="password" placeholder="Owner passphrase (step-up)" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="current-password" aria-label="Owner passphrase for step-up authentication" />;
+  authInfo.mode === 'privy'
+    ? <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} placeholder="Six-digit authenticator code" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="one-time-code" aria-label="Authenticator step-up code" />
+    : <input type="password" placeholder="Owner passphrase (offline recovery)" value={value} onChange={(e) => onChange(e.target.value)} autoComplete="current-password" aria-label="Owner passphrase for step-up authentication" />;
 
 const MODES = [
   ['OBSERVE', 'Observe', 'Scan and explain only. No orders.'],
