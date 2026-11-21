@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { api, fmt, useApi } from '../api';
+import { api, authInfo, fmt, useApi } from '../api';
+import { ConnectedWallets } from '../privy/WalletLogin';
 import { Action, Badge, Card, Empty, ErrorLine, Page, Tabs } from '../ui';
 import { StepUp } from './Trading';
 
@@ -10,6 +11,7 @@ export function Wallet() {
   const net = data?.networks.find((n: any) => n.id === wd.network);
   return <Page title="Wallet & Withdrawals" sub={data?.custody}>
     <ErrorLine e={error} />
+    {authInfo.mode === 'privy' && <><ConnectedWallets /><div style={{height:14}} /></>}
     <div className="banner stale">Withdrawals are BLOCKED BY RELEASE GATE: no isolated signing service exists in this build. The flow below validates and previews only, and records an audit entry. The trading bot and Trader Joe have no access to this workflow.</div>
     <div className="grid g2">
       <Card title="Verified address book"><div className="col">
@@ -85,9 +87,13 @@ export function Settings() {
   return <Page title="Settings" sub="Security, notifications, display and assistant configuration. Risk limits live in the Risk Center; execution mode in Bot Account.">
     <ErrorLine e={error} />
     <div className="grid g2">
-      <Card title="Security"><div className="col"><input type="password" placeholder="Current passphrase" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" /><input type="password" placeholder="New passphrase (≥10 chars)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" />
-        <Action className="primary" label="Change passphrase (signs out all sessions)" run={async () => { await api('/api/settings/password', { body: pw }); window.location.reload(); }} />
-        <div className="hint">MIA never requests seed phrases or private keys. Secrets (API keys, bot tokens) are configured server-side via environment variables and never reach the browser.</div></div></Card>
+      <Card title="Security"><div className="col">
+        {authInfo.mode === 'passphrase' ? <>
+          <input type="password" placeholder="Current passphrase" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" />
+          <input type="password" placeholder="New passphrase (≥10 chars)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" />
+          <Action className="primary" label="Change passphrase (signs out all sessions)" run={async () => { await api('/api/settings/password', { body: pw }); window.location.reload(); }} />
+        </> : <TwoFactorSetup />}
+        <div className="hint">MIA never requests seed phrases or private keys. Secrets and recovery credentials stay on the server. Wallet login does not authorize LIVE trading.</div></div></Card>
       <Card title="Notifications"><div className="col">{p && <>
         <label className="row">Telegram minimum severity <select value={p.telegramMinSeverity} onChange={(e) => setPrefs({ ...p, telegramMinSeverity: e.target.value })}><option>INFO</option><option>WARNING</option><option>CRITICAL</option></select></label>
         <label className="row">Quiet hours (UTC, critical always delivered) <input type="number" min={0} max={23} style={{ width: 60 }} value={p.quietHoursUtc?.[0] ?? ''} onChange={(e) => setPrefs({ ...p, quietHoursUtc: e.target.value === '' ? null : [Number(e.target.value), p.quietHoursUtc?.[1] ?? 7] })} />–<input type="number" min={0} max={23} style={{ width: 60 }} value={p.quietHoursUtc?.[1] ?? ''} onChange={(e) => setPrefs({ ...p, quietHoursUtc: [p.quietHoursUtc?.[0] ?? 22, Number(e.target.value)] })} /></label>
@@ -97,4 +103,40 @@ export function Settings() {
       <Card title="Trader Joe"><div className="kv"><span>Mode</span><span>{data?.joe.llm ? `Claude API (${data.joe.model})` : 'Command mode — set ANTHROPIC_API_KEY on the server for conversational answers'}</span><span>Tools</span><span className="hint">{data?.joe.tools.join(', ')}</span><span>Authority</span><span className="hint">read, analyze, and risk-reducing pause only</span></div></Card>
     </div>
   </Page>;
+}
+
+/** Verified owner 2FA enrollment; initial enrollment needs the server-console setup code. */
+function TwoFactorSetup() {
+  const status = useApi<{ enrolled: boolean; pending: boolean }>('/api/security/2fa');
+  const [consoleCode, setConsoleCode] = useState('');
+  const [otp, setOtp] = useState('');
+  const [secret, setSecret] = useState<string | null>(null);
+  const [uri, setUri] = useState<string | null>(null);
+  const [note, setNote] = useState('');
+  return <div className="col">
+    <b>Authenticator step-up</b>
+    <div className="hint">{status.data?.enrolled ? 'Enabled: high-risk actions require a fresh six-digit authenticator code.' : 'Not enrolled: high-risk actions remain blocked until setup.'}</div>
+    <input placeholder={status.data?.enrolled ? 'Existing authenticator code' : 'One-time server-console code'}
+      value={status.data?.enrolled ? otp : consoleCode}
+      onChange={e => status.data?.enrolled ? setOtp(e.target.value) : setConsoleCode(e.target.value)} />
+    <Action label={status.data?.enrolled ? 'Replace authenticator (requires current code)' : 'Begin authenticator setup'}
+      run={async () => {
+        const response = await api<{ secret?: string; otpauth?: string; needsProof?: string }>('/api/security/2fa/begin',
+          { body: status.data?.enrolled ? { otp } : { consoleCode: consoleCode || undefined } });
+        if (response.needsProof) { setNote('Obtain the setup code from the MIA server console, then retry.'); return; }
+        setSecret(response.secret ?? null); setUri(response.otpauth ?? null);
+        setNote('Add the secret to an authenticator app; then confirm using a fresh six-digit code.');
+      }} />
+    {secret && <div className="hint">Authenticator setup secret (do not share): <code>{secret}</code></div>}
+    {uri && <div className="hint">Setup URI: <code style={{overflowWrap:'anywhere'}}>{uri}</code></div>}
+    {secret && <>
+      <input inputMode="numeric" autoComplete="one-time-code" placeholder="Six-digit authenticator code" value={otp} onChange={e=>setOtp(e.target.value)} />
+      <Action className="primary" label="Confirm authenticator" run={async () => {
+        await api('/api/security/2fa/confirm', { body: { otp } });
+        setSecret(null); setUri(null); setOtp(''); setConsoleCode('');
+        setNote('Authenticator enrolled.'); status.reload();
+      }} />
+    </>}
+    {note && <div className="hint" role="status">{note}</div>}
+  </div>;
 }

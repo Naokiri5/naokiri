@@ -33,11 +33,19 @@ export function verifyPassphrase(pass: unknown, client: string, purpose: string)
 }
 export function login(pass: string, ip: string) {
   verifyPassphrase(pass, ip, 'login');
-  run('DELETE FROM sessions WHERE expires_at <= ?', Date.now()); // expired sessions are otherwise kept forever
-  const token = randomBytes(32).toString('hex');
-  run('INSERT INTO sessions(token_hash, created_at, expires_at) VALUES (?,?,?)', sha256(token), Date.now(), Date.now() + SESSION_MS);
-  audit('owner', 'auth.login', { ip }); return token;
+  return createSession(ip, 'passphrase');
 }
+/** One established MIA cookie/session table, shared by password recovery and verified Privy owner. */
+export function createSession(ip: string, method: 'passphrase' | 'privy') {
+  run('DELETE FROM sessions WHERE expires_at <= ?', Date.now());
+  const token = randomBytes(32).toString('hex');
+  run('INSERT INTO sessions(token_hash, created_at, expires_at) VALUES (?,?,?)',
+    sha256(token), Date.now(), Date.now() + SESSION_MS);
+  audit('owner', 'auth.login', { ip, method });
+  return token;
+}
+export function revokeAllSessions() { run('DELETE FROM sessions'); }
+
 export function validSession(token?: string) {
   if (!token) return false;
   const r = get<{ expires_at: number }>('SELECT expires_at FROM sessions WHERE token_hash=?', sha256(token));
