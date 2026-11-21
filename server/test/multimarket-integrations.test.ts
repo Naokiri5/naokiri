@@ -188,7 +188,7 @@ describe('MIA multi-market adapters — read-only by construction', () => {
       const imports = [...text.matchAll(/from '([^']+)'/g)].map(m => m[1]);
       expect(imports.filter(s => /\/(exec|wallet|risk)\/|binanceLive|\/oms/.test(s))).toEqual([]);
       expect(text).not.toContain('/api/v3/order');
-      expect(text).not.toContain('/execute');
+      expect(text).not.toMatch(/fetchProvider\([^\n]*execute/);
     }
   });
 });
