@@ -12,6 +12,8 @@ import { record } from '../core/latency.js';
 import { bus } from '../core/bus.js';
 import { readIndicators } from '../workers/indicators.js';
 import { strategyKnowledge, type KnowledgeRef } from '../knowledge/integration.js';
+import { analyzeThinking, failedThinkingAnalysis, type ThinkingAnalysis } from './think-adapter.js';
+import { thinkSettings } from './think-router.js';
 
 /** Part 8 central decision engine — the only component that can produce a trade decision. */
 export type DecisionState = 'APPROVED_FOR_MONITORING' | 'WAIT_FOR_CONFIRMATION' | 'PAPER_TRADE' | 'APPROVED_FOR_USER_CONFIRMATION' | 'APPROVED_FOR_BOUNDED_EXECUTION' | 'REJECTED' | 'INSUFFICIENT_DATA';
@@ -31,6 +33,8 @@ export interface DecisionReport {
   /** Explanatory knowledge references (Academy). Never read by the risk gate or OMS. */
   knowledge?: { refs: KnowledgeRef[]; authority: string };
   disclaimer: string;
+  /** Adaptive FAST/DEEP diagnostics. Shadow by default; no independent execution authority. */
+  thinking?: ThinkingAnalysis;
 }
 
 export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord, stratStats: { trades: number; expectancyR: number } | null, correlatedOpen: number): DecisionReport {
@@ -66,6 +70,28 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
     decision = risk.decision === 'DENY' ? 'REJECTED' : risk.decision === 'NEEDS_REVIEW' ? 'APPROVED_FOR_USER_CONFIRMATION' : mode === 'APPROVAL' ? 'APPROVED_FOR_USER_CONFIRMATION' : 'PAPER_TRADE';
     // BOUNDED_LIVE is unreachable: mode change is blocked by the release gate.
   }
+  // PDF adaptive THINK integration: preserved decision/risk logic ABOVE remains authoritative.
+  // Default SHADOW adds deterministic evidence only; explicit ENFORCED can only abstain,
+  // never upgrade a decision, override a risk veto, open a position, or unlock live.
+  const thinkConfig = thinkSettings();
+  let thinking: ThinkingAnalysis | undefined;
+  if (thinkConfig.enforcement !== 'DISABLED') {
+    const thinkT0 = performance.now();
+    try {
+      thinking = analyzeThinking({ ctx, qci, correlatedOpen,
+        preference: thinkConfig.preference, enforcement: thinkConfig.enforcement });
+    } catch (e) {
+      thinking = failedThinkingAnalysis(e, thinkConfig.enforcement, thinkConfig.preference);
+    }
+    record('think.review', performance.now() - thinkT0);
+    if (thinkConfig.enforcement === 'ENFORCED' && thinking.wouldAbstain &&
+        (decision === 'PAPER_TRADE' || decision === 'APPROVED_FOR_USER_CONFIRMATION')) {
+      decision = 'WAIT_FOR_CONFIRMATION';
+      step('Adaptive THINK abstention (risk-reducing only)', 'FAIL',
+        thinking.routeReasons.join('; ') || 'EXTENDED_REVIEW_REJECTED');
+    }
+  }
+
   step('Expected fees / slippage / impact', risk?.evaluated.costR != null ? (Number(risk.evaluated.costR) <= pol.maxCostR ? 'PASS' : 'FAIL') : 'SKIP', risk ? `cost ${risk.evaluated.costR}R, spread ${risk.evaluated.spreadBps}bps, impact ${risk.evaluated.impactBps}bps` : 'computed by risk engine when eligible');
   step('Position size', risk?.sizing ? 'PASS' : 'SKIP', risk?.sizing ? `qty ${risk.sizing.qty} ($${risk.sizing.notional}), planned max loss $${risk.sizing.plannedMaxLoss}` : '—');
   step('Portfolio correlation & exposure', correlatedOpen > 0 ? 'WARN' : 'PASS', `${correlatedOpen} correlated open positions`);
@@ -89,6 +115,7 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
     dataFreshness: { quoteAgeMs: q.quoteAgeMs, candleAgeMs: q.candleAgeMs, bookAgeMs: q.bookAgeMs, status: q.status },
     opportunity: opp, consensus: { id: qci.consensus_id, state: expired ? 'EXPIRED' : qci.state, support: qci.weighted_support, opposition: qci.weighted_opposition, expiresAt: qci.expires_at },
     risk, decision, finalDecision: final, steps, indicators: readIndicators(ctx.f), knowledge: strategyKnowledge(cand.strategyId),
+    thinking,
     disclaimer: 'Opportunity score and consensus are evidence summaries, not probabilities of profit. Paper trading only.',
   };
   record('decision.engine', performance.now() - t0);
