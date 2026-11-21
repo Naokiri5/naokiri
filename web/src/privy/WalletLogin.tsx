@@ -32,6 +32,7 @@ export function WalletLogin({ appId, onDone }: { appId: string; onDone: () => vo
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [slow, setSlow] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [loggingOut, setLoggingOut] = useState(() => privyLogoutPending(appId));
   const exchanging = useRef(false);
   const { login } = useLogin({
@@ -61,7 +62,7 @@ export function WalletLogin({ appId, onDone }: { appId: string; onDone: () => vo
       } catch (e) { setError(friendly(e)); }
       finally { exchanging.current = false; setBusy(false); }
     })();
-  }, [ready, authenticated, getAccessToken, appId, loggingOut, onDone]);
+  }, [ready, authenticated, getAccessToken, appId, loggingOut, onDone, attempt]);
 
   useEffect(() => {
     if (!loggingOut || !ready) return;
@@ -76,9 +77,8 @@ export function WalletLogin({ appId, onDone }: { appId: string; onDone: () => vo
       try { login(); }
       catch (e) { takePrivySignIn(appId); setError(friendly(e)); }
     } else {
-      // A new sign-in intent causes the authenticated effect to exchange once.
-      setBusy(true);
-      window.setTimeout(() => setBusy(false), 0);
+      // Already authenticated in Privy: an explicit click exchanges the token.
+      setAttempt(value => value + 1);
     }
   };
   return <main className="mia-wallet-login"><section className="mia-wallet-card" aria-labelledby="mia-wallet-heading">
