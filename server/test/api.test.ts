@@ -91,6 +91,23 @@ describe('HTTP API (auth, permissions, release gate)', () => {
 
   });
 
+  it('exposes account-scoped bundle lifecycle in the existing portfolio and authenticated bundle views', async () => {
+    expect((await app.inject({ url: '/api/trading/bundles' })).statusCode).toBe(401);
+    expect((await app.inject({ url: '/api/trading/bundles/unknown' })).statusCode).toBe(401);
+    const response = await app.inject({ url: '/api/trading/bundles', headers: H() });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      environment: 'PAPER',
+      bundles: [],
+      readOnly: true,
+      canPlaceRealOrders: false,
+    });
+    expect((await app.inject({ url: '/api/trading/bundles/unknown', headers: H() })).statusCode).toBe(404);
+    expect((await app.inject({ url: '/api/trading/bundles?limit=0', headers: H() })).statusCode).toBe(400);
+    const portfolio = await app.inject({ url: '/api/portfolio', headers: H() });
+    expect(portfolio.statusCode).toBe(200);
+    expect(portfolio.json().paperBundles).toEqual([]);
+  });
   it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {
     const password = 'correct horse battery'; const id = STRATEGIES[0].id; const worker = WORKERS[0].id;
     const statusUrl = `/api/lab/strategy/${id}/status`; const releaseUrl = `/api/workers/${worker}/release`;
