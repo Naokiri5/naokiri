@@ -35,6 +35,7 @@ afterEach(async () => {
   delete process.env.MIA_AUTH_MODE;
   delete process.env.MIA_PRIVY_APP_ID;
   delete process.env.MIA_PRIVY_OWNER_ID;
+  delete process.env.MIA_PRIVY_VERIFICATION_KEY;
 });
 
 describe('MIA wallet-first Privy integration into main — fail closed', () => {
@@ -115,6 +116,16 @@ describe('MIA wallet-first Privy integration into main — fail closed', () => {
     expect(logout.statusCode).toBe(200);
     expect(logout.headers['set-cookie']).toContain('Max-Age=0');
     expect((await session()).statusCode).toBe(401);
+  });
+  it('returns retryable 503 if the configured Privy verification key is invalid without creating a session', async () => {
+    bindOwner(OWNER, 'server-cli');
+    _setPrivyKeyForTests(null);
+    process.env.MIA_PRIVY_VERIFICATION_KEY = 'not-a-valid-PEM-key';
+    const response = await post('/api/auth/privy/login', { accessToken: await token() });
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error).toMatch(/Privy verification is unavailable/i);
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect((await app.inject({ method: 'GET', url: '/api/shell' })).statusCode).toBe(401);
   });
   it('never grants live-trading authority through authentication', async () => {
     bindOwner(OWNER, 'server-cli');
