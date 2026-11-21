@@ -1,11 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { backtest } from '../src/lab/backtest.js';
-import { listBacktests, strategyStats } from '../src/lab/lab.js';
+import { fetchHistory, listBacktests, strategyStats } from '../src/lab/lab.js';
 import { newExitState, stepExit } from '../src/lab/exits.js';
 import { closeDb, J, run } from '../src/db/db.js';
 import { simulateTwin } from '../src/ditas/twin.js';
 import { STRATEGIES, type StrategyDef } from '../src/lab/strategies.js';
 import type { Candle } from '../src/market/types.js';
+import * as providerHttp from '../src/providers/http.js';
 import { freshDb, seedBacktestFixture } from './helpers.js';
 
 const HOUR = 3_600_000;
@@ -21,6 +22,23 @@ const fixtureStrategy: StrategyDef = {
 };
 
 describe('backtest evidence integrity', () => {
+  it('excludes a bar that was still forming when the history request started', async () => {
+    const history = candles(2);
+    const cutoff = history[1].closeTime! - 1;
+    const now = vi.spyOn(Date, 'now').mockReturnValue(cutoff);
+    const fetchProvider = vi.spyOn(providerHttp, 'fetchProvider').mockImplementation(async () => {
+      now.mockReturnValue(cutoff + 2);
+      return history.map((bar) => [bar.t, bar.o, bar.h, bar.l, bar.c, bar.v, bar.closeTime, 0, 0, 0]);
+    });
+    try {
+      expect((await fetchHistory('BTCUSDT', '1h', 2)).map((bar) => bar.t)).toEqual([history[0].t]);
+      expect(fetchProvider.mock.calls[0][1]).toContain(`&endTime=${history[1].t - 1}`);
+    } finally {
+      fetchProvider.mockRestore();
+      now.mockRestore();
+    }
+  });
+
   it.each(['gap', 'duplicate', 'unordered', 'nan', 'invalid-range', 'negative-volume', 'early-close', 'late-close', 'forming'])('rejects %s history before evaluating a strategy', fault => {
     const history = candles(); let evaluated = false;
     if (fault === 'gap') history.splice(220, 1);

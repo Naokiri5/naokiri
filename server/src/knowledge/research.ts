@@ -33,8 +33,9 @@ export function storedCandles(instrument: string, interval: Interval, limit = 10
 export async function researchCandles(symbol: string, interval: Interval, bars: number): Promise<{ candles: Candle[]; origin: 'PROVIDER+STORE' | 'STORE_ONLY' }> {
   if (!/^[A-Z0-9]{5,20}$/.test(symbol)) throw new Error('invalid symbol');
   if (!INTERVALS.includes(interval)) throw new Error('interval must be 15m, 1h or 4h');
+  const cutoff = Date.now();
   if (!config.offline) { try { storeCandles(symbol, interval, await fetchHistory(symbol, interval, bars + 1)); } catch (e: any) { if (!storedCandles(symbol, interval, 1).length) throw new Error(`no stored history and provider failed: ${e.message}`); } }
-  const candles = storedCandles(symbol, interval, bars).filter((c) => (c.closeTime ?? c.t + INTERVAL_MS[interval]) < Date.now());
+  const candles = storedCandles(symbol, interval, bars).filter((c) => c.t + INTERVAL_MS[interval] <= cutoff && (c.closeTime ?? 0) < cutoff);
   const gaps = candles.slice(1).filter((c, i) => c.t - candles[i].t !== INTERVAL_MS[interval]).length;
   if (gaps) throw new Error(`stored history for ${symbol} ${interval} has ${gaps} gap(s); refresh it before research`);
   return { candles, origin: config.offline ? 'STORE_ONLY' : 'PROVIDER+STORE' };
@@ -149,7 +150,7 @@ function strategyWalkforward(c: Candle[], interval: Interval, strategyId: string
   const verdict = agg.trades < 30 ? 'INSUFFICIENT_EVIDENCE' : positiveWindows === windows && (agg.expectancyR95CI?.[0] ?? -1) > 0 ? 'SUPPORTED' : agg.expectancyR > 0 ? 'INCONCLUSIVE' : 'NOT_SUPPORTED';
   const byRegime: Record<string, { trades: number; expectancyR: number }> = {};
   for (const t of oosTrades) { const g = (byRegime[t.regime] ??= { trades: 0, expectancyR: 0 }); g.expectancyR = (g.expectancyR * g.trades + t.r) / (g.trades + 1); g.trades++; }
-  return { results: { strategy: { id: s.id, version: s.version }, costs, windows: all_, outOfSampleAggregate: agg, positiveOosWindows: `${positiveWindows}/${windows}`, byRegime, purgedTrades: purged, embargoedTrades: embargoed, embargoBars },
+  return { results: { strategy: { id: s.id, version: s.version }, backtestModelVersion: bt.modelVersion, costs, windows: all_, outOfSampleAggregate: agg, positiveOosWindows: `${positiveWindows}/${windows}`, byRegime, purgedTrades: purged, embargoedTrades: embargoed, embargoBars },
     verdict, limitations: ['Strategy parameters are fixed research defaults (no optimisation), so the training window only warms indicators.', 'Survivorship bias: tested on a currently listed instrument.', 'Paper/backtest fills; real fills may be worse.'] };
 }
 

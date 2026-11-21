@@ -6,7 +6,7 @@ import { uid } from '../core/util.js';
 import { audit } from '../core/audit.js';
 import { market } from '../market/store.js';
 import { getSetting, setSetting } from '../core/settings.js';
-import type { Candle } from '../market/types.js';
+import { INTERVAL_MS, type Candle, type Interval } from '../market/types.js';
 
 /** Part 18 lifecycle: RESEARCH → BACKTESTED → PAPER → (LIVE_CANDIDATE, gated) | SUSPENDED | RETIRED */
 export type StrategyStatus = 'RESEARCH' | 'BACKTESTED' | 'PAPER' | 'LIVE_CANDIDATE' | 'SUSPENDED' | 'RETIRED';
@@ -27,8 +27,11 @@ export function setStrategyStatus(actor: string, id: string, status: StrategySta
   setSetting('suspendedStrategies', [...susp]);
   audit(actor, 'strategy.status', { id, status, note });
 }
-export async function fetchHistory(symbol: string, interval: string, bars = 3000): Promise<Candle[]> {
-  const out: Candle[] = []; let end: number | undefined;
+export async function fetchHistory(symbol: string, interval: Interval, bars = 3000): Promise<Candle[]> {
+  const duration = INTERVAL_MS[interval];
+  // Freeze the last closed interval before the first request. Pagination can cross a candle boundary.
+  const closedThrough = Math.floor(Date.now() / duration) * duration;
+  const out: Candle[] = []; let end = closedThrough - 1;
   while (out.length < bars) {
     const lim = Math.min(1000, bars - out.length);
     const batch = await klinesBefore(symbol, interval, lim, end);
@@ -36,7 +39,7 @@ export async function fetchHistory(symbol: string, interval: string, bars = 3000
     out.unshift(...batch); end = batch[0].t - 1;
     if (batch.length < lim) break;
   }
-  return out.filter((c) => (c.closeTime ?? 0) < Date.now());
+  return out.filter((c) => c.t + duration <= closedThrough && (c.closeTime ?? 0) < closedThrough);
 }
 async function klinesBefore(symbol: string, interval: string, limit: number, endTime?: number) {
   const raw: any[] = await fetchProvider('binance', `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}${endTime ? `&endTime=${endTime}` : ''}`);
