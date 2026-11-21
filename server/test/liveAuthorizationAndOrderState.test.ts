@@ -263,4 +263,36 @@ describe('MIA exchange order observation reducer: no orders sent', () => {
     expect(a.canAuthorizeTrade).toBe(false);
     expect(a.canRetryOriginalOrder).toBe(false);
   });
+
+  it('rejects malformed source event types instead of silently recording them', () => {
+    const start = make();
+    const invalid = [
+      { ...ev('x1', 1001), kind: 'RETRY_APPROVED' },
+      { ...ev('x2', 1001), kind: 'UNCERTAIN', reason: 'NOT_SURE' },
+      { ...ev('x3', 1001), kind: 'STATUS', source: 'UNVERIFIED',
+        venueStatus: 'NEW', cumulativeUnits: '0', venueOrderId: '123' },
+      { ...ev('x4', 1001), kind: 'STATUS', source: 'REST_AND_TRADES',
+        venueStatus: 'SETTLED_AND_AUTHORIZED', cumulativeUnits: '0', venueOrderId: '123' },
+    ];
+    for (const record of invalid)
+      expect(() => reduceVenueOrder(start, record as never)).toThrow();
+    expect(start).toMatchObject({
+      phase: 'INTENT_RECORDED', version: 0,
+      confirmedFillUnits: '0', canAuthorizeTrade: false,
+    });
+  });
+
+  it('rejects unsafe dictionary keys and invalid order sides', () => {
+    expect(() => newVenueOrderProjection({
+      scope, instrumentId: 'crypto:binance:BTCUSDT',
+      requestedUnits: '10', recordedAt: 1000, side: 'WITHDRAW' as never,
+    })).toThrow('INVALID_ORDER_SIDE');
+    expect(() => reduceVenueOrder(make(), {
+      ...ev('__proto__', 1001), kind: 'ACK', venueOrderId: '123',
+    })).toThrow('INVALID_EVENT_ID');
+    expect(() => reduceVenueOrder(make(), {
+      ...ev('trade-evil', 1001), kind: 'FILL',
+      venueTradeId: 'constructor', quantityUnits: '1',
+    })).toThrow('INVALID_VENUE_TRADE_ID');
+  });
 });
