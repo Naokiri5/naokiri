@@ -58,6 +58,7 @@ import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js
 import { provider, ProviderError } from '../providers/http.js';
 import { limiter, RateLimitError } from '../core/ratelimit.js';
 import { sha256 } from '../core/util.js';
+import { thinkSettings } from '../decision/think-router.js';
 
 const COOKIE = 'mia_session';
 const tokenOf = (req: FastifyRequest) => (req.headers.cookie ?? '').split(/;\s*/).find((c) => c.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
@@ -246,6 +247,29 @@ export async function routes(app: FastifyInstance) {
 
   // ── scanner / decisions ──
   app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
+  // Read-only adaptive-thinking diagnostics over the canonical stored decisions.
+  // Shares the existing /api session auth gate, no execution authority or DB writes.
+  app.get('/api/think', async (req) => {
+    const { limit } = z.object({
+      limit: z.coerce.number().int().min(1).max(50).default(20),
+    }).strict().parse(req.query ?? {});
+    const rows = all<{ report: string }>(
+      'SELECT report FROM decisions ORDER BY created_at DESC,id DESC LIMIT ?', limit);
+    const items = rows.flatMap(row => {
+      const report = P(row.report) as { id?: string; createdAt?: string; instrumentId?: string;
+        decision?: string; thinking?: unknown };
+      return report.thinking
+        ? [{ decisionId: report.id, decidedAt: report.createdAt, instrumentId: report.instrumentId,
+            originalDecision: report.decision, thinking: report.thinking }]
+        : [];
+    });
+    return {
+      version: 'mia-think-observer-v1', advisoryOnly: true, settings: thinkSettings(),
+      source: 'EXISTING_DECISION_REPORTS', items,
+      latency: latencyReport().filter(r => r.stage === 'think.review'),
+    };
+  });
+
   app.get('/api/decisions', async (req) => { const q = z.object({ decision: TOKEN.optional() }).parse(req.query); return all<any>(`SELECT id, instrument, strategy, decision, score, risk_decision, created_at FROM decisions ${q.decision ? 'WHERE decision=?' : ''} ORDER BY created_at DESC LIMIT 300`, ...(q.decision ? [q.decision] : [])); });
   /** THINK Reason-to-Trade Certificate: deterministic, read-only explanation of a stored decision (no authority). */
   app.get('/api/decisions/:id/certificate', async (req, reply) => {

@@ -52,7 +52,7 @@ export function DecisionView({ report: r, consensus }: { report: any; consensus?
   return <div className="col" style={{ gap: 14 }}>
     <div className="row"><h2 style={{ fontSize: 18 }}>{r.asset}</h2><Badge v={r.decision} /><Badge v={r.direction} tone={r.direction === 'LONG' ? 'b-good' : 'b-neutral'} /><Badge v={r.consensus.state} /><span className="muted">{r.strategy.id} v{r.strategy.version} · {r.regime} · {fmt.time(r.createdAt)}</span></div>
     <div className="banner info" style={{ marginBottom: 0 }}>{r.disclaimer}</div>
-    <Tabs tabs={['Explanation', 'Certificate', 'Pipeline steps', 'Score factors', 'QCI consensus', 'Indicators']} value={tab} onChange={setTab} />
+    <Tabs tabs={['Explanation', 'Certificate', ...(r.thinking ? ['Adaptive THINK'] : []), 'Pipeline steps', 'Score factors', 'QCI consensus', 'Indicators']} value={tab} onChange={setTab} />
     {tab === 'Explanation' && <div className="grid g2">
       <Card title="Trade plan"><div className="kv">
         <span>Market</span><span>{r.market} · {r.venue}</span><span>Final decision</span><span><b>{r.finalDecision}</b></span><span>Reason</span><span>{r.reason}</span>
@@ -71,12 +71,58 @@ export function DecisionView({ report: r, consensus }: { report: any; consensus?
         <Card title="Missing information">{r.missingInformation.length ? <ul style={{ margin: 0, paddingLeft: 18 }}>{r.missingInformation.map((x: string, i: number) => <li key={i} className="muted">{x}</li>)}</ul> : <span className="muted">none</span>}</Card>
       </div></div>}
     {tab === 'Certificate' && <ThinkCertificateView decisionId={r.id} />}
+    {tab === 'Adaptive THINK' && r.thinking && <AdaptiveThinkView t={r.thinking} />}
     {tab === 'Pipeline steps' && <Card flush><table><tbody>{r.steps.map((s: any) => <tr key={s.step}><td className="faint mono">{s.step}</td><td>{s.name}</td><td><Badge v={s.result} /></td><td className="muted">{s.detail}</td></tr>)}</tbody></table></Card>}
     {tab === 'Score factors' && <Card flush><table><thead><tr><th>Factor</th><th className="num">Weight</th><th className="num">Value</th><th>Basis</th></tr></thead><tbody>{r.opportunity.factors.map((f: any) => <tr key={f.factor}><td>{f.factor}{f.missing && <> <Badge v="MISSING" tone="b-warn" /></>}</td><td className="num">{(f.weight * 100).toFixed(0)}%</td><td className="num">{f.value}</td><td className="muted">{f.basis}</td></tr>)}</tbody></table></Card>}
     {tab === 'QCI consensus' && (consensus ? <ConsensusView c={consensus} /> : <Empty>Consensus record {r.consensus.id} — open from Decisions page for full detail.</Empty>)}
     {tab === 'Indicators' && <IndicatorGrid list={r.indicators} />}
   </div>;
 }
+/** Adaptive THINK is a deterministic explanation, never an independent execution console. */
+export function AdaptiveThinkView({ t }: { t: any }) {
+  const sc = t.deep?.hypotheticalScenarios;
+  return <div className="col" style={{ gap: 14 }}>
+    <div className="banner info">Fast/Deep analysis reads the existing QCI and market evidence. It cannot approve, place or close an order. SHADOW does not change MIA's original decision; all hypothetical scenarios are research only.</div>
+    <div className="grid g2">
+      <Card title="Adaptive decision route">
+        <div className="kv">
+          <span>Selected route</span><span><Badge v={t.route} /></span>
+          <span>Policy</span><span><Badge v={t.enforcement} /> · {t.preference}</span>
+          <span>Trade authority</span><span className="muted">NONE — original decision engine, risk gate and OMS only</span>
+          <span>Would abstain</span><span><Badge v={t.wouldAbstain ? 'YES' : 'NO'} tone={t.wouldAbstain ? 'b-warn' : 'b-neutral'} /></span>
+          <span>Market source</span><span className="muted">{t.dataTransport}</span>
+          <span>Calibration</span><span><Badge v="NO VALID FORECAST" tone="b-neutral" /></span>
+        </div>
+      </Card>
+      <Card title="Routing explanation">
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {(t.routeReasons ?? []).map((reason: string, i: number) => <li key={i} className="mono">{reason}</li>)}
+        </ul>
+        <div className="hint" style={{ marginTop: 10 }}>This routing score is NOT a win probability. Missing evidence and existing vetoes always take priority.</div>
+      </Card>
+    </div>
+    {t.deep && <div className="grid g2">
+      <Card title="Timeframe reasoning">
+        <div className="kv">
+          {Object.entries(t.deep.horizonTrends ?? {}).map(([interval, trend]) => <span key={interval}>{interval}: <Badge v={String(trend)} /></span>)}
+          <span>Critical contradictions</span><span><Badge v={String(t.deep.criticalChallengeCount)} /></span>
+        </div>
+        {!!t.deep.unresolvedFindings?.length && <ul style={{ margin: '10px 0 0', paddingLeft: 18 }}>{t.deep.unresolvedFindings.map((reason: string, i: number) => <li key={i}>{reason}</li>)}</ul>}
+      </Card>
+      <Card title="Deep stress checks (hypothetical)">
+        {!sc?.valid ? <Empty>{sc?.invalidReason ?? 'No valid scenario'}</Empty> :
+          <div className="col" style={{ gap: 8 }}>
+            {sc.scenarios.map((s: any) => <div className="row between" key={s.id}>
+              <span className="muted">{s.id}</span>
+              <b className="mono">{fmt.num(s.netR, 3)}R</b>
+            </div>)}
+            <span className="hint">Fees and potential stop gaps included. This is not a forecast, position size or executable quote.</span>
+          </div>}
+      </Card>
+    </div>}
+  </div>;
+}
+
 export function ConsensusView({ c }: { c: any }) {
   const [domain, setDomain] = useState<string | null>(null);
   return <div className="col" style={{ gap: 14 }}>
