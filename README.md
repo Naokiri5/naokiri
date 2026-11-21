@@ -34,16 +34,16 @@ npm install
 npm start              # builds the UI on first run if needed, then serves API + UI on port 8787
 ```
 
-Open **http://localhost:8787/** for the public Obsidian Palazzo landing page, or **http://localhost:8787/app** to create the owner passphrase and enter the protected MIA terminal. The server prints its base URLs:
+Open **http://localhost:8787/** for the public Obsidian Palazzo landing page, or **http://localhost:8787/app** for the **Privy wallet sign-in**. Production MIA no longer offers the old passphrase form. Before login, configure the [Privy wallet setup guide](docs/operations/PRIVY_SIGN_IN.md): set `MIA_PRIVY_APP_ID`, provision the correct `MIA_PRIVY_OWNER_ID` on the server, enable wallet-only login and register the exact HTTPS origin in Privy. The server prints its base URLs:
 
 ```
   ➜ Local:     http://localhost:8787/
   ➜ Network:   http://<container-ip>:8787/      (only when bound to all interfaces)
 ```
 
-Then create the **owner passphrase**, and:
+Then sign in with the pre-approved **Privy wallet**, enroll MIA two-factor authentication in Security Center using the server-console enrollment proof, and:
 
-1. **Risk Center**: review and accept the risk policy (step-up passphrase).
+1. **Risk Center**: review and accept the risk policy (sensitive actions require a fresh 6-digit authenticator code).
 2. **Strategy Lab**: run backtests, then **promote** a strategy to PAPER only if you accept its out-of-sample record.
 3. **Bot Account**: allocate paper capital and switch the mode to **Paper** (or **Approval** to confirm each order).
 
@@ -57,8 +57,7 @@ Development with hot reload: `npm run dev` starts the backend (8787) and Vite (h
 | Docker, dev container, Codespaces, Gitpod, Claude Code cloud session | `0.0.0.0` (auto-detected) | the forwarded URL for port **8787** |
 | WSL2, a VM, or another device on your LAN | set `MIA_HOST=0.0.0.0` | `http://<machine-ip>:8787/` |
 
-`MIA_HOST` and `MIA_PORT` always override the defaults. Binding `0.0.0.0` exposes the login page to the network; MIA
-requires the owner passphrase for every API call, but put it behind TLS before exposing it beyond a trusted network.
+`MIA_HOST` and `MIA_PORT` always override the defaults. Binding `0.0.0.0` exposes the sign-in endpoint to the network: use HTTPS/TLS, the server-verified Privy owner identity and MIA's protected session/CSRF rules. Never expose the offline-only passphrase recovery mode publicly. A static Vercel frontend alone cannot authenticate MIA users: `/api/*` must reach a persistent MIA Fastify backend.
 
 ### Troubleshooting
 
