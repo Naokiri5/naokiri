@@ -128,24 +128,24 @@ export function sequenceForDecision(decisionId: string): SequenceProjection | nu
     decisionId, LIMITS.positions + 1,
   );
   const ordersRaw = all<OrderRow>(
-    \`SELECT id,status,purpose,position_id,decision_id,created_at,filled_qty,qty,reject_reason
+    `SELECT id,status,purpose,position_id,decision_id,created_at,filled_qty,qty,reject_reason
        FROM orders WHERE decision_id=? OR position_id IN
        (SELECT id FROM positions WHERE decision_id=?)
-       ORDER BY created_at,id LIMIT ?\`,
+       ORDER BY created_at,id LIMIT ?`,
     decisionId, decisionId, LIMITS.orders + 1,
   );
   const fillsRaw = all<FillRow>(
-    \`SELECT f.id,f.order_id,f.qty,f.ts FROM fills f
+    `SELECT f.id,f.order_id,f.qty,f.ts FROM fills f
        JOIN orders o ON o.id=f.order_id
        WHERE o.decision_id=? OR o.position_id IN
        (SELECT id FROM positions WHERE decision_id=?)
-       ORDER BY f.ts,f.id LIMIT ?\`,
+       ORDER BY f.ts,f.id LIMIT ?`,
     decisionId, decisionId, LIMITS.fills + 1,
   );
   const incidentsRaw = all<IncidentRow>(
-    \`SELECT id,position_id,status,reason FROM protection_incidents
+    `SELECT id,position_id,status,reason FROM protection_incidents
        WHERE position_id IN (SELECT id FROM positions WHERE decision_id=?)
-       ORDER BY opened_at,id LIMIT ?\`,
+       ORDER BY opened_at,id LIMIT ?`,
     decisionId, LIMITS.incidents + 1,
   );
   const memoryRaw = all<MemoryRow>(
@@ -173,7 +173,7 @@ export function sequenceForDecision(decisionId: string): SequenceProjection | nu
   const fillOrderIds = new Set(fills.map(f => f.order_id));
   for (const order of orders) {
     if (order.status === 'FILLED' && !fillOrderIds.has(order.id)) {
-      anomalies.push(\`FILLED_ORDER_WITHOUT_RECORDED_FILL:\${order.id}\`);
+      anomalies.push(`FILLED_ORDER_WITHOUT_RECORDED_FILL:${order.id}`);
     }
   }
 
@@ -189,7 +189,7 @@ export function sequenceForDecision(decisionId: string): SequenceProjection | nu
       o.purpose === 'PROTECTIVE_STOP' &&
       o.status === 'ACTIVE'
     );
-    if (!hasStop) anomalies.push(\`OPEN_POSITION_WITHOUT_ACTIVE_PROTECTIVE_STOP:\${position.id}\`);
+    if (!hasStop) anomalies.push(`OPEN_POSITION_WITHOUT_ACTIVE_PROTECTIVE_STOP:${position.id}`);
   }
 
   const incidentOpen = protectionIncidents.some(i => i.status === 'OPEN');
