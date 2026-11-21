@@ -1,6 +1,7 @@
 import type { WorkerContext } from '../workers/types.js';
 import type { ConsensusRecord } from '../qci/schemas.js';
 import { horizonAlignment } from '../qci/challenge.js';
+import { assessMarketEmotion, type EmotionAssessment } from './emotion-evidence.js';
 import { isExpired } from '../qci/coordinator.js';
 import { scenarioTable, type ScenarioReport } from './profitLab.js';
 import {
@@ -25,6 +26,8 @@ export interface ThinkingAnalysis {
   wouldAbstain: boolean;
   dataQuality: WorkerContext['quality']['status'];
   evidence: Readonly<ThinkRoutingEvidence>;
+  /** Observed market-state description. Can only request review or abstain. */
+  emotion: EmotionAssessment;
   /**
    * Deep analysis is bounded to existing deterministic evidence. No LLM,
    * no network calls, no second QCI, and no parallel risk/OMS implementation.
@@ -90,14 +93,27 @@ export function analyzeThinking(input: Readonly<ThinkInput>): ThinkingAnalysis {
     preference, nowMs: input.nowMs ?? Date.now(),
   });
   const routing = routeThinking(evidence);
+  const emotion = assessMarketEmotion({
+    routing: evidence, regime: input.ctx.candidate.regime,
+    quality: input.ctx.quality.status, qciState: input.qci.state,
+    priceChange24hPct: input.ctx.ticker?.changePct ?? null,
+    news: input.ctx.news == null ? null : {
+      relevant: input.ctx.news.relevant, positive: input.ctx.news.positive,
+      negative: input.ctx.news.negative, highImpactMacro: input.ctx.news.highImpactMacro,
+    },
+    // These require real account/incident provenance and are intentionally
+    // unavailable here; never fabricate a losing streak or incident status.
+    consecutiveLosses: null, protectionIncidentOpen: null,
+  });
   const result: ThinkingAnalysis = {
     version: 'mia-think-observer-v1',
     authority: 'EXPLANATION_ONLY',
     canAuthorizeTrade: false,
-    preference, enforcement, route: routing.route, routeReasons: routing.reasons,
-    wouldAbstain: routing.route === 'NO_TRADE',
+    preference, enforcement, route: routing.route,
+    routeReasons: [...routing.reasons, ...(emotion.wouldAbstain ? emotion.reasons : [])],
+    wouldAbstain: routing.route === 'NO_TRADE' || emotion.wouldAbstain,
     dataQuality: input.ctx.quality.status,
-    evidence, deep: null, dataTransport: 'CANONICAL_MIA_MARKET_FABRIC',
+    evidence, emotion, deep: null, dataTransport: 'CANONICAL_MIA_MARKET_FABRIC',
   };
   if (enforcement === 'DISABLED' || routing.route !== 'DEEP') return result;
 
@@ -151,6 +167,16 @@ export function failedThinkingAnalysis(
     routeReasons: ['ADAPTIVE_THINKING_UNAVAILABLE', code.slice(0, 50)],
     wouldAbstain: true, deep: null, dataTransport: 'CANONICAL_MIA_MARKET_FABRIC',
     dataQuality: 'FAIL',
+    emotion: assessMarketEmotion({
+      routing: {
+        preference, marketDataValid: false, mandatoryCoverageComplete: false,
+        hardVetoPresent: false, consensusExpired: true,
+        conflictingEvidence: false, unusualRegime: true,
+        executionUncertain: true, portfolioExposureElevated: false,
+        deepReviewBudgetAvailable: false,
+      }, regime: 'UNKNOWN', quality: 'FAIL', qciState: 'NO_QUORUM',
+      priceChange24hPct: null, news: null,
+    }),
     evidence: {
       preference, marketDataValid: false, mandatoryCoverageComplete: false,
       hardVetoPresent: false, consensusExpired: true, conflictingEvidence: false,
