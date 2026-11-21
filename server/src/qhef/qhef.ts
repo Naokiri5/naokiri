@@ -5,6 +5,7 @@ import { QCI_POLICY } from '../qci/coordinator.js';
 import { config } from '../config.js';
 import { market } from '../market/store.js';
 import { botStatus } from '../bot/bot.js';
+import { deriveDualEngineHealth } from '../ops/dualEngineHealth.js';
 
 /**
  * Part 33.18 latency budgets. Budgets cover stages MIA controls (internal hot path). Provider round trips are
@@ -44,6 +45,16 @@ export function qhefReport() {
     process: { uptimeSec: Math.round((Date.now() - startedAt) / 1000), rssMb: Math.round(mem.rss / 1048576), heapUsedMb: Math.round(mem.heapUsed / 1048576), node: process.versions.node },
     scheduler: { tickerIntervalMs: config.tickerIntervalMs, scanIntervalMs: config.scanIntervalMs, backgroundIntervalMs: 60_000, lastTickerAt: botStatus.lastTickerAt, lastScanAt: botStatus.lastScanAt, cycles: botStatus.cycles },
     workers: { concurrency: POOL.concurrency, deadlineMs: POOL.deadlineMs, quarantined: quarantined.size, quorum: QCI_POLICY },
+    // MIA5 integration: read-only projection of measured canonical stages.
+    // It never advertises an unimplemented <10ms reflex path or authorizes orders.
+    dualEngine: deriveDualEngineHealth({
+      stages: rep, activeWorkerCapacity: POOL.concurrency,
+      quarantinedWorkers: quarantined.size,
+      botRunning: botStatus.running, botRole: botStatus.role,
+      lastMonitorAt: botStatus.lastMonitorAt,
+      monitorFailing: botStatus.monitorFailing,
+      nowMs: Date.now(),
+    }),
     tiers: { t1Broad: market.tickers.size, t2Deep: market.universe.length },
     transport: { marketData: 'REST polling (documented fallback; WebSocket hosts not allow-listed)', eventBus: 'in-process' },
     note: 'Budgets apply to MIA-controlled stages only. Speed never bypasses data-quality, QCI, risk or permission checks.',
