@@ -1,8 +1,13 @@
 # MIA 5.x — Bundle Trading: canonical, gap-only integration
 
+**Architecture expansion proposal:** [FAST Solana bundles, DEEP monitoring and certified DEMO/LIVE parity](MIA_FAST_DEEP_SOLANA_ATOMIC_LIVE_ARCHITECTURE.md). This is a **documentation-only enhancement**. No LIVE unlocking, real orders, or testnet removal was performed.  
 **Branch:** feat/mia-bundle-canonical-preview-20261121  
 **Integration scope:** P1 canonical preview plus P2 owner-initiated atomic PAPER bundle execution using canonical OMS.  
 **Operational truth:** PAPER_ATOMIC execution is implemented for 2–5 existing PAPER decisions with step-up and an append-only v6 grouping migration. No second ledger, real orders, autonomous bundle scheduling, signer, TESTNET placement or LIVE orders were enabled. The existing single-entry OMS retains its behavior.
+
+## Proposed future expansion: FAST, DEEP and certified LIVE
+
+The architecture is documented in [MIA_FAST_DEEP_SOLANA_ATOMIC_LIVE_ARCHITECTURE.md](MIA_FAST_DEEP_SOLANA_ATOMIC_LIVE_ARCHITECTURE.md), without changing the PAPER code in this PR. It reuses stacked FAST/DEEP (#89/#91), Solana Hunter/mint/Pump.fun (#46/#50/#52), quotes (#95), TESTNET preflight (#92), reconciliation (#97/#72) and Guardian rather than adding duplicated risk or trading engines. It proposes two user-facing modes (DEMO and LIVE) while **retaining TESTNET as an isolated internal certification service**. LIVE cannot be enabled by source text or a UI toggle; signer, venue, G01–G14, live reconciliation, owner grant, independent review and canary testing remain prerequisites.
 
 ## Source preservation and identity
 
