@@ -58,7 +58,7 @@ export function readHiveSnapshot(
     const sourceSequence = Atomics.load(meta, m + META_SOURCE_SEQUENCE);
     const copy = data.slice(start, start + HIVE_FEATURE_SLOTS);
     const second = Atomics.load(meta, m + META_VERSION);
-    if (first === second && !(second & 1) && copy.every(Number.isFinite)) {
+    if (first === second && !(second & 1) && sourceSequence > 0 && copy.every(Number.isFinite)) {
       return { sequence: second >>> 0, sourceSequence, features: copy, authority: 'OBSERVATION_ONLY' };
     }
   }
