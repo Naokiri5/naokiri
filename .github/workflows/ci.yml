@@ -99,3 +99,25 @@ jobs:
         with:
           name: playwright-failures
           path: test-results/
+
+  mia5-isolated:
+    name: MIA5 SHA-256 staging and CPU-isolated chaos tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Never execute the destructive original heredoc installer. Safely
+      # stage all 12 exact source payloads outside canonical TypeScript.
+      - name: Stage exact original 12 payloads without changing MIA
+        run: node scripts/mia5-safe-stage.mjs --skip-tests
+      - name: Verify idempotence (all 12 remain unchanged)
+        run: |
+          node scripts/mia5-safe-stage.mjs --skip-tests | tee /tmp/mia5-stage.log
+          grep -q 'unchanged: 12' /tmp/mia5-stage.log
+      - name: Run isolated deterministic MIA5 chaos contract suite
+        run: node scripts/mia5-safe-stage.mjs

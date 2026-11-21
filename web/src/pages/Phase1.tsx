@@ -36,6 +36,33 @@ export function Qhef() {
       <Stat k="Process" v={data ? `${data.process.rssMb} MB` : '—'} s={data ? `heap ${data.process.heapUsedMb} MB · up ${Math.round(data.process.uptimeSec / 60)} min · Node ${data.process.node}` : ''} />
       <Stat k="Scan tiers" v={data ? `${data.tiers.t2Deep} deep` : '—'} s={data ? `${data.tiers.t1Broad} pairs in broad tier · ${data.scheduler.cycles} scan cycles` : ''} />
     </div>
+    {data?.dualEngine && <div className="grid g3" style={{ marginBottom: 14 }}>
+      <Card title="Fast path — measured">
+        <div className="kv">
+          <span>Stage</span><span className="mono">decision.engine</span>
+          <span>p95</span><span>{data.dualEngine.system1.measuredDecisionP95Ms ?? '—'} ms</span>
+          <span>Samples</span><span>{data.dualEngine.system1.measuredDecisionSamples}</span>
+          <span>Observation</span><span><Badge v={data.dualEngine.system1.status} /></span>
+          <span>10ms wire SLA</span><span><Badge v="NOT CERTIFIED" tone="b-warn" /></span>
+        </div>
+      </Card>
+      <Card title="Deep worker pool">
+        <div className="kv">
+          <span>Capacity</span><span>{data.dualEngine.system2.workerPoolCapacity}</span>
+          <span>Quarantined</span><span>{data.dualEngine.system2.quarantinedWorkers}</span>
+          <span>Health</span><span><Badge v={data.dualEngine.system2.status} /></span>
+          <span>Dedicated OOM thread</span><span><Badge v="NOT INTEGRATED" tone="b-neutral" /></span>
+        </div>
+      </Card>
+      <Card title="Existing position protection">
+        <div className="kv">
+          <span>Monitor status</span><span><Badge v={data.dualEngine.positionProtection.status} /></span>
+          <span>Last completed</span><span>{data.dualEngine.positionProtection.lastCompletedAt ? fmt.ago(data.dualEngine.positionProtection.lastCompletedAt) : 'not observed'}</span>
+          <span>Trading authority</span><span className="muted">Existing risk gate and OMS only</span>
+        </div>
+        <div className="hint" style={{ marginTop: 8 }}>Telemetry is read-only. Worker recovery cannot unlock orders.</div>
+      </Card>
+    </div>}
     <Card title="Hot-path latency budgets (MIA-controlled stages)" flush><table><thead><tr><th>Stage</th><th>Lane</th><th>What it measures</th><th className="num">Samples</th><th className="num">p50</th><th className="num">p95</th><th className="num">p99</th><th className="num">Budget</th><th>Status</th></tr></thead>
       <tbody>{(data?.budgets ?? []).map((b: any) => <tr key={b.stage}><td className="mono">{b.stage}</td><td>{b.lane}</td><td className="muted">{b.description}</td><td className="num">{b.samples}</td><td className="num">{b.p50 ?? '—'}</td><td className="num">{b.p95 ?? '—'}</td><td className="num">{b.p99 ?? '—'}</td><td className="num">{b.metric} ≤ {b.budgetMs} ms</td><td><Badge v={b.status} tone={tone(b.status)} /></td></tr>)}</tbody></table></Card>
     <div className="grid g2" style={{ marginTop: 14 }}>
