@@ -30,6 +30,28 @@ describe('Risk gate (Part 17)', () => {
     expect(s.notional).toBeLessThanOrEqual(2500.01);        // 25% max notional
     expect(r.policyVersion).toBe(1); expect(r.traceId).toBe('t');
   });
+  it('blocks real PAPER entries at the canonical risk gate when V8 heap is critical, then recovers', () => {
+    acceptPolicy('owner', DEFAULT_POLICY);
+    updateControl('owner', { mode: 'PAPER' });
+    ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    expect(evaluateRisk(prop(id, last)).decision).toBe('ALLOW');
+    const oldWarn = process.env.MIA_HEALTH_HEAP_WARN_RATIO;
+    const oldCritical = process.env.MIA_HEALTH_HEAP_CRIT_RATIO;
+    try {
+      // Force a deterministic simulated overload without moving any funds or mocking the risk gate.
+      process.env.MIA_HEALTH_HEAP_WARN_RATIO = '0.000000001';
+      process.env.MIA_HEALTH_HEAP_CRIT_RATIO = '0.000000002';
+      const blocked = evaluateRisk(prop(id, last));
+      expect(blocked.decision).toBe('DENY');
+      expect(blocked.reasonCodes).toContain('RUNTIME_HEAP_CRITICAL');
+    } finally {
+      if (oldWarn === undefined) delete process.env.MIA_HEALTH_HEAP_WARN_RATIO;
+      else process.env.MIA_HEALTH_HEAP_WARN_RATIO = oldWarn;
+      if (oldCritical === undefined) delete process.env.MIA_HEALTH_HEAP_CRIT_RATIO;
+      else process.env.MIA_HEALTH_HEAP_CRIT_RATIO = oldCritical;
+    }
+    expect(evaluateRisk(prop(id, last)).decision).toBe('ALLOW');
+  });
   it('enforces daily loss breaker, stop direction, duplicates, pause and emergency', () => {
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     evaluateRisk(prop(id, last)); // establishes start-of-day mark
