@@ -79,6 +79,7 @@ export function CopyTrading() {
   const [notice, setNotice] = useState<string | null>(null);
   const { data, error, reload } = useApi('/api/copy');
   const { data: observations, error: observationError, reload: reloadObservations } = useApi('/api/copy/observations');
+  const { data: profileData, error: profileError, reload: reloadProfile } = useApi('/api/copy/profile', { every: 90_000 });
   const { data: deep, error: deepError } = useApi('/api/whales/deep', { topics: ['whale'], every: 60_000 });
   const win = data?.win;
   const follow = win?.followedWallet;
@@ -92,6 +93,7 @@ export function CopyTrading() {
       else await api('/api/copy/follow', { body: { walletAddress: wallet.trim() } });
       await reload();
       await reloadObservations();
+      await reloadProfile();
       setNotice(stop ? 'Wallet follow disabled. No position or order was changed.'
         : 'Wallet saved for READ-ONLY monitoring. No trading or transaction feed has been enabled.');
       if (!stop) setWallet('');
@@ -133,6 +135,22 @@ export function CopyTrading() {
           <div className="hint">No wallet events are fabricated. A saved public wallet is not a funded account or an order authorization.</div>
         </Card>
       </div>
+      <Card title="WIN-02 · Whale history and follower replicability" >
+        <ErrorLine e={profileError} />
+        <div className="banner info">RESEARCH ONLY. Observed gross swap PnL excludes unverified fees/hedges; stressed open holdings are valued at zero if no trusted executable sell quote exists. No probability or trade approval is inferred.</div>
+        {profileData?.profile ? <>
+          <div className="grid g4" style={{ marginTop: 12 }}>
+            <Stat k="Finalized observed swaps" v={profileData.profile.observedSwapCount ?? 0} />
+            <Stat k="Matched sell events" v={profileData.profile.matchedSellCount ?? 0} />
+            <Stat k="Gross closed PnL estimate" v={fmt.usd(profileData.profile.grossClosedPnlUsd)} />
+            <Stat k="Worst-case unsold-bag PnL" v={fmt.usd(profileData.profile.stressUnrealizedPnlUsd)} />
+          </div>
+          <div className="row" style={{ marginTop: 12 }}><span className="muted">Evidence classification</span><Badge v={profileData.profile.status} /></div>
+          <div className="row"><span className="muted">History coverage</span><span>{profileData.profile.coverageRatio == null ? 'Unverified — no complete scan' : fmt.pct(profileData.profile.coverageRatio * 100)}</span></div>
+          <div className="row"><span className="muted">Follower after-cost PnL</span><span>{profileData.profile.simulatedFollowerClosedPnlUsd == null ? 'Not measurable — missing historical obtainable quotes' : fmt.usd(profileData.profile.simulatedFollowerClosedPnlUsd)}</span></div>
+          <div className="hint" style={{ marginTop: 8 }}>Reasons: {(profileData.profile.reasonCodes ?? []).join(', ') || 'No additional observations'}</div>
+        </> : <Empty>Select one wallet to view research-only analytics.</Empty>}
+      </Card>
       <Card title="Verified followed-wallet events" flush>
         <ErrorLine e={observationError} />
         <div className="tablewrap"><table><thead><tr><th>Time</th><th>Mint address</th><th>Side</th><th>Source proof</th></tr></thead>
