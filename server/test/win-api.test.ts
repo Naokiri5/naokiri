@@ -55,6 +55,19 @@ describe('WIN HTTP integration (owner auth + CSRF, no execution)', () => {
     expect((await app.inject({ url: '/api/copy/observations', headers: { cookie } })).json().events).toEqual([]);
   });
 
+  it('profile requires authentication and never turns research PnL into execution authority', async () => {
+    expect((await app.inject({ url: '/api/copy/profile' })).statusCode).toBe(401);
+    const r = await app.inject({ url: '/api/copy/profile', headers: { cookie } });
+    expect(r.statusCode).toBe(200);
+    const p = r.json();
+    expect(p.status).toBe('RESEARCH_ONLY');
+    expect(p.executable).toBe(false);
+    expect(p.profile.automaticCopyEligible).toBe(false);
+    expect(p.profile.coverageRatio).toBeNull();
+    expect(p.profile.grossClosedPnlUsd).toBeNull();
+    expect(p.profile.reasonCodes).toContain('NO_INDEPENDENT_HISTORY_COVERAGE');
+  });
+
   it('DEEP returns only inferred anonymous research from existing large-print source', async () => {
     const r = await app.inject({ url: '/api/whales/deep', headers: { cookie } });
     expect(r.statusCode).toBe(200);
