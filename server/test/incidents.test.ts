@@ -42,6 +42,19 @@ describe('protection incidents', () => {
     expect(riskFor(id, last).reasonCodes.join(' ')).toMatch(/PROTECTION_INCIDENT_OPEN/);
   });
 
+  it('blocks new exposure in other instruments of the same paper account until protection recovers', () => {
+    const other = seedInstrument('BTCUSDT', { seed: 7 });
+    stale(id); monitorPositions();
+    const denied = riskFor(other.inst.id, other.last);
+    expect(denied.decision).toBe('DENY');
+    expect(denied.reasonCodes.join(' ')).toContain('UNPROTECTED_ACCOUNT_EXPOSURE');
+    setBook(id, last); market.tickers.get(id)!.receivedAt = Date.now();
+    monitorPositions();
+    const recovered = riskFor(other.inst.id, other.last);
+    expect(recovered.reasonCodes.join(' ')).not.toContain('UNPROTECTED_ACCOUNT_EXPOSURE');
+    expect(listIncidents()[0].status).toBe('RECOVERED');
+  });
+
   it('re-alerts only after the re-alert interval', () => {
     const pos = openPositions()[0]; const t0 = Date.now();
     reportUnprotected(pos, 'no book', t0); reportUnprotected(pos, 'no book', t0 + 1000);
