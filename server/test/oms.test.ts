@@ -144,6 +144,22 @@ describe('Order-book freshness and fill accounting', () => {
     expect(openPositions()).toHaveLength(0);
     expect(accountState().cash).toBe(10_000);
   });
+  it('limits the real depth-walk loss including the entry and buffered exit fees', () => {
+    const book = market.deep.get(id)!.book!;
+    const ask = market.price(id)!.ask!;
+    // A fill near the allowable slippage boundary must remain within the trade budget.
+    book.asks = [[ask, 0.01], [ask * 1.0016, 50]];
+    const result = submitEntry(report(id, last), 'bot');
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const pos = openPositions()[0];
+    const bufferedStop = pos.stop_price * (1 - DEFAULT_POLICY.stopFillBufferPct / 100);
+    const executedRisk = pos.qty * (pos.entry_price - bufferedStop +
+      DEFAULT_POLICY.feeRate * (pos.entry_price + bufferedStop));
+    expect(pos.planned_risk).toBeCloseTo(executedRisk, 8);
+    expect(executedRisk).toBeLessThanOrEqual(10_000 * DEFAULT_POLICY.riskPerTradePct / 100 + 1e-8);
+    expect(all('SELECT id FROM fills')).toHaveLength(1);
+  });
+
   it('rejects a fill whose depth-walk notional exceeds the policy cap', () => {
     acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 1 });
     const book = market.deep.get(id)!.book!;
