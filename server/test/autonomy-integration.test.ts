@@ -72,6 +72,8 @@ describe('autonomy integration: existing paper execution and exit authority', ()
     expect(submitEntry(decision(), 'bot').ok).toBe(true);
     const position = openPositions()[0];
     market.deep.get(instrumentId)!.book!.ts = Date.now() - 10 * 60_000;
+    const ticker = market.tickers.get(instrumentId)!;
+    Object.assign(ticker, { last: last * 0.96, bid: last * 0.9599, ask: last * 0.9601, receivedAt: Date.now() });
     monitorPositions();
     expect(openPositions()).toHaveLength(1);
     expect(openPositions()[0].id).toBe(position.id);
