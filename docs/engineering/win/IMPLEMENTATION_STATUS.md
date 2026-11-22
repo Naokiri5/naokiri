@@ -5,6 +5,15 @@
 **Safety status:** READ_ONLY evidence and owner watchlist only. No live or paper Solana order execution.
 **Merge policy:** DRAFT; DO NOT MERGE until full CI, trading-risk/security review, and source stack reconciliation.
 
+## WIN-L01 — adaptive whale learning follow-up (2026-11-22)
+
+**Committed to this same draft PR:** `server/src/whales/winLearning.ts`, `winProfiler.ts`, `winRegistry.ts`, owner-authenticated `GET /api/copy/learning`, focused tests, and [WIN_ADAPTIVE_LEARNING_SKILL.md](WIN_ADAPTIVE_LEARNING_SKILL.md).
+
+- **Working code / bounded research:** FIFO closed-lot outcome attribution; historical delayed follower **simulation** when quotes are supplied; pre-entry source-hashed DITAS Market DNA lookup, causal similarity matching, deduplication, 4-samples-per-wallet concentration cap, 6-lot/3-wallet independent evidence minimum, loss-pattern abstain-review and winning-pattern DEEP-review suggestions.
+- **Safety:** source histories below independently established 85% coverage, quarantined records, unknown quote costs, future snapshots, partial exits and one-wallet clusters never certify a learning rule. This is read-only memory derived from existing durable evidence, with no extra database/migration and no live execution authority.
+- **Not operational yet:** WIN has no connected continuous authenticated whale-history feed, complete-history denominator, stored historical follower quote stream, broad DEX Market DNA coverage, or Adaptive THINK runtime gate. The current `GET /api/copy/learning` therefore reports `AWAITING_VERIFIED_LEARNING_INPUTS` rather than manufacturing a winning model. PR #89's Adaptive THINK remains separate and unmerged. No feedback-driven strategy deployment, automatic order veto, QCI vote modification or trade copying is wired.
+- **Go/no-go:** **NO-GO** until exact final-head CI, source provenance, holdout studies, stack reconciliation and independent financial/security review pass. LIVE remains locked.
+
 ## Provenance
 
 - Original owner idea/text, full updated unified engineering specification, exact declaration catalog, 50-row feature catalog and Codex master prompt are under reference/.
