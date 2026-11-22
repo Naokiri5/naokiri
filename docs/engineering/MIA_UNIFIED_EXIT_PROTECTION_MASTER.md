@@ -86,3 +86,9 @@ Canonical additive file: [server/src/risk/exitProtection.ts](../../server/src/ri
 5. Never assume token sellability or liquidation prevention can be guaranteed.
 6. Verify replay, paper integration, and failure recovery before connecting this module to the scheduler.
 7. Confirm PR readiness through actual CI evidence; do not merge unfinished work.
+
+## Shared PAPER/LIVE monitoring integration (follow-up slice)
+
+Added `server/src/exec/exitMonitor.ts` with `monitorExitProtection(source, sink)` and `server/test/exitMonitor.test.ts`. The same assessment contract accepts PAPER and LIVE position evidence, returns advisory recommendations, and emits degraded status on unavailable sources. The source and sink are injected; there is **no installed live source, no live execution adapter, and no background runtime wiring yet**. The existing paper OMS remains responsible for actual position protection. Do not treat this read-only integration port as a deployed trading feature.
+
+**Next mandatory step before runtime wiring:** implement authoritative paper evidence mapping from existing market/ledger and independently verified live venue snapshots, with provenance, sellability/mark/margin inputs and strict freshness checks. Attach to the existing leader-only monitor lane; reconcile with canonical OMS/ledger and require integration tests and fresh CI. LIVE order execution remains prohibited without owner authorization and release certification.
