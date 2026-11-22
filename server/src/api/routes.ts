@@ -11,6 +11,7 @@ import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '.
 import { createVerifiedBackup } from '../ops/backup.js';
 import { bus } from '../core/bus.js';
 import { market } from '../market/store.js';
+import { hp97MarketSnapshot } from '../market/hp97.js';
 import { board, rejections, recentDecisions, analyzeInstrument, dexBoard } from '../market/scanner.js';
 import { bubbleMap } from '../market/bubbles.js';
 import { isEligibleSpot } from '../market/fabric.js';
@@ -43,6 +44,7 @@ import { releaseGates } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
 import { botStatus, botStatusView } from '../bot/bot.js';
 import { readiness } from '../ops/readiness.js';
+import { autopilotOperationalStatus } from '../ops/autopilotStatus.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
 import { all, get, P } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
@@ -230,6 +232,17 @@ export async function routes(app: FastifyInstance) {
       policyAccepted: !!pol, riskLimits: pol ? { dailyLossPct: pol.dailyLossPct, weeklyLossPct: pol.weeklyLossPct, drawdownWarnPct: pol.drawdownWarnPct, drawdownHaltPct: pol.drawdownHaltPct, maxOpenRiskPct: pol.maxOpenRiskPct, maxConsecutiveLosses: pol.maxConsecutiveLosses } : null,
       dataHealth: { stale, tickersAt: market.tickersFetchedAt, scanAt: market.lastScanAt, live: pv.filter((p) => p.status === 'LIVE').length, degraded: pv.filter((p) => p.status === 'DEGRADED' || p.status === 'DOWN').length },
       unread: get<{ n: number }>('SELECT COUNT(*) n FROM notifications WHERE read=0')!.n, gates: gates.summary, liveAllowed: gates.liveAllowed, offline: config.offline, scanIntervalMs: config.scanIntervalMs, tickerIntervalMs: config.tickerIntervalMs, serverTime: Date.now() };
+  });
+  // MIA 5.x additive owner-only observability. No duplicated control or trading authority.
+  app.get('/api/autopilot/status', async (_req, reply) =>
+    reply.header('cache-control', 'no-store').send(autopilotOperationalStatus()));
+  app.get('/api/market/hp97/:symbol', async (req, reply) => {
+    const { symbol } = z.object({ symbol: z.string().regex(/^[A-Za-z0-9._-]{1,20}$/) }).parse(req.params);
+    const instrument = market.bySymbol(symbol);
+    if (!instrument) return bad(reply, 404, 'instrument not registered');
+    const snapshot = hp97MarketSnapshot(instrument.id);
+    if (!snapshot) return bad(reply, 404, 'instrument not registered');
+    return reply.header('cache-control', 'no-store').send(snapshot);
   });
   app.get('/api/overview', async () => overviewSnapshot());
 
