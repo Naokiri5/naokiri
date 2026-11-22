@@ -45,6 +45,9 @@ export interface WinClosedLotOutcome {
   readonly mintAddress: string;
   readonly entryEvidenceId: string;
   readonly exitEvidenceId: string;
+  /** Every exit leg used to settle this entry, including earlier partial sells. */
+  readonly exitEvidenceIds: readonly string[];
+  readonly exitSourceSnapshotIds: readonly string[];
   readonly entryAt: number;
   readonly entryReceivedAt: number;
   readonly exitAt: number;
@@ -80,7 +83,9 @@ export interface WinProfileResult {
 }
 
 type Lot = { quantity: bigint; entryPrice: number; openedAt: number; receivedAt: number;
-  sourceSnapshotId: string; entryEvidenceId: string;
+  sourceSnapshotId: string; entryEvidenceId: string; instrumentId: string;
+  grossSettled: number; followerSettled: number; followerComplete: boolean;
+  exitEvidenceIds: string[]; exitSourceSnapshotIds: string[];
   followerEntryPrice: number | null; followerFeePerToken: number | null };
 type MintLots = { decimals: number; lots: Lot[] };
 type TokenInfo = { gross: number; remaining: bigint; observed: number; followerGross: number };
@@ -184,7 +189,9 @@ export function profileVerifiedWalletSwaps(
       mint.lots.push({
         quantity: q, entryPrice: price, openedAt: e.observedAt,
         receivedAt: e.receivedAt, sourceSnapshotId: e.sourceSnapshotId,
-        entryEvidenceId: key,
+        entryEvidenceId: key, instrumentId: e.instrumentId,
+        grossSettled: 0, followerSettled: 0, followerComplete: true,
+        exitEvidenceIds: [], exitSourceSnapshotIds: [],
         followerEntryPrice: followerPrice, followerFeePerToken: feePerToken
       });
       continue;
@@ -199,6 +206,11 @@ export function profileVerifiedWalletSwaps(
     for (const lot of mint.lots) {
       if (toMatch === 0n) break;
       if (lot.quantity === 0n) continue;
+      if (lot.instrumentId !== e.instrumentId) {
+        reasons.add('INSTRUMENT_IDENTITY_CONFLICT');
+        precisionSupported = false;
+        break;
+      }
       const consumed = toMatch < lot.quantity ? toMatch : lot.quantity;
       const qty = quoteAmount(consumed, e.tokenDecimals);
       if (qty === null) { precisionSupported = false; reasons.add('UNSAFE_PNL_PRECISION'); break; }
@@ -214,19 +226,25 @@ export function profileVerifiedWalletSwaps(
         : null;
       if (followerNet !== null) closedFollowerNet += followerNet;
       else followerUsable = false;
-      // A single sell can close several distinct FIFO buys. Keep each realized lot
-      // independently identifiable and never infer profits from an unsold position.
-      closedLots.push({
-        outcomeId: lot.entryEvidenceId + '|' + key,
+      lot.grossSettled += gross;
+      if (followerNet !== null) lot.followerSettled += followerNet;
+      else lot.followerComplete = false;
+      lot.exitEvidenceIds.push(key);
+      lot.exitSourceSnapshotIds.push(e.sourceSnapshotId);
+      // Only a FULLY sold entry can become a learning label. A first partial
+      // take-profit can be green while the remaining position later loses.
+      if (lot.quantity === 0n) closedLots.push({
+        outcomeId: lot.entryEvidenceId,
         walletAddress: e.walletAddress, mintAddress: e.mintAddress,
-        instrumentId: e.instrumentId, entryEvidenceId: lot.entryEvidenceId,
-        exitEvidenceId: key, entryAt: lot.openedAt,
-        entryReceivedAt: lot.receivedAt, exitAt: e.observedAt,
-        exitReceivedAt: e.receivedAt,
+        instrumentId: lot.instrumentId, entryEvidenceId: lot.entryEvidenceId,
+        exitEvidenceId: key, exitEvidenceIds: [...lot.exitEvidenceIds],
+        exitSourceSnapshotIds: [...lot.exitSourceSnapshotIds],
+        entryAt: lot.openedAt, entryReceivedAt: lot.receivedAt,
+        exitAt: e.observedAt, exitReceivedAt: e.receivedAt,
         entrySourceSnapshotId: lot.sourceSnapshotId,
         exitSourceSnapshotId: e.sourceSnapshotId,
-        grossWhalePnlUsd: gross,
-        simulatedFollowerNetPnlUsd: followerNet,
+        grossWhalePnlUsd: lot.grossSettled,
+        simulatedFollowerNetPnlUsd: lot.followerComplete ? lot.followerSettled : null,
       });
     }
     if (didMatch) matchedSells++;
