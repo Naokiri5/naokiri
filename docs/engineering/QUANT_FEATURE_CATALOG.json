@@ -1,0 +1,1733 @@
+{
+  "schemaVersion": "1.1.1",
+  "repository": "Naokiri5/naokiri",
+  "baselineRef": "2627cd276d2108c15a47ba41d60cdb54fddf10ff",
+  "canonicalDoc": "docs/REQUIREMENTS_TRACEABILITY.md",
+  "statusMeaning": "Original baseline labels retained unchanged. BASE_EXISTS means related code only; statuses are not operational certification.",
+  "mergeRules": {
+    "BASE_EXISTS": "extend existing ownership; do not clone it",
+    "PARTIAL": "finish existing implementation; verify every claimed function",
+    "NEEDS_EXTERNAL_FEED": "blocked pending trusted provider/data/authority",
+    "PROPOSED": "research in existing owner only if measurable value"
+  },
+  "categoryOwnerPaths": {
+    "Statistics": [
+      "server/src/features/indicators.ts",
+      "server/src/lab/backtest.ts",
+      "server/src/knowledge/research.ts",
+      "server/src/ditas/calibration.ts"
+    ],
+    "Charts": [
+      "server/src/chart/analysis.ts",
+      "server/src/chart/replay.ts"
+    ],
+    "Solana": [
+      "server/src/market/fabric.ts",
+      "server/src/safety/safety.ts",
+      "server/src/providers/pending.ts"
+    ],
+    "AI": [
+      "server/src/qci/coordinator.ts",
+      "server/src/decision/engine.ts",
+      "server/src/ditas/service.ts"
+    ],
+    "Research": [
+      "server/src/lab/backtest.ts",
+      "server/src/lab/lab.ts",
+      "server/src/knowledge/research.ts"
+    ],
+    "Risk": [
+      "server/src/risk/gate.ts",
+      "server/src/exec/oms.ts"
+    ],
+    "Data": [
+      "server/src/market/quality.ts",
+      "server/src/market/fabric.ts",
+      "server/src/ditas/memory.ts"
+    ],
+    "Microstructure": [
+      "server/src/market/quality.ts",
+      "server/src/whales/prints.ts"
+    ],
+    "Portfolio": [
+      "server/src/portfolio/ledger.ts",
+      "server/src/portfolio/correlation.ts",
+      "server/src/ditas/execution.ts"
+    ],
+    "Operations": [
+      "server/src/core/latency.ts",
+      "server/src/exec/incidents.ts",
+      "server/src/qa/gates.ts"
+    ]
+  },
+  "evidenceOverrides": {
+    "MIA-Q001": "Phase-one draft extends existing FeatureEngine with 20-log-return moments; not yet test-certified.",
+    "MIA-Q006": "Costs and risk-normalized backtest outcomes already exist in lab/backtest.ts.",
+    "MIA-Q009": "IID trade bootstrap exists; dependence-aware/block bootstrap is not verified.",
+    "MIA-Q013": "Confirmed pivots are present in chart/analysis.ts; BOS/CHoCH enhancements remain.",
+    "MIA-Q023": "No verified Solana launch feed; provider integration required.",
+    "MIA-Q035": "MarketStore and DITAS snapshots exist; persistent general feature store not verified.",
+    "MIA-Q036": "DITAS calibration evaluates supplied forecasts; no certified production forecasting model.",
+    "MIA-Q040": "Deterministic QCI challenge panel exists; not a trained multi-agent ensemble.",
+    "MIA-Q042": "Existing decision twin is hypothetical; source is owner-uploaded/unverified.",
+    "MIA-Q045": "knowledge/research.ts already implements multi-window strategyWalkforward with crossing-trade purge and embargo.",
+    "MIA-Q046": "knowledge/research.ts already uses crossing-trade purge and embargo; overlapping-label pipeline may need more.",
+    "MIA-Q047": "chart/replay.ts supports prefix replay; full OMS event replay not established.",
+    "MIA-Q058": "Core decision/risk code is shared by existing paper workflow; live trading is locked and parity is not certified.",
+    "MIA-Q063": "chart/analysis.ts and market/quality.ts reject candle gaps and duplicates.",
+    "MIA-Q076": "Lab exits define stop/target/time behavior; labels for supervised learning are not verified.",
+    "MIA-Q091": "Pairwise correlation exists; full portfolio factor decomposition is not verified."
+  },
+  "features": [
+    {
+      "id": "MIA-Q001",
+      "number": 1,
+      "name": "Statistical distribution analyzer",
+      "category": "Statistics",
+      "summary": "Measure returns, variance, skewness and kurtosis.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q002",
+      "number": 2,
+      "name": "Robust outlier detection",
+      "category": "Statistics",
+      "summary": "Flag anomalous prices and volumes without contaminating baselines.",
+      "baseline": "PARTIAL",
+      "priority": "P1",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q003",
+      "number": 3,
+      "name": "Confidence interval engine",
+      "category": "Statistics",
+      "summary": "Quantify uncertainty of expectancy, win rates, and measured outcomes.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q004",
+      "number": 4,
+      "name": "Bayesian probability estimation",
+      "category": "Statistics",
+      "summary": "Update event probabilities with independent new evidence.",
+      "baseline": "PROPOSED",
+      "priority": "P2",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q005",
+      "number": 5,
+      "name": "Statistical hypothesis tester",
+      "category": "Statistics",
+      "summary": "Test an apparent strategy edge against explicit baselines.",
+      "baseline": "PROPOSED",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q006",
+      "number": 6,
+      "name": "Cost-adjusted expectancy",
+      "category": "Statistics",
+      "summary": "Compute expected net R after fees, slippage and market impact.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q007",
+      "number": 7,
+      "name": "Conditional volatility model",
+      "category": "Statistics",
+      "summary": "Estimate changing volatility with EWMA or GARCH-style approaches.",
+      "baseline": "PROPOSED",
+      "priority": "P2",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q008",
+      "number": 8,
+      "name": "Tail-risk analysis",
+      "category": "Statistics",
+      "summary": "Quantify extreme losses and expected shortfall.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q009",
+      "number": 9,
+      "name": "Advanced Monte Carlo",
+      "category": "Statistics",
+      "summary": "Simulate clustered losses, regime changes and adverse fills.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q010",
+      "number": 10,
+      "name": "Statistical drift detection",
+      "category": "Statistics",
+      "summary": "Detect changes in feature distributions and predictive performance.",
+      "baseline": "PARTIAL",
+      "priority": "P1",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q011",
+      "number": 11,
+      "name": "Correlation and covariance modeling",
+      "category": "Statistics",
+      "summary": "Quantify portfolio-wide common risk exposure.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q012",
+      "number": 12,
+      "name": "Statistical significance controller",
+      "category": "Statistics",
+      "summary": "Guard against multiple comparisons and strategy-selection bias.",
+      "baseline": "PROPOSED",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "features/indicators.ts",
+        "lab/backtest.ts",
+        "ditas/calibration.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q013",
+      "number": 13,
+      "name": "Advanced market structure",
+      "category": "Charts",
+      "summary": "Detect confirmed BOS, CHoCH, higher highs and lower lows.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P1",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q014",
+      "number": 14,
+      "name": "Support/resistance zones",
+      "category": "Charts",
+      "summary": "Estimate zone age, strength and confirmed retests.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P1",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q015",
+      "number": 15,
+      "name": "Fair value gap analysis",
+      "category": "Charts",
+      "summary": "Identify OHLCV gaps and test forward predictive value.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P1",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q016",
+      "number": 16,
+      "name": "Supply/demand analysis",
+      "category": "Charts",
+      "summary": "Hypothesize zones based on observable price and volume only.",
+      "baseline": "PROPOSED",
+      "priority": "P2",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q017",
+      "number": 17,
+      "name": "Volume profile",
+      "category": "Charts",
+      "summary": "Estimate traded volume by price level from suitable data.",
+      "baseline": "PARTIAL",
+      "priority": "P2",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q018",
+      "number": 18,
+      "name": "Anchored VWAP",
+      "category": "Charts",
+      "summary": "Calculate VWAP from identified historical anchor events.",
+      "baseline": "PARTIAL",
+      "priority": "P1",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q019",
+      "number": 19,
+      "name": "Multi-timeframe alignment",
+      "category": "Charts",
+      "summary": "Join confirmed frames strictly as-of decision time.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q020",
+      "number": 20,
+      "name": "Pattern performance database",
+      "category": "Charts",
+      "summary": "Track subsequent real outcomes for every detection.",
+      "baseline": "PARTIAL",
+      "priority": "P2",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q021",
+      "number": 21,
+      "name": "Chart explanation engine",
+      "category": "Charts",
+      "summary": "Present entry, invalidation, levels, time and evidence visually.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P1",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q022",
+      "number": 22,
+      "name": "Adaptive indicator parameters",
+      "category": "Charts",
+      "summary": "Promote parameters only after robust OOS testing.",
+      "baseline": "PARTIAL",
+      "priority": "P2",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "chart/analysis.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q023",
+      "number": 23,
+      "name": "Real-time launch detector",
+      "category": "Solana",
+      "summary": "Track mints, pools, launchpad events and migrations.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q024",
+      "number": 24,
+      "name": "Sub-minute analytics",
+      "category": "Solana",
+      "summary": "Compute event-time 5s, 15s, 1m and 5m measures.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q025",
+      "number": 25,
+      "name": "Token authority verifier",
+      "category": "Solana",
+      "summary": "Inspect SPL mint/freeze authority and Token-2022 behavior.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q026",
+      "number": 26,
+      "name": "Holder concentration analysis",
+      "category": "Solana",
+      "summary": "Estimate ownership distribution and linked clusters.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q027",
+      "number": 27,
+      "name": "Deployer reputation tracking",
+      "category": "Solana",
+      "summary": "Connect creators to prior launches and suspicious behavior.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P2",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q028",
+      "number": 28,
+      "name": "Liquidity survival analysis",
+      "category": "Solana",
+      "summary": "Measure whether pool liquidity survives launch and early trading.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q029",
+      "number": 29,
+      "name": "Buy/sell participation analysis",
+      "category": "Solana",
+      "summary": "Compare observed buyer, seller and transaction participation.",
+      "baseline": "PARTIAL",
+      "priority": "P1",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q030",
+      "number": 30,
+      "name": "Wash-trading detection",
+      "category": "Solana",
+      "summary": "Find repetitive, cyclic and coordinated wallet trades.",
+      "baseline": "PARTIAL",
+      "priority": "P2",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q031",
+      "number": 31,
+      "name": "Swap-route simulation",
+      "category": "Solana",
+      "summary": "Evaluate quote, sell-route feasibility and total trading cost.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q032",
+      "number": 32,
+      "name": "Transaction landing analysis",
+      "category": "Solana",
+      "summary": "Track submission, confirmation, expiry and failure.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q033",
+      "number": 33,
+      "name": "MEV and execution-risk analysis",
+      "category": "Solana",
+      "summary": "Estimate routing and adversarial transaction-execution risks.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P1",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q034",
+      "number": 34,
+      "name": "Wallet behavior intelligence",
+      "category": "Solana",
+      "summary": "Assess whale behavior without blind copy trading.",
+      "baseline": "PARTIAL",
+      "priority": "P2",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q035",
+      "number": 35,
+      "name": "Central feature store",
+      "category": "AI",
+      "summary": "Share versioned, point-in-time evidence across specialists.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q036",
+      "number": 36,
+      "name": "Predictive probability models",
+      "category": "AI",
+      "summary": "Train models on precisely defined and settled outcomes.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q037",
+      "number": 37,
+      "name": "Model ensemble",
+      "category": "AI",
+      "summary": "Combine models with independently measured contribution.",
+      "baseline": "PARTIAL",
+      "priority": "P1",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q038",
+      "number": 38,
+      "name": "Adaptive evidence weights",
+      "category": "AI",
+      "summary": "Reweight evidence only after validated OOS comparisons.",
+      "baseline": "PARTIAL",
+      "priority": "P2",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q039",
+      "number": 39,
+      "name": "Uncertainty-aware decisions",
+      "category": "AI",
+      "summary": "Abstain on weak, stale, anomalous or OOD data.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q040",
+      "number": 40,
+      "name": "Bull/bear/challenger debate",
+      "category": "AI",
+      "summary": "Use opposing analyses and independent failure tests.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P1",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q041",
+      "number": 41,
+      "name": "Market DNA memory",
+      "category": "AI",
+      "summary": "Find comparable historical conditions and their outcomes.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P1",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q042",
+      "number": 42,
+      "name": "Counterfactual decision twin",
+      "category": "AI",
+      "summary": "Compare enter, wait, skip and delayed alternatives.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P2",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q043",
+      "number": 43,
+      "name": "AI hallucination validator",
+      "category": "AI",
+      "summary": "Reject unsupported numbers, times and causal conclusions.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q044",
+      "number": 44,
+      "name": "Trader Joe explanation layer",
+      "category": "AI",
+      "summary": "Explain signals, costs, vetoes and filled orders with evidence.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P1",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "qci/coordinator.ts",
+        "decision/engine.ts",
+        "ditas/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q045",
+      "number": 45,
+      "name": "Rolling walk-forward testing",
+      "category": "Research",
+      "summary": "Evaluate successive unseen out-of-sample windows.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P2",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "lab/backtest.ts",
+        "lab/lab.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q046",
+      "number": 46,
+      "name": "Purged time-series validation",
+      "category": "Research",
+      "summary": "Prevent overlapping-label leakage and look-ahead.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P2",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "lab/backtest.ts",
+        "lab/lab.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q047",
+      "number": 47,
+      "name": "Realistic historical replay",
+      "category": "Research",
+      "summary": "Replay only information observable at each decision.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P2",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "lab/backtest.ts",
+        "lab/lab.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q048",
+      "number": 48,
+      "name": "Slippage and market-impact simulation",
+      "category": "Research",
+      "summary": "Model partial, adverse, delayed and failed fills.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P2",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "lab/backtest.ts",
+        "lab/lab.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q049",
+      "number": 49,
+      "name": "Strategy competition arena",
+      "category": "Research",
+      "summary": "Compare candidate strategies under identical windows and costs.",
+      "baseline": "PARTIAL",
+      "priority": "P1",
+      "phase": "P2",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "lab/backtest.ts",
+        "lab/lab.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q050",
+      "number": 50,
+      "name": "Performance decomposition",
+      "category": "Research",
+      "summary": "Separate signal edge, market beta and execution outcomes.",
+      "baseline": "PARTIAL",
+      "priority": "P1",
+      "phase": "P2",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "lab/backtest.ts",
+        "lab/lab.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q051",
+      "number": 51,
+      "name": "Shadow strategy testing",
+      "category": "Research",
+      "summary": "Test candidate models with zero order authority.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P2",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "lab/backtest.ts",
+        "lab/lab.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q052",
+      "number": 52,
+      "name": "Model and strategy version registry",
+      "category": "Research",
+      "summary": "Track datasets, hashes, versions, owners and approvals.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P2",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "lab/backtest.ts",
+        "lab/lab.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q053",
+      "number": 53,
+      "name": "Conditional position sizing",
+      "category": "Risk",
+      "summary": "Adjust permitted exposure to liquidity and estimated risk.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "risk/gate.ts",
+        "risk/policy.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q054",
+      "number": 54,
+      "name": "Expected shortfall controls",
+      "category": "Risk",
+      "summary": "Cap exposure to severe modeled downside.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "risk/gate.ts",
+        "risk/policy.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q055",
+      "number": 55,
+      "name": "Correlation stress testing",
+      "category": "Risk",
+      "summary": "Stress simultaneous losses across correlated assets.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "risk/gate.ts",
+        "risk/policy.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q056",
+      "number": 56,
+      "name": "Market-data failover",
+      "category": "Risk",
+      "summary": "Stop safely and recover after source outages.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "risk/gate.ts",
+        "risk/policy.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q057",
+      "number": 57,
+      "name": "Execution anomaly detection",
+      "category": "Risk",
+      "summary": "Find unexplained fills, slippage, latency and reconciliation gaps.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "risk/gate.ts",
+        "risk/policy.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q058",
+      "number": 58,
+      "name": "Unified paper/live rules",
+      "category": "Risk",
+      "summary": "Run the exact same decision and risk policies in both modes.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "risk/gate.ts",
+        "risk/policy.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q059",
+      "number": 59,
+      "name": "Model decay supervisor",
+      "category": "Risk",
+      "summary": "Suspend decayed strategies after valid prospective evidence.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "risk/gate.ts",
+        "risk/policy.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q060",
+      "number": 60,
+      "name": "Immutable decision journal",
+      "category": "Risk",
+      "summary": "Preserve inputs, models, approvals, execution and outcomes.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "risk/gate.ts",
+        "risk/policy.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q061",
+      "number": 61,
+      "name": "Event-time synchronization",
+      "category": "Data",
+      "summary": "Align exchange timestamps, Solana slots and receipt clocks.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q062",
+      "number": 62,
+      "name": "Deterministic event replay",
+      "category": "Data",
+      "summary": "Reproduce decisions without information from the future.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q063",
+      "number": 63,
+      "name": "Historical gap and duplicate detection",
+      "category": "Data",
+      "summary": "Reject incomplete or non-monotonic market records.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q064",
+      "number": 64,
+      "name": "Point-in-time market universes",
+      "category": "Data",
+      "summary": "Remove survivorship bias from historical testing.",
+      "baseline": "PROPOSED",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q065",
+      "number": 65,
+      "name": "Immutable raw-data provenance",
+      "category": "Data",
+      "summary": "Trace predictions to original unmodified observations.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q066",
+      "number": 66,
+      "name": "Return autocorrelation analysis",
+      "category": "Data",
+      "summary": "Test serial dependence and return predictability hypotheses.",
+      "baseline": "PARTIAL",
+      "priority": "P2",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q067",
+      "number": 67,
+      "name": "Market entropy diagnostics",
+      "category": "Data",
+      "summary": "Evaluate complexity under explicitly specified estimators.",
+      "baseline": "PROPOSED",
+      "priority": "P2",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q068",
+      "number": 68,
+      "name": "Jump and discontinuity detection",
+      "category": "Data",
+      "summary": "Identify moves poorly captured by smooth volatility.",
+      "baseline": "PARTIAL",
+      "priority": "P1",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q069",
+      "number": 69,
+      "name": "Covariance shrinkage",
+      "category": "Data",
+      "summary": "Stabilize estimates from limited return samples.",
+      "baseline": "PROPOSED",
+      "priority": "P2",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q070",
+      "number": 70,
+      "name": "Sequential statistical testing",
+      "category": "Data",
+      "summary": "Control repeated peeking at results over time.",
+      "baseline": "PROPOSED",
+      "priority": "P2",
+      "phase": "P1",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/fabric.ts",
+        "market/quality.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q071",
+      "number": 71,
+      "name": "Aggressor-volume imbalance",
+      "category": "Microstructure",
+      "summary": "Track buyer- and seller-initiated volume where available.",
+      "baseline": "PROPOSED",
+      "priority": "P1",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q072",
+      "number": 72,
+      "name": "Cumulative volume delta",
+      "category": "Microstructure",
+      "summary": "Aggregate signed trade flow over event time.",
+      "baseline": "PROPOSED",
+      "priority": "P1",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q073",
+      "number": 73,
+      "name": "Order-book resilience",
+      "category": "Microstructure",
+      "summary": "Measure depth recovery after market impact.",
+      "baseline": "PROPOSED",
+      "priority": "P2",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q074",
+      "number": 74,
+      "name": "Spread regime analysis",
+      "category": "Microstructure",
+      "summary": "Detect unstable spreads and execution friction.",
+      "baseline": "PARTIAL",
+      "priority": "P1",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q075",
+      "number": 75,
+      "name": "False-breakout outcome classifier",
+      "category": "Microstructure",
+      "summary": "Measure confirmed false-breakout frequencies.",
+      "baseline": "PARTIAL",
+      "priority": "P2",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q076",
+      "number": 76,
+      "name": "Triple-barrier outcome labeling",
+      "category": "Microstructure",
+      "summary": "Label target, stop and time barrier outcomes.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q077",
+      "number": 77,
+      "name": "Meta-labeling",
+      "category": "Microstructure",
+      "summary": "Learn when to accept or skip primary strategy signals.",
+      "baseline": "PROPOSED",
+      "priority": "P2",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q078",
+      "number": 78,
+      "name": "Class-imbalance evaluation",
+      "category": "Microstructure",
+      "summary": "Evaluate rare events without misleading accuracy.",
+      "baseline": "PROPOSED",
+      "priority": "P0",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q079",
+      "number": 79,
+      "name": "Regime-specific calibration",
+      "category": "Microstructure",
+      "summary": "Estimate reliability separately across market conditions.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q080",
+      "number": 80,
+      "name": "Out-of-distribution detection",
+      "category": "Microstructure",
+      "summary": "Abstain on inputs unlike the training distribution.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P3",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "market/quality.ts",
+        "features/indicators.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q081",
+      "number": 81,
+      "name": "Token-program-aware parser",
+      "category": "Solana",
+      "summary": "Separate SPL Token and Token-2022 programs.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q082",
+      "number": 82,
+      "name": "Token extension policy engine",
+      "category": "Solana",
+      "summary": "Validate fees, delegates, hooks and freeze powers.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q083",
+      "number": 83,
+      "name": "Pool creation graph",
+      "category": "Solana",
+      "summary": "Relate tokens, deployers, pools and prior launches.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P2",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q084",
+      "number": 84,
+      "name": "Holder concentration timeline",
+      "category": "Solana",
+      "summary": "Track concentration changes since launch.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P1",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q085",
+      "number": 85,
+      "name": "Organic participation estimator",
+      "category": "Solana",
+      "summary": "Identify signs of non-independent participants.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P2",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q086",
+      "number": 86,
+      "name": "Funding-wallet relationship analysis",
+      "category": "Solana",
+      "summary": "Investigate common funding sources and links.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P2",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q087",
+      "number": 87,
+      "name": "Solana transaction latency breakdown",
+      "category": "Solana",
+      "summary": "Measure detect, simulate, sign, submit, land and confirm.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q088",
+      "number": 88,
+      "name": "Quote expiration and revalidation",
+      "category": "Solana",
+      "summary": "Fail closed when swap quotes expire or state changes.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q089",
+      "number": 89,
+      "name": "Execution-provider benchmarking",
+      "category": "Solana",
+      "summary": "Compare providers using controlled comparable samples.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q090",
+      "number": 90,
+      "name": "Liquidity emergency detector",
+      "category": "Solana",
+      "summary": "Identify withdrawals and evaluate safe exit options.",
+      "baseline": "NEEDS_EXTERNAL_FEED",
+      "priority": "P0",
+      "phase": "P4",
+      "parity": "SHARED_CORE_AND_VENUE_ADAPTER",
+      "integrationHints": [
+        "market/fabric.ts",
+        "providers/",
+        "safety/safety.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q091",
+      "number": 91,
+      "name": "Factor exposure decomposition",
+      "category": "Portfolio",
+      "summary": "Quantify shared market, asset and event risk.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "portfolio/correlation.ts",
+        "portfolio/ledger.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q092",
+      "number": 92,
+      "name": "Liquidity-adjusted position limits",
+      "category": "Portfolio",
+      "summary": "Constrain positions by realistic exit capacity.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "portfolio/correlation.ts",
+        "portfolio/ledger.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q093",
+      "number": 93,
+      "name": "Realized versus predicted P&L attribution",
+      "category": "Portfolio",
+      "summary": "Explain discrepancies between forecasts and execution.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "portfolio/correlation.ts",
+        "portfolio/ledger.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q094",
+      "number": 94,
+      "name": "Portfolio scenario policy",
+      "category": "Portfolio",
+      "summary": "Stress simultaneous drawdowns and exits.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P5",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "portfolio/correlation.ts",
+        "portfolio/ledger.ts"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q095",
+      "number": 95,
+      "name": "Autonomous incident response",
+      "category": "Operations",
+      "summary": "Pause safely and alert owner on critical failures.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P6",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "core/",
+        "ops/",
+        "qa/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q096",
+      "number": 96,
+      "name": "Metamorphic mathematical testing",
+      "category": "Operations",
+      "summary": "Verify logical invariants of numerical code.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P6",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "core/",
+        "ops/",
+        "qa/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q097",
+      "number": 97,
+      "name": "Property-based leakage testing",
+      "category": "Operations",
+      "summary": "Verify hidden future input cannot change past decisions.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P6",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "core/",
+        "ops/",
+        "qa/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q098",
+      "number": 98,
+      "name": "Shadow-model comparisons",
+      "category": "Operations",
+      "summary": "A/B candidate models without execution authority.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P6",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "core/",
+        "ops/",
+        "qa/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q099",
+      "number": 99,
+      "name": "Per-stage latency budgets",
+      "category": "Operations",
+      "summary": "Measure queue, model, risk and execution delays.",
+      "baseline": "BASE_EXISTS",
+      "priority": "P0",
+      "phase": "P6",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "core/",
+        "ops/",
+        "qa/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    },
+    {
+      "id": "MIA-Q100",
+      "number": 100,
+      "name": "Reproducible evidence packages",
+      "category": "Operations",
+      "summary": "Archive inputs, versions, assumptions and independent checks.",
+      "baseline": "PARTIAL",
+      "priority": "P0",
+      "phase": "P6",
+      "parity": "SHARED_CORE",
+      "integrationHints": [
+        "core/",
+        "ops/",
+        "qa/"
+      ],
+      "acceptance": "Point-in-time deterministic fixtures; OOS evidence; fail-closed missing data; identical PAPER/LIVE core evaluation."
+    }
+  ]
+}

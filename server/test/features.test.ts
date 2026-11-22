@@ -23,6 +23,27 @@ describe('FeatureEngine (incremental, Part 33.5)', () => {
     const up = synthCandles(250, { drift: 0.01, vol: 0.001 }); const u = new FeatureEngine(); u.ingest(up);
     expect(u.last!.rsi14).toBeGreaterThan(90); expect(u.last!.rsi14).toBeLessThanOrEqual(100);
   });
+  it('reports closed-bar 20-return distribution without look-ahead or invented shape statistics', () => {
+    const candles = Array.from({ length: 21 }, (_, i) => ({
+      t: i * 3_600_000, o: i === 20 ? 110 : 100,
+      h: i === 20 ? 110 : 100, l: i === 20 ? 110 : 100,
+      c: i === 20 ? 110 : 100, v: 1,
+    }));
+    const e = new FeatureEngine();
+    e.ingest(candles.slice(0, 20));
+    expect(Number.isNaN(e.last!.retMean20)).toBe(true);
+    expect(Number.isNaN(e.last!.retSkew20)).toBe(true);
+    e.ingest([candles[20]]);
+    expect(e.last!.retMean20).toBeCloseTo(Math.log(1.1) / 20, 12);
+    expect(e.last!.retSkew20).toBeGreaterThan(0);
+    expect(e.last!.retExcessKurt20).toBeGreaterThan(0);
+    const allAtOnce = new FeatureEngine(); allAtOnce.ingest(candles);
+    expect(allAtOnce.last!.retSkew20).toEqual(e.last!.retSkew20);
+    const flat = new FeatureEngine();
+    flat.ingest(candles.map((c) => ({ ...c, o: 100, h: 100, l: 100, c: 100 })));
+    expect(Number.isNaN(flat.last!.retSkew20)).toBe(true);
+    expect(Number.isNaN(flat.last!.retExcessKurt20)).toBe(true);
+  });
   it('Wilder RSI on a known sequence', () => {
     // classic Wilder example closes
     const closes = [44.34,44.09,44.15,43.61,44.33,44.83,45.10,45.42,45.84,46.08,45.89,46.03,45.61,46.28,46.28];
