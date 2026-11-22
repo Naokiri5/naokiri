@@ -82,8 +82,11 @@ const httpError = (code: number, msg: string) => Object.assign(new Error(msg), {
 /** Programming/infrastructure faults: these are server errors (500, logged), never "bad request". */
 const isServerFault = (e: any) => e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError
   || /^ERR_SQLITE|^SQLITE/.test(String(e?.code ?? '')) || /SQLITE_|database is locked/i.test(String(e?.message ?? ''));
-// Per-session budgets for routes that call paid APIs, many upstream endpoints, or run long CPU work.
-const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2) };
+// Per-session budgets for upstream requests and bounded analysis.
+const LIMITS = {
+  joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10),
+  instrument: limiter(60, 20), news: limiter(4, 2), behaviorEvidence: limiter(60, 20),
+};
 
 export async function routes(app: FastifyInstance) {
   /**
@@ -137,7 +140,7 @@ export async function routes(app: FastifyInstance) {
   });
   const limit = (req: FastifyRequest, l: keyof typeof LIMITS, what: string) => LIMITS[l].take(sha256(tokenOf(req) ?? req.ip), what);
 
-  await ditasRoutes(app);
+  await ditasRoutes(app, req => limit(req, 'behaviorEvidence', 'behavior evidence'));
   await knowledgeRoutes(app);
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));

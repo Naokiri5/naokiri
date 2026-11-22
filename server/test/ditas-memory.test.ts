@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { freshDb, seedInstrument } from './helpers.js';
 import { all, closeDb, get, getDb, openDb, run, tx } from '../src/db/db.js';
 import { SCHEMA_VERSION } from '../src/db/migrations.js';
