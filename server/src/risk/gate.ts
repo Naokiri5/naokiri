@@ -88,7 +88,10 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const d = market.deep.get(p.instrumentId);
   const estEntry = px.ask || px.price;
   const conservativeStopFill = p.stopPrice * (1 - pol.stopFillBufferPct / 100);
-  const perUnitLoss = estEntry - conservativeStopFill + pol.feeRate * (estEntry + conservativeStopFill);
+  // Size from the worst entry permitted by the slippage policy; actual fills are rechecked by the OMS.
+  // Keep the top ask for the separate notional cap, which must be enforced at the executed price.
+  const worstPermittedEntry = estEntry * (1 + pol.maxSlippageBps / 10_000);
+  const perUnitLoss = worstPermittedEntry - conservativeStopFill + pol.feeRate * (worstPermittedEntry + conservativeStopFill);
   const riskBudget = acct.equity * (pol.riskPerTradePct / 100);
   let qty = perUnitLoss > 0 ? riskBudget / perUnitLoss : 0;
   const maxNotional = Math.min(acct.equity * (pol.maxPositionNotionalPct / 100), acct.cash * 0.98);
