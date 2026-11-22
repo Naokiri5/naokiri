@@ -99,7 +99,13 @@ describe('WIN-01 verified Solana balance-delta normalizer', () => {
   it('never borrows other owners quote balance to create phantom buys', () => {
     const w=witness();
     expect(normalizeFinalizedSolanaSwapFromBalances({
-      ...w,postTokenBalances:[row(wallet,mint,'1000000000',9),row('8'.repeat(32),quote,'500000000',6)]
+      // The tracked wallet's quote remains unchanged; only a different owner moves quote.
+      ...w,postTokenBalances:[row(wallet,mint,'1000000000',9),row(wallet,quote,'1000000000',6),
+        row('8'.repeat(32),quote,'500000000',6)]
     })).toBeNull();
+    // Unrelated transfers from other owners must not block a genuine tracked-wallet swap.
+    expect(normalizeFinalizedSolanaSwapFromBalances({
+      ...w,postTokenBalances:[...w.postTokenBalances,row('8'.repeat(32),quote,'500000000',6)]
+    })?.side).toBe('BUY');
   });
 });
