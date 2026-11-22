@@ -24,6 +24,7 @@ export const VENUE = 'binance-paper';
 const feeRate = () => (currentPolicy()?.policy ?? DEFAULT_POLICY).feeRate;
 
 export class OmsError extends Error {}
+class EntryStateChanged extends Error {}
 
 function insertOrder(o: { clientOrderId: string; instrument: string; side: 'BUY' | 'SELL'; type: string; qty: number; limit?: number | null; stop?: number | null; status: string; purpose: string; positionId?: string | null; decisionId?: string | null; reject?: string | null; at?: number }) {
   const id = uid('ord'); const t = o.at ?? Date.now(); // `at`: same timestamp as the fill/ledger rows written with it
@@ -132,6 +133,10 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   let orderId: string;
   crashpoint('entry.preTx');
   try { orderId = tx(() => {
+    // BEGIN IMMEDIATE serializes writers. Recheck the pending row before reusing its order ID.
+    if (existing && !get("SELECT 1 FROM orders WHERE id=? AND status='PENDING_APPROVAL'", existing.id)) {
+      throw new EntryStateChanged();
+    }
     const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id });
     run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, Date.now(), oid);
     crashpoint('entry.order');
@@ -147,6 +152,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
     crashpoint('entry.precommit');
     return oid;
   }); } catch (e: any) {
+    if (e instanceof EntryStateChanged) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry is no longer pending approval' };
     // UNIQUE(client_order_id) is the last line of defence against a concurrent duplicate submission.
     if (/UNIQUE|constraint/i.test(String(e?.message))) return { ok: false, reason: `DUPLICATE: entry ${coid} was already submitted` };
     throw e;
@@ -159,8 +165,10 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   return { ok: true, orderId, positionId: posId };
 
   function reject(reason: string) {
-    if (existing) run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=?", reason, Date.now(), existing.id);
-    else insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
+    if (existing) {
+      const changed = run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", reason, Date.now(), existing.id);
+      if (Number(changed.changes) !== 1) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry is no longer pending approval' };
+    } else insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
     journal('ORDER', `Entry rejected for ${s.asset}: ${reason}`, s.id);
     bus.publish('order', { status: 'REJECTED', reason });
     return { ok: false, reason };
@@ -180,7 +188,12 @@ export function decideApproval(orderId: string, approve: boolean) {
   const o = get<any>('SELECT * FROM orders WHERE id=?', orderId);
   if (!o || o.status !== 'PENDING_APPROVAL') throw new OmsError('order is not pending approval');
   audit('owner', approve ? 'order.approve' : 'order.reject', { orderId });
-  if (!approve) { run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=?", Date.now(), orderId); journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId); return { ok: true }; }
+  if (!approve) {
+    const changed = run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), orderId);
+    if (Number(changed.changes) !== 1) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry is no longer pending approval' };
+    journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId);
+    return { ok: true };
+  }
   const rep = get<any>('SELECT report FROM decisions WHERE id=?', o.decision_id);
   if (!rep) throw new OmsError('decision record missing');
   return submitEntry(P(rep.report), 'owner');
@@ -188,7 +201,7 @@ export function decideApproval(orderId: string, approve: boolean) {
 export function expireApprovals() {
   for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.status='PENDING_APPROVAL'")) {
     const r = P<DecisionReport>(o.report);
-    if (Date.parse(r.consensus.expiresAt) <= Date.now()) run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed', updated_at=? WHERE id=?", Date.now(), o.id);
+    if (Date.parse(r.consensus.expiresAt) <= Date.now()) run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), o.id);
   }
 }
 

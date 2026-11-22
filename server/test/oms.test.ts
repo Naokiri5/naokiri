@@ -5,6 +5,7 @@ import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, getControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState, openPositions } from '../src/portfolio/ledger.js';
 import { submitEntry, monitorPositions, emergencyStop, closeAllPositions, closePosition, executeExit, queueForApproval, decideApproval, listOrders } from '../src/exec/oms.js';
+import { setCrashHook } from '../src/exec/crashpoint.js';
 import { reconcile, calendar } from '../src/portfolio/calendar.js';
 import { verifyAuditChain } from '../src/core/audit.js';
 import { run, all, get, J } from '../src/db/db.js';
@@ -57,6 +58,27 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', rep.id, rep.candidateId, id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
     const oid = queueForApproval(rep)!; expect(oid).toBeTruthy();
     const res = decideApproval(oid, true); expect(res, JSON.stringify(res)).toMatchObject({ ok: true });
+  });
+  it.each(['approve', 'cancel'] as const)('preserves the winning %s transition if it lands before the fill transaction', (winner) => {
+    updateControl('owner', { mode: 'APPROVAL' });
+    const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', rep.id, rep.candidateId, id, 'crypto', 'LONG', rep.strategy.id, rep.decision, 70, Date.now(), J(rep));
+    const oid = queueForApproval(rep)!;
+    setCrashHook((point) => {
+      if (point !== 'entry.preTx') return;
+      setCrashHook(null);
+      expect(decideApproval(oid, winner === 'approve').ok).toBe(true);
+    });
+    try {
+      expect(decideApproval(oid, true).ok).toBe(false);
+    } finally {
+      setCrashHook(null);
+    }
+    const fills = winner === 'approve' ? 1 : 0;
+    expect(all('SELECT id FROM fills WHERE order_id=?', oid)).toHaveLength(fills);
+    expect(openPositions()).toHaveLength(fills);
+    expect(get('SELECT status FROM orders WHERE id=?', oid)).toEqual({ status: fills ? 'FILLED' : 'CANCELLED' });
+    expect(reconcile().ok).toBe(true);
   });
   it('emergency stop: blocks, cancels, verifies protection, does not auto-close', () => {
     submitEntry(report(id, last), 'bot');
