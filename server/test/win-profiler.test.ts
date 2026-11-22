@@ -31,6 +31,13 @@ describe('WIN-02 wallet reconstruction (research only)', () => {
     expect(r.observedSwapCount).toBe(3);
     expect(r.matchedSellCount).toBe(1);
     expect(r.grossClosedPnlUsd).toBe(25); // 10*(3-1)+5*(3-2)
+    expect(r.closedLots).toHaveLength(2);
+    expect(r.closedLots.map(x => x.grossWhalePnlUsd)).toEqual([20, 5]);
+    expect(r.closedLots[0]).toMatchObject({
+      entryEvidenceId: expect.stringContaining('buy-a'),
+      exitEvidenceId: expect.stringContaining('sell-c'),
+      simulatedFollowerNetPnlUsd: null,
+    });
     expect(r.openCostBasisUsd).toBe(10); // five units at $2
     expect(r.stressUnrealizedPnlUsd).toBe(-10); // no verified full sell route
     expect(r.zeroLiquidityStressTokens).toBe(1);
@@ -90,6 +97,9 @@ describe('WIN-02 wallet reconstruction (research only)', () => {
     const r = profileVerifiedWalletSwaps([a,b,c], {...config,followerQuotes:quotes});
     expect(r.simulatedFollowerQuoteCoverage).toBe(1);
     expect(r.simulatedFollowerClosedPnlUsd).toBeCloseTo(21.15,8);
+    expect(r.closedLots.map(x => x.simulatedFollowerNetPnlUsd)).toHaveLength(2);
+    expect(r.closedLots.reduce((s, x) => s + (x.simulatedFollowerNetPnlUsd ?? 0), 0))
+      .toBeCloseTo(21.15, 8);
     expect(r.grossClosedPnlUsd).toBe(25);
     expect(r.automaticCopyEligible).toBe(false);
   });
