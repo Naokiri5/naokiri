@@ -19,6 +19,7 @@
 - WIN-03 safety-only preview: pure FAST evaluator requires verified direct swap, finality, token/sell-route checks, fresh follower quote, drift and after-cost edge. It cannot reach the OMS.
 - WIN-04 safe evidence: GET /api/whales/deep exposes only anonymous CEX print inference; deep hypothesis validator rejects future-available data and unvalidated models. It never identifies individual traders or executes trades.
 - Both evaluations, migration behavior, route authorization, CSRF and LIVE lock have regression tests.
+- WIN-06 partial UI: reuse existing /copy route and page; FAST read-only public address input/unfollow and DEEP inferred large-print display. Trading and live controls remain absent.
 
 ## Not yet implemented, and why
 
@@ -27,7 +28,7 @@
 - WIN-03 Solana token safety verified end-to-end, owner wallet signing, Jupiter actual quote-to-fill reliability, a Solana PAPER OMS adapter, signed QCI connection, automatic memecoin entries/exits.
 - WIN-04 licensed futures/forex/stock/ETF feeds, chart structure generation, point-in-time institutional filings, holdout and walk-forward calibrated performance, production multi-venue research.
 - WIN-05 capital reservations, futures/options margin, broker/DEX order lifecycle and crash reconciliation under a canonical existing OMS.
-- WIN-06 user-visible Whale Intelligence page, scaled index/store benchmark, full chaos/operations tests and release approval.
+- WIN-06 is PARTIAL: existing /copy page now offers FAST wallet selection, status, events and DEEP anonymous prints. A scaled index/store benchmark, full chaos/operations tests and release approval remain open.
 - LIVE is locked by MIA's existing G01-G14 release gate. No live signer, order, withdrawal or certified profitability in this PR.
 
 ## Existing canonical ownership (must not duplicate)
