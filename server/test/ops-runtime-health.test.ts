@@ -59,21 +59,46 @@ describe('canonical runtime health and entry safety', () => {
 });
 
 describe('SSE health integration', () => {
+  const streamIds = new Set<number>();
+  const open = (at: number) => {
+    const id = sseHealth.opened(at);
+    streamIds.add(id);
+    return id;
+  };
   beforeEach(() => freshDb());
   afterEach(() => {
     // Restore global counters even when a test fails before its last assertion.
-    while (sseHealth.state().activeStreams > 0) sseHealth.closed();
+    for (const id of streamIds) sseHealth.closed(id);
+    streamIds.clear();
   });
 
   it('tracks a real emitted heartbeat and closes without leaving a stale stream', () => {
-    sseHealth.opened(T - 100_000);
+    const streamId = open(T - 100_000);
     expect(sseHealth.state().activeStreams).toBe(1);
     expect(runtimeHealthChecks(T, { ...normal(), sseActiveStreams: sseHealth.state().activeStreams,
       sseLastFrameAtMs: sseHealth.state().lastFrameAtMs }).find((c) => c.name === 'runtime.sse')?.status).toBe('fail');
-    sseHealth.emitted(T - 1_000);
+    sseHealth.emitted(streamId, T - 1_000);
     expect(sseHealth.state().lastFrameAtMs).toBe(T - 1_000);
-    sseHealth.closed();
+    sseHealth.closed(streamId);
     expect(sseHealth.state()).toEqual({ activeStreams: 0, lastFrameAtMs: 0 });
+  });
+
+  it('does not let one healthy client hide a second stalled stream', () => {
+    const stale = open(T - 100_000);
+    const fresh = open(T - 1_000);
+    expect(sseHealth.state()).toEqual({ activeStreams: 2, lastFrameAtMs: T - 100_000 });
+    const asSample = () => normal({
+      sseActiveStreams: sseHealth.state().activeStreams,
+      sseLastFrameAtMs: sseHealth.state().lastFrameAtMs,
+    });
+    expect(status(asSample(), 'runtime.sse')).toBe('fail');
+    sseHealth.emitted(stale, T - 500);
+    expect(status(asSample(), 'runtime.sse')).toBe('pass');
+    sseHealth.closed(stale);
+    sseHealth.emitted(stale, T); // closed stream cannot resurrect itself
+    expect(sseHealth.state()).toEqual({ activeStreams: 1, lastFrameAtMs: T - 1_000 });
+    sseHealth.closed(fresh);
+    expect(status(asSample(), 'runtime.sse')).toBe('skip');
   });
 
   it('reads the real canonical SQLite database and V8 heap without opening a second DB', () => {
