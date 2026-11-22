@@ -17,7 +17,7 @@ export const NAV_GROUPS: NavGroup[] = [
     { to: '/bubbles', icon: '◍', label: 'Market Bubble Map', desc: 'Gainers, losers and market breadth', keywords: ['gainers', 'losers', 'breadth', 'movers', 'heatmap'] },
     { to: '/whales', icon: '◈', label: 'Whale & Launch Monitor', desc: 'Large exchange trades (not wallet identities)', keywords: ['whales', 'large trades', 'launches'] },
     { to: '/holders', icon: '⬡', label: 'Holder Map', desc: 'Holder clusters (needs an on-chain provider)', keywords: ['holders', 'on-chain', 'wallet clusters'] },
-    { to: '/copy', icon: '⧉', label: 'Copy Trading', desc: 'Wallet copy rules (needs an on-chain provider)', keywords: ['copy', 'follow wallets'] },
+    { to: '/copy', icon: '⧉', label: 'Whale Intelligence', desc: 'FAST read-only wallet follow and DEEP institutional-footprint research', keywords: ['copy', 'whale', 'follow wallets', 'deep', 'memecoin', 'strategy dna'] },
     { to: '/news', icon: '☰', label: 'News & Events', desc: 'Classified headlines and macro events', keywords: ['headlines', 'macro', 'events', 'calendar events'] },
   ] },
   { id: 'autopilot', label: 'Autopilot', icon: '◉', desc: 'Paper bot, risk limits and strategies', pages: [
