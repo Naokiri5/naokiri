@@ -19,12 +19,13 @@ COPY --from=builder /app/package.json /app/package.json
 COPY --from=builder /app/node_modules /app/node_modules
 COPY --from=builder /app/server/package.json /app/server/package.json
 COPY --from=builder /app/server/dist /app/server/dist
+COPY --from=builder /app/server/scripts/health-probe.mjs /app/server/scripts/health-probe.mjs
 COPY --from=builder /app/web/dist /app/web/dist
 USER mia
 EXPOSE 8787
 STOPSIGNAL SIGTERM
 # Existing /api/ready checks engine, SQLite WAL, and V8 runtime health.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:8787/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD ["node", "server/scripts/health-probe.mjs"]
 # main.ts executes canonical preflight BEFORE Fastify listen and before startBot().
 CMD ["node", "server/dist/main.js"]
