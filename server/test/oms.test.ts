@@ -80,6 +80,24 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     expect(get('SELECT status FROM orders WHERE id=?', oid)).toEqual({ status: fills ? 'FILLED' : 'CANCELLED' });
     expect(reconcile().ok).toBe(true);
   });
+  it('honors a pause committed after risk evaluation and before the fill transaction', () => {
+    setCrashHook((point) => {
+      if (point !== 'entry.preTx') return;
+      setCrashHook(null);
+      updateControl('owner', { pausedNewOrders: true });
+    });
+    try {
+      expect(submitEntry(report(id, last), 'bot')).toMatchObject({
+        ok: false,
+        reason: expect.stringContaining('NEW_ORDERS_PAUSED'),
+      });
+    } finally {
+      setCrashHook(null);
+    }
+    expect(openPositions()).toHaveLength(0);
+    expect(all('SELECT id FROM fills')).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
+  });
   it('emergency stop: blocks, cancels, verifies protection, does not auto-close', () => {
     submitEntry(report(id, last), 'bot');
     const e = emergencyStop('owner');
