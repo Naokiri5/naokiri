@@ -1,0 +1,51 @@
+Feature ID,Lane,Phase,Capability,Observed Status,Existing Owner or Source,Proposed Enhancement,Priority,Acceptance Criterion
+W001,BOTH,WIN-00,Single source ownership/duplicate inventory,EXISTING + GAP,"core, decision, risk, OMS",Map paths and PR overlap,P0,No duplicate core
+W002,BOTH,WIN-00,Original source preservation,NEW DESIGN,sources PDF+TXT,Keep exact originals byte-for-byte,P0,Hash-match archive
+W003,BOTH,WIN-00,PR stack ancestry reconciliation,GAP,#45/#46/#50/#92/#95/#106/#108,No broad merge without dependency review,P0,Base graph current
+W004,BOTH,WIN-01,Canonical instrument/contract registry,GAP,market/store.ts,Add venue/chain/multiplier/expiry,P0,No spot/future mixup
+W005,BOTH,WIN-01,Immutable provider evidence envelope,GAP,core/bus.ts and db,Versioned provenance and source timestamps,P0,Event replay and hash
+W006,FAST,WIN-01,Wallet discovery/index,OPEN PR PARTIAL,#46 Solana Hunter,Extend read-only candidate directory,P1,Paged distinct addresses
+W007,FAST,WIN-01,Provider RPC stream transport,OPEN PR PARTIAL,#46/#50/#95,Reuse approved RPC and HTTP clients,P0,No duplicate network stack
+W008,FAST,WIN-01,Net token balance-delta attribution,NEW DESIGN,source PDF observations.ts,Validate transfer vs swap and atomics,P0,Multi-hop and transfer tests
+W009,FAST,WIN-01,Finality/reorg gate,GAP,Solana RPC,Distinct confirmed/finalized evidence,P0,Unconfirmed never copied
+W010,FAST,WIN-01,Signature/leg deduplication,GAP,whale_observations proposal,Transaction-level uniqueness,P0,Duplicate not two orders
+W011,FAST,WIN-01,Millions-address tiered index,NEW DESIGN,whale_entities proposal,Historical index/active/followed tiers,P1,Bounded p95 refresh
+W012,FAST,WIN-02,Wallet FIFO trade reconstruction,NEW DESIGN,walletProfiler.ts proposal,Track partial lots and coverage,P0,Coverage and reconciliation
+W013,FAST,WIN-02,Unrealized dead-bag stress valuation,NEW DESIGN,walletProfiler.ts proposal,Separate mark and liquidation value,P1,Illiquid bags not hidden
+W014,FAST,WIN-02,Observed vs follower PnL,NEW DESIGN,walletProfiler.ts proposal,Net obtainable entry after latency,P0,"Follower price, not whale"
+W015,FAST,WIN-02,Whale source quality/MEV quarantine,NEW DESIGN,walletProfiler.ts proposal,"Mark bots, linked wallets and gaps",P1,Unreliable not auto-followed
+W016,FAST,WIN-02,Lag and slippage resiliency,NEW DESIGN,walletProfiler.ts proposal,Quantiles by notional / latency,P0,Benchmarked p50/p95/p99
+W017,FAST,WIN-02,Whale rank/calibration uncertainty,NEW DESIGN,source PDF score 40/35/25,Treat weighting as research baseline,P1,No fake win probability
+W018,FAST,WIN-03,One wallet follow config,PLACEHOLDER,GET /api/copy,Extend one existing authenticated route,P0,One active wallet per sleeve
+W019,FAST,WIN-03,Mint and Token-2022 safety,OPEN PR PARTIAL,#50; safety/safety.ts,"Extend checks, never upgrade on unknown",P0,Unknown is deny
+W020,FAST,WIN-03,Sell route and liquidity validation,GAP,Jupiter #95 read only quote,Require fresh follower obtainable quote,P0,Unexitable never auto-entry
+W021,FAST,WIN-03,Entry drift adverse price check,NEW DESIGN,fastSignals.ts proposal,Compare follower with whale fill,P0,Stale/chased rejected
+W022,FAST,WIN-03,Signer-free safe signal pipeline,NEW DESIGN,MIA_WIN_SAFE_FOUNDATION.ts,Pure CANDIDATE only,P0,No broker call
+W023,FAST,WIN-03,Authenticated QCI whale evidence,GAP,qci/coordinator.ts,Signed packet + reviewed domain cap,P0,Cannot bypass QCI veto
+W024,FAST,WIN-03,Paper Solana fill adapter,GAP,exec/oms.ts paper Binance,Add supported venue model under OMS,P0,Actual obtainable quote model
+W025,FAST,WIN-03,Whale sell evidence/position exit,GAP,exec/oms.ts,Only manage MIA-held positions,P0,No blind short/sell
+W026,DEEP,WIN-04,Crypto perp evidence adapter,OPEN PR PARTIAL,#95 broker data read-only,OI/funding/liquidations/licenses,P1,True data source and timestamps
+W027,DEEP,WIN-04,Forex footprint evidence,OPEN PR PARTIAL,#95 OANDA PRACTICE,Aggregated session context only,P1,No named whale fiction
+W028,DEEP,WIN-04,Exchange-traded futures feed,GAP,market providers,Licensed contract-specific source,P1,Contract rolls/multiplier
+W029,DEEP,WIN-04,Stocks ETFs tapes and filings,OPEN PR PARTIAL,#95 Alpaca PAPER metadata,Tape/13F/calendar provider,P1,No 13F lookahead
+W030,DEEP,WIN-04,Institutional point-in-time gate,NEW DESIGN,institutional.ts proposal,Actual availableAt and source times,P0,Replay embargo test
+W031,DEEP,WIN-04,Structure/liquidity zone DNA,NEW DESIGN,strategyDna.ts proposal,Reuse features/indicators.ts,P1,Trigger/stop/target versioned
+W032,DEEP,WIN-04,Historical backtest correctness,OPEN PR,#108,Reconcile gap/time-exit history,P0,No lookahead and costs
+W033,DEEP,WIN-04,Walkforward probability calibration,NEW DESIGN,strategyDna.ts proposal,"Benchmark to baseline, embargo",P0,Insufficient data abstains
+W034,DEEP,WIN-04,Product-aware friction and calendars,GAP,lab/strategies.ts spot long,Session/rollover/funding/fees,P0,Same strategy point-in-time
+W035,BOTH,WIN-05,Canonical risk gate reuse,EXISTING + GAP,risk/gate.ts,Extend account and products,P0,One veto authority
+W036,BOTH,WIN-05,Portfolio opportunity allocator,GAP,portfolio/ledger.ts,Prevent correlated over-allocation,P0,Aggregate cap enforced
+W037,BOTH,WIN-05,Durable order-intent reservation,GAP,"db migrations, OMS",Short atomic transaction no await,P0,Idempotent across crashes
+W038,BOTH,WIN-05,Venue order-state reconciliation,GAP,exec/demoLiveParity.ts spec,UNKNOWN query then settle,P0,Timeout not duplicate
+W039,BOTH,WIN-05,Position stops/protective incidents,EXISTING + GAP,exec/oms.ts; incidents.ts,Reuse and extend venue protection,P0,Partial fill protected
+W040,BOTH,WIN-05,Paper/live account separation,EXISTING + GAP,portfolio/ledger.ts,Scope by account/venue,P0,No cross-account ledger
+W041,BOTH,WIN-05,G01-G14 live lock,EXISTING,qa/gates.ts,Never weaken owner authorization,P0,Real adapter unreachable
+W042,BOTH,WIN-06,Whale Intelligence React workspace,NEW DESIGN,web/src/App.tsx,Reuse navigation and auth,P1,No false trade enablement
+W043,BOTH,WIN-06,Existing API version backward compatibility,EXISTING + GAP,api/routes.ts,"GET /api/copy evolves, no collision",P0,Legacy client test
+W044,BOTH,WIN-06,Event latency and backpressure telemetry,GAP,workers/runtime.ts; core/latency.ts,Instrument stage p95/p99,P1,No claimed 4ms SLA
+W045,BOTH,WIN-06,Crash fault/timeout/duplicate tests,NEW DESIGN,server/test; existing CI,Repro then fix,P0,Chaos suite pass
+W046,BOTH,WIN-06,GitHub CI behavior lock tests,GAP,.github/workflows/ci.yml,Replace static string guards,P0,Live adapter never called
+W047,BOTH,WIN-06,DITAS outcome linkage and promotion gate,EXISTING + GAP,ditas/,"Verified outcomes, versioned promotion",P0,No unverified auto-promotion
+W048,BOTH,WIN-LIVE,Licensed venue signer/native protection,NOT IMPLEMENTED,qa/gates.ts,Separate reviewed market adapters,P0,G01-14 + owner live approval
+W049,BOTH,WIN-LIVE,Deployment and persistent backend QA,UNKNOWN,server buildApp and infrastructure,Production network/backup/lease proof,P0,Failover and recovery drill
+W050,BOTH,WIN-00,Security/licensing threat model,NEW DESIGN,all external providers,Terms/redistribution/SSRF/keys,P0,Documented approvals

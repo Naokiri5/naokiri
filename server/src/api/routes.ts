@@ -35,6 +35,8 @@ import { listIncidents, acknowledgeIncident, IncidentError } from '../exec/incid
 import { listJournal } from '../journal/journal.js';
 import { recentNews, refreshNews } from '../news/news.js';
 import { recentPrints, printThreshold } from '../whales/prints.js';
+import { getWinCopyStatus, followOneWalletReadOnly, unfollowWalletReadOnly, recentWhaleObservations, getWinReadOnlyProfile, getWinLearningReadOnlyStatus } from '../whales/winRegistry.js';
+import { reconstructReadOnlyDeepFootprints } from '../whales/winDeep.js';
 import * as lab from '../lab/lab.js';
 import { STRATEGIES } from '../lab/strategies.js';
 import * as wallet from '../wallet/wallet.js';
@@ -398,8 +400,48 @@ export async function routes(app: FastifyInstance) {
       ],
       pipeline: ['Discover candidate whale wallets from on-chain transfers', 'Rank by verified, cost-adjusted historical performance (Part 4.3)', 'Detect a new trade by a followed wallet',
         'Treat it as a candidate: asset safety → 100-worker QCI → decision engine → deterministic risk gate', 'Paper-execute only within your limits; never mirror size blindly'],
-      note: 'No wallet data is simulated. Copy trading activates only after an on-chain provider is connected and the feature is tested.' };
+      note: 'No wallet data is simulated. Copy trading activates only after an on-chain provider is connected and the feature is tested.',
+      win: getWinCopyStatus(PAPER_ACCOUNT) };
   });
+  // WIN-01: read-only follow management. Global route hook already enforces
+  // the owner session and CSRF. No order or wallet signer is reachable here.
+  app.post('/api/copy/follow', async (req) => {
+    limit(req, 'instrument', 'win follow configuration');
+    const { walletAddress } = z.object({
+      walletAddress: z.string().trim().min(32).max(44)
+    }).strict().parse(req.body);
+    const follow = followOneWalletReadOnly(PAPER_ACCOUNT, walletAddress);
+    audit('owner', 'win.follow.read_only', { walletHash: sha256(follow.walletAddress) });
+    return getWinCopyStatus(PAPER_ACCOUNT);
+  });
+  app.delete('/api/copy/follow', async (req) => {
+    limit(req, 'instrument', 'win unfollow');
+    unfollowWalletReadOnly(PAPER_ACCOUNT);
+    audit('owner', 'win.unfollow.read_only');
+    return getWinCopyStatus(PAPER_ACCOUNT);
+  });
+  app.get('/api/copy/profile', async (req) => {
+    limit(req, 'instrument', 'read-only whale profile');
+    return getWinReadOnlyProfile(PAPER_ACCOUNT);
+  });
+  app.get('/api/copy/learning', async (req) => {
+    limit(req, 'instrument', 'read-only whale learning memory');
+    return getWinLearningReadOnlyStatus(PAPER_ACCOUNT);
+  });
+  app.get('/api/copy/observations', async (req) => {
+    const { limit: count } = z.object({
+      limit: z.coerce.number().int().min(1).max(200).default(100)
+    }).strict().parse(req.query ?? {});
+    return { status: 'READ_ONLY', events: recentWhaleObservations(PAPER_ACCOUNT, count),
+      provider: 'NOT_WIRED', executable: false };
+  });
+  app.get('/api/whales/deep', async () => ({
+    status: 'RESEARCH_ONLY', attribution: 'INFERRED_ENTITY',
+    method: 'ANONYMOUS_CEX_LARGE_PRINT',
+    note: 'These Binance prints do not reveal trader identities, strategy, or profitable positions.',
+    footprints: reconstructReadOnlyDeepFootprints(recentPrints(100), Date.now()),
+    calibratedStrategy: null, executable: false
+  }));
   app.get('/api/latency', async () => latencyReport());
   app.get('/api/notifications', async () => listNotifications(300));
   app.post('/api/notifications/read', async (req) => { const { id } = z.object({ id: z.string().min(1).max(64).optional() }).parse(req.body ?? {}); markRead(id); return { ok: true }; });

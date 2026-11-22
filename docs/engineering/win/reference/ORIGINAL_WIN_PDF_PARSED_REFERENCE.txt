@@ -1,0 +1,1113 @@
+# PARSED REFERENCE ONLY — not byte-identical to the owner's PDF.
+# Original PDF retained in the user-provided review bundle; consult original for exact text/layout.
+
+<PARSED TEXT FOR PAGE: 1 / 26>
+Document 1: Unified Engineering Specification
+(docs/WHALE_INTELLIGENCE_UNIFIED.md)
+Save this file at docs/WHALE_INTELLIGENCE_UNIFIED.md in Naokiri5/naokiri. It consolidates the
+complete architecture, all four pre-merge engineering refinements, the PR reconciliation order,
+SQLite schemas, milestone contracts (WIN-01 through WIN-06), wiring checklists, and
+operational acceptance criteria.
+
+
+
+
+    Markdown
+    # MIA Whale Intelligence Network (WIN-01 through WIN-06) — Unified Engineering Specification​
+    ​
+    **Repository:** `https://github.com/Naokiri5/naokiri` (MIA 5.x · Node.js `22.23.5` · `@mia/server`
+    + `@mia/web` · SQLite WAL · Cloudflare Wrangler) ​
+    **Subsystems:** `WIN-FAST` (Whale Reflex · Solana Memecoins) & `WIN-DEEP` (Whale
+    Architect · Futures, Forex, Equities) ​
+    **Execution Status:** `READ_ONLY` & `PAPER` Shadow Mode Enabled · `LIVE` Execution
+    Locked (`G01–G14` Certification Required)​
+    ​
+    ---​
+    ​
+    ## 1. Core Architectural Boundary & Attribution Split​
+    ​
+    MIA Whale Intelligence Network (WIN) is an evidence-and-strategy subsystem whose
+    output enters MIA's existing `QCI -> decision/engine.ts -> UnifiedRiskGovernor ->
+    DurableWhaleOmsBridge / PaperOmsAdapter` pipeline. It does **not** create a second
+    copy-trading order system or competing position database.​
+    ​
+    | Market Class | Attribution Class | Source Evidence | WIN Lane | Permitted Action |​
+    | :--- | :--- | :--- | :--- | :--- |​
+    | **Solana Memecoins** | `VERIFIED_WALLET` | Confirmed on-chain `SOLANA_WALLET_SWAP`
+    via Helius / Yellowstone Geyser | `FAST` | Single-wallet follow, Token-2022 mint audit,
+    Jupiter V2 obtainable-quote drift check |​
+    | **Crypto / Index Futures** | `INFERRED_ENTITY` | Anonymous `CEX_LARGE_PRINT`,
+    OI/funding anomalies, `FUTURES_POSITIONING` (CFTC COT) | `DEEP` | Liquidity sweep zone
+    reconstruction + walk-forward Brier probability |​
+    | **Forex** | `INFERRED_ENTITY` | Session liquidity sweeps, spread/rollover state,
+    `FUTURES_POSITIONING` (CFTC COT) | `DEEP` | Zone retest hypothesis +
+    net-of-spread/rollover expectancy check |​
+    | **Stocks & ETFs** | `INFERRED_ENTITY` | Consolidated tape blocks, `INSTITUTIONAL_FILING`
+    (SEC Form 13F), RTH session checks | `DEEP` | Point-in-time disclosure context + regular
+<PARSED TEXT FOR PAGE: 2 / 26>
+session (`09:30–16:00 ET`) zone retest |​
+​
+---​
+​
+## 2. Four Mandatory Pre-Merge Architectural Refinements​
+​
+1. **Net Balance-Delta Attribution Over Instruction Parsing (Solana):**​
+   Solana whales route through multi-hop Jupiter split-routes, Jito tip bundles, and
+Pump.fun-to-PumpSwap/Raydium migrations. `walletProfiler.ts` and `observations.ts`
+compute net asset changes directly from confirmed `preTokenBalances` and
+`postTokenBalances` (plus native SOL lamport deltas minus priority/Jito fees) per
+transaction signature via `normalizeSolanaSwapFromBalances()`.​
+2. **Unrealized "Dead-Bag" Penalty in Whale Scoring (`WIN-02`):**​
+   Whales in Solana memecoins frequently hold illiquid or rugged tokens indefinitely
+without selling. `profileWhaleWallet()` marks open unclosed lots to current executable pool
+liquidity (`unrealizedBagPnlUsd`, defaulting to `0` if liquidity is pulled), quarantines wallets
+with orphan sells (`coverageRatio < 0.85`), quarantines sub-3-second MEV/sandwich bots
+(`medianHoldingMs < 3000`), and penalizes strategies that collapse under a `+2,500ms`
+execution lag (`lagResilienceRatio`).​
+3. **Protecting the 4ms `SwarmThreadPool` Hot Path:**​
+   Helius/Geyser WebSocket stream parsing, Token-2022 RPC security checks
+(`screenSolanaMint()`), and Jupiter V2 quote fetches run inside dedicated async I/O
+workers. A `WhaleObservation` is published into `NexusFabricRouter` only *after* transaction
+confirmation and fail-closed safety screening pass so the 100-agent swarm loop never
+stalls.​
+4. **Strict PR Reconciliation Order (`PR #95` -> `PR #46` -> `PR #50`):**​
+   - **Step 1 (`PR #95`):** Merge provider HTTP/WS transport abstractions, Helius/RPC
+rate-limiters, and deadline timeouts into `server/src/providers/`.​
+   - **Step 2 (`PR #46`):** Merge base Solana RPC client, `confirmed` vs. `finalized`
+commitment helpers, and base58 decoders into `server/src/solana/`.​
+   - **Step 3 (`PR #50`):** Merge Solana mint-safety checks into `server/src/safety/safety.ts`
+and expose `screenSolanaMint(mintAddress, inspector, now, policy)`.​
+​
+---​
+​
+## 3. Milestone Breakdown (`WIN-01` through `WIN-06`)​
+​
+* **WIN-01 — Whale Registry & Balance-Delta Normalization:**​
+  Applies `migrations/007_whale_intelligence.sql` (`whale_entities`, `whale_observations`,
+`whale_follow_config`, `whale_strategy_hypotheses`, `whale_outcomes`) and implements
+`server/src/whales/observations.ts` + `server/src/whales/index.ts`.​
+* **WIN-02 — Cost-Adjusted & Lag-Resilient Whale Analytics:**​
+  Implements `server/src/whales/walletProfiler.ts` enforcing FIFO lot reconstruction,
+<PARSED TEXT FOR PAGE: 3 / 26>
+`MIN_CALIBRATED_TRADES = 25`, `MIN_COVERAGE_RATIO = 0.85`, `SIMULATED_COPY_LAG_MS =
+2500`, `SIMULATED_COPY_ROUNDTRIP_COST_BPS = 180`, dead-bag mark-to-market
+deductions, and composite `0–100` scoring (`40` PnL + `35` lag resilience + `25` drawdown
+control).​
+* **WIN-03 — WIN-FAST Paper Shadow Integration & `/api/copy`:**​
+  Implements fail-closed `screenSolanaMint()` in `server/src/safety/safety.ts`, obtainable-quote
+drift evaluation in `server/src/whales/fastSignals.ts` (rejecting chased entries such as Whale
+W-042's `+18%` / `+1800 bps` move), bounded QCI voting (`weight = 0.28 < 0.30`) in
+`server/src/workers/whaleFastEvidenceWorker.ts`, risk bridging in
+`server/src/risk/whaleRiskBridge.ts`, and `GET /api/copy` + `POST /api/copy/follow` in
+`server/src/routes/copyRoutes.ts`.​
+* **WIN-04 — WIN-DEEP Multi-Market Whale Strategy DNA:**​
+  Implements `server/src/whales/institutional.ts` (point-in-time gating for SEC Form 13F
+45-day filing lags and CFTC COT Friday 3:30 PM ET releases, 45-minute exponential decay
+half-life, 75%/25% impulse/structural blend), `server/src/whales/strategyDna.ts` (liquidity
+sweep zone reconstruction, embargoed walk-forward Brier calibration with `Brier <= 0.235`
+and `n >= 30`, Wilson 95% confidence bounds, NYSE/Nasdaq `09:30–16:00 ET` RTH gate,
+and causal `runNoLookaheadDeepReplay()`), and `GET /api/whales/deep` in
+`server/src/routes/whaleDeepRoutes.ts`.​
+* **WIN-05 — Account-Scoped Durable OMS & `UnifiedRiskGovernor` Integration:**​
+  Applies `migrations/008_whale_durable_oms.sql` (`whale_oms_intents`) and implements
+`server/src/exec/whaleDurableOmsBridge.ts` enforcing atomic SQLite WAL capital
+reservations by `idempotency_key`, 30-trade rolling expectancy revocation (`< 0` veto when
+`rolling30TradeCount >= 30`), product-specific risk rules (futures `maintenanceMarginRatio >=
+0.75`, forex `currentSpreadBps > 8.0`, equities `corporateActionHaltActive`), `LIVE_LOCKED`
+enforcement, and `reconcileInFlightOnStartup()`.​
+* **WIN-06 — Operational Validation, Chaos Suites & React Workspace UI:**​
+  Implements `win03Acceptance.test.ts`, `win04NoLookaheadAudit.test.ts`,
+`win06OmsChaos.test.ts`, `scripts/bootstrap-win.sh`, `scripts/apply-win-migrations.mjs`, and
+`web/src/components/WhaleIntelligencePanel.tsx`.​
+​
+---​
+​
+## 4. Wiring & Acceptance Verification Matrix​
+​
+1. **Server Startup (`server/src/index.ts`):**​
+   - Run `node scripts/apply-win-migrations.mjs` (or equivalent startup WAL migration runner)
+on `data/mia_ledger.sqlite`.​
+   - Call `await durableWhaleOmsBridge.reconcileInFlightOnStartup(paperAdaptersByAccount,
+Date.now())` **before** starting background whale or market ingestion workers.​
+   - Register `registerWhaleIntelligenceRoutes(app, db)` before `await app.ready()`.​
+2. **Frontend Navigation (`web/src/App.tsx`):**​
+   - Mount `WhaleIntelligencePanel` under **Trading -> Whale Intelligence** alongside
+<PARSED TEXT FOR PAGE: 4 / 26>
+     `ExecutionTelemetryPanel`.​
+     3. **10 Mandatory Acceptance Invariants:**​
+       - FAST never copies an unconfirmed, misidentified, duplicate-signature, or stale
+     transaction.​
+       - Missing token permissions, Token-2022 permanent delegates, failed sell routes, or
+     insufficient liquidity block automatic memecoin entry.​
+       - Simulated follower fills execute at MIA's obtainable quote price, never the whale's
+     historical fill.​
+       - DEEP distinguishes direct trader attribution from anonymous institutional footprints and
+     blocks SEC 13F / CFTC COT lookahead.​
+       - Embargoed walk-forward calibration returns `INSUFFICIENT_EVIDENCE` when sample
+     size is below 30 or Brier score exceeds `0.235`.​
+       - Paper and future live paths invoke identical canonical risk rules with separate account
+     identities and `LIVE_LOCKED` enforced until `G01–G14` certification.​
+       - Process crashes, venue timeouts, partial fills, and restarts reconcile via
+     `reconcileInFlightOnStartup()` without duplicate order resubmission.​
+
+
+Document 2: Complete TypeScript Signature & Contract Catalog
+(docs/WIN_TYPESCRIPT_CATALOG.md)
+Save this file at docs/WIN_TYPESCRIPT_CATALOG.md so Claude and Codex have every exact
+type definition, interface field, constant threshold, and function signature across all 18 files in
+one unified reference.
+
+
+
+
+     TypeScript
+     // ============================================================================​
+     // MIA WHALE INTELLIGENCE NETWORK (WIN-01..WIN-06) — TYPESCRIPT API CATALOG​
+     // ============================================================================​
+     ​
+     // ----------------------------------------------------------------------------​
+     // 1. server/src/whales/observations.ts (WIN-01)​
+     // ----------------------------------------------------------------------------​
+     export type WhaleSource =​
+         | "SOLANA_WALLET_SWAP"​
+         | "CEX_LARGE_PRINT"​
+         | "FUTURES_POSITIONING"​
+         | "INSTITUTIONAL_FILING";​
+     ​
+     export type WhaleLane = "FAST" | "DEEP";​
+     ​
+<PARSED TEXT FOR PAGE: 5 / 26>
+export interface WhaleObservation {​
+ id: string;​
+  source: WhaleSource;​
+  sourceId: string;​
+  instrumentId: string;​
+  observedAt: number;​
+  receivedAt: number;​
+  walletAddress?: string;​
+  transactionSignature?: string;​
+  slotOrBlock?: number;​
+  confirmed: boolean;​
+  side: "BUY" | "SELL" | "UNKNOWN";​
+  baseAmount: number;​
+  quoteAmount: number;​
+  effectivePrice: number;​
+  feeQuote: number;​
+  sourceSnapshotId: string;​
+  rawPayloadHash: string;​
+}​
+​
+export type WhaleAssessment =​
+  | { status: "RESEARCH_ONLY"; reason: string }​
+  | { status: "REJECTED"; reason: string }​
+  | { status: "CANDIDATE"; observationId: string };​
+​
+export interface SolanaTokenBalanceDelta {​
+  mint: string;​
+  owner: string;​
+  preAmountUi: number;​
+  postAmountUi: number;​
+}​
+​
+export declare function normalizeSolanaSwapFromBalances(params: {​
+ walletAddress: string;​
+ signature: string;​
+ slot: number;​
+ confirmed: boolean;​
+ observedAt: number;​
+ receivedAt: number;​
+ solFeeLamports: number;​
+ solPriceUsd: number;​
+ tokenDeltas: SolanaTokenBalanceDelta[];​
+ nativeSolDeltaUi: number;​
+ sourceSnapshotId: string;​
+<PARSED TEXT FOR PAGE: 6 / 26>
+}): WhaleObservation | null;​
+​
+export declare function assessWhaleObservation(​
+  event: WhaleObservation,​
+  lane: WhaleLane,​
+  now: number,​
+  maxAgeMs: number​
+): WhaleAssessment;​
+​
+// ----------------------------------------------------------------------------​
+// 2. server/src/whales/walletProfiler.ts (WIN-02)​
+// ----------------------------------------------------------------------------​
+export interface ReconstructedLot {​
+    instrumentId: string;​
+  openTime: number;​
+  closeTime: number | null;​
+  entryPrice: number;​
+  exitPrice: number | null;​
+  quantity: number;​
+  realizedPnlUsd: number;​
+  unrealizedPnlUsd: number;​
+  delayedCopyPnlUsd: number;​
+  holdingMs: number;​
+}​
+​
+export interface WhaleProfileMetrics {​
+  walletAddress: string;​
+  verifiedTradeCount: number;​
+  orphanSellCount: number;​
+  coverageRatio: number;​
+  realizedNetPnlUsd: number;​
+  unrealizedBagPnlUsd: number;​
+  totalAdjustedPnlUsd: number;​
+  maxDrawdownPct: number;​
+  medianHoldingMs: number;​
+  delayedCopyNetPnlUsd: number;​
+  lagResilienceRatio: number;​
+  status: "INSUFFICIENT_EVIDENCE" | "CALIBRATED" | "QUARANTINED";​
+  qualityScore: number | null;​
+  disqualificationReason?: string;​
+}​
+​
+export interface MarkPriceLookup {​
+<PARSED TEXT FOR PAGE: 7 / 26>
+  getMarkPrice(instrumentId: string): number | null;​
+  getDelayedQuotePrice(​
+    instrumentId: string,​
+    observedAt: number,​
+    lagMs: number,​
+    side: "BUY" | "SELL"​
+  ): number | null;​
+}​
+​
+export declare function profileWhaleWallet(​
+  walletAddress: string,​
+  chronologicalSwaps: readonly WhaleObservation[],​
+  marketLookup: MarkPriceLookup,​
+  now: number​
+): WhaleProfileMetrics;​
+​
+// ----------------------------------------------------------------------------​
+// 3. server/src/safety/safety.ts (WIN-03 · Reconciled with PR #50)​
+// ----------------------------------------------------------------------------​
+export interface SolanaMintSecuritySnapshot {​
+    mintAddress: string;​
+  programId: "TOKEN_LEGACY" | "TOKEN_2022" | "UNKNOWN";​
+  mintAuthorityRevoked: boolean;​
+  freezeAuthorityRevoked: boolean;​
+  transferFeeBps: number;​
+  hasPermanentDelegate: boolean;​
+  hasNonTransferableExtension: boolean;​
+  poolLiquidityUsd: number;​
+  top10HoldersPct: number;​
+  creatorRemainingPct: number;​
+  creatorSoldRecently: boolean;​
+  sellSimulationSuccess: boolean;​
+  simulatedSellTaxBps: number;​
+  fetchedAt: number;​
+}​
+​
+export interface SolanaSafetyPolicy {​
+  minPoolLiquidityUsd: number;​
+  maxTop10HoldersPct: number;​
+  maxTransferFeeBps: number;​
+  maxSimulatedSellTaxBps: number;​
+  maxSnapshotAgeMs: number;​
+}​
+<PARSED TEXT FOR PAGE: 8 / 26>
+​
+export interface MintSafetyVerdict {​
+    safe: boolean;​
+  vetoReasons: string[];​
+  snapshot: SolanaMintSecuritySnapshot | null;​
+}​
+​
+export interface SolanaMintInspector {​
+  fetchMintSecuritySnapshot(​
+    mintAddress: string,​
+    timeoutMs: number​
+  ): Promise<SolanaMintSecuritySnapshot | null>;​
+}​
+​
+export declare const DEFAULT_SOLANA_SAFETY_POLICY: SolanaSafetyPolicy;​
+​
+export declare function screenSolanaMint(​
+  mintAddress: string,​
+  inspector: SolanaMintInspector,​
+  now: number,​
+  policy?: SolanaSafetyPolicy​
+): Promise<MintSafetyVerdict>;​
+​
+// ----------------------------------------------------------------------------​
+// 4. server/src/whales/fastSignals.ts (WIN-03)​
+// ----------------------------------------------------------------------------​
+export interface WhaleFollowConfig {​
+    configId: string;​
+  whaleId: string;​
+  walletAddress: string;​
+  lane: "FAST";​
+  selectionMode: "USER_SELECTED" | "MIA_PROPOSED";​
+  executionMode: "READ_ONLY" | "PAPER" | "LIVE_LOCKED";​
+  maxEntryDriftBps: number;​
+  maxSignalAgeMs: number;​
+  minPoolLiquidityUsd: number;​
+  targetNotionalUsd: number;​
+  active: boolean;​
+}​
+​
+export interface ObtainableDexQuote {​
+  mintAddress: string;​
+  side: "BUY" | "SELL";​
+<PARSED TEXT FOR PAGE: 9 / 26>
+  notionalUsd: number;​
+  obtainablePriceUsd: number;​
+  priceImpactBps: number;​
+  estimatedPriorityFeeUsd: number;​
+  routeHopCount: number;​
+  quoteExpiresAt: number;​
+}​
+​
+export interface JupiterQuoteProvider {​
+  getObtainableQuote(params: {​
+    mintAddress: string;​
+    side: "BUY" | "SELL";​
+    notionalUsd: number;​
+    maxSlippageBps: number;​
+  }): Promise<ObtainableDexQuote | null>;​
+}​
+​
+export interface QciWhaleEvidencePacket {​
+  packetId: string;​
+  sourceDomain: "WHALE_FAST";​
+  sleeve: "memecoin";​
+  observationId: string;​
+  whaleId: string;​
+  walletAddress: string;​
+  instrumentId: string;​
+  mintAddress: string;​
+  side: "BUY" | "SELL";​
+  whaleEffectivePrice: number;​
+  miaObtainablePrice: number;​
+  entryDriftBps: number;​
+  priceImpactBps: number;​
+  estimatedPriorityFeeUsd: number;​
+  whaleQualityScore: number;​
+  lagResilienceRatio: number;​
+  safetySnapshotFetchedAt: number;​
+  quoteExpiresAt: number;​
+  createdAt: number;​
+}​
+​
+export type FastSignalEvaluationResult =​
+  | {​
+      outcome: "REJECTED";​
+      observationId: string;​
+<PARSED TEXT FOR PAGE: 10 / 26>
+        reasons: string[];​
+        whaleEntryPrice: number;​
+        miaObtainablePrice: number | null;​
+        entryDriftBps: number | null;​
+      }​
+    | {​
+        outcome: "READ_ONLY_LOGGED";​
+        observationId: string;​
+        packet: QciWhaleEvidencePacket;​
+      }​
+    | {​
+        outcome: "QCI_CANDIDATE_READY";​
+        observationId: string;​
+        packet: QciWhaleEvidencePacket;​
+      };​
+​
+export interface FastSignalDependencies {​
+    mintInspector: SolanaMintInspector;​
+  quoteProvider: JupiterQuoteProvider;​
+  hasProcessedSignature: (signature: string) => boolean;​
+}​
+​
+export declare function evaluateFastWhaleSignal(​
+  observation: WhaleObservation,​
+  followConfig: WhaleFollowConfig,​
+  whaleProfile: WhaleProfileMetrics,​
+  deps: FastSignalDependencies,​
+  now: number​
+): Promise<FastSignalEvaluationResult>;​
+​
+// ----------------------------------------------------------------------------​
+// 5. server/src/workers/whaleFastEvidenceWorker.ts (WIN-03)​
+// ----------------------------------------------------------------------------​
+export interface QciEvidenceVote {​
+    workerId: string;​
+    sourceDomain: string;​
+    instrumentId: string;​
+    sleeve: "memecoin";​
+    direction: "LONG" | "SHORT" | "ABSTAIN";​
+    confidence: number;​
+    weight: number;​
+    evidenceRefId: string;​
+    rationale: string;​
+    expiresAt: number;​
+<PARSED TEXT FOR PAGE: 11 / 26>
+}​
+​
+export interface QciConsensusSnapshot {​
+    instrumentId: string;​
+  verdict: "TRADE" | "WAIT" | "REJECT";​
+  aggregatedConfidence: number;​
+  supportingWorkerCount: number;​
+  adversarialVetoTriggered: boolean;​
+  vetoReason?: string;​
+}​
+​
+export declare function buildWhaleFastQciVote(​
+  packet: QciWhaleEvidencePacket,​
+  now: number​
+): QciEvidenceVote;​
+​
+// ----------------------------------------------------------------------------​
+// 6. server/src/risk/whaleRiskBridge.ts (WIN-03)​
+// ----------------------------------------------------------------------------​
+export interface SleeveRiskState {​
+    sleeve: "memecoin";​
+  allocatedCapitalUsd: number;​
+  currentExposureUsd: number;​
+  dailyRealizedPnlUsd: number;​
+  dailyDrawdownLimitUsd: number;​
+  rolling30TradeExpectancyUsd: number;​
+  circuitBreakerTripped: boolean;​
+}​
+​
+export interface RiskAuthorizationDecision {​
+  approved: boolean;​
+  canonicalDecisionId: string;​
+  authorizedNotionalUsd: number;​
+  executionMode: "PAPER";​
+  vetoReason?: string;​
+}​
+​
+export interface PaperOrderIntent {​
+  intentId: string;​
+  canonicalDecisionId: string;​
+  sleeve: "memecoin";​
+  instrumentId: string;​
+  side: "BUY" | "SELL";​
+<PARSED TEXT FOR PAGE: 12 / 26>
+  notionalUsd: number;​
+  limitPriceUsd: number;​
+  maxSlippageBps: number;​
+  stopLossPct: number;​
+  takeProfitPct: number;​
+  metadata: {​
+    lane: "FAST";​
+    observationId: string;​
+    whaleId: string;​
+    whaleEntryPrice: number;​
+    entryDriftBps: number;​
+  };​
+}​
+​
+export interface PaperOmsExecutor {​
+  submitPaperShadowOrder(intent: PaperOrderIntent): Promise<{​
+    accepted: boolean;​
+    simulatedFillPriceUsd: number | null;​
+    rejectReason?: string;​
+  }>;​
+}​
+​
+export interface WhaleOutcomeRepository {​
+  recordWhaleOutcome(record: {​
+    outcomeId: string;​
+    observationId: string;​
+    canonicalDecisionId: string;​
+    lane: "FAST";​
+    decisionVerdict: "TRADE" | "WAIT" | "MONITOR" | "REJECT";​
+    vetoReason: string | null;​
+    whaleEntryPrice: number;​
+    miaObtainablePrice: number | null;​
+    entryDriftBps: number | null;​
+    recordedAt: number;​
+  }): void;​
+}​
+​
+export declare function authorizeWhaleFastRisk(params: {​
+ packet: QciWhaleEvidencePacket;​
+ qciConsensus: QciConsensusSnapshot;​
+ sleeveRisk: SleeveRiskState;​
+ requestedNotionalUsd: number;​
+ requestedExecutionMode: "READ_ONLY" | "PAPER" | "LIVE_LOCKED";​
+<PARSED TEXT FOR PAGE: 13 / 26>
+ now: number;​
+}): RiskAuthorizationDecision;​
+​
+export declare function executeWhaleFastPaperShadow(params: {​
+ packet: QciWhaleEvidencePacket;​
+ riskDecision: RiskAuthorizationDecision;​
+ paperOms: PaperOmsExecutor;​
+ outcomeRepo: WhaleOutcomeRepository;​
+ now: number;​
+}): Promise<void>;​
+​
+// ----------------------------------------------------------------------------​
+// 7. server/src/whales/institutional.ts (WIN-04)​
+// ----------------------------------------------------------------------------​
+export type DeepMarketClass = "FUTURES" | "FOREX" | "EQUITIES";​
+​
+export interface InstitutionalFootprintRecord {​
+    footprintId: string;​
+  source: Exclude<WhaleSource, "SOLANA_WALLET_SWAP">;​
+  marketClass: DeepMarketClass;​
+  instrumentId: string;​
+  attributionClass: "INFERRED_ENTITY";​
+  eventPeriodEndAt: number;​
+  availableAt: number;​
+  directionalBias: "ACCUMULATION" | "DISTRIBUTION" | "NEUTRAL";​
+  footprintIntensity: number;​
+  structuralContextOnly: boolean;​
+  metrics: {​
+    notionalUsd?: number;​
+    volumeZScore?: number;​
+    openInterestDeltaPct?: number;​
+    fundingRateBps?: number;​
+    liquidationImbalanceUsd?: number;​
+    cotLeveragedNetZScore?: number;​
+    sec13fQuarterShareDeltaPct?: number;​
+    darkPoolBlockRatio?: number;​
+  };​
+  sourceSnapshotId: string;​
+}​
+​
+export interface AggregatedInstitutionalContext {​
+  instrumentId: string;​
+  marketClass: DeepMarketClass;​
+  asOfTime: number;​
+<PARSED TEXT FOR PAGE: 14 / 26>
+  netDirectionalScore: number;​
+  impulseIntensity: number;​
+  structuralBiasScore: number;​
+  supportingRecordIds: string[];​
+  discardedLookaheadCount: number;​
+  staleRecordCount: number;​
+}​
+​
+export declare function isPointInTimeAvailable(​
+  record: InstitutionalFootprintRecord,​
+  asOfTime: number​
+): { valid: boolean; reason?: string };​
+​
+export declare function buildInstitutionalFootprintFromObservation(params: {​
+ observation: WhaleObservation;​
+ marketClass: DeepMarketClass;​
+ availableAt: number;​
+ metrics: InstitutionalFootprintRecord["metrics"];​
+}): InstitutionalFootprintRecord | null;​
+​
+export declare function synthesizeInstitutionalContext(​
+  instrumentId: string,​
+  marketClass: DeepMarketClass,​
+  records: readonly InstitutionalFootprintRecord[],​
+  asOfTime: number​
+): AggregatedInstitutionalContext;​
+​
+// ----------------------------------------------------------------------------​
+// 8. server/src/whales/strategyDna.ts (WIN-04)​
+// ----------------------------------------------------------------------------​
+export interface OhlcvBar {​
+    timestamp: number;​
+  open: number;​
+  high: number;​
+  low: number;​
+  close: number;​
+  volume: number;​
+  vwap: number;​
+  atr14: number;​
+  bidAskSpreadBps: number;​
+}​
+​
+export interface MarketFrictionModel {​
+  marketClass: DeepMarketClass;​
+<PARSED TEXT FOR PAGE: 15 / 26>
+  takerFeeBps: number;​
+  makerFeeBps: number;​
+  slippageBps: number;​
+  carryCostBpsPerHour: number;​
+  signalToFillLatencyMs: number;​
+  enforceRegularTradingHours: boolean;​
+}​
+​
+export declare const DEFAULT_FRICTION_MODELS: Record<DeepMarketClass,
+MarketFrictionModel>;​
+​
+export interface LiquiditySweepZone {​
+  direction: "LONG" | "SHORT";​
+  sweptLevel: number;​
+  sweepExtremePrice: number;​
+  entryZone: { low: number; high: number };​
+  invalidationPrice: number;​
+  targetPrice: number;​
+  vwapAnchor: number;​
+  detectedAt: number;​
+}​
+​
+export interface HistoricalSetupSample {​
+  setupId: string;​
+  strategyId: string;​
+  marketClass: DeepMarketClass;​
+  instrumentId: string;​
+  decisionTime: number;​
+  resolvedAt: number;​
+  rawModelScore: number;​
+  netReturnBps: number;​
+  profitableAfterCosts: boolean;​
+}​
+​
+export interface WalkForwardCalibrationReport {​
+  strategyId: string;​
+  marketClass: DeepMarketClass;​
+  status: "CALIBRATED" | "INSUFFICIENT_EVIDENCE";​
+  sampleSize: number;​
+  brierScore: number | null;​
+  logLoss: number | null;​
+  calibratedProbability: number | null;​
+  uncertaintyInterval: { low: number; high: number } | null;​
+<PARSED TEXT FOR PAGE: 16 / 26>
+  expectedNetReturnBps: number | null;​
+  disqualificationReason?: string;​
+}​
+​
+export interface DeepStrategyHypothesis {​
+  hypothesisId: string;​
+  observationId: string;​
+  lane: "DEEP";​
+  marketClass: DeepMarketClass;​
+  instrumentId: string;​
+  direction: "LONG" | "SHORT" | "NONE";​
+  strategyId: string;​
+  strategyVersion: string;​
+  evidenceSnapshotId: string;​
+  entryZone: { low: number; high: number } | null;​
+  invalidationPrice: number | null;​
+  targetPrice: number | null;​
+  maxHoldingMs: number;​
+  calibratedProbability: number | null;​
+  uncertaintyLow: number | null;​
+  uncertaintyHigh: number | null;​
+  probabilitySampleSize: number;​
+  expectedNetEdgeBps: number | null;​
+  status: "RESEARCH_ONLY" | "CANDIDATE";​
+  rejectionReason?: string;​
+  expiresAt: number;​
+  createdAt: number;​
+}​
+​
+export interface NoLookaheadReplayTrade {​
+  hypothesisId: string;​
+  marketClass: DeepMarketClass;​
+  instrumentId: string;​
+  direction: "LONG" | "SHORT";​
+  decisionTime: number;​
+  fillTime: number;​
+  exitTime: number;​
+  entryPrice: number;​
+  exitPrice: number;​
+  exitReason: "TARGET_HIT" | "INVALIDATION_STOP" | "MAX_HOLDING_EXPIRY";​
+  grossReturnBps: number;​
+  totalFrictionBps: number;​
+  netReturnBps: number;​
+<PARSED TEXT FOR PAGE: 17 / 26>
+}​
+​
+export interface NoLookaheadReplaySummary {​
+    marketClass: DeepMarketClass;​
+  totalBarsEvaluated: number;​
+  candidateCount: number;​
+  executedTradeCount: number;​
+  winRatePct: number;​
+  meanNetReturnBps: number;​
+  cumulativeNetReturnBps: number;​
+  maxDrawdownBps: number;​
+  trades: NoLookaheadReplayTrade[];​
+}​
+​
+export declare function detectLiquiditySweepZone(​
+  bars: readonly OhlcvBar[],​
+  institutionalNetScore: number,​
+  now: number​
+): LiquiditySweepZone | null;​
+​
+export declare function calibrateWalkForwardProbability(params: {​
+ strategyId: string;​
+ marketClass: DeepMarketClass;​
+ historicalSamples: readonly HistoricalSetupSample[];​
+ currentRawScore: number;​
+ asOfTime: number;​
+}): WalkForwardCalibrationReport;​
+​
+export declare function isUsEquitiesRegularSession(timestampMs: number): boolean;​
+​
+export declare function evaluateDeepStrategyHypothesis(params: {​
+ observationId: string;​
+ instrumentId: string;​
+ marketClass: DeepMarketClass;​
+ bars: readonly OhlcvBar[];​
+ institutionalRecords: readonly InstitutionalFootprintRecord[];​
+ historicalSamples: readonly HistoricalSetupSample[];​
+ now: number;​
+ maxHoldingMs?: number;​
+ frictionModel?: MarketFrictionModel;​
+}): DeepStrategyHypothesis;​
+​
+export declare function runNoLookaheadDeepReplay(params: {​
+ instrumentId: string;​
+ marketClass: DeepMarketClass;​
+<PARSED TEXT FOR PAGE: 18 / 26>
+ chronologicalBars: readonly OhlcvBar[];​
+ allInstitutionalRecords: readonly InstitutionalFootprintRecord[];​
+ seedCalibrationSamples: readonly HistoricalSetupSample[];​
+ maxHoldingBars?: number;​
+ frictionModel?: MarketFrictionModel;​
+}): NoLookaheadReplaySummary;​
+​
+// ----------------------------------------------------------------------------​
+// 9. server/src/exec/whaleDurableOmsBridge.ts (WIN-05)​
+// ----------------------------------------------------------------------------​
+export type WhaleOmsSleeve = "memecoin" | "futures" | "forex" | "stocks_etf";​
+​
+export type WhaleOmsState =​
+    | "RESERVED"​
+    | "SUBMITTED"​
+    | "PARTIAL_FILL"​
+    | "FILLED"​
+    | "CANCELLED"​
+    | "VETOED"​
+    | "RECONCILE_HALTED";​
+​
+export interface UnifiedSleeveRiskSnapshot {​
+    accountId: string;​
+  sleeve: WhaleOmsSleeve;​
+  executionMode: "PAPER" | "LIVE_LOCKED";​
+  allocatedCapitalUsd: number;​
+  activeExposureUsd: number;​
+  reservedMarginUsd: number;​
+  dailyRealizedPnlUsd: number;​
+  dailyDrawdownLimitUsd: number;​
+  rolling30TradeCount: number;​
+  rolling30TradeExpectancyUsd: number;​
+  emergencyPauseActive: boolean;​
+  g01ToG14Certified: boolean;​
+  maxPermittedLeverage: number;​
+  maintenanceMarginRatio?: number;​
+  currentSpreadBps?: number;​
+  corporateActionHaltActive?: boolean;​
+}​
+​
+export interface UnifiedWhaleTradeIntent {​
+  idempotencyKey: string;​
+  canonicalDecisionId: string;​
+  accountId: string;​
+<PARSED TEXT FOR PAGE: 19 / 26>
+  executionMode: "PAPER" | "LIVE_LOCKED";​
+  lane: "FAST" | "DEEP";​
+  sleeve: WhaleOmsSleeve;​
+  instrumentId: string;​
+  side: "BUY" | "SELL";​
+  requestedNotionalUsd: number;​
+  requestedLeverage: number;​
+  limitPrice: number;​
+  stopLossPrice: number;​
+  takeProfitPrice: number;​
+  expiresAt: number;​
+}​
+​
+export interface VenueOrderAdapter {​
+  readonly accountId: string;​
+  readonly executionMode: "PAPER";​
+  placeOrder(intent: {​
+    intentId: string;​
+    idempotencyKey: string;​
+    instrumentId: string;​
+    side: "BUY" | "SELL";​
+    notionalUsd: number;​
+    leverage: number;​
+    limitPrice: number;​
+    stopLossPrice: number;​
+    takeProfitPrice: number;​
+  }): Promise<{​
+    status: "FILLED" | "PARTIAL_FILL" | "OPEN" | "REJECTED";​
+    venueOrderId: string | null;​
+    filledNotionalUsd: number;​
+    avgFillPrice: number | null;​
+    rejectReason?: string;​
+  }>;​
+  queryOrderByClientKey(idempotencyKey: string): Promise<{​
+    found: boolean;​
+    status: "FILLED" | "PARTIAL_FILL" | "OPEN" | "CANCELLED" | "UNKNOWN";​
+    venueOrderId: string | null;​
+    filledNotionalUsd: number;​
+    avgFillPrice: number | null;​
+  }>;​
+}​
+​
+export interface DurableExecutionReceipt {​
+<PARSED TEXT FOR PAGE: 20 / 26>
+        intentId: string;​
+      state: WhaleOmsState;​
+      reservedMarginUsd: number;​
+      filledNotionalUsd: number;​
+      avgFillPrice: number | null;​
+      vetoOrErrorReason: string | null;​
+    }​
+    ​
+    export declare function evaluateCanonicalWhaleRisk(​
+      intent: UnifiedWhaleTradeIntent,​
+      risk: UnifiedSleeveRiskSnapshot,​
+      now: number​
+    ): { approved: boolean; requiredMarginUsd: number; vetoReason?: string };​
+    ​
+    export declare class DurableWhaleOmsBridge {​
+        constructor(db: unknown);​
+      submitDurableIntent(​
+        intent: UnifiedWhaleTradeIntent,​
+        risk: UnifiedSleeveRiskSnapshot,​
+        adapter: VenueOrderAdapter,​
+        now: number​
+      ): Promise<DurableExecutionReceipt>;​
+      reconcileInFlightOnStartup(​
+        adaptersByAccount: ReadonlyMap<string, VenueOrderAdapter>,​
+        now: number​
+      ): Promise<{ reconciledCount: number; haltedCount: number }>;​
+    }​
+    ​
+    // ----------------------------------------------------------------------------​
+    // 10. Routes & Barrel (server/src/routes/* & server/src/whales/index.ts)​
+    // ----------------------------------------------------------------------------​
+    export declare function registerCopyRoutes(app: unknown, db: unknown): void;​
+    export declare function registerWhaleDeepRoutes(app: unknown, db: unknown): void;​
+    export declare function registerWhaleIntelligenceRoutes(app: unknown, db: unknown): void;​
+
+
+Document 3: GitHub Actions CI & Safety Workflow
+(.github/workflows/mia-win-ci.yml)
+Save this file at .github/workflows/mia-win-ci.yml. It automates idempotent bootstrap and
+SQLite WAL migration checks, verifies that no uncertified live execution bypass exists, runs
+strict TypeScript typechecks across @mia/server and @mia/web, executes all three Vitest
+suites (win03Acceptance.test.ts, win04NoLookaheadAudit.test.ts, win06OmsChaos.test.ts),
+and builds both workspaces on Node.js 22.23.5.
+<PARSED TEXT FOR PAGE: 21 / 26>
+YAML
+name: MIA Whale Intelligence Network (WIN-01..WIN-06) CI​
+​
+on:​
+ push:​
+     branches: [main]​
+     paths:​
+      - "migrations/007_whale_intelligence.sql"​
+      - "migrations/008_whale_durable_oms.sql"​
+      - "server/src/whales/**"​
+      - "server/src/safety/**"​
+      - "server/src/workers/whaleFastEvidenceWorker.ts"​
+      - "server/src/risk/whaleRiskBridge.ts"​
+      - "server/src/exec/whaleDurableOmsBridge.ts"​
+      - "server/src/exec/__tests__/win06OmsChaos.test.ts"​
+      - "server/src/routes/copyRoutes.ts"​
+      - "server/src/routes/whaleDeepRoutes.ts"​
+      - "web/src/components/WhaleIntelligencePanel.tsx"​
+      - "scripts/bootstrap-win.sh"​
+      - "scripts/apply-win-migrations.mjs"​
+      - ".github/workflows/mia-win-ci.yml"​
+    pull_request:​
+     branches: [main]​
+​
+concurrency:​
+ group: mia-win-ci-${{ github.ref }}​
+    cancel-in-progress: true​
+​
+jobs:​
+  win-safety-and-migration-audit:​
+     name: WIN Safety Lock, Bootstrap & SQLite WAL Migration Audit​
+     runs-on: ubuntu-latest​
+     steps:​
+      - name: Checkout repository​
+       uses: actions/checkout@v4​
+​
+      - name: Setup Node.js 22.23.5​
+       uses: actions/setup-node@v4​
+       with:​
+        node-version: "22.23.5"​
+<PARSED TEXT FOR PAGE: 22 / 26>
+        cache: "npm"​
+​
+      - name: Install dependencies​
+       run: npm ci​
+​
+      - name: Verify bootstrap-win.sh idempotency (run twice)​
+       env:​
+        MIA_LEDGER_DB_PATH: ${{ runner.temp }}/mia_ledger_ci.sqlite​
+       run: |​
+        chmod +x scripts/bootstrap-win.sh​
+        ./scripts/bootstrap-win.sh​
+        ./scripts/bootstrap-win.sh​
+​
+      - name: Enforce LIVE_LOCKED G01-G14 safety invariant across WIN routes & bridges​
+     run: |​
+      node -e '​
+         const fs = require("node:fs");​
+         const copyRoutes = fs.readFileSync("server/src/routes/copyRoutes.ts", "utf8");​
+         const deepRoutes = fs.readFileSync("server/src/routes/whaleDeepRoutes.ts", "utf8");​
+         const omsBridge = fs.readFileSync("server/src/exec/whaleDurableOmsBridge.ts", "utf8");​
+         if (!copyRoutes.includes("liveExecutionLocked: true")) {​
+           throw new Error("SECURITY VIOLATION: copyRoutes.ts missing liveExecutionLocked: true");​
+         }​
+         if (!deepRoutes.includes("liveExecutionLocked: true")) {​
+           throw new Error("SECURITY VIOLATION: whaleDeepRoutes.ts missing liveExecutionLocked:
+true");​
+         }​
+         if (!omsBridge.includes("LIVE_EXECUTION_LOCKED_PENDING_G01_G14_CERTIFICATION")) {​
+           throw new Error("SECURITY VIOLATION: whaleDurableOmsBridge.ts missing G01-G14 lock
+guard");​
+         }​
+         console.log("[PASS] LIVE_LOCKED & G01-G14 static safety invariants verified.");​
+      '​
+​
+    win-typecheck-and-vitest:​
+     name: WIN TypeScript Typecheck & Vitest Acceptance / Chaos Suites​
+     runs-on: ubuntu-latest​
+     needs: [win-safety-and-migration-audit]​
+     steps:​
+      - name: Checkout repository​
+       uses: actions/checkout@v4​
+​
+      - name: Setup Node.js 22.23.5​
+       uses: actions/setup-node@v4​
+       with:​
+<PARSED TEXT FOR PAGE: 23 / 26>
+          node-version: "22.23.5"​
+          cache: "npm"​
+    ​
+        - name: Install dependencies​
+         run: npm ci​
+    ​
+        - name: Typecheck @mia/server​
+         run: npm --workspace=@mia/server run typecheck​
+    ​
+        - name: Typecheck @mia/web​
+         run: npm --workspace=@mia/web run typecheck​
+    ​
+        - name: Run WIN-03 FAST Acceptance & Drift Rejection Tests​
+         run: npx vitest run server/src/whales/__tests__/win03Acceptance.test.ts --reporter=verbose​
+    ​
+        - name: Run WIN-04 DEEP No-Lookahead & Brier Calibration Audit Tests​
+        run: npx vitest run server/src/whales/__tests__/win04NoLookaheadAudit.test.ts
+    --reporter=verbose​
+    ​
+        - name: Run WIN-06 Durable OMS Crash-Recovery & Chaos Tests​
+         run: npx vitest run server/src/exec/__tests__/win06OmsChaos.test.ts --reporter=verbose​
+    ​
+        - name: Build @mia/server and @mia/web​
+         run: npm run build​
+
+
+Document 4: Unified Master Prompt for OpenAI Codex & Claude
+(CLAUDE.md / AGENTS.md Execution Prompt)
+Paste this prompt directly into OpenAI Codex or Claude Code inside Naokiri5/naokiri
+alongside docs/WHALE_INTELLIGENCE_UNIFIED.md and
+docs/WIN_TYPESCRIPT_CATALOG.md.
+
+
+
+
+    Markdown
+    # MASTER ENGINEERING PROMPT — CODEX & CLAUDE (`Naokiri5/naokiri`)​
+    **Objective:** Implement, reconcile, wire, and verify the complete **MIA Whale Intelligence
+    Network (`WIN-01` through `WIN-06`)** across `@mia/server` and `@mia/web` using
+    `docs/WHALE_INTELLIGENCE_UNIFIED.md` and `docs/WIN_TYPESCRIPT_CATALOG.md` as
+    authoritative contracts.​
+    ​
+    ## 1. Strict Rules & Guardrails (`CLAUDE.md` / `AGENTS.md`)​
+<PARSED TEXT FOR PAGE: 24 / 26>
+- **Runtime & Module System:** Node.js `22.23.5`, npm workspaces (`@mia/server`,
+`@mia/web`), ESM `NodeNext` TypeScript (always use explicit `.js` extensions on relative
+TypeScript imports in `server/src/`).​
+- **Single Pipeline Authority:** Never create a parallel copy-trading executor or second
+position ledger. Route all WIN candidates through `QCI -> decision/engine.ts ->
+UnifiedRiskGovernor -> DurableWhaleOmsBridge`.​
+- **Attribution Integrity:** Keep `VERIFIED_WALLET` (`SOLANA_WALLET_SWAP`) strictly
+separate from `INFERRED_ENTITY` (`CEX_LARGE_PRINT`, `FUTURES_POSITIONING`,
+`INSTITUTIONAL_FILING`). Never attribute anonymous futures, forex, or equity prints to a
+named trader or wallet.​
+- **Hot-Path Isolation:** Never block the 4ms `SwarmThreadPool` loop with Helius/Geyser
+RPC calls, Token-2022 mint audits, or Jupiter V2 quotes; perform all network I/O in async
+workers before emitting `WhaleObservation` to `NexusFabricRouter`.​
+- **Fail-Closed & Live Lock:** Any missing safety snapshot, RPC timeout, Token-2022
+permanent delegate, failed sell simulation, or drift exceeding `maxEntryDriftBps` must reject
+(`safe: false` / `outcome: "REJECTED"`). Keep `LIVE_LOCKED` enforced everywhere until
+`G01–G14` certification is completed.​
+​
+## 2. Step-by-Step Execution Order​
+​
+### Step A — Reconcile Open PRs in Strict Dependency Order​
+1. Reconcile **`PR #95`** into `server/src/providers/` (shared HTTP/WS transport,
+rate-limiting, and deadline timeouts).​
+2. Reconcile **`PR #46`** into `server/src/solana/` (base Solana RPC client, `confirmed` vs.
+`finalized` commitment helpers, and `preTokenBalances`/`postTokenBalances` decoders).​
+3. Reconcile **`PR #50`** into `server/src/safety/safety.ts` and implement `screenSolanaMint()`
+matching `docs/WIN_TYPESCRIPT_CATALOG.md`.​
+​
+### Step B — Implement & Verify All 18 WIN-01..WIN-06 Artifacts​
+Ensure every file listed below matches the exact TypeScript signatures in
+`docs/WIN_TYPESCRIPT_CATALOG.md` and SQL constraints in
+`docs/WHALE_INTELLIGENCE_UNIFIED.md`:​
+1. `migrations/007_whale_intelligence.sql`​
+2. `migrations/008_whale_durable_oms.sql`​
+3. `server/src/whales/observations.ts` (`normalizeSolanaSwapFromBalances`,
+`assessWhaleObservation`)​
+4. `server/src/whales/walletProfiler.ts` (`profileWhaleWallet` with FIFO lots, orphan-sell
+quarantine `< 0.85`, dead-bag mark-to-market, `< 3000ms` MEV quarantine, `+2.5s` lag
+resilience)​
+5. `server/src/safety/safety.ts` (`screenSolanaMint`, `DEFAULT_SOLANA_SAFETY_POLICY`)​
+6. `server/src/whales/fastSignals.ts` (`evaluateFastWhaleSignal` with signature deduplication,
+mint screening, and Jupiter V2 obtainable-quote drift gating)​
+7. `server/src/workers/whaleFastEvidenceWorker.ts` (`buildWhaleFastQciVote` with `weight: 0.28`)​
+<PARSED TEXT FOR PAGE: 25 / 26>
+8. `server/src/risk/whaleRiskBridge.ts` (`authorizeWhaleFastRisk`,
+`executeWhaleFastPaperShadow` at obtainable quote prices)​
+9. `server/src/whales/institutional.ts` (`isPointInTimeAvailable` blocking pre-release SEC 13F
+45-day and CFTC COT Friday 3:30 PM ET records, `synthesizeInstitutionalContext`)​
+10. `server/src/whales/strategyDna.ts` (`detectLiquiditySweepZone`, embargoed
+`calibrateWalkForwardProbability` with `Brier <= 0.235` and `n >= 30`,
+`isUsEquitiesRegularSession`, `evaluateDeepStrategyHypothesis`, `runNoLookaheadDeepReplay`)​
+11. `server/src/exec/whaleDurableOmsBridge.ts` (`evaluateCanonicalWhaleRisk`,
+`DurableWhaleOmsBridge` with atomic SQLite reservations, 30-trade rolling expectancy
+floor, product-specific risk gates, and `reconcileInFlightOnStartup`)​
+12. `server/src/routes/copyRoutes.ts` (`GET /api/copy`, `POST /api/copy/follow`)​
+13. `server/src/routes/whaleDeepRoutes.ts` (`GET /api/whales/deep`)​
+14. `server/src/whales/index.ts` (`registerWhaleIntelligenceRoutes`)​
+15. `server/src/whales/__tests__/win03Acceptance.test.ts`​
+16. `server/src/whales/__tests__/win04NoLookaheadAudit.test.ts`​
+17. `server/src/exec/__tests__/win06OmsChaos.test.ts`​
+18. `web/src/components/WhaleIntelligencePanel.tsx`​
+​
+### Step C — Wire Entry Points & CI Workflow​
+1. In `server/src/index.ts`, apply `007` and `008` SQLite WAL migrations, call `await
+durableWhaleOmsBridge.reconcileInFlightOnStartup(paperAdaptersByAccount, Date.now())`
+before starting background workers, and call `registerWhaleIntelligenceRoutes(app, db)`
+before `await app.ready()`.​
+2. In `web/src/App.tsx`, mount `WhaleIntelligencePanel` under **Trading -> Whale
+Intelligence**.​
+3. Commit `scripts/bootstrap-win.sh`, `scripts/apply-win-migrations.mjs`, and
+`.github/workflows/mia-win-ci.yml`.​
+​
+## 3. Mandatory Verification Gate​
+Run these exact commands and do not conclude until every command exits `0`:​
+```bash​
+chmod +x scripts/bootstrap-win.sh​
+./scripts/bootstrap-win.sh​
+npm --workspace=@mia/server run typecheck​
+npm --workspace=@mia/web run typecheck​
+npx vitest run \​
+  server/src/whales/__tests__/win03Acceptance.test.ts \​
+  server/src/whales/__tests__/win04NoLookaheadAudit.test.ts \​
+  server/src/exec/__tests__/win06OmsChaos.test.ts \​
+  --reporter=verbose​
+npm run build​
+<PARSED TEXT FOR PAGE: 26 / 26>
+<FollowUp label="Want me to generate the live Helius/Geyser WebSocket ingestion
+worker and Jupiter V2 quote adapter implementing SolanaMintInspector and
+JupiterQuoteProvider?" query="Write the concrete TypeScript implementations for
+Helius/Geyser Solana swap ingestion worker, RPC SolanaMintInspector (Token-2022 + sell
+simulation), and Jupiter V2 JupiterQuoteProvider in server/src/solana/ and
+server/src/providers/."/>​
