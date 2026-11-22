@@ -19,6 +19,8 @@ export interface DeepState {
   /** Raw source-batch failures persist until a validated refresh for the same interval. */
   integrityIssues?: Partial<Record<Interval, string[]>>;
   book: Book | null;
+  /** Tracks provenance of the canonical executable book; stream invalidation clears only stream-owned data. */
+  bookSource?: 'REST' | 'STREAM';
   cross: Record<string, Quote>;
 }
 

@@ -7,7 +7,7 @@ Implementation owner: existing draft PR #62 (`codex/mia-50-recovery`), stacked o
 
 This increment **extends**, rather than duplicates, the reviewed Phase 1 specification:
 - `market/depthStream.ts`: existing `BookSync`, bounded snapshot retry and generation fencing. Reject malformed REST snapshots before they can bootstrap an incremental book. Count invalid snapshots.
-- `market/fabric.ts`: existing `setBook` and `streamFresh`. Reject invalid books before canonical publication, prevent future freshness assertions, skip redundant REST depth fetches in `refreshDeep` while verified streaming is fresh, and clear previous-generation freshness after reconnect/re-subscription.
+- `market/fabric.ts` + `market/store.ts`: existing `setBook`, `DeepState`, and `streamFresh`. Reject invalid books before canonical publication, preserve REST/STREAM provenance, clear stream-owned executable book state on gap/disconnect, protect newer REST replacement, prevent future freshness assertions, skip redundant REST depth fetches in `refreshDeep` while verified streaming is fresh, and clear previous-generation freshness after reconnect/re-subscription.
 - Existing scanner, FeatureEngine, QCI, risk gate, paper OMS, ledger, database schema, incident manager, DITAS, bus and lease implementation remain authoritative and unchanged.
 - Existing REST fallback remains active whenever the stream is disabled, invalid, disconnected, stale or outside the freshness window. No new exchange trading API, credentials or signing.
 

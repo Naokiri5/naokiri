@@ -18,7 +18,7 @@ import { startDepthStream, binanceStreamUrl, type StreamBook, type StreamDeps } 
 
 /** Install a book snapshot unless it is older than the one already held (concurrent refreshes can land out of order). */
 /** Install a book unless it is older than the held one. Returns whether it was installed. */
-function setBook(id: string, b: Book): boolean {
+function setBook(id: string, b: Book, source: 'REST' | 'STREAM' = 'REST'): boolean {
   // Reject the book before it can replace known-good state or appear fresh to the OMS.
   if (!validBook(b) || (b.lastUpdateId !== undefined && (!Number.isSafeInteger(b.lastUpdateId) || b.lastUpdateId < 0))) return false;
   const d = market.deep.get(id); if (!d) return false;
@@ -27,7 +27,9 @@ function setBook(id: string, b: Book): boolean {
   // Same lastUpdateId = the venue book has not changed (cached mirror response, halted symbol). Re-stamping it with our
   // receive time would make frozen depth look fresh and executable; keep the old timestamp so it ages out (Squad B B-01).
   if (cur && b.lastUpdateId != null && b.lastUpdateId === cur.lastUpdateId) return false;
-  d.book = b; return true;
+  d.book = b;
+  d.bookSource = source; // published in the same synchronous turn as the validated book
+  return true;
 }
 
 /** Part 29 L0 + Part 33.6 tiered scanning. Polling is the documented fallback (no WS hosts allow-listed). */
@@ -200,7 +202,8 @@ const streamBookAt = new Map<string, number>();
 export const STREAM_FRESH_MS = 2_000;
 export const streamFresh = (id: string, nowTs = Date.now()) => {
   const publishedAt = streamBookAt.get(id);
-  return publishedAt !== undefined && Number.isSafeInteger(nowTs) &&
+  return market.deep.get(id)?.bookSource === 'STREAM' &&
+    publishedAt !== undefined && Number.isSafeInteger(nowTs) &&
     nowTs >= publishedAt && nowTs - publishedAt <= STREAM_FRESH_MS;
 };
 let depthStream: ReturnType<typeof startDepthStream> | null = null; let streamKey = '';
@@ -227,11 +230,24 @@ export function syncDepthStreams(ids: string[], seams: Partial<Pick<StreamDeps, 
     publish: (sym, b: StreamBook) => {
       const id = `crypto:binance:${sym}`; const inst = market.instruments.get(id); if (!inst) return;
       market.deepState(inst); // Fresh only if the book was actually installed: a rejected (older) stream book must not stop REST (CodeRabbit PR #18).
-      if (setBook(id, { bids: b.bids, asks: b.asks, ts: b.ts, lastUpdateId: b.lastUpdateId })) streamBookAt.set(id, b.ts);
+      if (setBook(id, { bids: b.bids, asks: b.asks, ts: b.ts, lastUpdateId: b.lastUpdateId }, 'STREAM')) streamBookAt.set(id, b.ts);
     },
     // Gap or disconnect: the published book stays valid only as of its timestamp and ages out under the normal execution
     // limits; REST stops skipping this symbol immediately (MA-18).
-    invalidate: (sym) => { streamBookAt.delete(`crypto:binance:${sym}`); },
+    invalidate: (sym) => {
+      const id = `crypto:binance:${sym}`;
+      streamBookAt.delete(id);
+      // A disconnected/gapped stream is not executable. Clear ONLY its own book, never a newer
+      // REST replacement; otherwise the old book could pass the 60-second age gate.
+      const held = market.deep.get(id);
+      if (held?.bookSource === 'STREAM') {
+        held.book = null;
+        held.bookSource = undefined;
+        bus.publish('health', { type: 'market-data-integrity', instrumentId: id,
+          source: 'binance', at: Date.now(), status: 'DEGRADED',
+          issues: ['stream depth invalidated; awaiting verified REST or stream recovery'] });
+      }
+    },
   });
   return depthStream;
 }

@@ -94,7 +94,7 @@ describe('streaming books wired into the market fabric', () => {
     expect(streamFresh(inst.id)).toBe(false);
     await tick(); await tick();
     expect(streamFresh(inst.id)).toBe(false);
-    expect(market.deep.get(inst.id)!.book!.lastUpdateId).toBe(50);
+    expect(market.deep.get(inst.id)!.book).toBeNull(); // invalid stream depth must not remain executable
   });
   it('a stream book that setBook rejects (older id) does not mark the symbol fresh (SAFE-03)', async () => {
     const { inst, last } = seedInstrument('STRM5USDT');
@@ -133,5 +133,41 @@ describe('Phase 1: stream admission into canonical market store', () => {
     await tick(); await tick();
     expect(streamFresh(inst.id)).toBe(true);
     expect(streamFresh(inst.id, Date.now() - 1)).toBe(false);
+  });
+});
+
+describe('Phase 1: invalidated stream depth is never executable', () => {
+  it('clears stream-owned books at socket shutdown while preserving ticker observations', async () => {
+    const { inst, last } = seedInstrument('STRM9USDT');
+    Object.assign(config, { streaming: true, offline: false });
+    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any,
+      snapshot: async () => ({ lastUpdateId: 12, ts: Date.now(),
+        bids: [[last * 0.999, 2]], asks: [[last * 1.001, 2]] }),
+    });
+    await tick(); await tick();
+    expect(market.deep.get(inst.id)!.bookSource).toBe('STREAM');
+    expect(streamFresh(inst.id)).toBe(true);
+    FakeWS.last!.close();
+    expect(market.deep.get(inst.id)!.book).toBeNull();
+    expect(market.deep.get(inst.id)!.bookSource).toBeUndefined();
+    expect(streamFresh(inst.id)).toBe(false);
+  });
+
+  it('does not destroy a newer REST-owned book during a stream disconnect', async () => {
+    const { inst, last } = seedInstrument('STRM10USDT');
+    Object.assign(config, { streaming: true, offline: false });
+    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any,
+      snapshot: async () => ({ lastUpdateId: 20, ts: Date.now(),
+        bids: [[last * 0.999, 2]], asks: [[last * 1.001, 2]] }),
+    });
+    await tick(); await tick();
+    const d = market.deep.get(inst.id)!;
+    const recovery = { bids: [[last * 0.998, 1]] as [number, number][],
+      asks: [[last * 1.002, 1]] as [number, number][], ts: Date.now(), lastUpdateId: 21 };
+    d.book = recovery; d.bookSource = 'REST'; // emulate a verified later REST installation
+    FakeWS.last!.close();
+    expect(d.book).toEqual(recovery);
+    expect(d.bookSource).toBe('REST');
+    expect(streamFresh(inst.id)).toBe(false);
   });
 });
