@@ -31,8 +31,9 @@ describe('WIN-02 wallet reconstruction (research only)', () => {
     expect(r.observedSwapCount).toBe(3);
     expect(r.matchedSellCount).toBe(1);
     expect(r.grossClosedPnlUsd).toBe(25); // 10*(3-1)+5*(3-2)
-    expect(r.closedLots).toHaveLength(2);
-    expect(r.closedLots.map(x => x.grossWhalePnlUsd)).toEqual([20, 5]);
+    // The second BUY has only sold 5/10 units and MUST NOT be a learned win.
+    expect(r.closedLots).toHaveLength(1);
+    expect(r.closedLots.map(x => x.grossWhalePnlUsd)).toEqual([20]);
     expect(r.closedLots[0]).toMatchObject({
       entryEvidenceId: expect.stringContaining('buy-a'),
       exitEvidenceId: expect.stringContaining('sell-c'),
@@ -45,6 +46,21 @@ describe('WIN-02 wallet reconstruction (research only)', () => {
     expect(r.coverageRatio).toBe(1);
     expect(r.simulatedFollowerClosedPnlUsd).toBeNull();
     expect(r.reasonCodes).toContain('NO_VERIFIED_EXIT_LIQUIDITY_STRESS_ZERO');
+    expect(r.automaticCopyEligible).toBe(false);
+  });
+
+  it('records a multi-sell entry only when fully exited and retains every exit proof', () => {
+    const finalSell = swap('sell-d', 'SELL', '5', 4, 25000);
+    const r = profileVerifiedWalletSwaps([a, b, c, finalSell], {
+      ...config, verifiedHistorySwapCount: 4,
+    });
+    expect(r.closedLots).toHaveLength(2);
+    expect(r.closedLots.map(x => x.grossWhalePnlUsd)).toEqual([20, 15]);
+    expect(r.closedLots[1].exitEvidenceIds).toHaveLength(2);
+    expect(r.closedLots[1].exitSourceSnapshotIds).toHaveLength(2);
+    expect(r.closedLots[1].entryEvidenceId).toContain('buy-b');
+    expect(r.closedLots[1].exitEvidenceId).toContain('sell-d');
+    expect(r.closedLots[1].simulatedFollowerNetPnlUsd).toBeNull();
     expect(r.automaticCopyEligible).toBe(false);
   });
 
@@ -97,9 +113,8 @@ describe('WIN-02 wallet reconstruction (research only)', () => {
     const r = profileVerifiedWalletSwaps([a,b,c], {...config,followerQuotes:quotes});
     expect(r.simulatedFollowerQuoteCoverage).toBe(1);
     expect(r.simulatedFollowerClosedPnlUsd).toBeCloseTo(21.15,8);
-    expect(r.closedLots.map(x => x.simulatedFollowerNetPnlUsd)).toHaveLength(2);
-    expect(r.closedLots.reduce((s, x) => s + (x.simulatedFollowerNetPnlUsd ?? 0), 0))
-      .toBeCloseTo(21.15, 8);
+    expect(r.closedLots).toHaveLength(1);
+    expect(r.closedLots[0].simulatedFollowerNetPnlUsd).toBeCloseTo(17.8, 8);
     expect(r.grossClosedPnlUsd).toBe(25);
     expect(r.automaticCopyEligible).toBe(false);
   });
