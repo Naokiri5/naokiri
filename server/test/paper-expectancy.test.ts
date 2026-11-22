@@ -41,6 +41,36 @@ describe('MIA 5.0 canonical PAPER 30-trade expectancy (research only)', () => {
     expect(assessPaperExpectancyCohort([row(1, Number.NaN)]).profitFactor).toBeNull();
   });
 
+  it('rejects duplicate position IDs instead of counting replayed fills as 30 distinct outcomes', () => {
+    const rows = Array.from({ length: 30 }, (_, i) => row(i, i === 29 ? -10 : 2));
+    rows[29] = row(0, -10, { closed_at: rows[29].closed_at });
+    const r = assessPaperExpectancyCohort(rows);
+    expect(r).toMatchObject({
+      sampleTrades: 30, status: 'INVALID_EVIDENCE',
+      rollingExpectancyR: null, rollingMaxDrawdownR: null,
+    });
+  });
+
+  it('calculates realized peak-to-trough drawdown in R chronologically, not in query order', () => {
+    const rows = Array.from({ length: 30 }, (_, i) => row(i, 0));
+    rows[25] = row(25, 10); // 1R gain; peak = 1R
+    rows[26] = row(26, -20); // 2R loss
+    rows[27] = row(27, -5); // additional 0.5R loss; worst drawdown = 2.5R
+    const ordered = assessPaperExpectancyCohort(rows);
+    const reversed = assessPaperExpectancyCohort([...rows].reverse());
+    expect(ordered.rollingMaxDrawdownR).toBeCloseTo(2.5);
+    expect(reversed.rollingMaxDrawdownR).toBeCloseTo(2.5);
+    expect(ordered.status).toBe('THRESHOLDS_NOT_MET');
+  });
+
+  it('keeps an invalid drawdown aggregation out of all research evidence', () => {
+    const rows = Array.from({ length: 30 }, (_, i) =>
+      row(i, i % 2 === 0 ? Number.MAX_VALUE : -Number.MAX_VALUE, { planned_risk: Number.MIN_VALUE }));
+    const result = assessPaperExpectancyCohort(rows);
+    expect(result.status).toBe('INVALID_EVIDENCE');
+    expect(result.rollingMaxDrawdownR).toBeNull();
+  });
+
   it('never labels unknown markets or non-Binance positions as implemented spot trading', () => {
     expect(assessPaperExpectancyCohort([row(1, 2, { market: 'equity' })]).sleeve).toBeNull();
     expect(assessPaperExpectancyCohort([row(1, 2, { instrument: 'solana:dex:token' })]).sleeve).toBeNull();
