@@ -77,7 +77,7 @@ jobs:
             -e MIA_OFFLINE=1 -e MIA_AUTH_MODE=passphrase mia:pr-smoke
           trap 'docker logs mia-pr-smoke || true; docker rm -f mia-pr-smoke || true' EXIT
           for attempt in {1..35}; do
-            if docker exec mia-pr-smoke node -e "fetch('http://127.0.0.1:8787/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+            if docker exec mia-pr-smoke node server/scripts/health-probe.mjs; then
               docker exec mia-pr-smoke node -e "fetch('http://127.0.0.1:8787/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
               exit 0
             fi
