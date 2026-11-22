@@ -1,7 +1,7 @@
 import { validateCandles } from '../chart/analysis.js';
 import { market } from './store.js';
-import { INTERVAL_MS, type Interval } from './types.js';
-import type { Book } from '../providers/binance.js';
+import { INTERVAL_MS, type Instrument, type Interval } from './types.js';
+import type { Book, Ticker24 } from '../providers/binance.js';
 
 /** Part 32.2 data-quality gate. Fail-closed: missing data ⇒ FAIL. */
 export interface DataQuality {
@@ -21,6 +21,29 @@ export const QUALITY_LIMITS = {
   clockSkewMs: 5_000, warnDeviationPct: 0.5, failDeviationPct: 1.5,
   maxExecBookAgeMs: envMs('MIA_MAX_EXEC_BOOK_AGE_MS', 60_000), maxExecQuoteAgeMs: 120_000,
 };
+/**
+ * Bronze → validated quote boundary for the existing Binance spot ingest.
+ * Reject an entire malformed provider row BEFORE it can replace a usable quote.
+ * Source timestamps, not receipt freshness, determine whether an event is stale.
+ * Deliberately does not invent prices, reject legitimate volatility, or authorize orders.
+ */
+export function validateTicker24(t: Ticker24, inst: Instrument, receivedAt: number): string | null {
+  if (!Number.isSafeInteger(receivedAt) || receivedAt <= 0) return 'INVALID_RECEIPT_TIME';
+  if (!t || typeof t.symbol !== 'string' || t.symbol !== inst.symbol) return 'INSTRUMENT_MISMATCH';
+  if (!Number.isSafeInteger(t.closeTime) || t.closeTime <= 0) return 'INVALID_SOURCE_TIME';
+  if (t.closeTime > receivedAt + QUALITY_LIMITS.clockSkewMs) return 'FUTURE_SOURCE_TIME';
+  if (receivedAt - t.closeTime > QUALITY_LIMITS.maxQuoteAgeMs) return 'STALE_SOURCE_EVENT';
+
+  const prices = [t.lastPrice, t.bidPrice, t.askPrice, t.highPrice, t.lowPrice, t.openPrice];
+  if (!prices.every((p) => Number.isFinite(p) && p > 0)) return 'INVALID_PRICES';
+  if (t.bidPrice > t.askPrice || t.lowPrice > t.highPrice ||
+    t.lastPrice < t.lowPrice || t.lastPrice > t.highPrice) return 'INCONSISTENT_PRICES';
+  if (![t.quoteVolume, t.volume].every((v) => Number.isFinite(v) && v >= 0) ||
+    !Number.isFinite(t.priceChangePercent) ||
+    !Number.isSafeInteger(t.count) || t.count < 0) return 'INVALID_MARKET_STATS';
+  return null;
+}
+
 const positive = (x: number) => Number.isFinite(x) && x > 0;
 const timestamp = (x: number) => Number.isFinite(x) && x >= 0;
 
