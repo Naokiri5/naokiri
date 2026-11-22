@@ -11,6 +11,18 @@ if (maj < 22 || (maj === 22 && min < 13)) {
   process.exit(1);
 }
 
+// Before opening the Fastify listener or starting market-data lanes, verify the
+// active MIA environment and existing canonical WAL database without writing to it.
+const { runPreflightChecks } = await import('./ops/preflight.js');
+const preflight = runPreflightChecks({ env: process.env, dataDir: config.dataDir });
+for (const check of preflight.checks) {
+  if (check.status === 'fail') console.error(`✖ Startup preflight [${check.name}]: ${check.detail}`);
+}
+if (!preflight.ok) {
+  console.error('MIA startup denied: correct the preflight failures. No HTTP listener or trading engine was started.');
+  process.exit(1);
+}
+
 const { buildApp } = await import('./index.js');
 const { startBot, drainBot } = await import('./bot/bot.js');
 const { closeDb } = await import('./db/db.js');
