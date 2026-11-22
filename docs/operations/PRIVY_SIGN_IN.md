@@ -33,7 +33,7 @@
 
 - The approved owner ID is a **Privy user DID**, not an Ethereum/Solana wallet address.
 - If the DID is not yet known, complete Privy login on a **private staging instance** to read the returned user DID, then pre-provision the correct ID on the server. A failed first authorization must not create an owner.
-- Before first owner binding, MIA creates a database backup; on backup failure, owner binding fails closed.
+- Before first owner binding, MIA creates and verifies a database backup. Set `MIA_BACKUP_KEY` in the backend environment for online or production setups. Backup or verification failure aborts owner binding.
 - After wallet login, enroll the MIA authenticator in Security Center using the setup code displayed on the server console. Sensitive actions remain blocked until 2FA enrollment is completed.
 - Existing data and paper trading remain in their original database. Avoid switching to public passphrase fallback.
 

@@ -4,6 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { basename, join, normalize, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { config, REPO_ROOT } from '../src/config.js';
+import { run } from '../src/db/db.js';
+import { PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import * as gates from '../src/qa/gates.js';
 import { freshDb } from './helpers.js';
 
@@ -223,6 +225,43 @@ describe('release gate manifest and certification gaps', () => {
       for (const gate of result.gates.filter(g => !['G01', 'G02', 'G03', 'G04', 'G09'].includes(g.id))) expect(gate).toEqual(baseline.gates.find(g => g.id === gate.id));
       for (const id of ['G01', 'G02', 'G03', 'G04', 'G09']) expect(result.gates.find(g => g.id === id)?.status).toBe('PENDING');
     }
+  });
+});
+
+describe('G10 prospective paper evaluation', () => {
+  const day = 86_400_000;
+  const recordPosition = (id: string, account: string, openedAt: number, closedAt: number | null) => {
+    run(`INSERT INTO positions (id, account, instrument, market, direction, strategy, qty, entry_price, stop_price,
+      initial_stop, targets, status, opened_at, closed_at, planned_risk)
+      VALUES (?, ?, 'crypto:binance:BTCUSDT', 'crypto', 'LONG', 'trend_pullback', 0, 100, 90, 90, '[]', 'CLOSED', ?, ?, 10)`,
+    id, account, openedAt, closedAt);
+  };
+
+  beforeEach(() => freshDb());
+
+  it('keeps historical trades pending even when more than a month has elapsed without activity', () => {
+    const now = Date.now();
+    for (let i = 0; i < 50; i++) {
+      const openedAt = now - 60 * day + i * 60_000;
+      recordPosition(`historical-${i}`, PAPER_ACCOUNT, openedAt, openedAt + 60_000);
+    }
+    const gate = gates.releaseGates(null).gates.find(g => g.id === 'G10');
+    expect(gate).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('50 recorded closed paper trades') });
+    expect(gate?.evidence).toContain('60.0 elapsed days since first recorded paper entry');
+    expect(gate?.evidence).toContain('Prospective supervision');
+  });
+
+  it('reports only historical paper positions with admissible timestamps', () => {
+    const now = Date.now();
+    recordPosition('paper-valid', PAPER_ACCOUNT, now - 2 * day, now - day);
+    recordPosition('other-account', 'foreign-fixture', now - 180 * day, now - day);
+    recordPosition('paper-future-open', PAPER_ACCOUNT, now + day, now + 2 * day);
+    recordPosition('paper-future-close', PAPER_ACCOUNT, now - day, now + day);
+    recordPosition('paper-inverted', PAPER_ACCOUNT, now - day, now - 2 * day);
+    recordPosition('paper-no-close-time', PAPER_ACCOUNT, now - day, null);
+    const gate = gates.releaseGates(null).gates.find(g => g.id === 'G10');
+    expect(gate).toMatchObject({ status: 'PENDING', evidence: expect.stringContaining('1 recorded closed paper trade') });
+    expect(gate?.evidence).toContain('2.0 elapsed days since first recorded paper entry');
   });
 });
 

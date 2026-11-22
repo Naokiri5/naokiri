@@ -98,6 +98,7 @@ Start with `docs/PROJECT_STATUS.md` (plain-language status) and `docs/SETUP_GUID
 | `docs/SECURITY.md` | security audit and controls |
 | `docs/TEST_REPORT.md` | test evidence |
 | `docs/DEPLOYMENT_GUIDE.md` | running, backups, incidents, rollback |
+| [Live-readiness repair register](docs/engineering/MIA_LIVE_READINESS_REPAIR_REGISTER.md) | 50 audit findings, canonical owners, and release evidence |
 | `docs/KNOWN_LIMITATIONS.md` | what does not work yet and why |
 | `docs/QHEF_LATENCY_BASELINE.md` | measured performance |
 | `docs/CHANGELOG.md` | history |

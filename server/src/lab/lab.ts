@@ -1,12 +1,13 @@
 import { STRATEGIES, strategyById } from './strategies.js';
 import { BACKTEST_MODEL_VERSION, backtest, stats, monteCarlo, type BtResult, type BtTrade } from './backtest.js';
 import { fetchProvider } from '../providers/http.js';
-import { all, get, run, J, P } from '../db/db.js';
+import { all, get, run, tx, J, P } from '../db/db.js';
 import { uid } from '../core/util.js';
 import { audit } from '../core/audit.js';
 import { market } from '../market/store.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { INTERVAL_MS, type Candle, type Interval } from '../market/types.js';
+import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
 /** Part 18 lifecycle: RESEARCH → BACKTESTED → PAPER → (LIVE_CANDIDATE, gated) | SUSPENDED | RETIRED */
 export type StrategyStatus = 'RESEARCH' | 'BACKTESTED' | 'PAPER' | 'LIVE_CANDIDATE' | 'SUSPENDED' | 'RETIRED';
@@ -86,22 +87,59 @@ export function strategyStats(strategyId: string) {
   if (!trades.length) return null;
   return { ...stats(trades), modelVersion, instruments: instruments.size, monteCarlo: monteCarlo(trades.map((trade) => trade.r)) };
 }
-/** Realized paper performance per strategy (Part 18.5 decay detection input). */
-export function paperStats(strategyId: string) {
-  const rows = all<{ realized_pnl: number; planned_risk: number }>("SELECT realized_pnl, planned_risk FROM positions WHERE strategy=? AND status='CLOSED'", strategyId);
-  if (!rows.length) return null;
-  const rs = rows.map((r) => (r.planned_risk > 0 ? r.realized_pnl / r.planned_risk : 0));
-  return { trades: rs.length, expectancyR: rs.reduce((a, b) => a + b, 0) / rs.length, winRate: rs.filter((r) => r > 0).length / rs.length };
+const PAPER_OUTCOME_WINDOW = 50;
+
+/** Share the same closed paper cohort between the Strategy Lab, DITAS, and the health monitor. */
+export function recentPaperOutcomes(strategyId: string, nowTs = Date.now()) {
+  const currentVersion = strategyById(strategyId)?.version;
+  const recent = currentVersion ? all<{ realized_pnl: number; planned_risk: number; report: string | null }>(`
+    SELECT p.realized_pnl, p.planned_risk, d.report FROM positions p
+    LEFT JOIN decisions d ON d.id=p.decision_id AND d.strategy=p.strategy AND d.instrument=p.instrument AND d.market=p.market
+    WHERE p.account=? AND p.strategy=? AND p.status='CLOSED'
+      AND typeof(p.opened_at)='integer' AND p.opened_at>0
+      AND typeof(p.closed_at)='integer' AND p.closed_at>=p.opened_at AND p.closed_at<=?
+    ORDER BY p.closed_at DESC, p.id DESC LIMIT ?`, PAPER_ACCOUNT, strategyId, nowTs, PAPER_OUTCOME_WINDOW) : [];
+  const returns: number[] = [];
+  let unknownVersion = 0, otherVersion = 0, invalidRisk = 0;
+  for (const row of recent.reverse()) {
+    let version: unknown;
+    try { version = P<{ strategy?: { version?: unknown } }>(row.report)?.strategy?.version; } catch { /* Unparseable legacy evidence is unknown. */ }
+    if (typeof version !== 'string' || version.length === 0) { unknownVersion++; continue; }
+    if (version !== currentVersion) { otherVersion++; continue; }
+    const result = row.realized_pnl / row.planned_risk;
+    if (!Number.isFinite(row.planned_risk) || row.planned_risk <= 0 || !Number.isFinite(row.realized_pnl) || !Number.isFinite(result)) { invalidRisk++; continue; }
+    returns.push(result);
+  }
+  return { returns, windowClosedPositions: PAPER_OUTCOME_WINDOW, observedClosedPositions: recent.length,
+    excludedUnknownVersion: unknownVersion, excludedOtherVersion: otherVersion, excludedInvalidRisk: invalidRisk };
+}
+
+/** Realized performance for eligible paper outcomes (Part 18.5 decay detection input). */
+export function paperStats(strategyId: string, nowTs = Date.now()) {
+  const { returns } = recentPaperOutcomes(strategyId, nowTs);
+  const trades = returns.length;
+  if (!trades) return null;
+  const scale = Math.max(...returns.map(Math.abs));
+  const expectancyR = scale === 0 ? 0 : (returns.reduce((total, result) => total + result / scale, 0) / trades) * scale;
+  return { trades, expectancyR, winRate: returns.filter(result => result > 0).length / trades };
 }
 /** Strategy health (Part 18.5): suspend when paper expectancy decays well below backtest after enough trades. */
 export function checkStrategyHealth() {
   const flagged: string[] = [];
+  const nowTs = Date.now();
+  const hasPaperStatus = (id: string) => !!get("SELECT 1 FROM strategies WHERE id=? AND status='PAPER'", id);
   for (const s of STRATEGIES) {
-    const p = paperStats(s.id); const b = strategyStats(s.id);
-    if (p && p.trades >= 15 && p.expectancyR < -0.3 && (!b || b.expectancyR > p.expectancyR + 0.3)) {
-      const cur = get<any>('SELECT status FROM strategies WHERE id=?', s.id);
-      if (cur?.status !== 'SUSPENDED') { setStrategyStatus('strategy-health-monitor', s.id, 'SUSPENDED', `auto-suspended: paper expectancy ${p.expectancyR.toFixed(2)}R over ${p.trades} trades`); flagged.push(s.id); }
-    }
+    if (!hasPaperStatus(s.id)) continue;
+    const p = paperStats(s.id, nowTs);
+    if (!p || p.trades < 15 || p.expectancyR >= -0.3) continue;
+    const b = strategyStats(s.id);
+    if (b && b.expectancyR <= p.expectancyR + 0.3) continue;
+    const suspended = tx(() => {
+      if (!hasPaperStatus(s.id)) return false;
+      setStrategyStatus('strategy-health-monitor', s.id, 'SUSPENDED', `auto-suspended: paper expectancy ${p.expectancyR.toFixed(2)}R over ${p.trades} trades`);
+      return true;
+    });
+    if (suspended) flagged.push(s.id);
   }
   return flagged;
 }

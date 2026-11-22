@@ -1,8 +1,13 @@
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect } from 'vitest';
 import { stepExit, newExitState } from '../src/lab/exits.js';
 import { backtest, monteCarlo } from '../src/lab/backtest.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
-import { synthCandles } from './helpers.js';
+import { checkStrategyHealth, paperStats } from '../src/lab/lab.js';
+import { getSetting } from '../src/core/settings.js';
+import { get, J, run } from '../src/db/db.js';
+import { strategyPassports } from '../src/ditas/passports.js';
+import { PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
+import { freshDb, synthCandles } from './helpers.js';
 
 describe('exit capsule', () => {
   it('stop wins when stop and target are hit in the same bar; gap fills at open', () => {
@@ -32,5 +37,56 @@ describe('backtester', () => {
   it('Monte Carlo is deterministic per seed and bounded', () => {
     const a = monteCarlo([1, -1, 2, -1, 0.5, -1], { seed: 3 })!, b = monteCarlo([1, -1, 2, -1, 0.5, -1], { seed: 3 })!;
     expect(a).toEqual(b); expect(a.maxDdP95).toBeGreaterThanOrEqual(a.maxDdP50);
+  });
+});
+
+describe('paper strategy health', () => {
+  const strategy = STRATEGIES[0];
+  const now = Date.now();
+  const instrument = 'crypto:binance:BTCUSDT';
+  type Outcome = { account?: string; version?: string; decisionInstrument?: string; closedAt?: number; plannedRisk?: number; pnl?: number };
+  beforeEach(() => freshDb());
+
+  function recordLosses(outcome: Outcome = {}) {
+    const { account = PAPER_ACCOUNT, version = strategy.version, decisionInstrument = instrument, closedAt = now - 1000, plannedRisk = 10, pnl = -10 } = outcome;
+    for (let i = 0; i < 15; i++) {
+      const decision = `decision-${i}`;
+      run('INSERT INTO decisions (id,candidate_id,instrument,market,direction,strategy,decision,created_at,report) VALUES (?,?,?,?,?,?,?,?,?)',
+        decision, `candidate-${i}`, decisionInstrument, 'crypto', 'LONG', strategy.id, 'PAPER_TRADE', now - 3000, J({ strategy: { id: strategy.id, version } }));
+      run('INSERT INTO positions (id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,realized_pnl,fees,planned_risk,decision_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        `position-${i}`, account, instrument, 'crypto', 'LONG', strategy.id, 0, 100, 95, 95, '{}', 'CLOSED', now - 2000, closedAt, pnl, 0, plannedRisk, decision);
+    }
+  }
+
+  it.each([
+    { label: 'foreign account', outcome: { account: 'other-account' } },
+    { label: 'obsolete version', outcome: { version: '0.9.0' } },
+    { label: 'unrelated decision', outcome: { decisionInstrument: 'crypto:binance:ETHUSDT' } },
+    { label: 'future closure', outcome: { closedAt: now + 3_600_000 } },
+    { label: 'inverted closure', outcome: { closedAt: now - 2500 } },
+    { label: 'non-finite return', outcome: { pnl: -Number.MAX_VALUE, plannedRisk: 0.5 } },
+  ] satisfies { label: string; outcome: Outcome }[])('excludes $label from both the paper review and automated suspension', ({ outcome }) => {
+    recordLosses(outcome);
+    expect(checkStrategyHealth()).toEqual([]);
+    expect(get<{ status: string }>('SELECT status FROM strategies WHERE id=?', strategy.id)?.status).toBe('PAPER');
+    expect(paperStats(strategy.id)).toBeNull();
+    expect(strategyPassports()[0].paperHealth.samples).toBe(0);
+  });
+
+  it('suspends a PAPER strategy on eligible current-version outcomes once', () => {
+    recordLosses();
+    expect(paperStats(strategy.id)).toEqual({ trades: 15, expectancyR: -1, winRate: 0 });
+    expect(strategyPassports()[0].paperHealth).toMatchObject({ samples: 15, expectancyR: -1 });
+    expect(checkStrategyHealth()).toEqual([strategy.id]);
+    expect(get<{ status: string }>('SELECT status FROM strategies WHERE id=?', strategy.id)?.status).toBe('SUSPENDED');
+    expect(getSetting('suspendedStrategies', [])).toEqual([strategy.id]);
+    expect(checkStrategyHealth()).toEqual([]);
+  });
+
+  it.each(['RETIRED', 'RESEARCH', 'BACKTESTED'])('preserves the %s lifecycle state', (status) => {
+    recordLosses();
+    run('UPDATE strategies SET status=? WHERE id=?', status, strategy.id);
+    expect(checkStrategyHealth()).toEqual([]);
+    expect(get<{ status: string }>('SELECT status FROM strategies WHERE id=?', strategy.id)?.status).toBe(status);
   });
 });

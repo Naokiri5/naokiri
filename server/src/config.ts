@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
@@ -31,15 +31,34 @@ export function loadEvidenceKey(dataDir: string, envValue = env.MIA_EVIDENCE_KEY
   }
   if (!persist) return { key: randomBytes(32), source: 'ephemeral' };
   const file = join(dataDir, 'evidence.key');
-  if (existsSync(file)) {
+  const readKey = () => {
     const v = readFileSync(file, 'utf8').trim();
-    if (!hex.test(v) || v.length % 2) throw new Error(`${file} is corrupt (expected 64+ hex characters). Restore it from backup, or delete it to start a new key (older evidence will no longer verify).`);
-    return { key: Buffer.from(v, 'hex'), source: 'file' };
+    if (!hex.test(v) || v.length % 2) throw new Error('evidence.key must contain at least 64 hex characters with even length');
+    return { key: Buffer.from(v, 'hex'), source: 'file' as const };
+  };
+  try {
+    try { return readKey(); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+    const key = randomBytes(32);
+    const staging = mkdtempSync(join(dataDir, '.evidence-key-'));
+    const staged = join(staging, 'key');
+    try {
+      writeFileSync(staged, key.toString('hex') + '\n', { mode: 0o600, flag: 'wx', flush: true });
+      // Publish the complete file in one operation without replacing a concurrent winner's key.
+      try { linkSync(staged, file); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        return readKey();
+      }
+      return { key, source: 'generated' };
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+    }
+  } catch (error) {
+    throw new Error('A persistent evidence signing key is required. Check MIA_DATA_DIR, restore the original evidence.key, or configure MIA_EVIDENCE_KEY.', { cause: error });
   }
-  const k = randomBytes(32);
-  try { mkdirSync(dataDir, { recursive: true }); writeFileSync(file, k.toString('hex') + '\n', { mode: 0o600, flag: 'wx' }); }
-  catch (e: any) { if (e?.code === 'EEXIST') return loadEvidenceKey(dataDir, envValue, persist); return { key: k, source: 'ephemeral' }; }
-  return { key: k, source: 'generated' };
 }
 const DATA_DIR = env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data');
 const EVIDENCE = loadEvidenceKey(DATA_DIR);

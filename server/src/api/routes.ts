@@ -8,7 +8,7 @@ import * as auth from './auth.js';
 import * as privy from '../security/privy.js';
 import * as totp from '../security/totp.js';
 import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
-import { createBackup } from '../ops/backup.js';
+import { createVerifiedBackup } from '../ops/backup.js';
 import { bus } from '../core/bus.js';
 import { market } from '../market/store.js';
 import { board, rejections, recentDecisions, analyzeInstrument, dexBoard } from '../market/scanner.js';
@@ -173,7 +173,7 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/auth/privy/login', async (req, reply) => {
     if (authMode() !== 'privy') throw httpError(403, 'wallet login is disabled in offline recovery mode');
     const { accessToken } = z.object({ accessToken: z.string().min(20).max(4096) }).strict().parse(req.body);
-    const token = await privy.loginWithPrivy(accessToken, req.ip, { backup: () => { createBackup(); } });
+    const token = await privy.loginWithPrivy(accessToken, req.ip, { backup: () => { createVerifiedBackup(); } });
     return issue(reply, token);
   });
   app.get('/api/auth/privy/config', async () => privy.privyPublicConfig());

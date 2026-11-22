@@ -6,6 +6,7 @@ import { currentPolicy } from '../risk/policy.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { WORKERS } from '../workers/registry.js';
 import { reconcile } from '../portfolio/calendar.js';
+import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
 /** Part 12.7 release gates. Evidence-driven; manual gates can only be satisfied by humans outside this app. */
 export interface Gate { id: string; name: string; status: 'PASS' | 'FAIL' | 'PENDING' | 'NOT_CERTIFIED' | 'NOT_IMPLEMENTED'; evidence: string }
@@ -143,9 +144,13 @@ export function releaseGates(report?: unknown) {
   g.push({ id: 'G07', name: 'Wallet permissions & signing isolation security tests', status: 'NOT_IMPLEMENTED', evidence: 'No signer exists in this build (by design). Requires isolated signer + external security test.' });
   g.push({ id: 'G08', name: 'No unresolved critical/high security findings', status: 'NOT_CERTIFIED', evidence: 'Requires independent security review.' });
   g.push({ id: 'G09', name: 'Emergency shutdown & recovery procedures pass', ...testGate('G09') });
-  const first = get<{ t: number }>("SELECT MIN(opened_at) t FROM positions")?.t;
-  const days = first ? (Date.now() - first) / 86400_000 : 0; const closed = get<{ n: number }>("SELECT COUNT(*) n FROM positions WHERE status='CLOSED'")!.n;
-  g.push({ id: 'G10', name: '30-day paper-trading evaluation', status: days >= 30 && closed >= 50 ? 'PASS' : 'PENDING', evidence: `${days.toFixed(1)} days since first paper trade, ${closed} closed trades (needs ≥30 days, ≥50 trades)` });
+  const now = Date.now();
+  const paper = get<{ first: number | null; closed: number }>(`SELECT MIN(opened_at) AS first,
+    COUNT(CASE WHEN status='CLOSED' AND closed_at>=opened_at AND closed_at<=? THEN 1 END) AS closed
+    FROM positions WHERE account=? AND opened_at>0 AND opened_at<=?`, now, PAPER_ACCOUNT, now)!;
+  const paperHistory = paper.first === null ? 'No recorded paper entries.' :
+    `${((now - paper.first) / 86_400_000).toFixed(1)} elapsed days since first recorded paper entry, ${paper.closed} recorded closed paper ${paper.closed === 1 ? 'trade' : 'trades'}.`;
+  g.push({ id: 'G10', name: '30-day paper-trading evaluation', status: 'PENDING', evidence: `${paperHistory} Prospective supervision has not been verified (requires ≥30 days and ≥50 closed paper trades).` });
   g.push({ id: 'G11', name: 'Risk policy reviewed and accepted by owner', status: currentPolicy() ? 'PASS' : 'PENDING', evidence: currentPolicy() ? `policy v${currentPolicy()!.version}` : 'not accepted' });
   g.push({ id: 'G12', name: 'Live venue adapter + transaction firewall implemented', status: 'NOT_IMPLEMENTED', evidence: 'Deliberately absent until gates G07–G10 pass.' });
   g.push({ id: 'G13', name: 'Independent Release Auditor go/no-go', status: 'NOT_CERTIFIED', evidence: 'Human sign-off required.' });
