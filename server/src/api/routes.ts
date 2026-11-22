@@ -35,7 +35,7 @@ import { listIncidents, acknowledgeIncident, IncidentError } from '../exec/incid
 import { listJournal } from '../journal/journal.js';
 import { recentNews, refreshNews } from '../news/news.js';
 import { recentPrints, printThreshold } from '../whales/prints.js';
-import { getWinCopyStatus, followOneWalletReadOnly, unfollowWalletReadOnly, recentWhaleObservations } from '../whales/winRegistry.js';
+import { getWinCopyStatus, followOneWalletReadOnly, unfollowWalletReadOnly, recentWhaleObservations, getWinReadOnlyProfile } from '../whales/winRegistry.js';
 import { reconstructReadOnlyDeepFootprints } from '../whales/winDeep.js';
 import * as lab from '../lab/lab.js';
 import { STRATEGIES } from '../lab/strategies.js';
@@ -419,6 +419,10 @@ export async function routes(app: FastifyInstance) {
     unfollowWalletReadOnly(PAPER_ACCOUNT);
     audit('owner', 'win.unfollow.read_only');
     return getWinCopyStatus(PAPER_ACCOUNT);
+  });
+  app.get('/api/copy/profile', async (req) => {
+    limit(req, 'instrument', 'read-only whale profile');
+    return getWinReadOnlyProfile(PAPER_ACCOUNT);
   });
   app.get('/api/copy/observations', async (req) => {
     const { limit: count } = z.object({
