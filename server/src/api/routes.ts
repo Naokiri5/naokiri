@@ -1,6 +1,7 @@
 import { ditasRoutes } from '../ditas/routes.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { analyzeChart } from '../chart/analysis.js';
+import { analyzeDeepPrecision } from '../chart/precision.js';
 import { replayChart } from '../chart/replay.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -31,6 +32,8 @@ import { accountState, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio
 import { correlation } from '../portfolio/correlation.js';
 import { calendar, reconcile } from '../portfolio/calendar.js';
 import * as oms from '../exec/oms.js';
+import { previewBundle, bundleCapabilities } from '../exec/bundles/preview.js';
+import { getBundleStatus, listBundleStatuses } from '../exec/bundles/status.js';
 import { listIncidents, acknowledgeIncident, IncidentError } from '../exec/incidents.js';
 import { listJournal } from '../journal/journal.js';
 import { recentNews, refreshNews } from '../news/news.js';
@@ -83,7 +86,7 @@ const httpError = (code: number, msg: string) => Object.assign(new Error(msg), {
 const isServerFault = (e: any) => e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError
   || /^ERR_SQLITE|^SQLITE/.test(String(e?.code ?? '')) || /SQLITE_|database is locked/i.test(String(e?.message ?? ''));
 // Per-session budgets for routes that call paid APIs, many upstream endpoints, or run long CPU work.
-const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2) };
+const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), bundle: limiter(10, 5), instrument: limiter(60, 20), news: limiter(4, 2) };
 
 export async function routes(app: FastifyInstance) {
   /**
@@ -251,9 +254,16 @@ export async function routes(app: FastifyInstance) {
     }
     const d = market.deep.get(i.id);
     const f = d ? { '15m': d.engines['15m'].last, '1h': d.engines['1h'].last, '4h': d.engines['4h'].last } : {};
-    return { chartIntelligence: analyzeChart(i.id, iv, d?.engines[iv].candles ?? [], Date.now()), instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
+    const now = Date.now();
+    const canonicalQuality = assessQuality(i.id, '1h', now);
+    const quote = market.price(i.id);
+    const deepPrecision = analyzeDeepPrecision({ instrument: i,
+      candles: { '15m': d?.engines['15m'].candles ?? [], '1h': d?.engines['1h'].candles ?? [], '4h': d?.engines['4h'].candles ?? [] },
+      quality: canonicalQuality, quote: quote ? { price: quote.price, ts: quote.ts } : null,
+      nowMs: now, style: 'DAY_TRADING' });
+    return { deepPrecision, chartIntelligence: analyzeChart(i.id, iv, d?.engines[iv].candles ?? [], Date.now()), instrument: i, ticker: market.tickers.get(i.id) ?? null, candles: d ? [...d.engines[iv].candles.slice(-300), ...(d.forming[iv] ? [{ ...d.forming[iv], forming: true }] : [])] : [], features: d?.engines[iv].last ?? null,
       book: d?.book ? { bids: d.book.bids.slice(0, 20), asks: d.book.asks.slice(0, 20), ts: d.book.ts } : null, impact: bookImpact(d?.book ?? null, 'buy', 10_000), cross: d?.cross ?? {},
-      quality: assessQuality(i.id), safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };
+      quality: canonicalQuality, safety: assessCexAsset(i.id), regime: classifyRegime(d?.engines['1h'].last ?? null), indicators: readIndicators(f), prints: recentPrints(500).filter((p) => p.instrumentId === i.id).slice(0, 30) };
   });
   // Bounded research-only replay. Uses owner-supplied history and the existing auth/CSRF gate.
   app.post('/api/chart/replay', async (req) => {
@@ -329,7 +339,44 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/portfolio', async () => {
     const acct = accountState(); const pos = oms.listPositions();
     const curve = all<any>("SELECT closed_at t, realized_pnl p FROM positions WHERE status='CLOSED' ORDER BY closed_at"); let eq = acct.deposits; const equityCurve = curve.map((c) => ({ t: c.t, equity: (eq += c.p) }));
-    return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
+    return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), paperBundles: listBundleStatuses(20), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
+  });
+  // Bundle preflight is authenticated, CSRF-protected and strictly read-only.
+  // There is no bundle submission endpoint or alternate risk/execution authority.
+  // Bundle status comes directly from the canonical orders/positions; no shadow ledger.
+  // Read-only views honor the existing owner session and never grant venue permission.
+  app.get('/api/trading/bundles', async (req) => {
+    const q = z.object({ limit: z.coerce.number().int().min(1).max(100).default(30) }).strict().parse(req.query ?? {});
+    return { environment: 'PAPER' as const, bundles: listBundleStatuses(q.limit), readOnly: true, canPlaceRealOrders: false };
+  });
+  app.get('/api/trading/bundles/:id', async (req, reply) => {
+    const id = idOf(req);
+    const status = getBundleStatus(id);
+    return status ?? bad(reply, 404, 'bundle not found');
+  });
+  app.get('/api/trading/bundles/capabilities', async () => bundleCapabilities());
+  app.post('/api/trading/bundles/preview', async (req) => {
+    limit(req, 'bundle', 'bundle preflight');
+    const b = z.object({
+      environment: z.enum(['PAPER', 'TESTNET', 'LIVE']),
+      mode: z.enum(['BATCH_BEST_EFFORT', 'SPLIT_ORDER', 'MULTI_ASSET_BASKET',
+        'COORDINATED_STRATEGY', 'PAPER_ATOMIC', 'SOLANA_JITO_ATOMIC']),
+      decisionIds: z.array(ID).min(2).max(5),
+    }).strict().parse(req.body ?? {});
+    return previewBundle(b);
+  });
+
+  // Explicit owner PAPER-only submission; all legs use the existing OMS in one
+  // DB transaction. No route or parameter can select TESTNET/LIVE here.
+  app.post('/api/trading/bundles/paper/execute', async (req) => {
+    limit(req, 'bundle', 'paper bundle execution');
+    const b = z.object({
+      decisionIds: z.array(ID).min(2).max(5),
+      password: PW.optional(),
+      otp: z.string().regex(/^\d{6}$/).optional(),
+    }).strict().parse(req.body ?? {});
+    stepUp(req, b);
+    return oms.submitPaperAtomicBundle(b.decisionIds, 'owner');
   });
   app.get('/api/orders', async () => oms.listOrders(300));
   app.post('/api/orders/:id/approve', async (req) => oms.decideApproval(idOf(req), true));

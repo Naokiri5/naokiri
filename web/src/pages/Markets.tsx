@@ -46,6 +46,34 @@ export function Terminal() {
             </tbody></table></div>
           </div>}
         </Card>
+        <Card title="MIA DEEP PRECISION · evidence-based zones">
+          {data?.deepPrecision ? <div className="col" style={{ gap: 10 }}>
+            <div className="row">
+              <Badge v={data.deepPrecision.stage} tone={data.deepPrecision.stage === 'NO_TRADE' ? 'b-warn' : 'b-info'} />
+              <Badge v={data.deepPrecision.bias} />
+              <Badge v="RESEARCH ONLY" />
+            </div>
+            <div className="hint">DEEP day-trading analysis using existing 15m/1h/4h closed candles and MIA's registered workers. No trade is placed or authorized, and no 100% prediction accuracy is claimed.</div>
+            <div className="kv mono" style={{ fontSize: 12 }}>
+              <span>Market adapter</span><span>{data.deepPrecision.marketSupport}</span>
+              <span>Worker registry</span><span>{data.deepPrecision.workerPlan.registeredWorkers} total; {data.deepPrecision.workerPlan.selectedWorkers} selected by available domain</span>
+              <span>Independent QCI</span><span>{data.deepPrecision.qci}</span>
+              <span>Evidence quorum</span><span>{data.deepPrecision.workerPlan.evidenceQuorum}</span>
+            </div>
+            <div className="row" style={{ gap: 6 }}>
+              {data.deepPrecision.timeframes.map((f: any) => <span key={f.timeframe} className="hint">{f.timeframe} <Badge v={f.trend} /> <Badge v={f.status} /></span>)}
+            </div>
+            {data.deepPrecision.zone && <div className="kv mono" style={{ fontSize: 12 }}>
+              <span>Research zone</span><span>{fmt.px(data.deepPrecision.zone.low)}–{fmt.px(data.deepPrecision.zone.high)}</span>
+              <span>Invalidation / stop</span><span>{fmt.px(data.deepPrecision.zone.invalidation)}</span>
+              <span>Hypothetical target</span><span>{fmt.px(data.deepPrecision.zone.target)}</span>
+              <span>Worst-edge gross R:R</span><span>{fmt.num(data.deepPrecision.zone.rewardRiskAtWorstEdge, 2)} (NOT_CALIBRATED)</span>
+              <span>Expires</span><span>{fmt.time(data.deepPrecision.zone.expiresAt)}</span>
+            </div>}
+            {data.deepPrecision.reasons.length > 0 && <div className="hint warn">Conditions: {data.deepPrecision.reasons.join(' · ')}</div>}
+            <div className="hint">{data.deepPrecision.note} Scalping's 1m/tick feed and non-spot brokers are not yet certified in this branch.</div>
+          </div> : <Empty>DEEP evidence is unavailable for this instrument.</Empty>}
+        </Card>
         <Card title="50 indicator specialists"><IndicatorGrid list={data?.indicators ?? []} /></Card>
       </div>
       <div className="col" style={{ gap: 14 }}>

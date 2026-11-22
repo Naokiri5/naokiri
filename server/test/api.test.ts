@@ -67,6 +67,47 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(body.live.unmetGates).toContain('G07');
     expect(body.releaseSummary).toMatch(/live execution LOCKED/);
   });
+  it('bundle preview is owner-authenticated, CSRF protected and cannot submit or unlock LIVE', async () => {
+    expect((await app.inject({ url: '/api/trading/bundles/capabilities' })).statusCode).toBe(401);
+    const cap = await app.inject({ url: '/api/trading/bundles/capabilities', headers: H() });
+    expect(cap.statusCode).toBe(200);
+    expect(cap.json().environments.filter((e: any) => e.environment !== 'PAPER').every((e: any) => e.canPlaceBundleOrders === false)).toBe(true);
+    const payload = { environment: 'LIVE', mode: 'MULTI_ASSET_BASKET', decisionIds: ['dec1', 'dec2'] };
+    expect((await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', payload })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', headers: { cookie }, payload })).statusCode).toBe(403);
+    const result = await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', headers: H(), payload });
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ approved: false, canSubmit: false, environment: 'LIVE' });
+    expect(result.json().reasonCodes).toContain('LIVE_BUNDLE_SUBMISSION_NOT_CERTIFIED');
+    expect((await app.inject({ method: 'POST', url: '/api/trading/bundles/preview', headers: H(), payload: { ...payload, decisionIds: ['x'] } })).statusCode).toBe(400);
+    const execute = '/api/trading/bundles/paper/execute';
+    expect((await app.inject({ method: 'POST', url: execute, payload: { decisionIds: ['d1', 'd2'] } })).statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: execute, headers: { cookie }, payload: { decisionIds: ['d1', 'd2'] } })).statusCode).toBe(403);
+    // Do not make a deliberate bad step-up attempt here: the shared lockout
+    // budget is tested separately in dedicated security tests.
+    const noDecisions = await app.inject({ method: 'POST', url: execute, headers: H(), payload: { decisionIds: ['d1', 'd2'], password: 'correct horse battery' } });
+    expect(noDecisions.statusCode).toBe(200);
+    expect(noDecisions.json().ok).toBe(false);
+
+  });
+
+  it('exposes account-scoped bundle lifecycle in the existing portfolio and authenticated bundle views', async () => {
+    expect((await app.inject({ url: '/api/trading/bundles' })).statusCode).toBe(401);
+    expect((await app.inject({ url: '/api/trading/bundles/unknown' })).statusCode).toBe(401);
+    const response = await app.inject({ url: '/api/trading/bundles', headers: H() });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      environment: 'PAPER',
+      bundles: [],
+      readOnly: true,
+      canPlaceRealOrders: false,
+    });
+    expect((await app.inject({ url: '/api/trading/bundles/unknown', headers: H() })).statusCode).toBe(404);
+    expect((await app.inject({ url: '/api/trading/bundles?limit=0', headers: H() })).statusCode).toBe(400);
+    const portfolio = await app.inject({ url: '/api/portfolio', headers: H() });
+    expect(portfolio.statusCode).toBe(200);
+    expect(portfolio.json().paperBundles).toEqual([]);
+  });
   it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {
     const password = 'correct horse battery'; const id = STRATEGIES[0].id; const worker = WORKERS[0].id;
     const statusUrl = `/api/lab/strategy/${id}/status`; const releaseUrl = `/api/workers/${worker}/release`;
@@ -155,6 +196,13 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     const r = await app.inject({ url: '/api/instrument/CHARTUSDT?interval=1h', headers: { cookie } });
     expect(r.statusCode).toBe(200);
     expect(r.json().chartIntelligence).toMatchObject({ status: 'VALID', decision: 'NO TRADE', timeframe: '1h' });
+    expect(r.json().deepPrecision).toMatchObject({
+      version: 'mia-deep-precision-research-v1',
+      instrumentId: 'crypto:binance:CHARTUSDT',
+      canAuthorizeTrade: false, canSubmitOrder: false, canSignOrder: false,
+      qci: 'NOT_RUN_FOR_THIS_ZONE',
+      workerPlan: { registeredWorkers: 100, evidenceQuorum: 'NOT_EVALUATED' },
+    });
     expect((await app.inject({ url: '/api/instrument/CHARTUSDT?interval=1m', headers: { cookie } })).statusCode).toBe(400);
   });
   it('protects replay, validates intervals, and returns only the visible prefix', async () => {

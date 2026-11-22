@@ -132,8 +132,94 @@ export function Risk() {
   </Page>;
 }
 
+/**
+ * Manual PAPER-only bundle workflow. Source choices are persisted MIA decisions;
+ * the server re-evaluates canonical risk under the SQLite lock on execution.
+ * No browser-supplied quantities, market orders, signer, or LIVE route.
+ */
+function PaperBundleConsole({ onExecuted }: { onExecuted: () => void }) {
+  const { data: decisions, error: decisionsError, reload: reloadDecisions } = useApi('/api/decisions?decision=PAPER_TRADE', {
+    topics: ['decision', 'order'], every: 30_000,
+  });
+  const [ids, setIds] = useState<string[]>([]);
+  const [stepUpProof, setStepUpProof] = useState('');
+  const [preview, setPreview] = useState<any>(null);
+  const [execution, setExecution] = useState<any>(null);
+  const options = (decisions ?? []).slice(0, 16);
+  const isValid = ids.length >= 2 && ids.length <= 5;
+  const toggle = (id: string) => {
+    setPreview(null);
+    setExecution(null);
+    setIds(old => old.includes(id) ? old.filter(x => x !== id) : old.length < 5 ? [...old, id] : old);
+  };
+  return <Card title="PAPER bundle execution · owner approval" flush>
+    <div className="col" style={{ padding: 12, gap: 12 }}>
+      <div className="hint">Select 2–5 stored PAPER decisions. MIA checks each leg and their combined capital, risk, correlation and protection before any simulated order is recorded. Orders are committed together or all rolled back. LIVE, TESTNET and Solana Jito submissions are not available here.</div>
+      <ErrorLine e={decisionsError} />
+      {options.length ? <div className="tablewrap" style={{ maxHeight: 220 }}>
+        <table><thead><tr><th>Select</th><th>Instrument</th><th>Strategy</th><th>Score</th><th>Decision</th></tr></thead>
+          <tbody>{options.map((d: any) => <tr key={d.id}><td><input type="checkbox"
+            aria-label={'Include ' + d.instrument + ' in paper bundle'}
+            checked={ids.includes(d.id)}
+            disabled={!ids.includes(d.id) && ids.length >= 5}
+            onChange={() => toggle(d.id)} /></td>
+            <td>{d.instrument.split(':')[2] ?? d.instrument}</td>
+            <td>{d.strategy}</td>
+            <td>{d.score ?? '—'}</td>
+            <td><Badge v={d.decision} /></td>
+          </tr>)}</tbody>
+        </table>
+      </div> : <Empty>No stored PAPER_TRADE decisions to bundle. MIA must first produce current, eligible decisions.</Empty>}
+      <div className="row">
+        <span className="hint">{ids.length}/5 selected (minimum 2)</span>
+        <Action label="Preview basket risk" disabled={!isValid}
+          run={async () => {
+            const result = await api('/api/trading/bundles/preview', {
+              body: { environment: 'PAPER', mode: 'PAPER_ATOMIC', decisionIds: ids },
+            });
+            setExecution(null);
+            setPreview(result);
+          }} />
+      </div>
+      {preview && <div className="hint" role="status">
+        Preflight: <Badge v={preview.approved ? 'APPROVED FOR PAPER REVIEW' : 'DENIED'} tone={preview.approved ? 'b-good' : 'b-bad'} />
+        {preview.reasonCodes?.length ? <div>{preview.reasonCodes.join(' · ')}</div> : null}
+        <div>A preview does not place orders or reserve funds. MIA independently rechecks risk at submission.</div>
+      </div>}
+      <div className="row">
+        <StepUp value={stepUpProof} onChange={setStepUpProof} />
+        <Action className="primary" label="Execute PAPER bundle"
+          disabled={!isValid || !preview?.approved || !stepUpProof}
+          confirm={'Submit ' + ids.length + ' simulated PAPER entries as one atomic bundle? No real funds are used.'}
+          run={async () => {
+            try {
+              const result = await api('/api/trading/bundles/paper/execute', {
+                body: { decisionIds: ids, password: stepUpProof },
+              });
+              setExecution(result);
+              if (!result.ok) throw new Error(result.reason ?? 'PAPER bundle rejected');
+              setIds([]);
+              setPreview(null);
+              onExecuted();
+              reloadDecisions();
+            } finally {
+              setStepUpProof('');
+            }
+          }} />
+      </div>
+      {execution && <div className="hint" role="status">
+        <Badge v={execution.ok ? 'PAPER BUNDLE RECORDED' : 'NOT EXECUTED'} tone={execution.ok ? 'b-good' : 'b-bad'} />
+        {execution.bundleId ? <span className="mono"> {execution.bundleId}</span> : null}
+        {execution.reason ? <div>{execution.reason}</div> : null}
+        {execution.warning ? <div>{execution.warning}</div> : null}
+      </div>}
+      <div className="hint">The PAPER bot does not automatically submit bundle orders. Only owner step-up can execute this workflow. Existing independent stops continue managing each position after entry.</div>
+    </div>
+  </Card>;
+}
+
 export function Portfolio() {
-  const { data, error, reload } = useApi('/api/portfolio', { topics: ['position'], every: 20_000 });
+  const { data, error, reload } = useApi('/api/portfolio', { topics: ['position', 'order'], every: 20_000 });
   const a = data?.account;
   return <Page title="Portfolio" sub="Paper bot account (ledger is the source of truth). External wallets and exchange balances appear once read-only connections are configured.">
     <ErrorLine e={error} />
@@ -144,6 +230,32 @@ export function Portfolio() {
     <Card title="Realized equity curve">{data?.equityCurve.length > 1 ? <Sparkline values={data.equityCurve.map((x: any) => x.equity)} height={120} /> : <Empty>Curve appears after closed paper trades.</Empty>}</Card>
     <div style={{ height: 14 }} />
     <PositionsTable rows={data?.open ?? []} onChange={reload} />
+    <div style={{ height: 14 }} />
+    <PaperBundleConsole onExecuted={reload} />
+    <div style={{ height: 14 }} />
+    <Card title={'PAPER bundle executions (' + (data?.paperBundles?.length ?? 0) + ')'} flush>
+      {data?.paperBundles?.length ? <div className="tablewrap"><table><thead><tr>
+        <th>Committed</th><th>Bundle</th><th>Entry state</th><th>Current phase</th>
+        <th>Record health</th><th>Positions</th><th className="num">Entry total</th>
+        <th className="num">Entry fees</th><th className="num">Realized PnL</th>
+      </tr></thead><tbody>
+        {data.paperBundles.map((b: any) => <tr key={b.bundleId}>
+          <td className="faint">{fmt.time(b.committedAt ?? b.createdAt)}</td>
+          <td className="mono faint" style={{ fontSize: 11 }} title={b.bundleId}>{b.bundleId.slice(-12)}</td>
+          <td><Badge v={b.entryState} /></td>
+          <td><Badge v={b.phase} tone={b.phase === 'RECONCILIATION_REQUIRED' ? 'b-bad' : b.phase === 'CLOSED' ? 'b-good' : 'b-info'} /></td>
+          <td><Badge v={b.health} tone={b.health === 'NEEDS_ATTENTION' ? 'b-bad' : 'b-good'} title={(b.issues ?? []).join(' · ')} /></td>
+          <td>{b.counts.positionsOpen} open · {b.counts.positionsClosed} closed / {b.counts.legs}</td>
+          <td className="num">{fmt.usd(b.observedEntryNotional)}</td>
+          <td className="num">{fmt.usd(b.observedEntryFees)}</td>
+          <td className={b.observedRealizedPnl < 0 ? 'num down' : 'num up'}>{fmt.usd(b.observedRealizedPnl)}</td>
+        </tr>)}
+      </tbody></table><div className="hint" style={{ padding: '8px 12px' }}>
+        PAPER only. Entry FILLED means all simulated entries committed, not that positions are closed.
+        Stops are monitored by MIA's OMS and are not exchange-native guarantees.
+        Bundle health reflects existing order, fill, position and protection records.
+      </div></div> : <Empty>No PAPER bundle executions yet. Grouped execution requires an owner-authorized PAPER request.</Empty>}
+    </Card>
     <div style={{ height: 14 }} />
     <Card title="Closed positions" flush><div className="tablewrap"><table><thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th className="num">Entry</th><th className="num">Exit</th><th>Exit reason</th><th className="num">Fees</th><th className="num">Net PnL</th><th className="num">R</th></tr></thead>
       <tbody>{(data?.closed ?? []).map((p: any) => <tr key={p.id}><td className="faint">{fmt.time(p.closed_at)}</td><td>{p.instrument.split(':')[2]}</td><td>{p.strategy}</td><td className="num">{fmt.px(p.entry_price)}</td><td className="num">{fmt.px(p.exit_price)}</td><td><Badge v={p.exit_reason} /></td><td className="num">{fmt.usd(p.fees)}</td><td className={`num ${p.realized_pnl < 0 ? 'down' : 'up'}`}>{fmt.usd(p.realized_pnl)}</td><td className="num">{(p.realized_pnl / p.planned_risk).toFixed(2)}</td></tr>)}</tbody></table>{!data?.closed.length && <Empty>No closed positions.</Empty>}</div></Card>

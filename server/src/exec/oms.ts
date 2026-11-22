@@ -13,6 +13,7 @@ import { getControl, updateControl } from '../core/mode.js';
 import { stepExit, newExitState, type ExitState } from '../lab/exits.js';
 import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
+import { previewBundle } from './bundles/preview.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { crashpoint } from './crashpoint.js';
 
@@ -97,7 +98,7 @@ function simulateExitFill(instrumentId: string, qty: number, bufferPct: number, 
 }
 
 /** Entry submission with Part 29 L5 last-moment validation. */
-export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowTs = Date.now()): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
+export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowTs = Date.now(), deferred?: Deferred): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
   const t0 = performance.now();
   const s = report;
   const coid = `entry-${report.candidateId}`;
@@ -153,18 +154,75 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   }
   crashpoint('entry.committed');
   record('oms.submit', performance.now() - t0);
-  journal('FILL', `BUY ${qty} ${s.asset} @ ${fill.price.toPrecision(6)} (${strat}) — stop ${s.stopLoss.toPrecision(6)}, slippage ${fill.impactBps.toFixed(1)}bps`, posId, { decisionId: s.id, fill, fee, risk: fresh, actor });
-  notify('INFO', `Paper entry: ${s.asset}`, `${qty} @ ${fill.price.toPrecision(6)}, stop ${s.stopLoss.toPrecision(6)}, planned max loss $${fresh.sizing.plannedMaxLoss}`, 'oms');
-  bus.publish('order', { orderId, positionId: posId, status: 'FILLED' }); bus.publish('position', { positionId: posId });
+  const plannedMaxLoss = fresh.sizing.plannedMaxLoss;
+  // The single entry path publishes after commit. A PAPER bundle defers outward-facing
+  // effects until the enclosing SQLite transaction commits *all* financial rows.
+  const afterCommit = () => {
+    journal('FILL', `BUY ${qty} ${s.asset} @ ${fill.price.toPrecision(6)} (${strat}) — stop ${s.stopLoss.toPrecision(6)}, slippage ${fill.impactBps.toFixed(1)}bps`, posId, { decisionId: s.id, fill, fee, risk: fresh, actor });
+    notify('INFO', `Paper entry: ${s.asset}`, `${qty} @ ${fill.price.toPrecision(6)}, stop ${s.stopLoss.toPrecision(6)}, planned max loss $${plannedMaxLoss}`, 'oms');
+    bus.publish('order', { orderId, positionId: posId, status: 'FILLED' }); bus.publish('position', { positionId: posId });
+  };
+  if (deferred) deferred.push(afterCommit); else afterCommit();
   return { ok: true, orderId, positionId: posId };
 
   function reject(reason: string) {
+    // A bundle rolls the entire transaction back; never publish rolled-back failures.
+    if (deferred) return { ok: false, reason };
     if (existing) run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=?", reason, Date.now(), existing.id);
     else insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
     journal('ORDER', `Entry rejected for ${s.asset}: ${reason}`, s.id);
     bus.publish('order', { status: 'REJECTED', reason });
     return { ok: false, reason };
   }
+}
+
+/**
+ * Atomic PAPER bundle using the EXISTING single-entry OMS.
+ * One outer SQLite transaction wraps all order, fill, stop, position and ledger
+ * rows. Outward-facing events are deferred until after all legs commit.
+ * Not connected to any real exchange or autonomous bot scheduling.
+ */
+export function submitPaperAtomicBundle(decisionIds: readonly string[], actor: 'owner', nowTs = Date.now()):
+  { ok: boolean; bundleId?: string; orderIds?: string[]; reason?: string; warning?: string } {
+  if (actor !== 'owner') return { ok: false, reason: 'BUNDLE_OWNER_ONLY' };
+  if (!Array.isArray(decisionIds) || decisionIds.length < 2 || decisionIds.length > 5 ||
+      new Set(decisionIds).size !== decisionIds.length || decisionIds.some(id => !/^[A-Za-z0-9_.:-]{1,128}$/.test(id)))
+    return { ok: false, reason: 'BUNDLE_DECISION_IDS_INVALID' };
+  const after: Deferred = [];
+  let result: { bundleId: string; orderIds: string[] };
+  try {
+    result = tx(() => {
+      // Preflight while holding the SQLite writer lock, then independently revalidate
+      // each leg inside the same transaction through submitEntry().
+      const preview = previewBundle({ environment: 'PAPER', mode: 'PAPER_ATOMIC', decisionIds }, nowTs);
+      if (!preview.approved) throw new OmsError('BUNDLE_PREFLIGHT_DENIED: ' + preview.reasonCodes.join('|'));
+      const old = get<{ status: string }>('SELECT status FROM bundle_executions WHERE id=?', preview.bundleId);
+      if (old) throw new OmsError('BUNDLE_ALREADY_RECORDED: ' + old.status);
+      run("INSERT INTO bundle_executions(id,environment,account,idempotency_key,mode,status,created_at) VALUES (?,'PAPER',?,?,'PAPER_ATOMIC','RESERVED',?)",
+        preview.bundleId, PAPER_ACCOUNT, preview.bundleId, nowTs);
+      const orderIds: string[] = [];
+      for (let i = 0; i < decisionIds.length; i++) {
+        const row = get<{ report: string }>('SELECT report FROM decisions WHERE id=?', decisionIds[i]);
+        if (!row) throw new OmsError('BUNDLE_DECISION_MISSING');
+        const entry = submitEntry(P<DecisionReport>(row.report), 'owner', nowTs, after);
+        if (!entry.ok || !entry.orderId) throw new OmsError('BUNDLE_ENTRY_DENIED: ' + (entry.reason ?? 'missing order'));
+        orderIds.push(entry.orderId);
+        run('INSERT INTO bundle_entry_links(bundle_id,leg_index,decision_id,order_id) VALUES (?,?,?,?)',
+          preview.bundleId, i, decisionIds[i], entry.orderId);
+      }
+      run("UPDATE bundle_executions SET status='FILLED',committed_at=? WHERE id=? AND status='RESERVED'", Date.now(), preview.bundleId);
+      audit(actor, 'bundle.paper_atomic.committed', { bundleId: preview.bundleId, orderIds, account: PAPER_ACCOUNT });
+      return { bundleId: preview.bundleId, orderIds };
+    });
+  } catch (e: any) {
+    // Every financial write rolls back; never claim a partial PAPER fill as success.
+    return { ok: false, reason: e instanceof OmsError ? e.message : 'BUNDLE_TRANSACTION_FAILED' };
+  }
+  let warning: string | undefined;
+  for (const publish of after) {
+    try { publish(); } catch { warning = 'POST_COMMIT_NOTIFICATION_FAILED'; }
+  }
+  return { ok: true, ...result, ...(warning ? { warning } : {}) };
 }
 
 /** APPROVAL mode: queue a pending order for the owner. */
