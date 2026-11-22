@@ -1,0 +1,561 @@
+# **MIA WHALE INTELLIGENCE — FAST COPY & DEEP STRATEGY RECONSTRUCTION**
+
+Engineering blueprint · MIA 5.x · [Naokiri5/naokiri](https://github.com/Naokiri5/naokiri?utm_source=chatgpt.com)
+
+I would develop your idea as **MIA Whale Intelligence Network (WIN)**: a built-in system that observes large market participants, studies their historical behavior, identifies potentially repeatable trading advantages, and independently evaluates whether to take a position.
+
+It would have two distinct intelligence modes sharing MIA's existing decision, risk, execution, and portfolio infrastructure.
+
+WIN-FAST
+
+## **Whale Reflex**
+
+Solana memecoins
+
+Observe a selected whale's on-chain swaps, verify the transaction, screen token safety, and evaluate whether a fast independent entry is still viable.
+
+Event-driven · Wallet-level attribution
+
+WIN-DEEP
+
+## **Whale Architect**
+
+Multi-market
+
+Study large-participant activity, reconstruct chart setups and favorable zones, and formulate independent strategies rather than blindly following another trader.
+
+Research-driven · Structure-based inference
+
+The difference is fundamental: **FAST attempts to respond to an observable trade; DEEP attempts to understand why a trade might work and find its own entry.**
+
+Neither can guarantee winning trades or a specific accuracy percentage. We can build and calibrate probability models, but an observed whale's transaction is not proof of profitability.
+
+## **1. What I found in your GitHub**
+
+MIA already has a foundation that should be extended, not replaced.
+
+| Existing component   | What it does now                                           | Development action                                   |
+| -------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| `whales/prints.ts`   | Detects large Binance trade prints, not identified wallets | Extend whale evidence                                |
+| `GET /api/copy`      | Returns `BLOCKED` with empty tracked wallets               | Replace placeholder with verified read-only services |
+| `market/discover.ts` | Discovers CEX assets and DEX pools                         | Reuse for universe selection                         |
+| `safety/safety.ts`   | Rejects unverified DEX assets for automation               | Extend token validation                              |
+| `workers/` + `qci/`  | Runs existing evidence specialists                         | Integrate whale evidence without a second QCI        |
+| `decision/engine.ts` | Authoritative trade decisions                              | Reuse                                                |
+| `risk/gate.ts`       | Deterministic risk authorization                           | Reuse, extend for markets                            |
+| `exec/oms.ts`        | Paper execution and position monitoring                    | Reuse; live requires certification                   |
+| `ditas/`             | Decision evidence, outcomes, calibration                   | Add whale strategy analysis                          |
+
+There is also existing Solana work in [PR #46](https://github.com/Naokiri5/naokiri/pull/46?utm_source=chatgpt.com), mint-safety checks in [PR #50](https://github.com/Naokiri5/naokiri/pull/50?utm_source=chatgpt.com), and provider integration in [PR #95](https://github.com/Naokiri5/naokiri/pull/95?utm_source=chatgpt.com). These remain separate development work and must be reconciled before implementation.
+
+**Important engineering decision:** Do not build a second copy-trading order system. Build a *Whale Intelligence subsystem* whose output enters MIA's existing risk-controlled trading pipeline.
+
+## **2. What can actually be copied across markets?**
+
+This is the most important technical distinction for the entire product.
+
+| Market                       | Can MIA see an individual whale's actual trades?                                  | Correct approach                                            |
+| ---------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Solana memecoins             | Yes, for observable on-chain wallet transactions                                  | Direct wallet-following                                     |
+| Other on-chain crypto        | Yes, where transactions and wallet ownership are observable                       | Direct on-chain evidence                                    |
+| Centralized crypto exchanges | Generally not from anonymous public trade prints                                  | Large-order and order-flow analysis                         |
+| Crypto futures               | Usually not individual trader identities; some platforms expose opt-in positions  | Market-structure reconstruction or authorized signal feeds  |
+| Forex                        | Generally no; the spot market is fragmented and largely OTC                       | Positioning and liquidity analysis                          |
+| Stock/index futures          | Public trade/order-book activity normally does not identify the beneficial trader | Institutional footprint reconstruction                      |
+| Stocks and ETFs              | Public trades do not normally reveal their beneficial owner                       | Institutional disclosures, blocks and chart-based inference |
+
+For example, U.S. Form 13F filings report certain institutional holdings quarterly, generally within 45 days after the quarter ends. They cannot be used to copy an institution's immediate entry. CFTC Commitments of Traders reports similarly provide aggregated large-trader positioning, not an individual trader's complete live trade feed.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://www.investor.gov\&sz=32)
+
+Investor.gov+2
+
+
+
+That means MIA needs two evidence classes:
+
+- **Verified direct trade:** A specific public wallet executed a specific on-chain swap.
+- **Inferred large-player activity:** Market data suggests accumulation, distribution, hedging, liquidation or institutional participation, without claiming to know the individual trader.
+
+This preserves the credibility of MIA. It must never label an anonymous futures transaction as a trade by a named whale without verifiable attribution.
+
+## **3. The complete WIN architecture**
+
+**Whale Observation Network**
+
+Millions of indexed wallet addresses, large prints and institutional evidence records
+
+**Evidence Normalizer + Whale Identity Registry**
+
+Source · Address or entity · Transaction ID · Timestamp · Finality · Reliability
+
+**Whale Performance & Behavior Engine**
+
+Observed PnL · Holding behavior · Drawdown · Trade quality · Execution lag
+
+**FAST**
+
+Follow one verified wallet and evaluate a new swap
+
+**DEEP**
+
+Extract price zones and repeatable strategy hypotheses
+
+**Existing 100 Workers + QCI**
+
+Evidence voting, adversarial checks and source dependency coverage
+
+**MIA Decision Engine**
+
+Trade · Wait · Monitor · Reject
+
+**Canonical Risk Gate**
+
+Position sizing · Exposure · Token safety · Margin · Slippage · Loss limits
+
+**PAPER**
+
+Simulation and validation
+
+**LIVE**
+
+Future certified execution
+
+**Position Reconciliation + DITAS Learning**
+
+Actual fills, position outcomes, strategy performance and monitored adaptation
+
+This should integrate with MIA's existing scheduled lanes and engine lease, while allowing an event-driven FAST feed and a slower DEEP research pipeline.
+
+## **4. WIN-FAST — Single-Whale Memecoin Copy Trading**
+
+The user should be able to select **one public Solana whale wallet** from a large searchable directory, follow it, and let MIA decide which of its observed trades qualify.
+
+01
+
+**Whale discovery and indexing**
+
+Discover public wallets through on-chain swap histories, liquidity pools, verified DEX transactions and wallet behavior. Use Helius transaction data and streaming/indexing infrastructure, rather than scraping wallet dashboards. Solana's Yellowstone/Geyser infrastructure supports transaction and account streams.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://solana.com\&sz=32)
+
+solana.com+2
+
+
+
+02
+
+**Wallet reconstruction**
+
+Rebuild the wallet's observed buy and sell quantities, cost basis, partial exits, fees and holdings. Distinguish DEX swaps from transfers, liquidity provisioning, bot routing and internal wallet movements. Flag incomplete history and hidden or external hedges.
+
+03
+
+**Whale selection**
+
+Let the user follow one address or let MIA propose one from the verified directory. Show the actual wallet address, historical coverage, realized versus unrealized results, drawdown, average holding period and observed price-movement after the wallet's entry.
+
+04
+
+**Event detection**
+
+When the followed wallet swaps a token, deduplicate the transaction, validate the signature, inspect the actual swap legs and record its confirmation state. Never interpret a pending transaction or simple token transfer as a guaranteed purchase.
+
+05
+
+**Memecoin security screening**
+
+Reuse the Solana mint-audit work, then extend it with Token-2022 restrictions, transfer fees, freeze/mint authorities, pool liquidity, concentrated holders, creator activity, pool withdrawal risk, executable sell simulation and suspected coordinated wallets.
+
+06
+
+**Independent execution-quality check**
+
+Compare the whale's observed execution with the current available quote, price impact, priority fees and slippage. Reject the signal if the opportunity has already moved beyond its modeled advantage.
+
+Jupiter's current Swap V2 documentation provides quote/build and order/execute workflows that can support an eventual vetted Solana adapter.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://github.com\&sz=32)
+
+GitHub+1
+
+
+
+07
+
+**MIA evaluates the candidate**
+
+The whale event becomes evidence for the existing QCI coordinator and decision engine. An attractive historical whale performance does not override a token-safety failure or risk veto.
+
+08
+
+**Independent position entry and management**
+
+In PAPER, simulate the actual obtainable execution. In a future approved LIVE mode, place a new order through MIA's own authorized wallet and venue adapter. Track its own stop, exits, partial fills and realized PnL.
+
+Copying cannot transfer the whale's existing entry price or ownership of its executed trade into the user's portfolio.
+
+### **Example of FAST decision-making**
+
+**Illustrative whale event**
+
+Simulated example
+
+| Selected whale             | Solana wallet `W-042` |
+| -------------------------- | --------------------- |
+| Observed trade             | BUY of token `ABC`    |
+| Whale entry                | $0.00100              |
+| Current executable quote   | $0.00118              |
+| Price movement since trade | +18%                  |
+| Token safety               | Inconclusive          |
+
+MIA decision
+
+REJECT
+
+The whale might eventually make money, but the user's obtainable entry is substantially different and required safety evidence is missing. MIA should reject the copy rather than chase the position.
+
+This should be a defining feature of your product: **MIA can follow an excellent whale and still reject its trade.**
+
+## **5. WIN-DEEP — Multi-Market Whale Strategy Reconstruction**
+
+DEEP should be more sophisticated than ordinary copy trading.
+
+Instead of assuming an identifiable institution bought an asset, MIA would locate unusual large-participant activity, connect it with the chart structure at the time, and research whether similar patterns historically supported a repeatable entry.
+
+I would call the central subsystem **Whale Strategy DNA**.
+
+### **Its six analytical engines**
+
+| Engine                    | Responsibility                                                                                        | Output                                                 |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Institutional Footprint   | Analyze large prints, volume anomalies, order-book imbalance, open interest and aggregate positioning | Observed accumulation/distribution hypotheses          |
+| Market Structure          | Detect trend, swing pivots, breakouts, failed breakouts and structural changes                        | Directional context                                    |
+| Liquidity Zone            | Analyze VWAP, volume profile, liquidity concentrations and liquidity sweeps                           | Candidate entry and invalidation zones                 |
+| Strategy DNA              | Group historical market setups and infer reproducible conditions                                      | Versioned strategy hypotheses                          |
+| Probability & Calibration | Compare outcomes of similar historical setups using walk-forward validation                           | Calibrated probabilities and uncertainty, if supported |
+| Execution Timing          | Re-evaluate the zone, spreads, order flow, market hours and risk before entry                         | Actionable candidate or rejection                      |
+
+For example, suppose a large futures-market buying impulse appears near a prior support region. Rather than buying immediately, DEEP could record the event, examine whether the following price structure confirms or invalidates the hypothesis, and wait for a qualified retest.
+
+That would create a testable trading rule, not an assertion that MIA knows exactly which institution placed the original order.
+
+### **Market-specific reconstruction**
+
+| Market                   | Evidence to prioritize                                                            | Execution and risk requirements                                 |
+| ------------------------ | --------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Crypto perpetual futures | Funding, open interest, liquidations, volume delta, market depth                  | Funding cost, leverage, liquidation buffer, exchange protection |
+| Forex                    | Session structure, liquidity, economic releases, broker flow and COT positioning  | Bid/ask spread, rollover, session liquidity, leverage           |
+| Stock/index futures      | Contract volume, open interest, order flow, COT, session VWAP                     | Contract multiplier, margin, expiry and rollover                |
+| Stocks and ETFs          | Consolidated tape, block activity, earnings, institutional disclosures, ETF flows | Market hours, halts, corporate actions, order types             |
+
+Alpaca documents market-data streams and order updates; OANDA provides pricing, account, and order APIs. These are potential provider options, subject to market availability, licensing, and account permissions. Neither grants visibility into every other customer's positions.&#x20;
+
+[image](https://www.google.com/s2/favicons?domain=https://docs.alpaca.markets\&sz=32)
+
+docs.alpaca.markets+2
+
+
+
+For stock futures and exchange-traded futures, MIA also needs appropriate licensed exchange data and a futures-capable broker. An equities-only adapter is not sufficient.
+
+### **How DEEP should produce an entry**
+
+A reconstructed trade hypothesis should contain a market, direction, candidate entry zone, entry trigger, invalidation price, stop, targets, maximum holding period, model version, supporting historical sample and estimated execution cost.
+
+For example:
+
+**Illustrative DEEP setup**
+
+Research only
+
+Hypothetical BTC perpetual futures analysis; these are invented prices for explaining the engine, not market observations.
+
+Potential entry zone
+
+## **$98,000–$98,200**
+
+Invalidation level
+
+## **$97,500**
+
+Hypothetical target
+
+## **$99,600**
+
+Strategy
+
+Liquidity sweep + retest
+
+Required conditions
+
+A valid setup would require an observed sweep, confirming market structure, adequate liquidity, a net positive modeled edge after costs, and a passing MIA risk assessment. Otherwise it remains a research observation.
+
+No execution authorized
+
+MIA should not attempt to find the exact low or high of every market move. A **zone with explicit invalidation** is more robust and measurable than a claim of perfect entry timing.
+
+## **6. MIA Whale Performance & Probability Engine**
+
+This is where MIA could become meaningfully different from a conventional copy-trading interface.
+
+It should not simply rank whales by the percentage of profitable observed trades. It needs to determine whether **following a particular wallet, with MIA's own execution delays and costs, had historically been worthwhile**.
+
+### **Whale ranking model**
+
+| Metric                       | What MIA measures                                                                   |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| Verified trade coverage      | Proportion of historical activity that can actually be reconstructed                |
+| Realized trading performance | Observed completed-trade PnL after applicable costs                                 |
+| Maximum drawdown             | Largest observed decline in reconstructed equity                                    |
+| Consistency                  | Results across different periods and market regimes                                 |
+| Execution-lag resilience     | Whether following after a realistic delay remains profitable                        |
+| Liquidity sensitivity        | Whether an order of MIA's size could obtain a reasonable price                      |
+| Manipulation exposure        | Suspicious coordinated addresses, wash activity or potential pump-and-dump behavior |
+| Strategy stability           | Whether the wallet's behavior remains similar over time                             |
+| Sample reliability           | Statistical uncertainty and whether enough representative trades exist              |
+
+MIA should maintain separate outputs for a *whale quality score*, *source confidence*, *expected after-cost return*, and *calibrated probability of a favorable outcome*.
+
+For a real probability estimate, the system should use historical training and time-separated validation, measure Brier score or log loss, and report an uncertainty interval. If evidence is insufficient, it should return `INSUFFICIENT_EVIDENCE`, not invent a win percentage.
+
+Most importantly, historical success must not automatically trigger execution. MIA's existing risk authority must have the final veto.
+
+## **7. How to index millions of whales**
+
+Your requested scale is possible as a **data-indexing architecture**, but not as millions of constantly running AI agents.
+
+I would separate whale coverage into three levels.
+
+| Level                         | Purpose                                                                        | Processing                                        |
+| ----------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------- |
+| Historical directory          | Millions of distinct public wallet addresses or other supported entity records | Batch indexing and storage                        |
+| Active watch universe         | Wallets with recent relevant activity and sufficient evidence                  | Incremental profiling                             |
+| Followed/high-priority whales | Selected addresses with verified streams or licensed low-latency data          | Event-driven updates and fast decision evaluation |
+
+A million wallet addresses are not necessarily a million distinct people. One trader can control many wallets, and one address can serve many users. MIA should not collapse addresses into a supposed single person without justified evidence.
+
+For implementation, start with SQLite and the existing in-process services for a small validated workload. When measured throughput demands it, move high-volume observations to partitioned storage such as PostgreSQL/TimescaleDB or an analytical event store, with object storage for archived history. Keep orders and financial records in one independently reconciled transactional authority.
+
+This avoids paying for millions of redundant AI inference calls.
+
+## **8. TypeScript foundation — reusable, non-executing contracts**
+
+I would first implement a small, strongly typed evidence interface before connecting any trading action.
+
+The following is an example foundation, **not deployed or connected to live orders**.
+
+```
+
+export type WhaleSource =
+  | "SOLANA_WALLET_SWAP"
+  | "CEX_LARGE_PRINT"
+  | "FUTURES_POSITIONING"
+  | "INSTITUTIONAL_FILING";
+
+export type WhaleLane = "FAST" | "DEEP";
+
+export type WhaleObservation = {
+  id: string;
+  source: WhaleSource;
+  sourceId: string;
+  instrumentId: string;
+  observedAt: number;
+  receivedAt: number;
+  walletAddress?: string;
+  transactionSignature?: string;
+  confirmed: boolean;
+  side: "BUY" | "SELL" | "UNKNOWN";
+  sourceSnapshotId: string;
+};
+
+export type WhaleHypothesis = {
+  observationId: string;
+  lane: WhaleLane;
+  instrumentId: string;
+  direction: "LONG" | "SHORT" | "NONE";
+  strategyId: string;
+  strategyVersion: string;
+  evidenceSnapshotId: string;
+  entryZone: { low: number; high: number } | null;
+  invalidationPrice: number | null;
+  expiresAt: number;
+  calibratedProbability: number | null;
+  probabilitySampleSize: number | null;
+};
+
+export type WhaleAssessment =
+  | { status: "RESEARCH_ONLY"; reason: string }
+  | { status: "REJECTED"; reason: string }
+  | { status: "CANDIDATE"; observationId: string };
+
+export function assessWhaleObservation(
+  event: WhaleObservation,
+  lane: WhaleLane,
+  now: number,
+  maxAgeMs: number
+): WhaleAssessment {
+  if (
+    !Number.isSafeInteger(event.observedAt) ||
+    !Number.isSafeInteger(event.receivedAt) ||
+    !Number.isSafeInteger(now) ||
+    !Number.isFinite(maxAgeMs) ||
+    maxAgeMs <= 0 ||
+    event.observedAt > event.receivedAt ||
+    event.receivedAt > now
+  ) {
+    return { status: "REJECTED", reason: "INVALID_TIMESTAMPS" };
+  }
+
+  if (now - event.observedAt > maxAgeMs) {
+    return { status: "REJECTED", reason: "STALE_EVIDENCE" };
+  }
+
+  if (lane === "FAST") {
+    if (
+      event.source !== "SOLANA_WALLET_SWAP" ||
+      !event.walletAddress ||
+      !event.transactionSignature ||
+      !event.confirmed ||
+      event.side === "UNKNOWN"
+    ) {
+      return {
+        status: "RESEARCH_ONLY",
+        reason: "NO_VERIFIED_DIRECT_WALLET_TRADE"
+      };
+    }
+  }
+
+  return {
+    status: "CANDIDATE",
+    observationId: event.id
+  };
+}
+
+```
+
+This contract deliberately stops at **CANDIDATE**.
+
+Even a passing observation still needs source authentication, token validation, strategy evidence, a supported market adapter, QCI evaluation, the real canonical `evaluateRisk()` call and durable OMS authorization. The live execution branch stays locked until certified.
+
+## **9. Where to build it in your existing repository**
+
+The proposed source organization would extend the existing `server/src/whales/` domain:
+
+```
+
+server/src/
+  whales/
+    prints.ts               # KEEP: existing CEX large prints
+    registry.ts             # Whale/address catalog
+    observations.ts         # Normalized, versioned evidence
+    walletProfiler.ts       # On-chain observed performance
+    followRules.ts          # One-whale selection rules
+    scoring.ts              # Cost-adjusted whale ranking
+    fastSignals.ts          # FAST candidate preparation
+    strategyDna.ts          # DEEP strategy reconstruction
+    institutional.ts        # Aggregate/disclosure analysis
+    outcomes.ts             # Verified performance outcomes
+
+  solana/                   # REUSE open Solana work
+  providers/                # REUSE existing provider HTTP layer
+  market/                   # Canonical instruments/data quality
+  features/indicators.ts    # Canonical feature calculations
+  workers/                  # Existing 100-worker registry
+  qci/                      # Existing evidence coordination
+  decision/engine.ts        # Sole decision authority
+  risk/gate.ts              # Sole risk authority
+  exec/oms.ts               # Sole paper OMS
+  portfolio/ledger.ts       # Sole financial-accounting owner
+  ditas/                    # Outcome learning and calibration
+
+```
+
+A small append-only database migration would add indexed whale entities, immutable observations, follow configurations, strategy hypotheses and outcome records. New records should reference canonical decision and instrument IDs, not create a competing order or position database.
+
+For the frontend, integrate the experience into the existing Trading navigation with a dedicated **Whale Intelligence** workspace. It should expose two tabs: FAST Wallet Follow and DEEP Strategy DNA. A single-whale profile should show its source, wallet address where applicable, historical coverage, performance metrics, selected mode, candidate explanations and execution status.
+
+## **10. Development sequence for GitHub**
+
+The safest implementation is a sequence of reviewable PRs rather than one giant rewrite.
+
+**WIN-01 — Build the whale registry**
+
+Reconcile existing Solana PRs, normalize wallet transactions, create an indexed whale directory, and implement verified history reconstruction. Read-only; no orders.
+
+**WIN-02 — Add whale performance analytics**
+
+Calculate observed net PnL, drawdown, behavioral consistency and delayed-copy performance. Add tests for partial histories, related wallets, manipulated volume and incorrect cost basis.
+
+**WIN-03 — Connect FAST to paper trading**
+
+Let a user select one Solana wallet. Convert verified swaps into candidate evidence, reuse the existing intelligence and risk engines, and execute only qualifying simulated trades. Never fake a fill or bypass a token-safety veto.
+
+**WIN-04 — Build DEEP Strategy DNA**
+
+Integrate supported futures, forex and equities research feeds. Generate explicit zone-based strategy hypotheses using the existing chart and indicator engines. Test them in replay without historical lookahead.
+
+**WIN-05 — Unified order and risk integration**
+
+Adapt the canonical OMS to account-scoped trade intents, durable reservations, position reconciliation, margin/product-specific risk and order-state recovery. Do not enable live money as part of an unrelated feature merge.
+
+**WIN-06 — Operational validation and bounded release**
+
+Run replay, paper-trading, crash recovery, failover and independent security tests. Only consider limited live execution after the existing G01–G14 requirements, owner authorization and external venue protections pass.
+
+### **Acceptance criteria**
+
+I would not call the feature functional until its automated tests demonstrate these outcomes:
+
+- FAST never copies an unconfirmed, misidentified or stale transaction.
+- Missing token permissions, sell-route evidence or reliable liquidity blocks automatic memecoin entry.
+- Duplicate on-chain signatures cannot produce duplicate orders.
+- Simulated follower fills use the follower's obtainable price, not the whale's historical fill.
+- DEEP distinguishes direct trader attribution from anonymous institutional footprints.
+- Backtests use only information available at the historical decision time, including realistic fees, funding, spread and latency.
+- Paper and future live paths invoke the same canonical risk rules, with separate account identities.
+- Process crashes, exchange timeouts, partial fills and restarts reconcile without accidental order resubmission.
+- A risk veto, emergency pause, broker rejection or unsupported product never silently becomes an approval.
+- Whale model updates cannot promote themselves to live without documented validation.
+
+For example, a trading system that successfully identifies a wallet but cannot determine whether the user could profit after slippage has not passed the FAST acceptance criteria.
+
+## **11. How the user would operate WIN**
+
+## **Whale Intelligence Workspace — Product Concept**
+
+FAST • MemecoinsDEEP • Multi-market
+
+**Selected whale**
+
+Concept preview
+
+Whale selection
+
+Follow one wallet I select
+
+Let MIA propose one eligible wallet
+
+Observation mode
+
+Read-only
+
+Automatic paper trading
+
+Requires implementation
+
+Automatic live execution
+
+Locked
+
+No wallet is connected or selected by this preview.
+
+Once the service is developed and validated, the goal is that the user configures their authorized wallet or brokerage account, permitted markets, maximum exposure, loss limits and selection policy once. MIA then monitors, evaluates and manages qualifying trades independently within those boundaries, pausing when safety or connectivity requirements fail.
+
+## **Engineering recommendation**
+
+Start with **WIN-01 and WIN-02: one-whale Solana tracking and verified performance reconstruction**. These create the evidence foundation that both FAST and DEEP need. After that, connect FAST to the existing paper trading system, and develop DEEP using the same whale event catalog and canonical decision engine.
+
+The unique product feature is not simply copying whales. It is **selecting which observed whale behavior is worth imitating, distinguishing real evidence from inference, and finding a better independent execution decision than blindly mirroring the original trade.**
+
+I have reviewed the relevant GitHub implementation and drafted the architecture here, but **no repository files, pull requests, trading permissions or live execution settings were changed** in this response.
