@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Read-only, TypeScript-AST reachability audit complementing scripts/inventory.mjs.
+ * Read-only, comment-aware TypeScript import reachability audit complementing scripts/inventory.mjs.
  *
  * Starts from the REAL server entrypoints (main.ts, index.ts, backup-cli.ts).
  * This is an indicator of disconnected code, not proof that a feature runs.
@@ -9,7 +9,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXCLUDED_DIRS = new Set(['__tests__', '__mocks__', 'bench', 'chaos']);
@@ -24,26 +23,57 @@ function collect(dir, root, out) {
   return out;
 }
 
-function relativeImports(filename) {
-  const source = ts.createSourceFile(filename, fs.readFileSync(filename, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-  const result = [];
-  const add = (node) => {
-    if (node && ts.isStringLiteralLike(node) && node.text.startsWith('.')) result.push(node.text);
-  };
-  const walk = (node) => {
-    if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) add(node.moduleSpecifier);
-    if (ts.isCallExpression(node) && node.arguments.length > 0) {
-      const expr = node.expression;
-      if (expr.kind === ts.SyntaxKind.ImportKeyword ||
-        (ts.isIdentifier(expr) && expr.text === 'require')) add(node.arguments[0]);
+/**
+ * Mask comments without altering quoted strings or newlines. This is a bounded
+ * static import scan, not a full source-code parser or runtime execution proof.
+ * TypeScript 7 no longer publishes its classic JavaScript compiler AST API.
+ */
+function stripComments(source) {
+  let output = '';
+  let state = 'code';
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    const next = source[i + 1];
+    if (state === 'line') {
+      if (ch === '\n') { state = 'code'; output += '\n'; }
+      else output += ' ';
+      continue;
     }
-    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) &&
-      node.expression.text === 'URL' && node.arguments && node.arguments.length >= 2 &&
-      node.arguments[1].getText(source) === 'import.meta.url') add(node.arguments[0]);
-    ts.forEachChild(node, walk);
-  };
-  walk(source);
-  return result;
+    if (state === 'block') {
+      if (ch === '*' && next === '/') { output += '  '; i++; state = 'code'; }
+      else output += ch === '\n' ? '\n' : ' ';
+      continue;
+    }
+    if (state === 'single' || state === 'double' || state === 'template') {
+      output += ch;
+      if (ch === '\\' && i + 1 < source.length) { output += source[++i]; continue; }
+      if ((state === 'single' && ch === "'") ||
+          (state === 'double' && ch === '"') ||
+          (state === 'template' && ch.charCodeAt(0) === 96)) state = 'code';
+      continue;
+    }
+    if (ch === '/' && next === '/') { output += '  '; i++; state = 'line'; continue; }
+    if (ch === '/' && next === '*') { output += '  '; i++; state = 'block'; continue; }
+    if (ch === "'") state = 'single';
+    else if (ch === '"') state = 'double';
+    else if (ch.charCodeAt(0) === 96) state = 'template';
+    output += ch;
+  }
+  return output;
+}
+
+function relativeImports(filename) {
+  const src = stripComments(fs.readFileSync(filename, 'utf8'));
+  const references = new Set();
+  const patterns = [
+    /(?:^|[;\n])\s*(?:import|export)\s+(?:(?:type\s+)?[^;]*?\bfrom\s+)?['"](\.[^'"]+)['"]/g,
+    /\b(?:import|require)\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g,
+    /\bnew\s+URL\(\s*['"](\.[^'"]+)['"]\s*,\s*import\.meta\.url\s*\)/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of src.matchAll(pattern)) references.add(match[1]);
+  }
+  return [...references];
 }
 
 function resolveImport(from, specifier, files) {
@@ -89,8 +119,7 @@ export function auditReachableEngines(srcRoot = path.join(ROOT, 'server/src'), e
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const rootArg = process.argv.find((a) => a.startsWith('--root='));
   const root = rootArg ? rootArg.slice('--root='.length) : path.join(ROOT, 'server/src');
-  const roots = process.argv.includes('--root=') ? ['index.ts'] : undefined;
-  const result = auditReachableEngines(root, roots ?? (rootArg ? ['index.ts'] : undefined));
+  const result = rootArg ? auditReachableEngines(root, ['index.ts']) : auditReachableEngines(root);
   if (process.argv.includes('--json')) console.log(JSON.stringify(result));
   else {
     console.log(`MIA source reachability: ${result.reachableCount}/${result.totalCount} modules; ${result.orphans.length} disconnected; ${result.unresolved.length} unresolved relative imports.`);
