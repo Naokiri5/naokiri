@@ -7,6 +7,7 @@
     "dev": "node scripts/run.mjs dev",
     "start": "node scripts/run.mjs start",
     "backup": "node scripts/run.mjs backup",
+    "health:check": "node scripts/health-probe.mjs",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "cross-env NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run",

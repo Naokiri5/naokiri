@@ -1,0 +1,44 @@
+# A single MIA server serves API + compiled React UI + authenticated /api/stream SSE.
+# No parallel Nginx gateway, ledger process, or LIVE execution environment.
+name: mia-paper
+
+services:
+  mia:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 45s
+    # Optional operator-owned secrets and Privy settings; never baked into the image.
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      # Default loopback only. Use an independently secured HTTPS reverse proxy for external access.
+      - "127.0.0.1:${MIA_HTTP_PORT:-8787}:8787"
+    volumes:
+      - mia_data:/app/data
+    environment:
+      NODE_ENV: production
+      MIA_PORT: "8787"
+      MIA_HOST: "0.0.0.0"
+      MIA_DATA_DIR: /app/data
+      MIA_OFFLINE: "${MIA_OFFLINE:-0}"
+      # No EXECUTION_MODE, MIA_ALLOW_LIVE_TRADING, signing credentials, or auto-promotion.
+      # Canonical OBSERVE/PAPER permissions live in MIA's owner-controlled SQLite state.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "server/scripts/health-probe.mjs"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  mia_data:
+    driver: local
