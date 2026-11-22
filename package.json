@@ -12,6 +12,7 @@
     "prestart": "node server/scripts/ensure-build.mjs",
     "start": "npm run start -w server",
     "backup": "npm run backup -w server --",
+    "health:check": "npm run health:check -w server",
     "test": "npm test -w server && npm test -w web",
     "typecheck": "npm run typecheck -w server && npm run typecheck -w web",
     "test:e2e": "npm run build -w web && playwright test -c e2e/playwright.config.ts",
