@@ -13,14 +13,14 @@ import { INTERVAL_MS, type Candle } from '../market/types.js';
 
 export const DITAS_COVERAGE = [
   { foundation: 'Market data truth', status: 'PARTIAL', detail: 'Strict timestamps, identities, quotes, books and closed-candle validation; polling crypto only. No WebSocket/session certification.' },
-  { foundation: 'Decision memory', status: 'PARTIAL', detail: 'Immutable snapshots and events for new evaluated scans/proposals/decisions; existing actual fills remain in authoritative OMS tables. Legacy evidence is not backfilled.' },
+  { foundation: 'Decision memory', status: 'PARTIAL', detail: 'Immutable decision snapshots and versioned paper TRADE_OUTCOME events for newly closed, fill-backed positions; actual fills remain in OMS. Legacy evidence is not backfilled.' },
   { foundation: 'Market DNA', status: 'PARTIAL', detail: 'Normalized captured features and time-filtered similarity; unavailable macro/fundamental dimensions remain missing.' },
-  { foundation: 'Strategy passports', status: 'PARTIAL', detail: 'Current rules, version-aware OOS and recent paper health; lifecycle remains existing owner-controlled registry.' },
+  { foundation: 'Strategy passports', status: 'PARTIAL', detail: 'Current rules, version-aware OOS, account-scoped paper health and a fill-backed shadow no-trade diagnostic; lifecycle remains owner-controlled.' },
   { foundation: 'Decision Twin', status: 'PARTIAL', detail: 'Frozen proposal, shadow/delayed/WAIT alternatives with costs/depth limits. Hypothetical, uploaded history provenance unverified; exit-depth/queue impact not modeled.' },
   { foundation: 'Confidence calibration', status: 'PARTIAL', detail: 'Explicit probability forecast/outcome records and cohort metrics. No conversion of agent votes; no calibrated production model.' },
   { foundation: 'Portfolio and execution', status: 'PARTIAL', detail: 'Reuses risk, OMS and ledger. Extended sector/event budgets and acknowledgement/partial-fill telemetry pending.' },
   { foundation: 'AI reliability', status: 'PARTIAL', detail: 'Existing signed packets, bounded pool, timeouts and quarantine. Per-model prompt/cost evaluation pending.' },
-  { foundation: 'Safety and recovery', status: 'PARTIAL', detail: 'Existing pause, emergency and owner recovery controls retained. Unified autonomous incident governor pending.' },
+  { foundation: 'Safety and recovery', status: 'PARTIAL', detail: 'Existing pause and emergency controls plus account-wide open-protection-incident entry interlock; unified autonomous recovery governor still pending.' },
   { foundation: 'Strategy arena and stress simulator', status: 'MISSING', detail: 'Common-window competition and full operational scenario runner remain follow-on work.' },
   { foundation: 'Live certification', status: 'BLOCKED', detail: 'No live adapter/signer, paper evaluation sample or trading-performance certification. Live remains disabled.' },
 ];

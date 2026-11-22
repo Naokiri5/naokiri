@@ -69,6 +69,9 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
   step('Position size', risk?.sizing ? 'PASS' : 'SKIP', risk?.sizing ? `qty ${risk.sizing.qty} ($${risk.sizing.notional}), planned max loss $${risk.sizing.plannedMaxLoss}` : '—');
   step('Portfolio correlation & exposure', correlatedOpen > 0 ? 'WARN' : 'PASS', `${correlatedOpen} correlated open positions`);
   step('Independent deterministic risk approval (Part 17)', risk ? (risk.decision === 'ALLOW' ? 'PASS' : risk.decision === 'NEEDS_REVIEW' ? 'WARN' : 'FAIL') : 'SKIP', risk ? `${risk.decision} ${risk.reasonCodes.join('; ')}` : 'not reached');
+  const experienceVeto = risk?.reasonCodes.some(code => code.startsWith('PAPER_EXPERIENCE_NO_TRADE')) ?? false;
+  step('Verified paper no-trade evidence', !risk ? 'SKIP' : experienceVeto ? 'FAIL' : risk.evaluated.paperExperienceStatus === 'DEGRADED_REVIEW' ? 'WARN' : 'PASS',
+    risk ? `${risk.evaluated.paperExperienceMode}: ${risk.evaluated.paperExperienceSamples} verified version-matched paper closes, status ${risk.evaluated.paperExperienceStatus}; research is not a profit forecast` : 'risk gate not reached');
   step('Execution permission (Part 9)', mode === 'OBSERVE' ? 'FAIL' : 'PASS', `mode ${mode}`);
   step('Last-moment revalidation', 'SKIP', 'performed by OMS immediately before submission');
 

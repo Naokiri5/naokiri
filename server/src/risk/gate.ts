@@ -8,7 +8,8 @@ import { correlation } from '../portfolio/correlation.js';
 import { all, get } from '../db/db.js';
 import { iso } from '../core/util.js';
 import { getSetting } from '../core/settings.js';
-import { openIncidentFor } from '../exec/incidents.js';
+import { openIncidentFor, openIncidentForAccount } from '../exec/incidents.js';
+import { experienceGuard } from '../ditas/passports.js';
 
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
@@ -37,6 +38,15 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
   const suspended = getSetting<string[]>('suspendedStrategies', []);
   if (suspended.includes(p.strategyId)) deny.push(`STRATEGY_SUSPENDED:${p.strategyId}`);
+  // Optional, evidence-limited no-trade guard. SHADOW is the safe default; it
+  // records diagnostics but never changes an existing trading decision.
+  const experience = experienceGuard(p.strategyId, account);
+  ev.paperExperienceMode = experience.mode;
+  ev.paperExperienceStatus = experience.status;
+  ev.paperExperienceSamples = experience.samples;
+  ev.paperExperienceExpectancyR = experience.expectancyR;
+  ev.paperExperienceUpper95R = experience.upper95R;
+  if (experience.veto) deny.push(`PAPER_EXPERIENCE_NO_TRADE: ${experience.samples} verified closed fills, upper95R=${experience.upper95R}`);
   // Part 18 lifecycle: only strategies the owner promoted (after reviewing a backtest) may trade.
   const st = get<{ status: string }>('SELECT status FROM strategies WHERE id=?', p.strategyId);
   if (!st) deny.push(`STRATEGY_NOT_REGISTERED:${p.strategyId}`);
@@ -47,6 +57,11 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   // An instrument where an open paper position cannot currently be exited must not receive new exposure.
   const incident = openIncidentFor(p.instrumentId);
   if (incident) deny.push(`PROTECTION_INCIDENT_OPEN:${incident.id}`);
+  const accountIncident = openIncidentForAccount(account);
+  // Systemic protection outage: no new risk anywhere in this paper account
+  // while another live position cannot be protected or exited.
+  if (accountIncident && accountIncident.instrument !== p.instrumentId)
+    deny.push(`UNPROTECTED_ACCOUNT_EXPOSURE:${accountIncident.instrument}`);
   if (!pol.approvedMarkets.includes(inst.market as any)) deny.push(`MARKET_NOT_APPROVED:${inst.market}`);
   const safety = assessCexAsset(p.instrumentId); ev.safety = safety.status;
   if (!safety.eligibleForAutomation) deny.push(`ASSET_INELIGIBLE:${safety.status}`);
