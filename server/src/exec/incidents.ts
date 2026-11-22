@@ -51,6 +51,13 @@ export function markRecovered(positionId: string, nowTs = Date.now()) {
 export function sweepClosedPositions(nowTs = Date.now()) {
   run("UPDATE protection_incidents SET status='RECOVERED', recovered_at=? WHERE status='OPEN' AND position_id IN (SELECT id FROM positions WHERE status<>'OPEN')", nowTs);
 }
+/** Global account interlock: a different unprotected OPEN position must block new exposure too. */
+export function openIncidentForAccount(account: string) {
+  return get<Incident>(`SELECT i.* FROM protection_incidents i
+    JOIN positions p ON p.id=i.position_id
+    WHERE p.account=? AND p.status='OPEN' AND i.status='OPEN'
+    ORDER BY i.opened_at, i.id LIMIT 1`, account) ?? null;
+}
 export function openIncidentFor(instrumentId: string) { return get<Incident>("SELECT * FROM protection_incidents WHERE instrument=? AND status='OPEN' ORDER BY opened_at LIMIT 1", instrumentId) ?? null; }
 export function listIncidents(includeAcknowledged = false, limit = 100) {
   return all<Incident>(`SELECT * FROM protection_incidents ${includeAcknowledged ? '' : "WHERE status IN ('OPEN','RECOVERED')"} ORDER BY opened_at DESC LIMIT ?`, Math.min(500, Math.max(1, limit)));
