@@ -89,7 +89,7 @@ export function CopyTrading() {
     setBusy(true);
     setNotice(null);
     try {
-      if (stop) await api('/api/copy/follow', { method: 'DELETE' });
+      if (stop) await api('/api/copy/follow', { method: 'DELETE', body: {} }); // api() always emits application/json; Fastify requires a JSON body
       else await api('/api/copy/follow', { body: { walletAddress: wallet.trim() } });
       await reload();
       await reloadObservations();
