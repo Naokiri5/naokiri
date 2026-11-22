@@ -37,6 +37,25 @@ export interface WinProfileOptions {
   followerLagMs?: number;
   quoteToleranceMs?: number;
 }
+/** Immutable-in-memory research outcome reconstructed from one matched FIFO lot. */
+export interface WinClosedLotOutcome {
+  readonly outcomeId: string;
+  readonly walletAddress: string;
+  readonly instrumentId: string;
+  readonly mintAddress: string;
+  readonly entryEvidenceId: string;
+  readonly exitEvidenceId: string;
+  readonly entryAt: number;
+  readonly entryReceivedAt: number;
+  readonly exitAt: number;
+  readonly exitReceivedAt: number;
+  readonly entrySourceSnapshotId: string;
+  readonly exitSourceSnapshotId: string;
+  readonly grossWhalePnlUsd: number;
+  /** Historical delayed follower quote simulation, not actual wallet profit. */
+  readonly simulatedFollowerNetPnlUsd: number | null;
+}
+
 export interface WinProfileResult {
   status: 'INSUFFICIENT_EVIDENCE' | 'QUARANTINED';
   reasonCodes: string[];
@@ -54,11 +73,15 @@ export interface WinProfileResult {
   medianHoldingMs: number | null;
   simulatedFollowerClosedPnlUsd: number | null;
   simulatedFollowerQuoteCoverage: number;
+  /** FIFO outcome evidence for a future point-in-time DITAS memory join; not proof of wallet net PnL. */
+  closedLots: readonly WinClosedLotOutcome[];
   /** Neither source is complete, calibrated, or trade-authorized. */
   automaticCopyEligible: false;
 }
 
-type Lot = { quantity: bigint; entryPrice: number; openedAt: number; followerEntryPrice: number | null; followerFeePerToken: number | null };
+type Lot = { quantity: bigint; entryPrice: number; openedAt: number; receivedAt: number;
+  sourceSnapshotId: string; entryEvidenceId: string;
+  followerEntryPrice: number | null; followerFeePerToken: number | null };
 type MintLots = { decimals: number; lots: Lot[] };
 type TokenInfo = { gross: number; remaining: bigint; observed: number; followerGross: number };
 const validTime = (n: number) => Number.isSafeInteger(n) && n >= 0;
@@ -86,6 +109,7 @@ export function profileVerifiedWalletSwaps(
   const seen = new Set<string>();
   const perMint = new Map<string, MintLots>();
   const holdingDurations: number[] = [];
+  const closedLots: WinClosedLotOutcome[] = [];
   const followerPrices = new Map<string, WinFollowerQuote>();
   let followerQuotesSeen = 0;
   let followerUsable = true;
@@ -159,6 +183,8 @@ export function profileVerifiedWalletSwaps(
     if (e.side === 'BUY') {
       mint.lots.push({
         quantity: q, entryPrice: price, openedAt: e.observedAt,
+        receivedAt: e.receivedAt, sourceSnapshotId: e.sourceSnapshotId,
+        entryEvidenceId: key,
         followerEntryPrice: followerPrice, followerFeePerToken: feePerToken
       });
       continue;
@@ -179,13 +205,29 @@ export function profileVerifiedWalletSwaps(
       lot.quantity -= consumed;
       toMatch -= consumed;
       didMatch = true;
-      closedGross += qty * (price - lot.entryPrice);
+      const gross = qty * (price - lot.entryPrice);
+      closedGross += gross;
       holdingDurations.push(e.observedAt - lot.openedAt);
-      if (followerPrice !== null && feePerToken !== null &&
-          lot.followerEntryPrice !== null && lot.followerFeePerToken !== null) {
-        closedFollowerNet += qty * (followerPrice - lot.followerEntryPrice -
-          feePerToken - lot.followerFeePerToken);
-      } else followerUsable = false;
+      const followerNet = followerPrice !== null && feePerToken !== null &&
+        lot.followerEntryPrice !== null && lot.followerFeePerToken !== null
+        ? qty * (followerPrice - lot.followerEntryPrice - feePerToken - lot.followerFeePerToken)
+        : null;
+      if (followerNet !== null) closedFollowerNet += followerNet;
+      else followerUsable = false;
+      // A single sell can close several distinct FIFO buys. Keep each realized lot
+      // independently identifiable and never infer profits from an unsold position.
+      closedLots.push({
+        outcomeId: lot.entryEvidenceId + '|' + key,
+        walletAddress: e.walletAddress, mintAddress: e.mintAddress,
+        instrumentId: e.instrumentId, entryEvidenceId: lot.entryEvidenceId,
+        exitEvidenceId: key, entryAt: lot.openedAt,
+        entryReceivedAt: lot.receivedAt, exitAt: e.observedAt,
+        exitReceivedAt: e.receivedAt,
+        entrySourceSnapshotId: lot.sourceSnapshotId,
+        exitSourceSnapshotId: e.sourceSnapshotId,
+        grossWhalePnlUsd: gross,
+        simulatedFollowerNetPnlUsd: followerNet,
+      });
     }
     if (didMatch) matchedSells++;
     if (toMatch > 0n) { orphanSells++; reasons.add('ORPHAN_SELL_MISSING_ENTRY_BASIS'); }
@@ -248,6 +290,7 @@ export function profileVerifiedWalletSwaps(
     medianHoldingMs: median,
     simulatedFollowerClosedPnlUsd: financial && followerUsable && matchedSells > 0 ? closedFollowerNet : null,
     simulatedFollowerQuoteCoverage: observed ? followerQuotesSeen / observed : 0,
+    closedLots: financial ? closedLots : [],
     automaticCopyEligible: false
   };
 }
