@@ -9,8 +9,9 @@ import type { DecisionReport } from '../decision/engine.js';
 import { classifyRegime } from '../regime/regime.js';
 import { STRATEGIES, strategyById } from '../lab/strategies.js';
 import { fingerprint } from './fingerprint.js';
+import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
-export type MemoryKind = 'NO_SIGNAL' | 'REJECTED' | 'PROPOSAL' | 'DECISION' | 'CORRECTION';
+export type MemoryKind = 'NO_SIGNAL' | 'REJECTED' | 'PROPOSAL' | 'DECISION' | 'TRADE_OUTCOME' | 'CORRECTION';
 export interface MemoryEvent {
   id: string; kind: MemoryKind; instrumentId: string; strategyId: string | null; decisionId: string | null;
   createdAt: number; snapshotId: string | null; parentEventId: string | null; payload: any; hash: string;
@@ -41,7 +42,7 @@ function hashEvent(r: any) {
   return sha256(J([r.id, r.dedupe_key, r.created_at, r.kind, r.instrument, r.strategy, r.decision_id, r.snapshot_id, r.parent_event_id, r.payload, r.prev_hash]));
 }
 
-export function recordOpportunity(input: { kind: Exclude<MemoryKind, 'CORRECTION'>; instrumentId: string; strategyId?: string; interval?: Interval; dedupeKey: string; reason: string; candidate?: Candidate; ctx?: WorkerContext; report?: DecisionReport; snapshotId?: string }) {
+export function recordOpportunity(input: { kind: 'NO_SIGNAL' | 'REJECTED' | 'PROPOSAL' | 'DECISION'; instrumentId: string; strategyId?: string; interval?: Interval; dedupeKey: string; reason: string; candidate?: Candidate; ctx?: WorkerContext; report?: DecisionReport; snapshotId?: string }) {
   return atomic(() => {
     const exists = get<any>('SELECT * FROM ditas_events WHERE dedupe_key=?', input.dedupeKey);
     if (exists) return eventRow(exists);
@@ -56,6 +57,57 @@ export function recordOpportunity(input: { kind: Exclude<MemoryKind, 'CORRECTION
     const row = { id, dedupe_key: input.dedupeKey, created_at: ts, kind: input.kind, instrument: input.instrumentId, strategy: input.strategyId ?? null, decision_id: input.report?.id ?? null, snapshot_id: snapshotId, parent_event_id: null, payload, prev_hash: prevHash };
     run('INSERT INTO ditas_events(id,dedupe_key,created_at,kind,instrument,strategy,decision_id,snapshot_id,parent_event_id,payload,prev_hash,hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', id, row.dedupe_key, ts, row.kind, row.instrument, row.strategy, row.decision_id, snapshotId, null, payload, prevHash, hashEvent(row));
     return eventRow({ ...row, hash: hashEvent(row) });
+  });
+}
+
+/**
+ * Once a paper position has really CLOSED, attach its audited OMS result to the
+ * decision-time DITAS snapshot. No snapshot is fabricated at exit time and there
+ * is no duplicate PnL/ledger authority. Retrying an autopsy is idempotent.
+ *
+ * Legacy positions without an original DITAS decision event are intentionally
+ * skipped; a post-hoc snapshot would be look-ahead bias.
+ */
+export function recordClosedPaperOutcome(positionId: string): MemoryEvent | null {
+  return atomic(() => {
+    const p = get<{ id: string; account: string; instrument: string; strategy: string; status: string;
+      decision_id: string | null; entry_price: number; exit_price: number | null;
+      exit_reason: string | null; realized_pnl: number; fees: number; planned_risk: number;
+      opened_at: number; closed_at: number | null }>('SELECT * FROM positions WHERE id=?', positionId);
+    if (!p || p.account !== PAPER_ACCOUNT || p.status !== 'CLOSED' || !p.decision_id) return null;
+    const parent = get<any>("SELECT * FROM ditas_events WHERE kind='DECISION' AND decision_id=? AND instrument=? AND strategy=? ORDER BY seq LIMIT 1",
+      p.decision_id, p.instrument, p.strategy);
+    if (!parent?.snapshot_id || !get('SELECT 1 FROM ditas_snapshots WHERE id=? AND instrument=?', parent.snapshot_id, p.instrument)) return null;
+    if (!(p.closed_at != null && p.closed_at >= p.opened_at && Number.isFinite(p.realized_pnl) &&
+      Number.isFinite(p.fees) && Number.isFinite(p.entry_price) && p.entry_price > 0 &&
+      p.exit_price != null && Number.isFinite(p.exit_price) && p.exit_price > 0)) return null;
+    const entry = get<{ n: number }>(`SELECT COUNT(*) n FROM orders o JOIN fills f ON f.order_id=o.id
+      WHERE o.position_id=? AND o.account=? AND o.purpose='ENTRY' AND o.status='FILLED' AND f.qty>0`, p.id, PAPER_ACCOUNT);
+    const exit = get<{ n: number }>(`SELECT COUNT(*) n FROM orders o JOIN fills f ON f.order_id=o.id
+      WHERE o.position_id=? AND o.account=? AND o.purpose LIKE 'EXIT_%' AND o.status='FILLED' AND f.qty>0`, p.id, PAPER_ACCOUNT);
+    if (!entry?.n || !exit?.n) return null; // never learn from a manually fabricated CLOSED row
+    const dedupeKey = `paper:closed:${p.id}`;
+    const existing = get<any>('SELECT * FROM ditas_events WHERE dedupe_key=?', dedupeKey);
+    if (existing) return eventRow(existing);
+    const resultR = Number.isFinite(p.planned_risk) && p.planned_risk > 0
+      ? p.realized_pnl / p.planned_risk : null;
+    if (resultR != null && !Number.isFinite(resultR)) return null;
+    const payload = J({ origin: 'PAPER_OMS_FILLED_ENTRY_AND_EXIT', positionId: p.id,
+      openedAt: p.opened_at, closedAt: p.closed_at, entryPrice: p.entry_price,
+      exitPrice: p.exit_price, exitReason: p.exit_reason, feesUsd: p.fees,
+      realizedPnlUsd: p.realized_pnl, plannedRiskUsd: p.planned_risk,
+      resultR, result: p.realized_pnl > 0 ? 'WIN' : p.realized_pnl < 0 ? 'LOSS' : 'FLAT',
+      note: 'Historical paper outcome, not a calibrated future win probability or trading permission.' });
+    const id = uid('evt'), ts = Date.now();
+    const prevHash = get<any>('SELECT hash FROM ditas_events ORDER BY seq DESC LIMIT 1')?.hash ?? 'GENESIS';
+    const row = { id, dedupe_key: dedupeKey, created_at: ts, kind: 'TRADE_OUTCOME',
+      instrument: p.instrument, strategy: p.strategy, decision_id: p.decision_id,
+      snapshot_id: parent.snapshot_id, parent_event_id: parent.id, payload, prev_hash: prevHash };
+    const hash = hashEvent(row);
+    run('INSERT INTO ditas_events(id,dedupe_key,created_at,kind,instrument,strategy,decision_id,snapshot_id,parent_event_id,payload,prev_hash,hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      id, dedupeKey, ts, row.kind, row.instrument, row.strategy, row.decision_id,
+      row.snapshot_id, row.parent_event_id, payload, prevHash, hash);
+    return eventRow({ ...row, hash });
   });
 }
 
