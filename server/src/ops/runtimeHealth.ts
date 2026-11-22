@@ -80,14 +80,15 @@ export function sampleRuntimeHealth(): RuntimeHealthSample {
   } catch {
     databaseError = true;
   }
+  const sse = sseHealth.state();
   return {
     heapUsedBytes: heap.used_heap_size,
     heapLimitBytes: heap.heap_size_limit,
     databaseJournalMode,
     databaseFileBacked,
     databaseError,
-    sseActiveStreams: activeStreams,
-    sseLastFrameAtMs: lastFrameAtMs,
+    sseActiveStreams: sse.activeStreams,
+    sseLastFrameAtMs: sse.lastFrameAtMs,
   };
 }
 
