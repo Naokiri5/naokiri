@@ -127,10 +127,10 @@ export function takeoverIntegrity(): { ok: boolean; checks: IntegrityCheck[] } {
   add('audit chain', () => { const a = verifyAuditChain(); return [a.ok, a.ok ? `${a.entries} entries` : `broken at entry ${a.brokenAt}`]; });
   add('decision memory chain', () => { const d = verifyMemory(); return [d.ok, d.ok ? `${d.entries} events` : `broken at ${d.brokenAt}`]; });
   add('ledger reconcile', () => { const r = reconcile(); return [r.ok, r.detail]; });
-  add('paper OMS restart reconciliation', () => { const report = auditPaperOmsRecovery(); return [report.ok, report.detail]; });
   add('protective stops', () => {
     const bad = protectPositions().positions.filter((p) => p.issue === 'no active protective stop' || p.issue === 'stop/qty mismatch');
     return [bad.length === 0, bad.length ? `${bad.length} open position(s) without a matching active stop: ${bad.slice(0, 5).map((p) => p.positionId).join(', ')}` : 'every open position has a matching active stop'];
   });
+  add('paper OMS restart reconciliation', () => { const report = auditPaperOmsRecovery(); return [report.ok, report.detail]; });
   return { ok: checks.every((c) => c.ok), checks };
 }
