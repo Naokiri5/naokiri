@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MIA_FEATURES, assertUniqueFeatureIds, identifyFeatures } from '../src/ops/featureIdentification.js';
+import { MIA_FEATURES, assertUniqueFeatureIds, identifyFeatures, tradingParityInventory } from '../src/ops/featureIdentification.js';
 import { MIA_GATE_IDS, allLiveGatesPass, executionKey, routeEntry, validateIntent,
   type BoundedLiveAuthorization, type ExecutionIntent, type ParityPorts, type RiskResult, type VenuePort } from '../src/exec/demoLiveParity.js';
 
@@ -63,6 +63,33 @@ describe('MIA identification-first and guarded environment contract', () => {
     expect(identifyFeatures(paths).find(f => f.id === 'paper_oms')?.presentOnScannedMain).toBe(true);
     expect(identifyFeatures(paths).find(f => f.id === 'event_bus')?.reviewRequired).toBe(true);
     expect(MIA_FEATURES.find(f => f.id === 'live_order_state')?.status).toBe('UNMERGED_CANDIDATE');
+  });
+
+  it('exposes canonical demo/live capability gaps without inventing live certification', () => {
+    const features = tradingParityInventory();
+    expect(features.length).toBeGreaterThanOrEqual(15);
+    expect(new Set(features.map(f => f.featureId)).size).toBe(features.length);
+    for (const f of features) {
+      const source = MIA_FEATURES.find(item => item.id === f.featureId);
+      expect(source).toBeDefined();
+      expect(f.owner).toBe(source!.owner);
+      expect(f.canonicalPath).toBe(source!.inspectedMainPath ?? null);
+      expect(f.candidatePr).toBe(source!.candidatePr ?? null);
+    }
+    expect(features.find(f => f.featureId === 'risk_authority')).toMatchObject({
+      demo: 'PAPER_WIRED', live: 'UNVERIFIED', canonicalPath: 'server/src/risk/gate.ts',
+    });
+    expect(features.find(f => f.featureId === 'paper_oms')).toMatchObject({
+      demo: 'PAPER_WIRED', live: 'NOT_OPERATIONAL', canonicalPath: 'server/src/exec/oms.ts',
+    });
+    expect(features.find(f => f.featureId === 'live_adapter')).toMatchObject({
+      demo: 'NOT_APPLICABLE', live: 'NOT_OPERATIONAL', canonicalPath: null,
+    });
+    expect(features.find(f => f.featureId === 'live_order_state')).toMatchObject({
+      live: 'PROPOSAL_ONLY', candidatePr: 97,
+    });
+    expect(features.filter(f => f.live === 'NOT_OPERATIONAL').length).toBeGreaterThan(0);
+    expect(tradingParityInventory()).toEqual(features); // deterministic pure read model
   });
 
   it('validates old, expired, future or invalid decisions before any order effects', async () => {
