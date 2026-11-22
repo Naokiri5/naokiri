@@ -334,7 +334,10 @@ export function autopsy(positionId: string) {
   // Learning failures must never roll back fills, create phantom protection incidents
   // or interrupt the OMS position event/notification pipeline.
   try { recordClosedPaperOutcome(positionId); }
-  catch (e: any) { journal('SYSTEM', `DITAS paper outcome recording failed for ${positionId}: ${String(e?.message ?? e).slice(0, 160)}`, positionId); }
+  catch (e: any) {
+    try { journal('SYSTEM', `DITAS paper outcome recording failed for ${positionId}: ${String(e?.message ?? e).slice(0, 160)}`, positionId); }
+    catch { /* A failed evidence/journal write must not prevent the committed OMS position event. */ }
+  }
   notify(p.realized_pnl >= 0 ? 'INFO' : 'WARNING', `Paper position closed: ${p.instrument.split(':')[2]}`, findings[0], 'oms');
 }
 
