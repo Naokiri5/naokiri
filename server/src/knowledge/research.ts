@@ -120,12 +120,12 @@ export function performanceMetrics(trades: BtTrade[], riskPct: number, bars: num
 }
 
 /** Walk-forward over a single point-in-time backtest: trades partitioned by entry time, boundary-crossing trades purged, embargo after each boundary. */
-function strategyWalkforward(c: Candle[], interval: Interval, strategyId: string, seed: number, windows = 5, embargoBars = 24) {
+function strategyWalkforward(c: Candle[], interval: Interval, strategyId: string, instrumentId: string, seed: number, windows = 5, embargoBars = 24) {
   const s = strategyById(strategyId); if (!s) throw new Error('unknown strategy');
   if (s.interval !== interval) throw new Error(`strategy ${s.id} runs on ${s.interval} candles`);
   if (c.length < 1500) throw new Error(`need ≥1500 bars for 1 training + ${windows} test windows, have ${c.length}`);
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY; const costs = { feeRate: pol.feeRate, slippageBps: 3, spreadBps: 2 };
-  const bt = backtest(s, `crypto:binance:${strategyId}`, c, costs, 1);
+  const bt = backtest(s, instrumentId, c, costs, 1);
   const segLen = Math.floor(c.length / (windows + 1)); const bounds = Array.from({ length: windows + 2 }, (_, i) => c[Math.min(c.length - 1, i * segLen)].t);
   bounds[bounds.length - 1] = c[c.length - 1].t + INTERVAL_MS[interval];
   const embargoMs = embargoBars * INTERVAL_MS[interval]; let purged = 0, embargoed = 0;
@@ -149,7 +149,7 @@ function strategyWalkforward(c: Candle[], interval: Interval, strategyId: string
   const verdict = agg.trades < 30 ? 'INSUFFICIENT_EVIDENCE' : positiveWindows === windows && (agg.expectancyR95CI?.[0] ?? -1) > 0 ? 'SUPPORTED' : agg.expectancyR > 0 ? 'INCONCLUSIVE' : 'NOT_SUPPORTED';
   const byRegime: Record<string, { trades: number; expectancyR: number }> = {};
   for (const t of oosTrades) { const g = (byRegime[t.regime] ??= { trades: 0, expectancyR: 0 }); g.expectancyR = (g.expectancyR * g.trades + t.r) / (g.trades + 1); g.trades++; }
-  return { results: { strategy: { id: s.id, version: s.version }, costs, windows: all_, outOfSampleAggregate: agg, positiveOosWindows: `${positiveWindows}/${windows}`, byRegime, purgedTrades: purged, embargoedTrades: embargoed, embargoBars },
+  return { results: { strategy: { id: s.id, version: s.version }, backtestInstrument: bt.instrument, costs, windows: all_, outOfSampleAggregate: agg, positiveOosWindows: `${positiveWindows}/${windows}`, byRegime, purgedTrades: purged, embargoedTrades: embargoed, embargoBars },
     verdict, limitations: ['Strategy parameters are fixed research defaults (no optimisation), so the training window only warms indicators.', 'Survivorship bias: tested on a currently listed instrument.', 'Paper/backtest fills; real fills may be worse.'] };
 }
 
@@ -167,7 +167,7 @@ export async function runExperiment(actor: string, input: RunInput) {
   const spec = concept ? researchSpec(concept.id, { symbol: input.symbol, interval: input.interval, strategyId }) : null;
   const { candles, origin } = await researchCandles(input.symbol.toUpperCase(), input.interval, bars);
   const out = input.kind === 'volatility_clustering' ? volatilityClustering(candles, seed) : input.kind === 'return_autocorrelation' ? returnAutocorrelation(candles, seed)
-    : strategyWalkforward(candles, input.interval, strategyId!, seed);
+    : strategyWalkforward(candles, input.interval, strategyId!, `crypto:binance:${input.symbol.toUpperCase()}`, seed);
   const priorTrials = get<{ n: number }>("SELECT COUNT(*) n FROM research_experiments WHERE kind=? AND json_extract(dataset,'$.symbol')=? AND json_extract(dataset,'$.interval')=? AND COALESCE(json_extract(spec,'$.strategyId'),'')=?",
     input.kind, input.symbol.toUpperCase(), input.interval, strategyId ?? '')!.n;
   const dataset = { symbol: input.symbol.toUpperCase(), interval: input.interval, bars: candles.length, from: candles[0]?.t, to: candles[candles.length - 1]?.t, source: 'Binance public klines', origin };
