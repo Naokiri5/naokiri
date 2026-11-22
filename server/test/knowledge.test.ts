@@ -304,6 +304,9 @@ describe('research laboratory', () => {
   it('walk-forward experiment purges boundary trades and reports out-of-sample metrics per window', async () => {
     seedHistory(3000);
     const e = await runExperiment('owner', { kind: 'strategy_walkforward', symbol: 'TESTUSDT', interval: '1h', bars: 3000, strategyId: 'trend_pullback' });
+    // The real research pipeline must label results with the dataset's market symbol, never the strategy ID.
+    expect(e.results.backtestInstrument).toBe('crypto:binance:TESTUSDT');
+    expect(e.dataset.symbol).toBe('TESTUSDT');
     expect(e.results.windows).toHaveLength(6); expect(e.results.windows.slice(1).every((w: any) => w.role === 'OUT_OF_SAMPLE')).toBe(true);
     expect(e.results.embargoBars).toBe(24); expect(typeof e.results.purgedTrades).toBe('number');
     expect(['SUPPORTED', 'INCONCLUSIVE', 'NOT_SUPPORTED', 'INSUFFICIENT_EVIDENCE']).toContain(e.verdict);
