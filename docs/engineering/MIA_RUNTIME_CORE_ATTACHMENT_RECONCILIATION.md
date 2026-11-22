@@ -42,6 +42,15 @@ This is **active server-side functionality**, not a preview panel or second trad
 9. **Same BotCoordinator PDF (11 pages)** — byte-for-byte duplicate of attachment 8 (SHA-256 `a58ea30f59290ac77ca87f4a0a912ae64a909ffaf05f0904232a8453f84d050a`); do not implement twice.
 10. **Operational Binance/OKX live adapters, SQLite and UI (25 pages)** — not copied: proposes a second ledger, strategy engine and execution adapters and an environment-variable live unlock. LIVE authority, signed order idempotency, real venue reconciliation, capital isolation and independent approval have not been certified.
 
+## Operational readiness probe (continuation)
+ 
+- The new `server/scripts/health-probe.mjs` is a **real external healthcheck**, not an advisory status model. Use `npm run health:check` from the repository root, or `node server/scripts/health-probe.mjs` from a container/supervisor.
+- It queries the existing unauthenticated Fastify `GET /api/ready` at **loopback only** (`MIA_PORT`, default 8787), with a two-second default timeout (`MIA_HEALTH_CHECK_TIMEOUT_MS` can be 250–10000).
+- Exit code **0** requires HTTP 200, `ready: true`, a nonempty check list, and no failing/unknown check status. It exits **1** on 503, invalid responses, network errors, or timeout. Output is redacted to `MIA_READY`/`MIA_NOT_READY`.
+- `GET /api/health` remains liveness and must **not** be treated as trading readiness. Operators can use the probe as an explicit Docker HEALTHCHECK or systemd supervisor command; no Dockerfile or systemd service exists in this main-branch source tree.
+- `server/test/health-probe-cli.test.ts` executes the actual Node CLI against a local HTTP fixture to verify successful, degraded, and malformed responses without exchange access.
+- This does **not** certify a deployed container, configure a restart policy, or allow LIVE execution. Deployment smoke, actual service-manager restart behavior, and independent safety review remain release gates.
+
 ## Merge / release decision
 
 **DRAFT: DO NOT MERGE without green CI, successful actual integration run, independent review and PR conflict checks.** Run repository's real `npm ci && npm run typecheck && npm run build && npm test` and verify critical /api/ready and risk paths against representative process/db failures. Keep current signed live trading locked. Never enable LIVE based only on `MIA_ALLOW_LIVE_TRADING=true`, and never treat paper simulation fills as real settlement evidence.
