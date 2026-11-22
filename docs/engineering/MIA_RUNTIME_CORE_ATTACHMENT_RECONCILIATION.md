@@ -84,3 +84,32 @@ The owner subsequently supplied:
 - [ ] Post-deploy baseline with real owner identity, TLS proxy, backup restore and rollback rehearsal
 
 **NO MERGE / NO LIVE DEPLOYMENT** until all mandatory checks and review gates pass. The SmartOrderRouter remains explicitly *blocked*, not silently described as implemented.
+
+
+## Eight follow-up PDFs: executable ownership and anti-duplication decision (2026-11-22)
+
+These new owner attachments are **not** a wholesale TypeScript import. Their paths and class contracts conflict with the present canonical `server/src/` Fastify/PAPER implementation; importing them verbatim would create a competing OMS, position ledger and exit loop.
+
+| Owner proposal | Canonical repository owner | Disposition |
+| --- | --- | --- |
+| Unified ExitSupervisor priority machine | `lab/exits.ts`, `exec/oms.ts`, PRs #81/#82/#111 | No second supervisor or venue order writer. Reconcile fill-committed rungs, closed-bar timing, hazard priority and active intent state on the actual OMS branch before enabling new exit behavior. |
+| Crash-restart fill reconciliation | `ops/integrity.ts`, `portfolio/calendar.ts`, existing engine lease in `bot/bot.ts` | **Implemented read-only PAPER integrity gate in this PR.** It compares linked entry/exit orders, confirmed fill quantities, cash/fee ledger amounts and remaining exposure, and blocks lease takeover on ambiguous exit orders or ghost NEW entries. No invented recovery fill, no user-facing preview-only helper. |
+| N-bar Chandelier + initial-qty targets | Existing `lab/exits.ts`, OMS, PRs #81 and #82 | PR #82 adds an opt-in pure closed-bar assessment. It still needs authenticated closed-candle evidence wired to BOTH backtest and paper OMS before production use; never treat forming candles as closed. |
+| Strategy Lab shared exit simulation | `lab/backtest.ts`, `lab/exits.ts`, PRs #81/#82 | Keep shared `stepExit`. A separate `backtest_runner.ts` with a different model is forbidden. Changes must preserve adverse-first stops, fees, fills, slippage and OOS provenance. |
+| Walk-forward and regime certification | `lab/backtest.ts`, `lab/lab.ts`, existing risk/decision gates | Current single chronological OOS split and small samples cannot certify strategy edge. A rolling walk-forward experiment and minimum-sample gate require new, genuinely independent OOS data and backtest/OMS parity tests before promotion. |
+| DITAS closed-trade outcome linker | `ditas/memory.ts`, `ditas/service.ts`, `ditas/passports.ts`, PR #112 | PR #112 already adds immutable decision-linked, fill-backed PAPER outcomes and SHADOW safety diagnostics. Do not add a second event table or double-count closed positions. It must clear its own CI/conflicts before integration. |
+| Trader Joe explanation cards | `joe/joe.ts`, PR #44 `joe/live/` | PR #44 already builds a deterministic owner-authenticated trade-lifecycle explanation feed from actual committed PAPER records. Do not invent live fills or add a second event schema. |
+| Pre-flight environment + SQLite | `ops/preflight.ts`, `main.ts`, this PR #116 | Already wired into actual Fastify startup; rejects prototype LIVE flags and validates canonical WAL before binding HTTP. No `packages/server`, `better-sqlite3`, secondary SQLite ledger or env-based live unlock. |
+
+### Exact crash-restart safety contract in this PR
+
+- The real scheduler calls `takeoverIntegrity()` **before** acquiring leadership and running ticker/scanner/OMS loops. The appended `paper OMS restart reconciliation` check reads only the single canonical WAL database.
+- For every materialized PAPER entry and exit, it requires a FILLED order, matching positive fills, matching order fee total, exactly one matching cash leg and fee leg, and `entry filled − exit filled = remaining position quantity`. CLOSED positions must reconcile to zero.
+- An orphaned `NEW`/`SUBMITTED` entry or exit intent, disconnected order, missing fee, missing fill, duplicated ledger cash leg, or quantity drift **fails** the takeover. Owner-approval requests without a position remain legitimate and do not become fake fills.
+- The verifier is strictly read-only and cannot determine whether any external exchange received a real-money order. It **does not** implement venue reconciliation, auto-resubmit, auto-cancel, signer or settlement, and must not be represented as doing so.
+- The existing lease failure path stops scheduler leadership, reports the integrity error and leaves open positions unchanged. An operator must resolve and audit ambiguous records; never automatically mark unknown orders as rejected or balances as recovered.
+- `server/test/ops-recovery-audit.test.ts` exercises verified partial fills, ghosts, unlinked orders, missing fills, duplicate cash bookings, quantity drift, legitimate pending approval and no-write safety on real canonical SQLite fixtures.
+
+### PR release gate
+
+This patch must pass its exact-head CI, full container offline smoke, browser E2E and independent review. A passing source-level audit cannot certify a venue that is not connected. PR #116 stays **DRAFT; DO NOT MERGE**. The stacked exit PRs and PR #112 also remain independently gated. Never claim that the eight PDFs are all running in production.
