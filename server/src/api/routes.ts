@@ -43,6 +43,7 @@ import { releaseGates } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
 import { botStatus, botStatusView } from '../bot/bot.js';
 import { readiness } from '../ops/readiness.js';
+import { tradingParityInventory } from '../ops/featureIdentification.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
 import { all, get, P } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
@@ -411,6 +412,7 @@ export async function routes(app: FastifyInstance) {
     const control = getControl();
     const acceptedPolicy = !!currentPolicy();
     const release = releaseGates();
+    const features = tradingParityInventory();
     return {
       readOnly: true,
       canonical: { market: 'server/src/market/fabric.ts', decision: 'server/src/decision/engine.ts',
@@ -425,6 +427,12 @@ export async function routes(app: FastifyInstance) {
         unmetGates: release.gates.filter((g) => g.status !== 'PASS').map((g) => g.id),
         reason: 'Certified live adapter, isolated signer, durable reservation and external authorization are not installed in this build.' },
       releaseSummary: release.summary,
+      capabilityAudit: {
+        interpretation: 'Source-level and wiring evidence, not live venue certification or trade authorization.',
+        features,
+        liveGaps: features.filter(f => f.live === 'NOT_OPERATIONAL' || f.live === 'PROPOSAL_ONLY' || f.live === 'UNVERIFIED')
+          .map(f => ({ featureId: f.featureId, status: f.live, owner: f.owner, reason: f.integrationGap, candidatePr: f.candidatePr })),
+      },
     };
   });
   app.get('/api/qa', async () => ({ ...releaseGates(), audit: verifyAuditChain() }));
