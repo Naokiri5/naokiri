@@ -1,6 +1,6 @@
 import { STRATEGIES } from '../lab/strategies.js';
-import { strategyStats } from '../lab/lab.js';
-import { all, get, P } from '../db/db.js';
+import { recentPaperOutcomes, strategyStats } from '../lab/lab.js';
+import { get } from '../db/db.js';
 
 const RULES: Record<string, { entry: string[]; stop: string; exit: string; dependencies: string[]; weaknesses: string[] }> = {
   trend_pullback: {
@@ -21,7 +21,7 @@ const RULES: Record<string, { entry: string[]; stop: string; exit: string; depen
 };
 
 const STATE: Record<string, string> = { RESEARCH: 'RESEARCH', BACKTESTED: 'VALIDATION', PAPER: 'PAPER_TRADING', LIVE_CANDIDATE: 'APPROVED', SUSPENDED: 'RESTRICTED', RETIRED: 'RETIRED' };
-const WINDOW = 50, MIN_SAMPLES = 30;
+const MIN_SAMPLES = 30;
 
 /** Read-only statistical summary. No thresholds here mutate strategy eligibility. */
 export function returnHealth(returns: number[]) {
@@ -40,26 +40,17 @@ export function returnHealth(returns: number[]) {
 
 /** Passports project existing registry/history; they neither create a parallel registry nor promote strategies. */
 export function strategyPassports() {
+  const nowTs = Date.now();
   return STRATEGIES.map(s => {
     const registry = get<{ status: string; version: string }>('SELECT status, version FROM strategies WHERE id=?', s.id);
-    const recent = all<{ realized_pnl: number; planned_risk: number; report: string | null }>(`SELECT p.realized_pnl, p.planned_risk, d.report FROM positions p LEFT JOIN decisions d ON d.id=p.decision_id
-      WHERE p.strategy=? AND p.status='CLOSED' ORDER BY p.closed_at DESC LIMIT ?`, s.id, WINDOW);
-    const valid: number[] = []; let unknownVersion = 0, otherVersion = 0, invalidRisk = 0;
-    for (const p of recent.reverse()) {
-      let version: string | undefined;
-      try { version = P<{ strategy?: { version?: string } }>(p.report)?.strategy?.version; } catch { /* malformed legacy evidence is unknown */ }
-      if (!version) { unknownVersion++; continue; }
-      if (version !== s.version) { otherVersion++; continue; }
-      if (!(Number.isFinite(p.planned_risk) && p.planned_risk > 0 && Number.isFinite(p.realized_pnl))) { invalidRisk++; continue; }
-      valid.push(p.realized_pnl / p.planned_risk);
-    }
+    const { returns, ...cohort } = recentPaperOutcomes(s.id, nowTs);
     const rules = RULES[s.id];
     return { id: s.id, name: s.name, version: s.version, description: s.description, suitableMarkets: ['crypto spot long-only'], timeframes: [s.interval], regimes: s.suitableRegimes,
       rules, positionSizing: 'Existing deterministic risk/gate.ts; agent agreement never increases budget.',
       execution: 'Paper only, observed order-book liquidity, configured fees/spread/slippage; stops are OMS monitored.',
       currentStatus: registry?.status ?? 'UNREGISTERED', ditasState: STATE[registry?.status ?? ''] ?? 'DISABLED', lifecycleMapping: 'Read-only mapping of existing strategy states; no additional approval is granted.',
       registryVersion: registry?.version ?? null, registryVersionMismatch: registry != null && registry.version !== s.version,
-      outOfSample: strategyStats(s.id), paperHealth: { ...returnHealth(valid), windowClosedPositions: WINDOW, observedClosedPositions: recent.length, excludedUnknownVersion: unknownVersion, excludedOtherVersion: otherVersion, excludedInvalidRisk: invalidRisk },
+      outOfSample: strategyStats(s.id), paperHealth: { ...returnHealth(returns), ...cohort },
       limitations: ['Historical paper outcomes without a linked strategy version are excluded from version-specific health.', 'Out-of-sample records are research evidence; promotion still requires explicit owner review.', 'Health intervals assume independent outcomes; regime clustering can invalidate that approximation.'] };
   });
 }
