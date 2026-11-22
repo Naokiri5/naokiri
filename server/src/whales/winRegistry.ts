@@ -1,5 +1,6 @@
 import { all, get, run, tx } from '../db/db.js';
 import type { VerifiedWalletSwap } from './winEvidence.js';
+import { profileVerifiedWalletSwaps } from './winProfiler.js';
 import { makeWalletObservationKey, parseAtomicQuantity } from './winEvidence.js';
 
 /**
@@ -136,4 +137,57 @@ export function recentWhaleObservations(accountId: string, limit = 100): StoredW
     walletAddress: r.wallet_address, mintAddress: r.mint_address,
     instrumentId: r.instrument, instructionLeg: r.instruction_leg, side: r.side,
     observedAt: r.observed_at, receivedAt: r.received_at, sourceSnapshotId: r.source_snapshot }));
+}
+
+
+/**
+ * WIN-02 account-scoped research replay from canonical immutable WIN evidence.
+ * No broker, ledger, live mark, authenticated Solana feed or complete wallet
+ * coverage is currently available: all outputs are explicitly non-tradable.
+ * A bounded newest window MUST NOT imply the complete wallet history.
+ */
+export function getWinReadOnlyProfile(accountId: string, asOf = Date.now()) {
+  const follow = getWhaleFollow(accountId);
+  if (!follow || !follow.active) return {
+    status: 'NOT_CONFIGURED' as const, walletAddress: null,
+    profile: null, source: 'WIN_FINALIZED_EVIDENCE_ONLY' as const,
+    executable: false as const
+  };
+  if (!Number.isSafeInteger(asOf) || asOf <= 0) throw new Error('INVALID_CLOCK');
+  const rows = all<{
+    signature: string; wallet_address: string; mint_address: string;
+    instrument: string; instruction_leg: number; side: 'BUY' | 'SELL';
+    token_amount_atomic: string; token_decimals: number;
+    observed_at: number; available_at: number; received_at: number;
+    source_snapshot: string; source_hash: string; effective_price_usd: number;
+    finality: 'FINALIZED';
+  }>('SELECT signature,wallet_address,mint_address,instrument,instruction_leg,side,' +
+    'token_amount_atomic,token_decimals,observed_at,available_at,received_at,' +
+    'source_snapshot,source_hash,effective_price_usd,finality FROM win_whale_observations ' +
+    'WHERE wallet_address=? AND received_at<=? ORDER BY observed_at DESC LIMIT 1000',
+    follow.walletAddress, asOf);
+  const events: VerifiedWalletSwap[] = rows.map((r) => ({
+    kind: 'VERIFIED_WALLET_SWAP', attribution: 'VERIFIED_WALLET', chain: 'solana',
+    walletAddress: r.wallet_address, mintAddress: r.mint_address,
+    signature: r.signature, instructionLeg: r.instruction_leg,
+    instrumentId: r.instrument, side: r.side, tokenAmountAtomic: r.token_amount_atomic,
+    tokenDecimals: r.token_decimals, observedAt: r.observed_at,
+    availableAt: r.available_at, receivedAt: r.received_at,
+    sourceSnapshotId: r.source_snapshot, sourcePayloadHash: r.source_hash,
+    finality: r.finality, verifiedAsSwap: true,
+    effectiveWhalePriceUsd: r.effective_price_usd
+  }));
+  const profile = profileVerifiedWalletSwaps(events, {
+    asOf, walletAddress: follow.walletAddress
+    // History completeness, follower quotes and executable exit liquidity
+    // are unknown; never supply synthetic values to manufacture a score.
+  });
+  return {
+    status: 'RESEARCH_ONLY' as const,
+    walletAddress: follow.walletAddress,
+    profile,
+    source: 'WIN_FINALIZED_EVIDENCE_ONLY' as const,
+    executable: false as const,
+    note: 'Gross matched-swap PnL is not audited wallet net PnL. Missing hedges, fees, incomplete history and sellable liquidity prevent automatic whale ranking.'
+  };
 }
