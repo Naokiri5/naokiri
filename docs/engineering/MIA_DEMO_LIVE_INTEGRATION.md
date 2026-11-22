@@ -69,3 +69,51 @@ Offline standalone parity-package compile/tests passed before the import, but **
 ## Next safe coding milestone
 
 Create a small PR to adapt the current **paper OMS** to the shared intent metadata without changing paper fills, stops or ledger results. Then add atomic environment/account-scoped reservation, fencing and an order reducer **by adapting PR #97**, followed by TESTNET-only venue protocol tests using PR #92. Enable real-money trading only after G01–G14, independent review, owner reauthorization, native protection and recoverable financial accounting.
+
+
+## 2026-11-23 — live gap inventory (review-only Phase A)
+
+**Compared:** \`main@a39ddaa597172619d8c897e49464910ebad6681f\`, existing manifest, running paper decision/OMS call sites, the authenticated parity API, and relevant draft PR descriptions. **Scope:** one source-derived feature gap inventory added to the existing parity endpoint, plus deterministic tests. No execution, policy, mode, account, ledger, schema, signer, or order lifecycle changes.
+
+### Evidence-backed architecture ownership
+
+| Concern | Main call-path evidence | DEMO | LIVE | Next owner |
+| --- | --- | --- | --- | --- |
+| Market ingestion and evidence | \`market/fabric.ts\`, \`quality.ts\`, indicators, worker registry, QCI | Shared source | Shared analysis source only | Market/decision |
+| Entry decisions | \`bot/bot.ts:onDecision\` handles \`PAPER_TRADE\` and calls \`oms.submitEntry\` | Paper path connected | No operational live dispatch | Existing decision/OMS |
+| Risk and safety | \`risk/gate.ts:evaluateRisk\`, \`core/mode.ts\` | Evaluated at paper entry | Live account and venue integration unverified | Canonical risk/mode |
+| Entries/partial exits/stops | \`exec/oms.ts\` simulates order book fills and monitors paper positions | Paper execution path exists | No certified venue acknowledgment or protective order | Existing OMS; future venue adapter |
+| Ledger | \`portfolio/ledger.ts\` with \`PAPER_ACCOUNT\` | Paper cash, positions, P&L | No certified live fill-to-account reconciliation | Existing ledger |
+| Parity contract | \`exec/demoLiveParity.ts\` has dependency-injected \`routeEntry\` | Synthetic tests | Synthetic tests only; NOT production-wired | Existing OMS and durable order ownership |
+| Release authority | \`qa/gates.ts\` G01–G14 | Paper can be eligible | G12 not implemented, G13 uncertified, G14 pending | Release auditor and owner |
+
+The full critical-path inventory is **now available** under \`capabilityAudit.features\` on authenticated \`GET /api/trading/parity\`; source IDs, canonical owners and candidate PR numbers derive from the **existing** \`ops/featureIdentification.ts\` manifest. \`capabilityAudit.liveGaps\` filters items with \`UNVERIFIED\`, \`PROPOSAL_ONLY\`, or \`NOT_OPERATIONAL\` live status. These are **source and integration classifications**, not independently tested production claims. The endpoint stays read-only, owner-authenticated and no-store.
+
+### Priority defect / missing-capability register
+
+| Priority | Finding | Evidence / impact | Safe next action |
+| --- | --- | --- | --- |
+| P0 | Direct LIVE mode-change hardening is not in inspected \`main\` | \`core/mode.ts\` has optional \`gateCheck\`; draft #117 repairs this | Independently review #117, reconcile #45, merge only after exact-head CI and review |
+| P0 | Paper OMS concurrency and execution price risk fixes remain drafts | #118 → #119 → #121 are stacked; executed-fill/transaction protections remain unmerged | Review stacked diffs and tests, then merge in dependency order after approval |
+| P0 | Live order path, isolated signer and native protective execution absent | Main \`bot/bot.ts\` dispatches PAPER only; G12–G14 are incomplete | Maintain LIVE lock; do not add executable signer in parity-audit work |
+| P1 | Parity contract is not production-wired | \`exec/demoLiveParity.ts\` explicitly disclaims production wiring | Design durable reservations and authoritative account/venue boundary before attaching |
+| P1 | Exchange partial-fill, rejection, unknown order recovery not certified | #92 / #97 / #98 are overlapping draft proposals | Review minimal compatible order reducer and testnet protocol separately |
+| P1 | DITAS live outcomes and FAST/DEEP parity unverified | Memory and intelligence sources exist, but no operational live fill linkage | Extend existing source, not duplicate memory/worker core |
+| P1 | Production deployment evidence incomplete | Draft #123 CI passed, but separate deployment contexts were blocked | Check current exact-commit production backend readiness and independent release review |
+
+### Checks and constraints for this focused PR
+
+- Unit regression: feature IDs are unique and the parity projection uses the manifest's canonical owner/path/PR instead of re-declaring ownership.
+- API regression: unauthenticated requests fail; the authenticated response is no-store and reports PAPER OMS as paper-wired and LIVE OMS/adapter as not operational.
+- Existing parity contract simulation, production build, TypeScript checks, server/web tests, Playwright, secret scan, and dependency audit are required on the **exact final head**.
+- A green CI does not prove provider-backed fills, financial account reconciliation, 30-day paper certification, deployment health, or production live permission.
+- **Current state:** draft only; no merge, deployment, release-gate changes, transaction permissions or real-money trading authorization.
+
+### Handoff for Phase B
+
+1. Resolve draft #117's mode fail-closed invariant and related #45 overlap before touching live dispatch.
+2. Reconcile #118 → #119 → #121 OMS safety fixes before adding an execution abstraction.
+3. Reuse the original \`bot/bot.ts → exec/oms.ts → risk/gate.ts → portfolio/ledger.ts\` call path. Do not call the prototype \`routeEntry()\` from the bot without transactional reservations, account/environment isolation and crash reconciliation.
+4. Build exact-snapshot parity regressions against the **real canonical** decision and risk services for controlled PAPER and non-executing LIVE evaluation. Distinguish a shared rule from an authorized, operational live path.
+5. Leave any missing venue adapter, signer, native protection or unresolved release gate as a **hard LIVE blocker**.
+
