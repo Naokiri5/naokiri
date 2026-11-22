@@ -13,6 +13,7 @@ import { getControl, updateControl } from '../core/mode.js';
 import { stepExit, newExitState, type ExitState } from '../lab/exits.js';
 import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
+import { recordClosedPaperOutcome } from '../ditas/memory.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { crashpoint } from './crashpoint.js';
 
@@ -329,6 +330,11 @@ export function autopsy(positionId: string) {
     'Single outcomes do not change strategy parameters (Part 26.3 #21).',
   ].filter(Boolean);
   journal('AUTOPSY', `${p.instrument.split(':')[2]} ${p.strategy}: ${r.toFixed(2)}R (${p.exit_reason})`, positionId, { findings, r });
+  // Append DITAS outcome only after the canonical financial close has committed.
+  // Learning failures must never roll back fills, create phantom protection incidents
+  // or interrupt the OMS position event/notification pipeline.
+  try { recordClosedPaperOutcome(positionId); }
+  catch (e: any) { journal('SYSTEM', `DITAS paper outcome recording failed for ${positionId}: ${String(e?.message ?? e).slice(0, 160)}`, positionId); }
   notify(p.realized_pnl >= 0 ? 'INFO' : 'WARNING', `Paper position closed: ${p.instrument.split(':')[2]}`, findings[0], 'oms');
 }
 
