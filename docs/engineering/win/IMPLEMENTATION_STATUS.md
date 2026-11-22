@@ -16,6 +16,9 @@
 - WIN-00: documents and scope/PR boundary inventory.
 - WIN-01: canonical migration v6 adds one-wallet-per-account READ_ONLY follow config and immutable, uniquely identified finalized whale observations. Store is non-public and only usable by a future authenticated RPC ingestion adapter. No fabricated wallet history.
 - WIN-01: owner-authenticated/CSRF-protected POST /api/copy/follow and DELETE /api/copy/follow. Existing GET /api/copy remains BLOCKED for automatic trading and gains additive win status. GET /api/copy/observations never exposes unverified trades as confirmed.
+- WIN-01 partial net-balance normalization: `server/src/whales/winSolanaNormalize.ts` aggregates wallet-owned SPL balances with BigInt and refuses ambiguous transactions, untrusted quote mints, malformed signatures, failed/future/unfinalized evidence and missing verified DEX-program proof. Pure function only; no active RPC ingestion or production proof chain. 8 negative/positive tests.
+- WIN-02 research-only FIFO profiler: `server/src/whales/winProfiler.ts` reconstructs matched gross closed lots, independently marks unsold holdings using usable full-size sell quotes or zero-liquidity stress, flags orphan sells/duplicates/MEV-like holding times, and estimates delayed follower PnL only when all validated historical quotes are supplied. The resulting `automaticCopyEligible` is always `false`. No historical wallet-trading feed is connected.
+- WIN-02 read-only `GET /api/copy/profile` from the existing authenticated API and dedicated research-only profile display in the existing `/copy` UI. The backend deliberately withholds history coverage, fees, follower PnL and accurate win probability when sources are absent.
 - WIN-03 safety-only preview: pure FAST evaluator requires verified direct swap, finality, token/sell-route checks, fresh follower quote, drift and after-cost edge. It cannot reach the OMS.
 - WIN-04 safe evidence: GET /api/whales/deep exposes only anonymous CEX print inference; deep hypothesis validator rejects future-available data and unvalidated models. It never identifies individual traders or executes trades.
 - Both evaluations, migration behavior, route authorization, CSRF and LIVE lock have regression tests.
@@ -23,12 +26,12 @@
 
 ## Not yet implemented, and why
 
-- WIN-01 scalable indexed Solana wallet discovery, authenticated provider ingestion, balance-delta proofs, finality reorg tracking and RPC credentials.
-- WIN-02 complete cost-basis / FIFO portfolio reconstruction, liquidity-adjusted dead-bag PnL, realistic follower PnL under delay, wallet quality ranking.
+- WIN-01 scalable indexed Solana wallet discovery, authenticated provider ingestion, end-to-end verified swap proof, finality reorg tracking and RPC credentials. The isolated net SPL delta normalizer is implemented but is not an RPC decoder or identity attestation.
+- WIN-02 verified complete wallet trade history, externally authenticated cost basis and fee/hedge reconciliation, executable liquidity quote feed, calibrated follower rankings and full latency/volume sweep. Pure FIFO, zero-liquidity stress, and delayed quote simulations are implemented as research-only partial capabilities.
 - WIN-03 Solana token safety verified end-to-end, owner wallet signing, Jupiter actual quote-to-fill reliability, a Solana PAPER OMS adapter, signed QCI connection, automatic memecoin entries/exits.
 - WIN-04 licensed futures/forex/stock/ETF feeds, chart structure generation, point-in-time institutional filings, holdout and walk-forward calibrated performance, production multi-venue research.
 - WIN-05 capital reservations, futures/options margin, broker/DEX order lifecycle and crash reconciliation under a canonical existing OMS.
-- WIN-06 is PARTIAL: existing /copy page now offers FAST wallet selection, status, events and DEEP anonymous prints. A scaled index/store benchmark, full chaos/operations tests and release approval remain open.
+- WIN-06 is PARTIAL: existing /copy page now offers FAST wallet selection, evidence, research-only FIFO/stress profile and DEEP anonymous prints. A scaled index/store benchmark, full chaos/operations tests and release approval remain open.
 - LIVE is locked by MIA's existing G01-G14 release gate. No live signer, order, withdrawal or certified profitability in this PR.
 
 ## Existing canonical ownership (must not duplicate)
@@ -78,4 +81,4 @@ From the actual integrated branch checkout:
 
 Review the GitHub CI checks on the exact final PR SHA. This document does not assert they passed merely because code was committed.
 
-**Current merge verdict: NO-GO** pending full integration tests, independent review and unmet WIN-02 through WIN-06 execution requirements.
+**Current merge verdict: NO-GO** pending completed CI on latest head, independent trading-risk/security review, review of overlapping v6 migrations and real provider / OMS / QCI integrations. Browser regression for unfollow's missing JSON body was reproduced from Actions job 137053795547 and patched; verify the fix on a completed, non-cancelled run before marking it fixed.
