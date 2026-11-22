@@ -93,6 +93,8 @@ export interface ObtainablePriceEvidence {
   readonly priceImpactBps: number;
   readonly poolLiquidityUsd: number;
   readonly estimatedTotalFeesUsd: number;
+  /** Actual intended follower order size; MAX cap is not a fee denominator. */
+  readonly notionalUsd: number;
   readonly quoteSourceId: string;
 }
 
@@ -189,6 +191,7 @@ export function evaluateFastWhaleCandidate(params: {
       !validPositive(q.priceUsd) ||
       !finiteNonnegative(q.priceImpactBps) ||
       !finiteNonnegative(q.estimatedTotalFeesUsd) ||
+      !validPositive(q.notionalUsd) || q.notionalUsd > f.maxNotionalUsd ||
       !finiteNonnegative(q.poolLiquidityUsd) ||
       !isTimestamp(q.quoteReceivedAt) || !isTimestamp(q.quoteExpiresAt) ||
       q.quoteReceivedAt > now || q.quoteExpiresAt < now ||
@@ -213,7 +216,7 @@ export function evaluateFastWhaleCandidate(params: {
   }
   // Estimated outcome is indicative only: onchain priority fees, rent and
   // actual fill can change. No execution is authorized by this calculation.
-  const feesBps = quote.estimatedTotalFeesUsd / f.maxNotionalUsd * 10_000;
+  const feesBps = quote.estimatedTotalFeesUsd / quote.notionalUsd * 10_000;
   const edgeBps = expectedMove - adverseDriftBps - quote.priceImpactBps - feesBps;
   if (!Number.isFinite(edgeBps) || edgeBps <= 0) {
     reasons.push('NONPOSITIVE_EXPECTED_EDGE_AFTER_COSTS');
