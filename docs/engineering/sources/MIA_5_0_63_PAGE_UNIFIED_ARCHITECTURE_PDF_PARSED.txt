@@ -1,0 +1,2752 @@
+MIA 5.0 — User-uploaded 63-page Unified Architecture / Master Prompt / TypeScript Catalog
+SOURCE ARCHIVE ONLY — DO NOT EXECUTE OR IMPORT AS PRODUCTION CODE.
+PDF binary SHA-256: 42fc0041a9e8741414ec49224e4b2cc3d4cc37254b904216dada421e9a6548cb
+Below is the complete line-range extraction from the uploaded PDF, 63 page boundaries, not byte-identical to the original PDF.
+It can contain formatting artifacts and proposed conflicting code. No release authorization is implied.
+
+<PARSED TEXT FOR PAGE: 1 / 63>
+MIA 5.0 Unified Architecture
+Documentation, Master Prompt &
+TypeScript Catalog
+This unified specification serves as both the canonical engineering reference and the drop-in
+Master Prompt (CLAUDE.md / AGENTS.md) for OpenAI Codex and Claude working on MIA
+5.0 ([https://github.com/Naokiri5/naokiri](https://github.com/Naokiri5/naokiri)). It preserves
+every architectural invariant, 5-sleeve portfolio rule, 100-agent swarm definition, 97-slot
+feature contract, SQLite WAL schema, and complete TypeScript implementation across the
+pre-flight, seeding, expectancy audit, paper burn-in, and Monday 9:30 AM ET equities
+readiness stack.
+1. Master System Prompt for Claude & OpenAI Codex
+(CLAUDE.md / AGENTS.md)
+Copy the block below directly into CLAUDE.md and AGENTS.md at the repository root so both
+Claude and Codex enforce identical runtime, safety, and architectural constraints on every
+task:
+
+
+
+
+    Markdown
+    # AGENTS.md / CLAUDE.md — MIA 5.0 Autonomous Multi-Sleeve Trading Platform​
+    ​
+    ## 1. Repository Identity & Runtime Stack​
+    - **Repository:** `https://github.com/Naokiri5/naokiri` (MIA 5.0)​
+    - **Workspaces:** npm workspaces `@mia/server` (`./server`) and `@mia/web` (`./web`),
+    deployed with Vite and Cloudflare Wrangler (`server/wrangler.jsonc`).​
+    - **Runtime:** Node.js `22.23.5` with native TypeScript execution (`node path/to/file.ts`) and
+    built-in `node:sqlite` (`DatabaseSync`).​
+    - **Zero Native Addon Rule:** NEVER introduce `better-sqlite3`, `sqlite3`, or C++ node-gyp
+    bindings. Always use Node 22's built-in `node:sqlite`.​
+    - **Testing Framework:** Vitest (`npx vitest run`).​
+    ​
+    ## 2. Hard Safety, Execution & Capital Invariants​
+    1. **Default Paper Lock:** All five portfolio sleeves (`futures`, `spot`, `memecoin`, `yield`,
+    `stocks_etf`) initialize and operate in `PAPER` shadow mode
+    (`MIA_EXECUTION_MODE=PAPER`, `ALLOW_LIVE_TRADING=false`) by default.​
+    2. **30-Trade Rolling Expectancy Promotion Gate:** No sleeve may transition from `PAPER`
+    to `LIVE` unless `UnifiedRiskGovernor` verifies ALL THREE conditions over the most recent
+<PARSED TEXT FOR PAGE: 2 / 63>
+`30` (`min_trades_required`) `FILLED` trades in `ledger_orders`:​
+  - `rolling_trade_count >= 30`​
+ - `rolling_expectancy_r >= sleeve.min_expectancy_r`​
+ - `rolling_max_drawdown_pct <= sleeve.max_daily_drawdown_pct`​
+3. **Automatic Decay Revocation & Drawdown Halt:**​
+ - If a `LIVE` sleeve's sliding 30-trade expectancy drops below `min_expectancy_r`,
+immediately transition `promotion_status` to `REVOKED` and block new `LIVE` entries while
+permitting `PAPER` shadow recovery.​
+  - If rolling or intraday high-water-mark drawdown exceeds `max_daily_drawdown_pct`,
+immediately transition `promotion_status` to `HALTED`, trip `circuit_breaker_tripped = 1` in
+`daily_risk_snapshots`, block all new entries, and allow ONLY risk-reducing exit orders (`isExit:
+true`).​
+4. **4ms Sub-Tick Reflex & Swarm SLA:** `NexusFabricRouter`, `fastReflexWorker`, and the
+bounded `SwarmThreadPool` (`AGT-001`–`AGT-100`) communicate over zero-copy
+`SharedArrayBuffer` (`SAB`) ring buffers with `Atomics` heartbeat counters. End-to-end
+swarm inference and `SAB` lag MUST remain `<= 4,000 µs` (`4.0 ms`).​
+5. **External Venue API Rules:**​
+  - **Solana DEX Quotes:** ALWAYS use Jupiter Swap API v1
+(`https://api.jup.ag/swap/v1/quote`) with the `x-api-key` header. NEVER use retired v6 hosts
+(`quote-api.jup.ag/v6`).​
+  - **Solana Token Safety:** Enforce `RugCheck` verification before any `memecoin` or `spot`
+swap dispatch.​
+  - **US Equities / ETFs:** Route `stocks_etf` orders through Alpaca Paper/Live API
+(`https://paper-api.alpaca.markets` for `PAPER`) using atomic bracket orders (`order_class:
+'bracket'`) with deterministic `client_order_id` idempotency.​
+  - **Perpetuals / Spot CEX:** Route `futures` and CEX `spot` through Binance and OKX
+adapters with isolated margin caps and mandatory stop-loss brackets.​
+6. **Treasury Yield Recall Guard:** `TreasurySweepGuard` manages idle capital swept into
+yield protocols (e.g., Kamino). Any JIT yield recall must persist `REQUESTED -> CONFIRMED |
+ROLLED_BACK | TIMEOUT` in `treasury_yield_recalls` inside `BEGIN IMMEDIATE` SQLite
+transactions so process restarts reconcile orphaned recalls cleanly.​
+7. **Authentication & Security:** Mutating control endpoints require Privy wallet-possession
+cryptographic signature verification (`PrivyAuthGuard`). Never log or commit API secrets.​
+​
+## 3. SQLite Persistence & Telemetry Rules​
+- **Databases:** `./data/mia_ledger.sqlite` (orders, sleeve state, daily risk snapshots, yield
+recalls) and `./data/mia_tca.sqlite` (TCA execution slippage, swarm consensus audit, worker
+heartbeats).​
+- **Mandatory Pragmas:** Every `DatabaseSync` connection MUST execute:​
+ `PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;
+PRAGMA busy_timeout = 5000;`​
+- **Atomic Writes:** Wrap multi-table state transitions in explicit `BEGIN IMMEDIATE; ...
+COMMIT;` with `ROLLBACK;` on error.​
+<PARSED TEXT FOR PAGE: 3 / 63>
+    - **SSE Streaming:** `/api/telemetry/stream` MUST stream unbuffered `text/event-stream`
+    updates from `SleeveTelemetryRepository` to `@mia/web` (`SleeveMatrixPanel.tsx` and
+    `ExecutionTelemetryPanel.tsx`).​
+    ​
+    ## 4. Coding & Verification Standards​
+    - Deliver complete, runnable TypeScript files with strict types—never truncate
+    implementations or leave `TODO` stubs.​
+    - Before declaring any change complete, verify against:​
+     1. `node server/scripts/seedSqlite.ts`​
+     2. `npx vitest run server/tests/expectancyGateAudit.test.ts`​
+     3. `node server/scripts/verifyPaperBurnIn.ts`​
+     4. `node server/scripts/verifyEquitiesPremarket.ts`​
+
+
+2. Unified Architecture & 5-Sleeve Portfolio
+Specification
+2.1 Five-Sleeve Capital & Risk Allocation Matrix
+Default seeding allocates a $10,000.00 virtual paper bankroll (MIA_INITIAL_BANKROLL_USD)
+across five orthogonal sleeves. Every sleeve starts locked in PAPER mode until it independently
+clears its 30-trade rolling expectancy gate:
+ Sleeve      Weight        Seed         Max          Min             Rolling   Primar     Initial
+ ID                        Capital      Daily        Expect          Trade     y          Status
+                           (USD)        DD Cap       ancy            Gate      Venues
+                                                     (R)
+
+
+ futures     30%           $3,000.      3.0%         0.15R           0 / 30    Binance    PAPER
+                           00                                                  Futures,
+                                                                               OKX
+                                                                               Swap
+
+
+ spot        25%           $2,500.      4.0%         0.12R           0 / 30    Jupiter    PAPER
+                           00                                                  v1,
+                                                                               Binance
+                                                                               Spot,
+                                                                               OKX
+
+
+ memec       10%           $1,000.      5.0%         0.25R           0 / 30    Jupiter    PAPER
+ oin                       00                                                  v1 +
+                                                                               RugChe
+                                                                               ck Gate
+<PARSED TEXT FOR PAGE: 4 / 63>
+ yield      20%         $2,000.     1.0%        0.02R       0 / 30      Kamino      PAPER
+                        00                                              /
+                                                                        Treasur
+                                                                        y
+                                                                        Sweep
+
+
+ stocks_    15%         $1,500.     2.5%        0.10R       0 / 30      Alpaca      PAPER
+ etf                    00                                              Paper /
+                                                                        Live
+                                                                        (SPY,
+                                                                        QQQ)
+
+
+
+2.2 The 19-Module Unified Architecture Map
+ 1.​ server/src/types/mia5.catalog.ts — Canonical TypeScript contracts for sleeves, 97-slot
+     feature vectors, 100 swarm agents, SharedArrayBuffer layouts, risk verdicts, SQLite rows,
+     and SSE telemetry frames.
+ 2.​ server/src/fabric/NexusFabricRouter.ts — Zero-copy SharedArrayBuffer ring-buffer
+     ingress router normalizing L1/L2 ticks across Binance, OKX, Solana RPC/Jupiter v1, and
+     Alpaca WebSockets.
+ 3.​ server/src/market/FeatureVectorBuilder.ts — Per-symbol rolling ring buffer computing
+     all 97 FeatureSlot (Float64Array) features (order-book imbalance, micro-price drift,
+     realized volatility, funding/basis spread, RSI/ATR/VWAP z-scores, liquidity depth,
+     cross-asset beta).
+ 4.​ server/src/workers/fastReflexWorker.ts — Sub-10ms worker thread reading
+     NexusFabricRouter SAB slots, updating Atomics heartbeat counters, and triggering
+     immediate stop/circuit-breaker reflexes.
+ 5.​ server/src/workers/deepConfluenceWorker.ts — Bounded-heap (resourceLimits)
+     worker thread performing multi-timeframe regime confluence with exponential backoff
+     respawn on OOM or stall.
+ 6.​ server/src/swarm/AgentRegistry.ts — Complete registry of all 100 orthogonal agents
+     (AGT-001 through AGT-100) partitioned across 10 specialized strategy and risk buckets
+     (10 agents per bucket).
+ 7.​ server/src/swarm/SwarmThreadPool.ts — Bounded worker_threads pool executing
+     parallel AGT-001–AGT-100 inference over SharedArrayBuffer within the 4,000 us (4.0
+     ms) SLA.
+ 8.​ server/src/thinking/AdaptiveThinkingEngine.ts — Routes execution cycles across
+     FAST, DEEP, AUTO, and NO_TRADE modes using DITAS confidence calibration and QHEF
+     per-mode observability.
+ 9.​ server/src/thinking/DitasCalibrator.ts — Dynamic Inference Threshold & Attribution
+     System (DITAS) calibrating swarm consensus scores against realized post-trade R
+<PARSED TEXT FOR PAGE: 5 / 63>
+      outcomes.
+  10.​server/src/risk/UnifiedRiskGovernor.ts — Enforces portfolio-wide exposure caps,
+      rolling 30-trade expectancy promotion (PAPER -> LIVE), decay revocation (LIVE ->
+      REVOKED), and drawdown circuit breakers (HALTED).
+  11.​server/src/risk/CanonicalRiskGate.ts — Synchronous pre-trade gate blocking
+      unauthorized live orders, insufficient sleeve equity, or halted sleeves while permitting
+      reduce-only exits (isExit: true).
+  12.​server/src/risk/MacroCalendarVetoSkill.ts — Vetoes high-leverage entries inside
+      FOMC, CPI, NFP, and major central-bank volatility windows.
+  13.​server/src/risk/CapitalAllocatorSkill.ts — Dynamic Kelly-fractional position sizing
+      calibrated to sleeve equity, 1R risk unit, and realized volatility.
+  14.​server/src/treasury/TreasurySweepGuard.ts — Atomic JIT yield deployment and recall
+      manager with SQLite crash-recovery reconciliation and RPC timeout rollbacks.
+  15.​server/src/oms/PaperOmsAdapter.ts — Deterministic shadow execution engine
+      simulating realistic arrival-price slippage, fees, bracket exits, and idempotent
+      client_order_id persistence.
+  16.​server/src/oms/LiveOmsRouter.ts — Multi-venue live order dispatcher (Binance, OKX,
+      Jupiter Swap API v1 + RugCheck, Alpaca bracket orders) gated strictly by
+      CanonicalRiskGate.
+  17.​server/src/security/PrivyAuthGuard.ts — Verifies Privy cryptographic
+      wallet-possession signatures on administrative mode switches, manual halts, and capital
+      reallocations.
+  18.​server/src/memory/TcaDatabase.ts & SleeveTelemetryRepository.ts — node:sqlite
+      WAL persistence repositories for mia_ledger.sqlite and mia_tca.sqlite, plus
+      backtestArenaWorker.ts replay evolution.
+  19.​server/src/routes/telemetryStream.ts & web/src/components/SleeveMatrixPanel.tsx
+      — Express unbuffered SSE endpoint (/api/telemetry/stream) streaming live 5-sleeve state,
+      SwarmThreadPool latency, and ExecutionTelemetryPanel.tsx metrics to @mia/web.
+3. Complete TypeScript Architecture Catalog
+(server/src/types/mia5.catalog.ts)
+Save this complete TypeScript catalog to server/src/types/mia5.catalog.ts. It gives Claude and
+Codex complete, strongly-typed visibility into all 19 modules, all 100 swarm agents
+(AGT-001–AGT-100), all 97 FeatureSlot indices, SharedArrayBuffer memory offsets, SQLite
+schemas, and SSE telemetry contracts:
+
+
+
+
+    TypeScript
+    /**​
+     * MIA 5.0 Complete TypeScript Architecture & Domain Catalog​
+<PARSED TEXT FOR PAGE: 6 / 63>
+* Repository: https://github.com/Naokiri5/naokiri​
+* Runtime: Node.js 22.23.5 (node:sqlite, worker_threads, SharedArrayBuffer)​
+*/​
+​
+export type SleeveId = 'futures' | 'spot' | 'memecoin' | 'yield' | 'stocks_etf';​
+​
+export type PromotionStatus = 'PAPER' | 'LIVE' | 'REVOKED' | 'HALTED';​
+​
+export type ExecutionMode = 'PAPER' | 'LIVE';​
+​
+export type ThinkingMode = 'FAST' | 'DEEP' | 'AUTO' | 'NO_TRADE';​
+​
+export type VenueId =​
+    | 'BINANCE_FUTURES'​
+    | 'BINANCE_SPOT'​
+    | 'OKX_SWAP'​
+    | 'OKX_SPOT'​
+    | 'JUPITER_V1'​
+    | 'KAMINO_YIELD'​
+    | 'ALPACA_EQUITIES';​
+​
+export type OrderSide = 'BUY' | 'SELL';​
+​
+export type OrderType = 'MARKET' | 'LIMIT' | 'BRACKET' | 'STOP_MARKET' | 'TAKE_PROFIT';​
+​
+export type OrderStatus =​
+    | 'PENDING'​
+    | 'SUBMITTED'​
+    | 'PARTIAL'​
+    | 'FILLED'​
+    | 'CANCELED'​
+    | 'REJECTED';​
+​
+export type YieldRecallStatus = 'REQUESTED' | 'CONFIRMED' | 'ROLLED_BACK' | 'TIMEOUT';​
+​
+/**​
+ * 10 Orthogonal Swarm Agent Buckets (10 agents per bucket = 100 total agents:
+AGT-001..AGT-100)​
+ */​
+export type SwarmBucketId =​
+    | 'B01_MICROSTRUCTURE_L2'​
+    | 'B02_MOMENTUM_BREAKOUT'​
+    | 'B03_MEAN_REVERSION'​
+<PARSED TEXT FOR PAGE: 7 / 63>
+    | 'B04_VOLATILITY_REGIME'​
+    | 'B05_FUNDING_BASIS_ARB'​
+    | 'B06_ONCHAIN_SOLANA_FLOW'​
+    | 'B07_EQUITIES_MACRO_BETA'​
+    | 'B08_YIELD_TREASURY_OPT'​
+    | 'B09_ADVERSARIAL_SPOOF_GUARD'​
+    | 'B10_TAIL_RISK_DRAWDOWN';​
+​
+export interface SwarmAgentSpec {​
+    readonly agentId: `AGT-${string}`;​
+    readonly numericIndex: number; // 1..100​
+    readonly bucket: SwarmBucketId;​
+    readonly codeName: string;​
+    readonly targetSleeves: readonly SleeveId[];​
+    readonly primaryFeatureSlots: readonly number[]; // Indices into 97-slot FeatureVector​
+    readonly baseWeight: number;​
+    readonly maxLatencyBudgetUs: number; // Must stay within 4,000 us pool SLA​
+}​
+​
+export const SWARM_BUCKETS: readonly {​
+    bucket: SwarmBucketId;​
+ startIndex: number;​
+ endIndex: number;​
+ targetSleeves: readonly SleeveId[];​
+ description: string;​
+}[] = [​
+ {​
+   bucket: 'B01_MICROSTRUCTURE_L2',​
+   startIndex: 1,​
+   endIndex: 10,​
+   targetSleeves: ['futures', 'spot', 'stocks_etf'],​
+   description: 'Order-book imbalance, queue depletion, micro-price tilt, and spread compression.',​
+ },​
+ {​
+   bucket: 'B02_MOMENTUM_BREAKOUT',​
+   startIndex: 11,​
+   endIndex: 20,​
+   targetSleeves: ['futures', 'spot', 'memecoin', 'stocks_etf'],​
+   description: 'Multi-horizon trend ignition, volume-weighted impulse, and range expansion.',​
+ },​
+ {​
+   bucket: 'B03_MEAN_REVERSION',​
+   startIndex: 21,​
+<PARSED TEXT FOR PAGE: 8 / 63>
+  endIndex: 30,​
+  targetSleeves: ['futures', 'spot', 'stocks_etf'],​
+  description: 'VWAP standard-deviation exhaustion, RSI divergence, and liquidity snapback.',​
+ },​
+ {​
+  bucket: 'B04_VOLATILITY_REGIME',​
+  startIndex: 31,​
+  endIndex: 40,​
+  targetSleeves: ['futures', 'spot', 'memecoin', 'stocks_etf'],​
+  description: 'Realized vs implied volatility clustering, Garman-Klass estimators, and ATR
+compression.',​
+ },​
+ {​
+  bucket: 'B05_FUNDING_BASIS_ARB',​
+  startIndex: 41,​
+  endIndex: 50,​
+  targetSleeves: ['futures', 'spot', 'yield'],​
+  description: 'Perpetual funding rate dislocations, spot-perp basis carry, and open-interest skew.',​
+ },​
+ {​
+  bucket: 'B06_ONCHAIN_SOLANA_FLOW',​
+  startIndex: 51,​
+  endIndex: 60,​
+  targetSleeves: ['spot', 'memecoin'],​
+  description: 'Jupiter v1 route depth, smart-wallet accumulation, holder concentration, and
+RugCheck signals.',​
+ },​
+ {​
+  bucket: 'B07_EQUITIES_MACRO_BETA',​
+  startIndex: 61,​
+  endIndex: 70,​
+  targetSleeves: ['stocks_etf', 'futures'],​
+  description: 'SPY/QQQ opening-range dynamics, pre-market gap fill, sector rotation, and macro
+calendar sensitivity.',​
+ },​
+ {​
+  bucket: 'B08_YIELD_TREASURY_OPT',​
+  startIndex: 71,​
+  endIndex: 80,​
+  targetSleeves: ['yield'],​
+  description: 'Kamino/stablecoin APY spread, utilization safety thresholds, and JIT recall slippage.',​
+ },​
+ {​
+<PARSED TEXT FOR PAGE: 9 / 63>
+  bucket: 'B09_ADVERSARIAL_SPOOF_GUARD',​
+  startIndex: 81,​
+  endIndex: 90,​
+  targetSleeves: ['futures', 'spot', 'memecoin', 'stocks_etf'],​
+  description: 'Detects flash-wick traps, wash volume, quote stuffing, and thin-book toxic flow.',​
+ },​
+ {​
+  bucket: 'B10_TAIL_RISK_DRAWDOWN',​
+  startIndex: 91,​
+  endIndex: 100,​
+  targetSleeves: ['futures', 'spot', 'memecoin', 'yield', 'stocks_etf'],​
+  description: 'Portfolio correlation spikes, intraday drawdown velocity, and emergency de-risking
+vetoes.',​
+ },​
+] as const;​
+​
+/**​
+ * Deterministic generator for all 100 repository swarm agents (AGT-001 through AGT-100).​
+ */​
+export function buildCanonicalAgentCatalog(): readonly SwarmAgentSpec[] {​
+ const catalog: SwarmAgentSpec[] = [];​
+ for (const b of SWARM_BUCKETS) {​
+  for (let idx = b.startIndex; idx <= b.endIndex; idx++) {​
+       const padded = String(idx).padStart(3, '0');​
+       const localSlot = idx - b.startIndex;​
+     catalog.push({​
+      agentId: `AGT-${padded}`,​
+      numericIndex: idx,​
+      bucket: b.bucket,​
+      codeName: `${b.bucket.toLowerCase()}_v${localSlot + 1}`,​
+      targetSleeves: b.targetSleeves,​
+      primaryFeatureSlots: [​
+        (localSlot * 9) % 97,​
+        (localSlot * 9 + 1) % 97,​
+        (localSlot * 9 + 2) % 97,​
+        (localSlot * 9 + 3) % 97,​
+      ],​
+      baseWeight: 1.0,​
+      maxLatencyBudgetUs: 4000,​
+     });​
+   }​
+ }​
+ return catalog;​
+<PARSED TEXT FOR PAGE: 10 / 63>
+}​
+​
+/**​
+ * 97-Slot FeatureVectorBuilder Contract (FEATURE_VECTOR_LENGTH = 97)​
+ * Stored as Float64Array per symbol inside rolling ring buffers.​
+ */​
+export const FEATURE_VECTOR_LENGTH = 97 as const;​
+​
+export enum FeatureSlot {​
+    // 0..15: L1/L2 Price & Microstructure​
+    MID_PRICE = 0,​
+    MICRO_PRICE = 1,​
+    SPREAD_BPS = 2,​
+    OBI_LEVEL_1 = 3,​
+    OBI_LEVEL_5 = 4,​
+    OBI_LEVEL_10 = 5,​
+    BID_DEPTH_USD_1PCT = 6,​
+    ASK_DEPTH_USD_1PCT = 7,​
+    TRADE_FLOW_IMBALANCE_1S = 8,​
+    TRADE_FLOW_IMBALANCE_5S = 9,​
+    TRADE_FLOW_IMBALANCE_30S = 10,​
+    TICK_ARRIVAL_RATE_HZ = 11,​
+    QUOTE_STUFFING_RATIO = 12,​
+    EFFECTIVE_SPREAD_BPS = 13,​
+    KYLE_LAMBDA_IMPACT = 14,​
+    VPIN_TOXICITY_SCORE = 15,​
+​
+    // 16..35: Multi-Horizon Returns & Momentum​
+    RET_1S = 16,​
+    RET_5S = 17,​
+    RET_15S = 18,​
+    RET_1M = 19,​
+    RET_5M = 20,​
+    RET_15M = 21,​
+    RET_1H = 22,​
+    RET_4H = 23,​
+    RET_24H = 24,​
+    EMA_9_DIST_PCT = 25,​
+    EMA_21_DIST_PCT = 26,​
+    EMA_55_DIST_PCT = 27,​
+    EMA_200_DIST_PCT = 28,​
+    MACD_HIST_NORM = 29,​
+    ADX_14 = 30,​
+<PARSED TEXT FOR PAGE: 11 / 63>
+    PLUS_DI_14 = 31,​
+    MINUS_DI_14 = 32,​
+    ROC_10_NORM = 33,​
+    DONCHIAN_POS_20 = 34,​
+    HURST_EXPONENT_64 = 35,​
+​
+    // 36..51: Mean Reversion & Oscillators​
+    VWAP_SESSION_DIST_Z = 36,​
+    VWAP_ROLLING_1H_Z = 37,​
+    RSI_7 = 38,​
+    RSI_14 = 39,​
+    STOCH_K_14 = 40,​
+    STOCH_D_14 = 41,​
+    BBAND_PCT_B_20 = 42,​
+    BBAND_WIDTH_20 = 43,​
+    KELTNER_POS_20 = 44,​
+    CCI_20_NORM = 45,​
+    WILLIAMS_R_14 = 46,​
+    OBV_SLOPE_14 = 47,​
+    CMF_20 = 48,​
+    MFI_14 = 49,​
+    ZSCORE_PRICE_50 = 50,​
+    ZSCORE_VOLUME_50 = 51,​
+​
+    // 52..65: Volatility & Tail Estimators​
+    REALIZED_VOL_1M = 52,​
+    REALIZED_VOL_15M = 53,​
+    REALIZED_VOL_1H = 54,​
+    REALIZED_VOL_24H = 55,​
+    ATR_14_PCT = 56,​
+    NATR_14 = 57,​
+    GARMAN_KLASS_VOL = 58,​
+    PARKINSON_VOL = 59,​
+    VOL_OF_VOL_RATIO = 60,​
+    VOL_REGIME_STATE = 61, // 0=LOW, 1=NORMAL, 2=HIGH, 3=EXTREME​
+    DOWNSIDE_SEMI_DEV = 62,​
+    SKEWNESS_64 = 63,​
+    KURTOSIS_64 = 64,​
+    MAX_1M_WICK_RATIO = 65,​
+​
+    // 66..77: Perpetuals, Basis & Solana On-Chain Signals​
+    FUNDING_RATE_CURRENT = 66,​
+    FUNDING_RATE_PREDICTED = 67,​
+<PARSED TEXT FOR PAGE: 12 / 63>
+    PERP_SPOT_BASIS_BPS = 68,​
+    OPEN_INTEREST_DELTA_1H = 69,​
+    LONG_SHORT_ACCOUNT_RATIO = 70,​
+    LIQUIDATION_IMBALANCE_5M = 71,​
+    JUPITER_V1_PRICE_IMPACT_BPS = 72,​
+    SOLANA_POOL_LIQUIDITY_USD = 73,​
+    RUGCHECK_RISK_SCORE = 74, // 0=SAFE .. 100=CRITICAL_VETO​
+    TOP10_HOLDER_CONCENTRATION = 75,​
+    SMART_MONEY_NET_FLOW_5M = 76,​
+    DEX_TX_VELOCITY_1M = 77,​
+​
+    // 78..88: US Equities / ETFs & Yield Sleeve Signals​
+    EQUITY_PREMARKET_GAP_PCT = 78,​
+    OPENING_RANGE_5M_POS = 79,​
+    OPENING_RANGE_15M_POS = 80,​
+    SPY_BETA_60M = 81,​
+    QQQ_BETA_60M = 82,​
+    EQUITY_RVOL_TOD = 83, // Time-of-day relative volume​
+    MARKET_SESSION_CODE = 84, // 0=CLOSED, 1=PRE, 2=REGULAR, 3=AFTER​
+    YIELD_PROTOCOL_APY_PCT = 85,​
+    YIELD_UTILIZATION_PCT = 86,​
+    YIELD_RECALL_EST_LATENCY_MS = 87,​
+    MACRO_EVENT_PROXIMITY_MIN = 88,​
+​
+    // 89..96: Portfolio Risk, Reflex & Thinking Telemetry​
+  SLEEVE_DRAWDOWN_PCT = 89,​
+  SLEEVE_ROLLING_EXPECTANCY_R = 90,​
+  SLEEVE_ROLLING_TRADE_COUNT = 91,​
+  PORTFOLIO_HEAT_PCT = 92,​
+  CORRELATION_TO_BTC = 93,​
+  REFLEX_SAB_LAG_US = 94,​
+  DITAS_CONFIDENCE_CALIBRATED = 95,​
+  THINKING_MODE_CODE = 96, // 0=NO_TRADE, 1=FAST, 2=DEEP, 3=AUTO​
+}​
+​
+/**​
+ * SharedArrayBuffer Control Header & Atomics Layout (Int32Array view)​
+ * Shared between NexusFabricRouter, fastReflexWorker, and SwarmThreadPool.​
+ */​
+export enum SabControlOffset {​
+    MAGIC_HEADER = 0, // 0x4D494135 ('MIA5')​
+    SCHEMA_VERSION = 1, // 5​
+    RING_WRITE_SEQ = 2, // Monotonic Atomics sequence counter​
+<PARSED TEXT FOR PAGE: 13 / 63>
+  FAST_REFLEX_HEARTBEAT = 3, // Incremented every sub-10ms cycle by fastReflexWorker​
+  DEEP_CONFLUENCE_HEARTBEAT = 4, // Incremented by deepConfluenceWorker​
+  SWARM_POOL_ACTIVE_WORKERS = 5,​
+  LAST_INFERENCE_DURATION_US = 6,​
+  GLOBAL_EMERGENCY_HALT_FLAG = 7, // 0=OK, 1=HALT_ALL_ENTRIES​
+  HEADER_INT32_SLOTS = 16,​
+}​
+​
+export interface SleeveStateRecord {​
+  sleeve: SleeveId;​
+  allocated_usd: number;​
+  available_usd: number;​
+  reserved_usd: number;​
+  realized_pnl_usd: number;​
+  unrealized_pnl_usd: number;​
+  high_water_mark_usd: number;​
+  max_daily_drawdown_pct: number;​
+  min_expectancy_r: number;​
+  min_trades_required: number; // Default: 30​
+  rolling_trade_count: number;​
+  rolling_expectancy_r: number;​
+  rolling_max_drawdown_pct: number;​
+  promotion_status: PromotionStatus;​
+  last_promoted_at: string | null;​
+  updated_at: string;​
+}​
+​
+export interface LedgerOrderRecord {​
+  client_order_id: string;​
+  broker_order_id: string | null;​
+  sleeve: SleeveId;​
+  symbol: string;​
+  venue: string;​
+  side: OrderSide;​
+  order_type: string;​
+  qty: number;​
+  limit_price: number | null;​
+  filled_qty: number;​
+  avg_fill_price: number | null;​
+  realized_r: number | null;​
+  status: OrderStatus;​
+  execution_mode: ExecutionMode;​
+  idempotency_hash: string;​
+<PARSED TEXT FOR PAGE: 14 / 63>
+  created_at: string;​
+  updated_at: string;​
+}​
+​
+export interface TcaExecutionRecord {​
+  execution_id: string;​
+  client_order_id: string;​
+  sleeve: SleeveId;​
+  symbol: string;​
+  venue: string;​
+  side: OrderSide;​
+  arrival_price: number;​
+  fill_price: number;​
+  slippage_bps: number;​
+  fee_usd: number;​
+  reflex_latency_us: number;​
+  swarm_inference_us: number;​
+  lead_agent_id: string;​
+  consensus_bucket: SwarmBucketId | string;​
+  execution_mode: ExecutionMode;​
+  recorded_at: string;​
+}​
+​
+export interface TelemetryStreamSnapshot {​
+  timestampIso: string;​
+  executionMode: ExecutionMode;​
+  thinkingMode: ThinkingMode;​
+  swarmInferenceUs: number;​
+  sabLagUs: number;​
+  activeAgents: number;​
+  sleeves: SleeveStateRecord[];​
+}​
+​
+export interface Mia19ModuleManifestEntry {​
+  readonly id: number;​
+  readonly name: string;​
+  readonly path: string;​
+  readonly layer: 'FABRIC' | 'SWARM' | 'THINKING' | 'RISK' | 'TREASURY' | 'OMS' | 'PERSISTENCE' | 'UI';​
+  readonly slaContract: string;​
+}​
+​
+export const MIA_19_MODULE_MANIFEST: readonly Mia19ModuleManifestEntry[] = [​
+  { id: 1, name: 'Mia5Catalog', path: 'server/src/types/mia5.catalog.ts', layer: 'FABRIC', slaContract:
+<PARSED TEXT FOR PAGE: 15 / 63>
+  'Canonical types for 5 sleeves, 97 features, 100 agents' },​
+   { id: 2, name: 'NexusFabricRouter', path: 'server/src/fabric/NexusFabricRouter.ts', layer: 'FABRIC',
+  slaContract: 'Zero-copy SharedArrayBuffer L1/L2 tick ingestion' },​
+    { id: 3, name: 'FeatureVectorBuilder', path: 'server/src/market/FeatureVectorBuilder.ts', layer:
+  'FABRIC', slaContract: '97-slot Float64Array ring buffer per symbol' },​
+    { id: 4, name: 'fastReflexWorker', path: 'server/src/workers/fastReflexWorker.ts', layer: 'FABRIC',
+  slaContract: 'Sub-10ms reflex loop + Atomics heartbeat counter' },​
+    { id: 5, name: 'deepConfluenceWorker', path: 'server/src/workers/deepConfluenceWorker.ts', layer:
+  'THINKING', slaContract: 'Bounded resourceLimits + OOM exponential backoff respawn' },​
+    { id: 6, name: 'AgentRegistry', path: 'server/src/swarm/AgentRegistry.ts', layer: 'SWARM',
+  slaContract: 'AGT-001..AGT-100 across 10 orthogonal buckets' },​
+    { id: 7, name: 'SwarmThreadPool', path: 'server/src/swarm/SwarmThreadPool.ts', layer: 'SWARM',
+  slaContract: 'Parallel worker_threads consensus <= 4,000 us (4.0ms)' },​
+    { id: 8, name: 'AdaptiveThinkingEngine', path: 'server/src/thinking/AdaptiveThinkingEngine.ts', layer:
+  'THINKING', slaContract: 'Routes FAST, DEEP, AUTO, NO_TRADE modes' },​
+    { id: 9, name: 'DitasCalibrator', path: 'server/src/thinking/DitasCalibrator.ts', layer: 'THINKING',
+  slaContract: 'Calibrates swarm confidence against realized R outcomes' },​
+    { id: 10, name: 'UnifiedRiskGovernor', path: 'server/src/risk/UnifiedRiskGovernor.ts', layer: 'RISK',
+  slaContract: 'Rolling 30-trade expectancy promotion/revocation + DD halts' },​
+    { id: 11, name: 'CanonicalRiskGate', path: 'server/src/risk/CanonicalRiskGate.ts', layer: 'RISK',
+  slaContract: 'Pre-trade gate blocking unpromoted LIVE or HALTED entries' },​
+    { id: 12, name: 'MacroCalendarVetoSkill', path: 'server/src/risk/MacroCalendarVetoSkill.ts', layer:
+  'RISK', slaContract: 'FOMC/CPI/NFP volatility window entry veto' },​
+    { id: 13, name: 'CapitalAllocatorSkill', path: 'server/src/risk/CapitalAllocatorSkill.ts', layer: 'RISK',
+  slaContract: '1R volatility-adjusted sleeve position sizing' },​
+    { id: 14, name: 'TreasurySweepGuard', path: 'server/src/treasury/TreasurySweepGuard.ts', layer:
+  'TREASURY', slaContract: 'JIT yield recall crash recovery & RPC timeout rollback' },​
+    { id: 15, name: 'PaperOmsAdapter', path: 'server/src/oms/PaperOmsAdapter.ts', layer: 'OMS',
+  slaContract: 'Shadow execution with atomic SQLite idempotency' },​
+    { id: 16, name: 'LiveOmsRouter', path: 'server/src/oms/LiveOmsRouter.ts', layer: 'OMS', slaContract:
+  'Binance, OKX, Jupiter v1 + RugCheck, Alpaca brackets' },​
+    { id: 17, name: 'PrivyAuthGuard', path: 'server/src/security/PrivyAuthGuard.ts', layer: 'OMS',
+  slaContract: 'Wallet-possession signature verification on control routes' },​
+    { id: 18, name: 'TcaAndTelemetryRepo', path: 'server/src/memory/SleeveTelemetryRepository.ts',
+  layer: 'PERSISTENCE', slaContract: 'Node 22 node:sqlite WAL persistence for ledger & TCA' },​
+    { id: 19, name: 'SleeveMatrixTelemetryUI', path: 'web/src/components/SleeveMatrixPanel.tsx', layer:
+  'UI', slaContract: 'Unbuffered /api/telemetry/stream SSE dashboard' },​
+  ] as const;​
+
+
+4. Complete Operational & Validation Scripts (Full
+Untruncated Source)
+<PARSED TEXT FOR PAGE: 16 / 63>
+4.1 SQLite WAL Persistence & 5-Sleeve Seeding Script
+(server/scripts/seedSqlite.ts)
+Provisions ./data/mia_ledger.sqlite and ./data/mia_tca.sqlite using Node 22's built-in node:sqlite,
+enforces PRAGMA journal_mode = WAL, seeds all five portfolio sleeves idempotently, verifies
+-wal and -shm sidecar files while write handles are mounted, and supports --reset.
+
+
+
+
+     TypeScript
+     import fs from 'node:fs';​
+     import path from 'node:path';​
+     import { DatabaseSync } from 'node:sqlite';​
+     ​
+     type SleeveId = 'futures' | 'spot' | 'memecoin' | 'yield' | 'stocks_etf';​
+     ​
+     interface SleeveSeedConfig {​
+       sleeve: SleeveId;​
+       weight: number;​
+       maxDailyDrawdownPct: number;​
+       minExpectancyR: number;​
+       minTradesRequired: number;​
+     }​
+     ​
+     const SLEEVE_CONFIGS: readonly SleeveSeedConfig[] = [​
+       { sleeve: 'futures', weight: 0.30, maxDailyDrawdownPct: 0.03, minExpectancyR: 0.15,
+     minTradesRequired: 30 },​
+       { sleeve: 'spot', weight: 0.25, maxDailyDrawdownPct: 0.04, minExpectancyR: 0.12,
+     minTradesRequired: 30 },​
+       { sleeve: 'memecoin', weight: 0.10, maxDailyDrawdownPct: 0.05, minExpectancyR: 0.25,
+     minTradesRequired: 30 },​
+       { sleeve: 'yield', weight: 0.20, maxDailyDrawdownPct: 0.01, minExpectancyR: 0.02,
+     minTradesRequired: 30 },​
+       { sleeve: 'stocks_etf', weight: 0.15, maxDailyDrawdownPct: 0.025, minExpectancyR: 0.10,
+     minTradesRequired: 30 },​
+     ] as const;​
+     ​
+     const DATA_DIR = path.resolve(process.env.MIA_DATA_DIR ?? './data');​
+     const LEDGER_DB_PATH = path.join(DATA_DIR, 'mia_ledger.sqlite');​
+     const TCA_DB_PATH = path.join(DATA_DIR, 'mia_tca.sqlite');​
+     const TOTAL_BANKROLL_USD = Number(process.env.MIA_INITIAL_BANKROLL_USD ??
+     '10000');​
+<PARSED TEXT FOR PAGE: 17 / 63>
+const RESET_MODE = process.argv.includes('--reset');​
+​
+function configureAndVerifyWal(db: DatabaseSync, dbPath: string): void {​
+    db.exec(`​
+     PRAGMA journal_mode = WAL;​
+     PRAGMA synchronous = NORMAL;​
+     PRAGMA foreign_keys = ON;​
+     PRAGMA busy_timeout = 5000;​
+     PRAGMA wal_autocheckpoint = 1000;​
+     PRAGMA temp_store = MEMORY;​
+    `);​
+​
+    const modeRow = db.prepare('PRAGMA journal_mode;').get() as { journal_mode?: string } |
+undefined;​
+    const journalMode = (modeRow?.journal_mode ?? '').toLowerCase();​
+    if (journalMode !== 'wal') {​
+     throw new Error(`WAL verification failed for ${dbPath}: expected "wal", got "${journalMode}"`);​
+    }​
+​
+    const integrityRow = db.prepare('PRAGMA integrity_check;').get() as { integrity_check?:
+string } | undefined;​
+    if (integrityRow?.integrity_check !== 'ok') {​
+     throw new Error(`Integrity check failed for ${dbPath}: ${JSON.stringify(integrityRow)}`);​
+  }​
+}​
+​
+function initLedgerDatabase(db: DatabaseSync, bankrollUsd: number): void {​
+    db.exec(`​
+  CREATE TABLE IF NOT EXISTS sleeve_state (​
+   sleeve TEXT PRIMARY KEY CHECK (sleeve IN ('futures', 'spot', 'memecoin', 'yield', 'stocks_etf')),​
+   allocated_usd REAL NOT NULL,​
+   available_usd REAL NOT NULL,​
+   reserved_usd REAL NOT NULL DEFAULT 0,​
+   realized_pnl_usd REAL NOT NULL DEFAULT 0,​
+   unrealized_pnl_usd REAL NOT NULL DEFAULT 0,​
+   high_water_mark_usd REAL NOT NULL,​
+   max_daily_drawdown_pct REAL NOT NULL,​
+   min_expectancy_r REAL NOT NULL,​
+   min_trades_required INTEGER NOT NULL DEFAULT 30,​
+   rolling_trade_count INTEGER NOT NULL DEFAULT 0,​
+   rolling_expectancy_r REAL NOT NULL DEFAULT 0,​
+   rolling_max_drawdown_pct REAL NOT NULL DEFAULT 0,​
+   promotion_status TEXT NOT NULL DEFAULT 'PAPER' CHECK (promotion_status IN ('PAPER', 'LIVE',
+'REVOKED', 'HALTED')),​
+   last_promoted_at TEXT,​
+<PARSED TEXT FOR PAGE: 18 / 63>
+      updated_at TEXT NOT NULL​
+    );​
+​
+   CREATE TABLE IF NOT EXISTS ledger_orders (​
+     client_order_id TEXT PRIMARY KEY,​
+     broker_order_id TEXT,​
+     sleeve TEXT NOT NULL REFERENCES sleeve_state(sleeve),​
+     symbol TEXT NOT NULL,​
+     venue TEXT NOT NULL,​
+     side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),​
+     order_type TEXT NOT NULL,​
+     qty REAL NOT NULL,​
+     limit_price REAL,​
+     filled_qty REAL NOT NULL DEFAULT 0,​
+     avg_fill_price REAL,​
+     realized_r REAL,​
+     status TEXT NOT NULL CHECK (status IN ('PENDING', 'SUBMITTED', 'PARTIAL', 'FILLED',
+'CANCELED', 'REJECTED')),​
+     execution_mode TEXT NOT NULL DEFAULT 'PAPER' CHECK (execution_mode IN ('PAPER', 'LIVE')),​
+     idempotency_hash TEXT NOT NULL UNIQUE,​
+     created_at TEXT NOT NULL,​
+     updated_at TEXT NOT NULL​
+   );​
+​
+   CREATE TABLE IF NOT EXISTS treasury_yield_recalls (​
+     recall_id TEXT PRIMARY KEY,​
+     sleeve TEXT NOT NULL REFERENCES sleeve_state(sleeve),​
+     protocol TEXT NOT NULL,​
+     asset TEXT NOT NULL,​
+     amount_usd REAL NOT NULL,​
+     tx_signature TEXT,​
+     status TEXT NOT NULL CHECK (status IN ('REQUESTED', 'CONFIRMED', 'ROLLED_BACK',
+'TIMEOUT')),​
+     created_at TEXT NOT NULL,​
+     resolved_at TEXT​
+   );​
+​
+   CREATE TABLE IF NOT EXISTS daily_risk_snapshots (​
+     snapshot_date TEXT NOT NULL,​
+     sleeve TEXT NOT NULL REFERENCES sleeve_state(sleeve),​
+     sod_equity_usd REAL NOT NULL,​
+     current_equity_usd REAL NOT NULL,​
+     daily_pnl_usd REAL NOT NULL,​
+     circuit_breaker_tripped INTEGER NOT NULL DEFAULT 0,​
+     updated_at TEXT NOT NULL,​
+     PRIMARY KEY (snapshot_date, sleeve)​
+   );​
+​
+<PARSED TEXT FOR PAGE: 19 / 63>
+     CREATE INDEX IF NOT EXISTS idx_ledger_orders_sleeve_status ON ledger_orders(sleeve, status);​
+     CREATE INDEX IF NOT EXISTS idx_ledger_orders_created_at ON ledger_orders(created_at);​
+    `);​
+​
+    const nowIso = new Date().toISOString();​
+    const todayUtc = nowIso.slice(0, 10);​
+​
+    const upsertSleeve = db.prepare(`​
+     INSERT INTO sleeve_state (​
+       sleeve, allocated_usd, available_usd, reserved_usd,​
+       realized_pnl_usd, unrealized_pnl_usd, high_water_mark_usd,​
+       max_daily_drawdown_pct, min_expectancy_r, min_trades_required,​
+       rolling_trade_count, rolling_expectancy_r, rolling_max_drawdown_pct,​
+       promotion_status, updated_at​
+     ) VALUES (​
+       ?, ?, ?, 0,​
+       0, 0, ?,​
+       ?, ?, ?,​
+       0, 0, 0,​
+       'PAPER', ?​
+     )​
+     ON CONFLICT(sleeve) DO NOTHING;​
+    `);​
+​
+    const upsertSnapshot = db.prepare(`​
+     INSERT INTO daily_risk_snapshots (​
+       snapshot_date, sleeve, sod_equity_usd, current_equity_usd,​
+       daily_pnl_usd, circuit_breaker_tripped, updated_at​
+     ) VALUES (?, ?, ?, ?, 0, 0, ?)​
+     ON CONFLICT(snapshot_date, sleeve) DO NOTHING;​
+    `);​
+​
+    db.exec('BEGIN IMMEDIATE;');​
+    try {​
+     for (const cfg of SLEEVE_CONFIGS) {​
+       const allocationUsd = Number((bankrollUsd * cfg.weight).toFixed(2));​
+       upsertSleeve.run(​
+        cfg.sleeve,​
+        allocationUsd,​
+        allocationUsd,​
+        allocationUsd,​
+        cfg.maxDailyDrawdownPct,​
+        cfg.minExpectancyR,​
+        cfg.minTradesRequired,​
+        nowIso​
+<PARSED TEXT FOR PAGE: 20 / 63>
+      );​
+      upsertSnapshot.run(todayUtc, cfg.sleeve, allocationUsd, allocationUsd, nowIso);​
+    }​
+    db.exec('COMMIT;');​
+  } catch (err) {​
+    db.exec('ROLLBACK;');​
+    throw err;​
+  }​
+}​
+​
+function initTcaDatabase(db: DatabaseSync): void {​
+  db.exec(`​
+    CREATE TABLE IF NOT EXISTS tca_executions (​
+      execution_id TEXT PRIMARY KEY,​
+      client_order_id TEXT NOT NULL,​
+      sleeve TEXT NOT NULL CHECK (sleeve IN ('futures', 'spot', 'memecoin', 'yield', 'stocks_etf')),​
+      symbol TEXT NOT NULL,​
+      venue TEXT NOT NULL,​
+      side TEXT NOT NULL CHECK (side IN ('BUY', 'SELL')),​
+      arrival_price REAL NOT NULL,​
+      fill_price REAL NOT NULL,​
+      slippage_bps REAL NOT NULL,​
+      fee_usd REAL NOT NULL DEFAULT 0,​
+      reflex_latency_us INTEGER NOT NULL,​
+      swarm_inference_us INTEGER NOT NULL,​
+      lead_agent_id TEXT NOT NULL,​
+      consensus_bucket TEXT NOT NULL,​
+      execution_mode TEXT NOT NULL DEFAULT 'PAPER',​
+      recorded_at TEXT NOT NULL​
+    );​
+​
+    CREATE TABLE IF NOT EXISTS swarm_consensus_audit (​
+      audit_id INTEGER PRIMARY KEY AUTOINCREMENT,​
+      sleeve TEXT NOT NULL,​
+      symbol TEXT NOT NULL,​
+      active_agents INTEGER NOT NULL,​
+      bucket_scores_json TEXT NOT NULL,​
+      feature_vector_len INTEGER NOT NULL DEFAULT 97,​
+      inference_duration_us INTEGER NOT NULL,​
+      decision TEXT NOT NULL,​
+      recorded_at TEXT NOT NULL​
+    );​
+​
+    CREATE TABLE IF NOT EXISTS worker_heartbeat_log (​
+     id INTEGER PRIMARY KEY AUTOINCREMENT,​
+     worker_name TEXT NOT NULL,​
+<PARSED TEXT FOR PAGE: 21 / 63>
+       heartbeat_seq INTEGER NOT NULL,​
+       heap_used_mb REAL NOT NULL,​
+       sab_lag_us INTEGER NOT NULL,​
+       status TEXT NOT NULL,​
+       recorded_at TEXT NOT NULL​
+     );​
+​
+     CREATE INDEX IF NOT EXISTS idx_tca_sleeve_time ON tca_executions(sleeve, recorded_at);​
+     CREATE INDEX IF NOT EXISTS idx_swarm_audit_time ON swarm_consensus_audit(recorded_at);​
+    `);​
+​
+    const nowIso = new Date().toISOString();​
+  const insertSeedHeartbeat = db.prepare(`​
+   INSERT INTO worker_heartbeat_log (worker_name, heartbeat_seq, heap_used_mb, sab_lag_us,
+status, recorded_at)​
+   SELECT 'seed-bootstrap', 1, ?, 0, 'INITIALIZED', ?​
+   WHERE NOT EXISTS (SELECT 1 FROM worker_heartbeat_log WHERE worker_name =
+'seed-bootstrap');​
+  `);​
+​
+    const heapMb = Number((process.memoryUsage().heapUsed / (1024 * 1024)).toFixed(2));​
+  insertSeedHeartbeat.run(heapMb, nowIso);​
+}​
+​
+function verifySidecarFiles(dbPath: string): { walExists: boolean; shmExists: boolean } {​
+  const walExists = fs.existsSync(`${dbPath}-wal`);​
+  const shmExists = fs.existsSync(`${dbPath}-shm`);​
+  if (!walExists || !shmExists) {​
+    throw new Error(​
+   `WAL sidecar verification failed for ${dbPath} (wal=${String(walExists)},
+shm=${String(shmExists)})`​
+      );​
+    }​
+    return { walExists, shmExists };​
+}​
+​
+function main(): void {​
+    if (!Number.isFinite(TOTAL_BANKROLL_USD) || TOTAL_BANKROLL_USD <= 0) {​
+     throw new Error(`Invalid MIA_INITIAL_BANKROLL_USD: ${String(TOTAL_BANKROLL_USD)}`);​
+    }​
+​
+    fs.mkdirSync(DATA_DIR, { recursive: true });​
+​
+    if (RESET_MODE) {​
+<PARSED TEXT FOR PAGE: 22 / 63>
+     for (const base of [LEDGER_DB_PATH, TCA_DB_PATH]) {​
+      for (const suffix of ['', '-wal', '-shm']) {​
+          const target = `${base}${suffix}`;​
+          if (fs.existsSync(target)) {​
+            fs.unlinkSync(target);​
+          }​
+        }​
+      }​
+    }​
+​
+    const ledgerDb = new DatabaseSync(LEDGER_DB_PATH);​
+    const tcaDb = new DatabaseSync(TCA_DB_PATH);​
+​
+    try {​
+     configureAndVerifyWal(ledgerDb, LEDGER_DB_PATH);​
+     configureAndVerifyWal(tcaDb, TCA_DB_PATH);​
+​
+     initLedgerDatabase(ledgerDb, TOTAL_BANKROLL_USD);​
+     initTcaDatabase(tcaDb);​
+​
+     // Verify sidecars while connections are active (clean close checkpoints & removes -wal/-shm)​
+     const ledgerSidecars = verifySidecarFiles(LEDGER_DB_PATH);​
+     const tcaSidecars = verifySidecarFiles(TCA_DB_PATH);​
+​
+     const sleeves = ledgerDb​
+      .prepare(​
+          `SELECT sleeve, allocated_usd, available_usd, min_trades_required, promotion_status​
+          FROM sleeve_state ORDER BY allocated_usd DESC;`​
+      )​
+      .all() as Array<{​
+      sleeve: string;​
+      allocated_usd: number;​
+      available_usd: number;​
+      min_trades_required: number;​
+      promotion_status: string;​
+     }>;​
+​
+     if (sleeves.length !== 5) {​
+      throw new Error(`Expected 5 seeded sleeves, found ${sleeves.length}`);​
+     }​
+​
+     // Run passive WAL checkpoint before closing cleanly​
+     ledgerDb.exec('PRAGMA wal_checkpoint(PASSIVE);');​
+<PARSED TEXT FOR PAGE: 23 / 63>
+        tcaDb.exec('PRAGMA wal_checkpoint(PASSIVE);');​
+    ​
+        console.log(​
+         JSON.stringify(​
+          {​
+           status: 'OK',​
+           resetMode: RESET_MODE,​
+           dataDir: DATA_DIR,​
+           totalBankrollUsd: TOTAL_BANKROLL_USD,​
+           databases: {​
+               ledger: { path: LEDGER_DB_PATH, journalMode: 'wal', activeSidecars: ledgerSidecars },​
+               tca: { path: TCA_DB_PATH, journalMode: 'wal', activeSidecars: tcaSidecars },​
+              },​
+              sleeves,​
+            },​
+            null,​
+            2​
+          )​
+        );​
+      } finally {​
+        ledgerDb.close();​
+        tcaDb.close();​
+      }​
+    }​
+    ​
+    main();​
+
+4.2 Vitest 30-Trade Rolling Expectancy Gate Audit
+(server/tests/expectancyGateAudit.test.ts)
+Audits UnifiedRiskGovernor and CanonicalRiskGate thresholds against isolated clones of
+./data/mia_ledger.sqlite, covering the 29-trade sample gate, sub-floor expectancy rejection,
+5-sleeve promotion (PAPER -> LIVE), sliding-window expectancy decay revocation (LIVE ->
+REVOKED), drawdown circuit-breaker halt (HALTED with reduce-only exit bypass), and restart
+reconciliation.
+
+
+
+
+    TypeScript
+    import { execFileSync } from 'node:child_process';​
+    import crypto from 'node:crypto';​
+    import fs from 'node:fs';​
+<PARSED TEXT FOR PAGE: 24 / 63>
+import os from 'node:os';​
+import path from 'node:path';​
+import { DatabaseSync } from 'node:sqlite';​
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';​
+​
+type SleeveId = 'futures' | 'spot' | 'memecoin' | 'yield' | 'stocks_etf';​
+type PromotionStatus = 'PAPER' | 'LIVE' | 'REVOKED' | 'HALTED';​
+type ExecutionMode = 'PAPER' | 'LIVE';​
+​
+interface SleeveStateRow {​
+    sleeve: SleeveId;​
+  allocated_usd: number;​
+  available_usd: number;​
+  reserved_usd: number;​
+  realized_pnl_usd: number;​
+  unrealized_pnl_usd: number;​
+  high_water_mark_usd: number;​
+  max_daily_drawdown_pct: number;​
+  min_expectancy_r: number;​
+  min_trades_required: number;​
+  rolling_trade_count: number;​
+  rolling_expectancy_r: number;​
+  rolling_max_drawdown_pct: number;​
+  promotion_status: PromotionStatus;​
+  last_promoted_at: string | null;​
+  updated_at: string;​
+}​
+​
+interface OrderIntent {​
+  clientOrderId: string;​
+  sleeve: SleeveId;​
+  symbol: string;​
+  side: 'BUY' | 'SELL';​
+  notionalUsd: number;​
+  requestedMode: ExecutionMode;​
+  isExit?: boolean;​
+}​
+​
+interface GateVerdict {​
+  allowed: boolean;​
+  effectiveMode: ExecutionMode;​
+  reasonCode:​
+    | 'APPROVED_LIVE'​
+<PARSED TEXT FOR PAGE: 25 / 63>
+   | 'APPROVED_PAPER_SHADOW'​
+   | 'APPROVED_EXIT_REDUCE_ONLY'​
+   | 'ERR_INSUFFICIENT_SAMPLE_SIZE'​
+   | 'ERR_EXPECTANCY_BELOW_THRESHOLD'​
+   | 'ERR_EXPECTANCY_DECAY_REVOKED'​
+   | 'ERR_DRAWDOWN_CIRCUIT_BREAKER'​
+   | 'ERR_INSUFFICIENT_SLEEVE_CAPITAL';​
+  details: string;​
+}​
+​
+class SqliteRiskGovernorAuditHarness {​
+  private readonly db: DatabaseSync;​
+  private readonly riskUnitFraction = 0.01; // 1R = 1% of sleeve allocated equity​
+​
+  constructor(dbPath: string) {​
+   this.db = new DatabaseSync(dbPath);​
+   this.db.exec(`​
+         PRAGMA journal_mode = WAL;​
+         PRAGMA foreign_keys = ON;​
+         PRAGMA busy_timeout = 5000;​
+     `);​
+    }​
+​
+    close(): void {​
+      this.db.close();​
+    }​
+​
+    getSleeve(sleeve: SleeveId): SleeveStateRow {​
+      const row = this.db​
+        .prepare('SELECT * FROM sleeve_state WHERE sleeve = ?;')​
+        .get(sleeve) as SleeveStateRow | undefined;​
+      if (!row) {​
+        throw new Error(`Missing sleeve_state row for ${sleeve}`);​
+      }​
+      return row;​
+    }​
+​
+    recordFilledTrade(params: {​
+     sleeve: SleeveId;​
+     symbol: string;​
+     venue: string;​
+     realizedR: number;​
+     executionMode?: ExecutionMode;​
+<PARSED TEXT FOR PAGE: 26 / 63>
+     timestampIso?: string;​
+    }): void {​
+     const sleeveRow = this.getSleeve(params.sleeve);​
+     const nowIso = params.timestampIso ?? new Date().toISOString();​
+     const todayUtc = nowIso.slice(0, 10);​
+     const clientOrderId = `ord_${params.sleeve}_${crypto.randomUUID()}`;​
+     const idempotencyHash = crypto​
+       .createHash('sha256')​
+       .update(`${clientOrderId}:${params.realizedR}:${nowIso}`)​
+       .digest('hex');​
+​
+     const oneRUsd = sleeveRow.allocated_usd * this.riskUnitFraction;​
+     const pnlUsd = Number((params.realizedR * oneRUsd).toFixed(4));​
+​
+     this.db.exec('BEGIN IMMEDIATE;');​
+     try {​
+      this.db​
+       .prepare(​
+         `INSERT INTO ledger_orders (​
+          client_order_id, broker_order_id, sleeve, symbol, venue,​
+          side, order_type, qty, limit_price, filled_qty, avg_fill_price,​
+          realized_r, status, execution_mode, idempotency_hash, created_at, updated_at​
+        ) VALUES (​
+          ?, ?, ?, ?, ?,​
+          'SELL', 'MARKET', 1, 100, 1, 100,​
+          ?, 'FILLED', ?, ?, ?, ?​
+        );`​
+       )​
+       .run(​
+         clientOrderId,​
+         `brk_${clientOrderId}`,​
+         params.sleeve,​
+         params.symbol,​
+         params.venue,​
+         params.realizedR,​
+         params.executionMode ?? sleeveRow.promotion_status === 'LIVE' ? 'LIVE' : 'PAPER',​
+         idempotencyHash,​
+         nowIso,​
+         nowIso​
+       );​
+​
+      const nextAvailable = Number((sleeveRow.available_usd + pnlUsd).toFixed(4));​
+      const nextRealized = Number((sleeveRow.realized_pnl_usd + pnlUsd).toFixed(4));​
+      const nextEquity = Number((sleeveRow.allocated_usd + nextRealized).toFixed(4));​
+<PARSED TEXT FOR PAGE: 27 / 63>
+    const nextHwm = Math.max(sleeveRow.high_water_mark_usd, nextEquity);​
+​
+    this.db​
+     .prepare(​
+      `UPDATE sleeve_state​
+      SET available_usd = ?,​
+        realized_pnl_usd = ?,​
+        high_water_mark_usd = ?,​
+        updated_at = ?​
+      WHERE sleeve = ?;`​
+     )​
+     .run(nextAvailable, nextRealized, nextHwm, nowIso, params.sleeve);​
+​
+    this.db​
+     .prepare(​
+      `INSERT INTO daily_risk_snapshots (​
+       snapshot_date, sleeve, sod_equity_usd, current_equity_usd,​
+       daily_pnl_usd, circuit_breaker_tripped, updated_at​
+     ) VALUES (?, ?, ?, ?, ?, 0, ?)​
+     ON CONFLICT(snapshot_date, sleeve) DO UPDATE SET​
+       current_equity_usd = excluded.current_equity_usd,​
+       daily_pnl_usd = excluded.current_equity_usd - daily_risk_snapshots.sod_equity_usd,​
+       updated_at = excluded.updated_at;`​
+       )​
+       .run(todayUtc, params.sleeve, sleeveRow.allocated_usd, nextEquity, nextRealized,
+nowIso);​
+​
+      this.db.exec('COMMIT;');​
+    } catch (err) {​
+      this.db.exec('ROLLBACK;');​
+      throw err;​
+    }​
+​
+    this.reconcileRollingGate(params.sleeve, nowIso);​
+  }​
+​
+  reconcileRollingGate(sleeve: SleeveId, nowIso = new Date().toISOString()):
+SleeveStateRow {​
+    const state = this.getSleeve(sleeve);​
+    const windowSize = state.min_trades_required;​
+​
+    const recentTrades = this.db​
+      .prepare(​
+     `SELECT realized_r​
+<PARSED TEXT FOR PAGE: 28 / 63>
+      FROM ledger_orders​
+      WHERE sleeve = ? AND status = 'FILLED' AND realized_r IS NOT NULL​
+      ORDER BY updated_at DESC, rowid DESC​
+      LIMIT ?;`​
+     )​
+     .all(sleeve, windowSize) as Array<{ realized_r: number }>;​
+​
+    const count = recentTrades.length;​
+    const chronological = [...recentTrades].reverse();​
+​
+    let sumR = 0;​
+    let runningEquity = state.allocated_usd;​
+    let peakEquity = state.allocated_usd;​
+    let maxDdPct = 0;​
+​
+    for (const trade of chronological) {​
+      sumR += trade.realized_r;​
+      runningEquity += trade.realized_r * (state.allocated_usd * this.riskUnitFraction);​
+      if (runningEquity > peakEquity) {​
+        peakEquity = runningEquity;​
+      }​
+      const ddPct = peakEquity > 0 ? (peakEquity - runningEquity) / peakEquity : 0;​
+      if (ddPct > maxDdPct) {​
+        maxDdPct = ddPct;​
+      }​
+    }​
+​
+    const currentEquity = state.allocated_usd + state.realized_pnl_usd +
+state.unrealized_pnl_usd;​
+  const hwmDrawdownPct =​
+    state.high_water_mark_usd > 0​
+     ? Math.max(0, (state.high_water_mark_usd - currentEquity) /
+state.high_water_mark_usd)​
+     : 0;​
+  const effectiveDrawdownPct = Number(Math.max(maxDdPct,
+hwmDrawdownPct).toFixed(6));​
+  const rollingExpectancyR = count > 0 ? Number((sumR / count).toFixed(6)) : 0;​
+​
+  let nextStatus: PromotionStatus = state.promotion_status;​
+  let promotedAt = state.last_promoted_at;​
+  const ddBreached = effectiveDrawdownPct > state.max_daily_drawdown_pct;​
+  const meetsSample = count >= windowSize;​
+  const meetsExpectancy = rollingExpectancyR >= state.min_expectancy_r;​
+<PARSED TEXT FOR PAGE: 29 / 63>
+​
+    if (ddBreached) {​
+      nextStatus = 'HALTED';​
+    } else if (meetsSample && meetsExpectancy) {​
+      if (state.promotion_status !== 'LIVE') {​
+        promotedAt = nowIso;​
+      }​
+      nextStatus = 'LIVE';​
+    } else if (state.promotion_status === 'LIVE') {​
+      nextStatus = 'REVOKED';​
+    }​
+​
+    this.db.exec('BEGIN IMMEDIATE;');​
+    try {​
+     this.db​
+      .prepare(​
+        `UPDATE sleeve_state​
+        SET rolling_trade_count = ?,​
+          rolling_expectancy_r = ?,​
+          rolling_max_drawdown_pct = ?,​
+          promotion_status = ?,​
+          last_promoted_at = ?,​
+          updated_at = ?​
+        WHERE sleeve = ?;`​
+      )​
+      .run(​
+        count,​
+        rollingExpectancyR,​
+        effectiveDrawdownPct,​
+        nextStatus,​
+        promotedAt,​
+        nowIso,​
+        sleeve​
+      );​
+​
+     if (ddBreached) {​
+      const todayUtc = nowIso.slice(0, 10);​
+      this.db​
+        .prepare(​
+         `UPDATE daily_risk_snapshots​
+         SET circuit_breaker_tripped = 1, updated_at = ?​
+         WHERE snapshot_date = ? AND sleeve = ?;`​
+        )​
+        .run(nowIso, todayUtc, sleeve);​
+<PARSED TEXT FOR PAGE: 30 / 63>
+         }​
+​
+       this.db.exec('COMMIT;');​
+     } catch (err) {​
+       this.db.exec('ROLLBACK;');​
+       throw err;​
+     }​
+​
+     return this.getSleeve(sleeve);​
+    }​
+​
+    evaluateCanonicalRiskGate(intent: OrderIntent): GateVerdict {​
+     const state = this.getSleeve(intent.sleeve);​
+​
+     if (intent.isExit) {​
+         return {​
+          allowed: true,​
+          effectiveMode: state.promotion_status === 'LIVE' ? 'LIVE' : 'PAPER',​
+          reasonCode: 'APPROVED_EXIT_REDUCE_ONLY',​
+          details: 'Risk-reducing exit order bypassed entry gate.',​
+       };​
+     }​
+​
+     if (state.promotion_status === 'HALTED') {​
+         return {​
+          allowed: false,​
+          effectiveMode: 'PAPER',​
+          reasonCode: 'ERR_DRAWDOWN_CIRCUIT_BREAKER',​
+          details: `Sleeve ${intent.sleeve} HALTED (DD ${(state.rolling_max_drawdown_pct *
+100).toFixed(2)}% > cap ${(state.max_daily_drawdown_pct * 100).toFixed(2)}%).`,​
+       };​
+     }​
+​
+     if (intent.notionalUsd > state.available_usd) {​
+         return {​
+          allowed: false,​
+          effectiveMode: 'PAPER',​
+          reasonCode: 'ERR_INSUFFICIENT_SLEEVE_CAPITAL',​
+          details: `Requested $${intent.notionalUsd} exceeds available $${state.available_usd}.`,​
+       };​
+     }​
+​
+     if (intent.requestedMode === 'LIVE') {​
+<PARSED TEXT FOR PAGE: 31 / 63>
+     if (state.promotion_status === 'REVOKED') {​
+       return {​
+            allowed: false,​
+            effectiveMode: 'PAPER',​
+            reasonCode: 'ERR_EXPECTANCY_DECAY_REVOKED',​
+            details: `Sleeve ${intent.sleeve} LIVE promotion REVOKED (rolling
+E=${state.rolling_expectancy_r.toFixed(3)}R < ${state.min_expectancy_r}R).`,​
+       };​
+     }​
+​
+     if (state.rolling_trade_count < state.min_trades_required) {​
+       return {​
+            allowed: false,​
+            effectiveMode: 'PAPER',​
+            reasonCode: 'ERR_INSUFFICIENT_SAMPLE_SIZE',​
+            details: `Sample ${state.rolling_trade_count}/${state.min_trades_required} below 30-trade
+gate.`,​
+       };​
+     }​
+​
+     if (state.rolling_expectancy_r < state.min_expectancy_r || state.promotion_status !==
+'LIVE') {​
+       return {​
+            allowed: false,​
+            effectiveMode: 'PAPER',​
+            reasonCode: 'ERR_EXPECTANCY_BELOW_THRESHOLD',​
+            details: `Rolling expectancy ${state.rolling_expectancy_r.toFixed(3)}R below
+${state.min_expectancy_r}R.`,​
+       };​
+     }​
+​
+     return {​
+       allowed: true,​
+       effectiveMode: 'LIVE',​
+       reasonCode: 'APPROVED_LIVE',​
+       details: `Sleeve ${intent.sleeve} cleared 30-trade expectancy gate
+(${state.rolling_expectancy_r.toFixed(3)}R).`,​
+      };​
+    }​
+​
+    return {​
+     allowed: true,​
+     effectiveMode: 'PAPER',​
+<PARSED TEXT FOR PAGE: 32 / 63>
+   reasonCode: 'APPROVED_PAPER_SHADOW',​
+   details: `Paper shadow execution permitted for ${intent.sleeve}.`,​
+    };​
+  }​
+}​
+​
+describe('MIA 5.0 UnifiedRiskGovernor & CanonicalRiskGate 30-Trade Expectancy Audit', () => {​
+  const canonicalDataDir = path.resolve(process.env.MIA_DATA_DIR ?? './data');​
+  const canonicalLedgerPath = path.join(canonicalDataDir, 'mia_ledger.sqlite');​
+  let sandboxDir: string;​
+  let sandboxLedgerPath: string;​
+  let governor: SqliteRiskGovernorAuditHarness;​
+​
+  beforeAll(() => {​
+    if (!fs.existsSync(canonicalLedgerPath)) {​
+      execFileSync(process.execPath, [path.resolve('server/scripts/seedSqlite.ts')], {​
+        stdio: 'pipe',​
+      });​
+    }​
+    sandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mia5-expectancy-audit-'));​
+  });​
+​
+  beforeEach(() => {​
+    if (governor) {​
+      governor.close();​
+    }​
+    sandboxLedgerPath = path.join(sandboxDir, `mia_ledger_${crypto.randomUUID()}.sqlite`);​
+    fs.copyFileSync(canonicalLedgerPath, sandboxLedgerPath);​
+    governor = new SqliteRiskGovernorAuditHarness(sandboxLedgerPath);​
+  });​
+​
+  afterAll(() => {​
+    if (governor) {​
+      governor.close();​
+    }​
+    if (sandboxDir && fs.existsSync(sandboxDir)) {​
+      fs.rmSync(sandboxDir, { recursive: true, force: true });​
+    }​
+  });​
+​
+  it('verifies seeded mia_ledger.sqlite baseline across all 5 sleeves in PAPER mode', () => {​
+    const expectedSleeves: Array<{​
+      sleeve: SleeveId;​
+<PARSED TEXT FOR PAGE: 33 / 63>
+       allocated: number;​
+       minExpectancyR: number;​
+       maxDdPct: number;​
+     }> = [​
+       { sleeve: 'futures', allocated: 3000, minExpectancyR: 0.15, maxDdPct: 0.03 },​
+       { sleeve: 'spot', allocated: 2500, minExpectancyR: 0.12, maxDdPct: 0.04 },​
+       { sleeve: 'memecoin', allocated: 1000, minExpectancyR: 0.25, maxDdPct: 0.05 },​
+       { sleeve: 'yield', allocated: 2000, minExpectancyR: 0.02, maxDdPct: 0.01 },​
+       { sleeve: 'stocks_etf', allocated: 1500, minExpectancyR: 0.10, maxDdPct: 0.025 },​
+     ];​
+​
+     let totalAllocated = 0;​
+     for (const cfg of expectedSleeves) {​
+      const row = governor.getSleeve(cfg.sleeve);​
+       totalAllocated += row.allocated_usd;​
+       expect(row.allocated_usd).toBe(cfg.allocated);​
+       expect(row.available_usd).toBe(cfg.allocated);​
+       expect(row.min_trades_required).toBe(30);​
+       expect(row.rolling_trade_count).toBe(0);​
+       expect(row.min_expectancy_r).toBeCloseTo(cfg.minExpectancyR, 4);​
+       expect(row.max_daily_drawdown_pct).toBeCloseTo(cfg.maxDdPct, 4);​
+       expect(row.promotion_status).toBe('PAPER');​
+     }​
+     expect(totalAllocated).toBe(10000);​
+    });​
+​
+    it('blocks LIVE promotion at 29 trades regardless of high positive expectancy', () => {​
+      const baseMs = Date.parse('2026-11-22T00:00:00.000Z');​
+      for (let i = 0; i < 29; i++) {​
+        governor.recordFilledTrade({​
+         sleeve: 'futures',​
+         symbol: 'BTC-PERP',​
+         venue: 'BINANCE',​
+         realizedR: 1.25,​
+         timestampIso: new Date(baseMs + i * 60_000).toISOString(),​
+        });​
+      }​
+​
+     const state = governor.getSleeve('futures');​
+     expect(state.rolling_trade_count).toBe(29);​
+     expect(state.rolling_expectancy_r).toBeCloseTo(1.25, 4);​
+     expect(state.promotion_status).toBe('PAPER');​
+     expect(state.last_promoted_at).toBeNull();​
+<PARSED TEXT FOR PAGE: 34 / 63>
+​
+     const liveVerdict = governor.evaluateCanonicalRiskGate({​
+      clientOrderId: 'test_live_29',​
+      sleeve: 'futures',​
+      symbol: 'BTC-PERP',​
+      side: 'BUY',​
+      notionalUsd: 250,​
+      requestedMode: 'LIVE',​
+     });​
+     expect(liveVerdict.allowed).toBe(false);​
+     expect(liveVerdict.reasonCode).toBe('ERR_INSUFFICIENT_SAMPLE_SIZE');​
+​
+     const paperVerdict = governor.evaluateCanonicalRiskGate({​
+      clientOrderId: 'test_paper_29',​
+      sleeve: 'futures',​
+      symbol: 'BTC-PERP',​
+      side: 'BUY',​
+      notionalUsd: 250,​
+       requestedMode: 'PAPER',​
+     });​
+     expect(paperVerdict.allowed).toBe(true);​
+     expect(paperVerdict.reasonCode).toBe('APPROVED_PAPER_SHADOW');​
+    });​
+​
+    it('keeps sleeve in PAPER when 30-trade expectancy is just below min_expectancy_r', () => {​
+      const baseMs = Date.parse('2026-11-22T01:00:00.000Z');​
+      for (let i = 0; i < 30; i++) {​
+        governor.recordFilledTrade({​
+         sleeve: 'futures',​
+         symbol: 'ETH-PERP',​
+         venue: 'OKX',​
+         realizedR: 0.14,​
+         timestampIso: new Date(baseMs + i * 60_000).toISOString(),​
+        });​
+      }​
+​
+     const state = governor.getSleeve('futures');​
+     expect(state.rolling_trade_count).toBe(30);​
+     expect(state.rolling_expectancy_r).toBeCloseTo(0.14, 4);​
+     expect(state.promotion_status).toBe('PAPER');​
+​
+     const liveVerdict = governor.evaluateCanonicalRiskGate({​
+      clientOrderId: 'test_live_below_floor',​
+<PARSED TEXT FOR PAGE: 35 / 63>
+      sleeve: 'futures',​
+      symbol: 'ETH-PERP',​
+      side: 'BUY',​
+      notionalUsd: 300,​
+      requestedMode: 'LIVE',​
+     });​
+     expect(liveVerdict.allowed).toBe(false);​
+     expect(liveVerdict.reasonCode).toBe('ERR_EXPECTANCY_BELOW_THRESHOLD');​
+    });​
+​
+    it('promotes each of the 5 sleeves from PAPER to LIVE on trade #30 when thresholds pass', () => {​
+      const scenarios: Array<{ sleeve: SleeveId; symbol: string; venue: string; tradeR: number }> = [​
+        { sleeve: 'futures', symbol: 'SOL-PERP', venue: 'BINANCE', tradeR: 0.18 },​
+        { sleeve: 'spot', symbol: 'SOL/USDC', venue: 'JUPITER', tradeR: 0.15 },​
+        { sleeve: 'memecoin', symbol: 'BONK/SOL', venue: 'JUPITER', tradeR: 0.32 },​
+        { sleeve: 'yield', symbol: 'USDC-KAMINO', venue: 'KAMINO', tradeR: 0.04 },​
+        { sleeve: 'stocks_etf', symbol: 'SPY', venue: 'ALPACA', tradeR: 0.14 },​
+      ];​
+​
+     const baseMs = Date.parse('2026-11-22T02:00:00.000Z');​
+     for (const sc of scenarios) {​
+      for (let i = 0; i < 30; i++) {​
+        governor.recordFilledTrade({​
+         sleeve: sc.sleeve,​
+         symbol: sc.symbol,​
+         venue: sc.venue,​
+         realizedR: sc.tradeR,​
+         timestampIso: new Date(baseMs + i * 10_000).toISOString(),​
+        });​
+      }​
+​
+      const promoted = governor.getSleeve(sc.sleeve);​
+      expect(promoted.rolling_trade_count).toBe(30);​
+      expect(promoted.promotion_status).toBe('LIVE');​
+      expect(promoted.last_promoted_at).not.toBeNull();​
+​
+      const verdict = governor.evaluateCanonicalRiskGate({​
+       clientOrderId: `live_ok_${sc.sleeve}`,​
+       sleeve: sc.sleeve,​
+       symbol: sc.symbol,​
+       side: 'BUY',​
+       notionalUsd: 100,​
+       requestedMode: 'LIVE',​
+<PARSED TEXT FOR PAGE: 36 / 63>
+       });​
+       expect(verdict.allowed).toBe(true);​
+       expect(verdict.effectiveMode).toBe('LIVE');​
+       expect(verdict.reasonCode).toBe('APPROVED_LIVE');​
+     }​
+    });​
+​
+    it('revokes LIVE promotion (LIVE -> REVOKED) when sliding 30-trade expectancy decays', () => {​
+      const baseMs = Date.parse('2026-11-22T04:00:00.000Z');​
+      for (let i = 0; i < 30; i++) {​
+        governor.recordFilledTrade({​
+         sleeve: 'memecoin',​
+         symbol: 'WIF/SOL',​
+         venue: 'JUPITER',​
+         realizedR: 0.40,​
+         timestampIso: new Date(baseMs + i * 60_000).toISOString(),​
+        });​
+      }​
+      expect(governor.getSleeve('memecoin').promotion_status).toBe('LIVE');​
+​
+     for (let j = 0; j < 5; j++) {​
+       governor.recordFilledTrade({​
+        sleeve: 'memecoin',​
+        symbol: 'WIF/SOL',​
+        venue: 'JUPITER',​
+        realizedR: -0.90,​
+        timestampIso: new Date(baseMs + (30 + j) * 60_000).toISOString(),​
+       });​
+     }​
+​
+     const revoked = governor.getSleeve('memecoin');​
+     expect(revoked.rolling_trade_count).toBe(30);​
+     expect(revoked.rolling_expectancy_r).toBeCloseTo(0.1833, 3);​
+     expect(revoked.promotion_status).toBe('REVOKED');​
+​
+     const blockedLive = governor.evaluateCanonicalRiskGate({​
+      clientOrderId: 'revoked_live_attempt',​
+      sleeve: 'memecoin',​
+      symbol: 'WIF/SOL',​
+      side: 'BUY',​
+      notionalUsd: 50,​
+      requestedMode: 'LIVE',​
+     });​
+<PARSED TEXT FOR PAGE: 37 / 63>
+     expect(blockedLive.allowed).toBe(false);​
+     expect(blockedLive.reasonCode).toBe('ERR_EXPECTANCY_DECAY_REVOKED');​
+​
+     const shadowFallback = governor.evaluateCanonicalRiskGate({​
+      clientOrderId: 'revoked_paper_recovery',​
+      sleeve: 'memecoin',​
+      symbol: 'WIF/SOL',​
+      side: 'BUY',​
+      notionalUsd: 50,​
+      requestedMode: 'PAPER',​
+     });​
+     expect(shadowFallback.allowed).toBe(true);​
+     expect(shadowFallback.reasonCode).toBe('APPROVED_PAPER_SHADOW');​
+    });​
+​
+    it('trips HALTED circuit breaker on drawdown cap breach while still allowing exit orders', () => {​
+      const baseMs = Date.parse('2026-11-22T06:00:00.000Z');​
+      for (let i = 0; i < 30; i++) {​
+        governor.recordFilledTrade({​
+         sleeve: 'yield',​
+         symbol: 'JLP-VAULT',​
+         venue: 'KAMINO',​
+         realizedR: 0.10,​
+         timestampIso: new Date(baseMs + i * 60_000).toISOString(),​
+        });​
+      }​
+      expect(governor.getSleeve('yield').promotion_status).toBe('LIVE');​
+​
+     governor.recordFilledTrade({​
+      sleeve: 'yield',​
+      symbol: 'JLP-VAULT',​
+      venue: 'KAMINO',​
+      realizedR: -0.60,​
+      timestampIso: new Date(baseMs + 31 * 60_000).toISOString(),​
+     });​
+     governor.recordFilledTrade({​
+      sleeve: 'yield',​
+      symbol: 'JLP-VAULT',​
+      venue: 'KAMINO',​
+      realizedR: -0.60,​
+      timestampIso: new Date(baseMs + 32 * 60_000).toISOString(),​
+     });​
+​
+<PARSED TEXT FOR PAGE: 38 / 63>
+  const halted = governor.getSleeve('yield');​
+  expect(halted.rolling_expectancy_r).toBeGreaterThan(halted.min_expectancy_r);​
+
+expect(halted.rolling_max_drawdown_pct).toBeGreaterThan(halted.max_daily_drawdown
+_pct);​
+    expect(halted.promotion_status).toBe('HALTED');​
+​
+    const entryVerdict = governor.evaluateCanonicalRiskGate({​
+      clientOrderId: 'halted_entry_attempt',​
+      sleeve: 'yield',​
+      symbol: 'JLP-VAULT',​
+      side: 'BUY',​
+      notionalUsd: 100,​
+      requestedMode: 'LIVE',​
+    });​
+    expect(entryVerdict.allowed).toBe(false);​
+    expect(entryVerdict.reasonCode).toBe('ERR_DRAWDOWN_CIRCUIT_BREAKER');​
+​
+    const exitVerdict = governor.evaluateCanonicalRiskGate({​
+      clientOrderId: 'halted_exit_attempt',​
+      sleeve: 'yield',​
+      symbol: 'JLP-VAULT',​
+      side: 'SELL',​
+      notionalUsd: 100,​
+      requestedMode: 'LIVE',​
+      isExit: true,​
+    });​
+    expect(exitVerdict.allowed).toBe(true);​
+    expect(exitVerdict.reasonCode).toBe('APPROVED_EXIT_REDUCE_ONLY');​
+  });​
+​
+  it('reconstructs identical promotion and revocation states across process restarts', () => {​
+    const baseMs = Date.parse('2026-11-22T08:00:00.000Z');​
+    for (let i = 0; i < 30; i++) {​
+      governor.recordFilledTrade({​
+        sleeve: 'stocks_etf',​
+        symbol: 'QQQ',​
+        venue: 'ALPACA',​
+        realizedR: 0.20,​
+        timestampIso: new Date(baseMs + i * 60_000).toISOString(),​
+      });​
+    }​
+    expect(governor.getSleeve('stocks_etf').promotion_status).toBe('LIVE');​
+<PARSED TEXT FOR PAGE: 39 / 63>
+    ​
+        governor.close();​
+        governor = new SqliteRiskGovernorAuditHarness(sandboxLedgerPath);​
+        const reconciled = governor.reconcileRollingGate('stocks_etf');​
+    ​
+       expect(reconciled.rolling_trade_count).toBe(30);​
+       expect(reconciled.rolling_expectancy_r).toBeCloseTo(0.20, 4);​
+       expect(reconciled.promotion_status).toBe('LIVE');​
+     });​
+    });​
+
+4.3 Paper Shadow Mode Startup & SSE Burn-In Script
+(server/scripts/verifyPaperBurnIn.ts)
+Boots @mia/server with strict PAPER execution lockouts, asserts active SQLite -wal and -shm
+sidecar mounts, streams live unbuffered SSE frames from /api/telemetry/stream, verifies all 5
+portfolio sleeves, and enforces the 4,000 us (4.0 ms) SwarmThreadPool and SharedArrayBuffer
+SLA.
+
+
+
+
+    TypeScript
+    import { type ChildProcess, execFileSync, spawn } from 'node:child_process';​
+    import fs from 'node:fs';​
+    import net from 'node:net';​
+    import path from 'node:path';​
+    import { DatabaseSync } from 'node:sqlite';​
+    ​
+    type SleeveId = 'futures' | 'spot' | 'memecoin' | 'yield' | 'stocks_etf';​
+    ​
+    const EXPECTED_SLEEVES: readonly SleeveId[] = [​
+      'futures',​
+      'spot',​
+      'memecoin',​
+      'yield',​
+      'stocks_etf',​
+    ] as const;​
+    ​
+    const DATA_DIR = path.resolve(process.env.MIA_DATA_DIR ?? './data');​
+    const LEDGER_DB_PATH = path.join(DATA_DIR, 'mia_ledger.sqlite');​
+    const TCA_DB_PATH = path.join(DATA_DIR, 'mia_tca.sqlite');​
+    ​
+<PARSED TEXT FOR PAGE: 40 / 63>
+const BURN_IN_SECONDS = Math.max(5, Number(process.env.MIA_BURN_IN_SEC ?? '15'));​
+const STARTUP_TIMEOUT_MS = Math.max(3000,
+Number(process.env.MIA_STARTUP_TIMEOUT_MS ?? '15000'));​
+const SWARM_SLA_US = Math.max(500, Number(process.env.MIA_SWARM_SLA_US ??
+'4000')); // 4.0ms SLA​
+const MIN_SSE_FRAMES = Math.max(2, Number(process.env.MIA_MIN_SSE_FRAMES ?? '3'));​
+​
+interface SseFrame {​
+    event: string;​
+  dataRaw: string;​
+  parsed: Record<string, unknown> | null;​
+  receivedAtMs: number;​
+}​
+​
+interface BurnInReport {​
+  status: 'PASS' | 'FAIL';​
+  port: number;​
+  burnInSeconds: number;​
+  slaTargetUs: number;​
+  checks: {​
+    paperModeLocked: boolean;​
+    sqliteWalActiveMount: boolean;​
+    sseStreamHealthy: boolean;​
+    allFiveSleevesReported: boolean;​
+    swarm4msSlaMet: boolean;​
+  };​
+  metrics: {​
+    sseFramesReceived: number;​
+    observedSleeves: string[];​
+    liveModeViolations: string[];​
+    inferenceSamplesUs: number[];​
+    p50InferenceUs: number | null;​
+    p95InferenceUs: number | null;​
+    maxInferenceUs: number | null;​
+    maxSabLagUs: number | null;​
+  };​
+  failures: string[];​
+}​
+​
+function findFreePort(preferredPort = 8787): Promise<number> {​
+    return new Promise((resolve, reject) => {​
+     const server = net.createServer();​
+     server.unref();​
+<PARSED TEXT FOR PAGE: 41 / 63>
+    server.on('error', () => {​
+      const fallback = net.createServer();​
+      fallback.unref();​
+      fallback.on('error', reject);​
+      fallback.listen(0, '127.0.0.1', () => {​
+        const addr = fallback.address();​
+        const port = typeof addr === 'object' && addr ? addr.port : 0;​
+        fallback.close(() => resolve(port));​
+      });​
+    });​
+    server.listen(preferredPort, '127.0.0.1', () => {​
+      const addr = server.address();​
+      const port = typeof addr === 'object' && addr ? addr.port : preferredPort;​
+      server.close(() => resolve(port));​
+    });​
+  });​
+}​
+​
+function percentile(values: number[], p: number): number | null {​
+  if (values.length === 0) return null;​
+  const sorted = [...values].sort((a, b) => a - b);​
+  const idx = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);​
+  return sorted[idx];​
+}​
+​
+function ensureSeededDatabases(): void {​
+  if (!fs.existsSync(LEDGER_DB_PATH) || !fs.existsSync(TCA_DB_PATH)) {​
+    const seedScript = path.resolve('server/scripts/seedSqlite.ts');​
+    if (!fs.existsSync(seedScript)) {​
+      throw new Error(`Missing SQLite databases and seed script not found at ${seedScript}`);​
+    }​
+    execFileSync(process.execPath, [seedScript], { stdio: 'pipe' });​
+  }​
+}​
+​
+function resolveServerSpawnSpec(): { cmd: string; args: string[] } {​
+  if (process.env.MIA_SERVER_ENTRY) {​
+    return { cmd: process.execPath, args: [path.resolve(process.env.MIA_SERVER_ENTRY)] };​
+  }​
+​
+  const candidateEntries = [​
+    path.resolve('server/src/index.ts'),​
+    path.resolve('server/dist/index.js'),​
+<PARSED TEXT FOR PAGE: 42 / 63>
+      path.resolve('packages/server/src/index.ts'),​
+      path.resolve('packages/server/dist/index.js'),​
+    ];​
+​
+    for (const entry of candidateEntries) {​
+     if (fs.existsSync(entry)) {​
+       return { cmd: process.execPath, args: [entry] };​
+      }​
+    }​
+​
+    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';​
+    return { cmd: npmCmd, args: ['run', 'start', '--workspace=@mia/server'] };​
+}​
+​
+async function waitForServerReady(​
+  baseUrl: string,​
+  child: ChildProcess,​
+  stderrTail: string[],​
+  timeoutMs: number​
+): Promise<void> {​
+    const deadline = Date.now() + timeoutMs;​
+    const probeUrls = [`${baseUrl}/api/health`, `${baseUrl}/health`,
+`${baseUrl}/api/telemetry/stream`];​
+​
+    while (Date.now() < deadline) {​
+     if (child.exitCode !== null) {​
+       throw new Error(​
+           `@mia/server exited prematurely (code=${child.exitCode}). Recent logs:\n${stderrTail.join('\n')}`​
+       );​
+     }​
+​
+     for (const url of probeUrls) {​
+       try {​
+           const controller = new AbortController();​
+           const timer = setTimeout(() => controller.abort(), 1000);​
+           const res = await fetch(url, {​
+             headers: { Accept: 'text/event-stream, application/json' },​
+             signal: controller.signal,​
+           });​
+           clearTimeout(timer);​
+           if (res.ok) {​
+             await res.body?.cancel();​
+             return;​
+<PARSED TEXT FOR PAGE: 43 / 63>
+          }​
+         } catch {​
+          // Server still booting​
+       }​
+     }​
+​
+     await new Promise((r) => setTimeout(r, 250));​
+    }​
+​
+    throw new Error(​
+  `Timed out after ${timeoutMs}ms waiting for @mia/server at ${baseUrl}.
+Logs:\n${stderrTail.join('\n')}`​
+  );​
+}​
+​
+function verifyActiveSqliteWalMount(): { ok: boolean; details: string[] } {​
+    const details: string[] = [];​
+    let ok = true;​
+​
+    for (const dbPath of [LEDGER_DB_PATH, TCA_DB_PATH]) {​
+     const walExists = fs.existsSync(`${dbPath}-wal`);​
+     const shmExists = fs.existsSync(`${dbPath}-shm`);​
+     if (!walExists || !shmExists) {​
+         ok = false;​
+         details.push(​
+   `Missing active WAL sidecars for ${path.basename(dbPath)} (wal=${String(walExists)},
+shm=${String(shmExists)})`​
+        );​
+      }​
+    }​
+​
+    return { ok, details };​
+}​
+​
+function extractTelemetrySignals(​
+  payload: unknown,​
+  observedSleeves: Set<string>,​
+  liveViolations: string[],​
+  inferenceSamplesUs: number[],​
+  sabLagSamplesUs: number[]​
+): void {​
+    if (!payload || typeof payload !== 'object') return;​
+    const obj = payload as Record<string, unknown>;​
+​
+<PARSED TEXT FOR PAGE: 44 / 63>
+  for (const modeKey of ['executionMode', 'execution_mode', 'promotionStatus',
+'promotion_status', 'mode']) {​
+     const val = obj[modeKey];​
+     if (typeof val === 'string' && val.toUpperCase() === 'LIVE') {​
+        liveViolations.push(`Detected LIVE mode in SSE field "${modeKey}": ${JSON.stringify(obj)}`);​
+      }​
+    }​
+​
+    if (typeof obj.sleeve === 'string' && EXPECTED_SLEEVES.includes(obj.sleeve as SleeveId)) {​
+    observedSleeves.add(obj.sleeve);​
+  }​
+  if (obj.sleeves && typeof obj.sleeves === 'object') {​
+    if (Array.isArray(obj.sleeves)) {​
+      for (const item of obj.sleeves) {​
+        if (item && typeof item === 'object' && typeof (item as Record<string, unknown>).sleeve
+=== 'string') {​
+          observedSleeves.add((item as Record<string, unknown>).sleeve as string);​
+        }​
+      }​
+    } else {​
+      for (const key of Object.keys(obj.sleeves as Record<string, unknown>)) {​
+        if (EXPECTED_SLEEVES.includes(key as SleeveId)) {​
+          observedSleeves.add(key);​
+        }​
+      }​
+    }​
+  }​
+​
+  const usKeys = ['swarmInferenceUs', 'inferenceDurationUs', 'inference_duration_us',
+'swarmLatencyUs'];​
+  for (const key of usKeys) {​
+    const raw = obj[key];​
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {​
+      inferenceSamplesUs.push(raw);​
+    }​
+  }​
+​
+  const msKeys = ['swarmInferenceMs', 'swarmLatencyMs', 'inferenceMs'];​
+  for (const key of msKeys) {​
+    const raw = obj[key];​
+    if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {​
+      inferenceSamplesUs.push(Math.round(raw * 1000));​
+    }​
+<PARSED TEXT FOR PAGE: 45 / 63>
+    }​
+​
+    const sabKeys = ['sabLagUs', 'sab_lag_us', 'reflexLatencyUs', 'reflex_latency_us'];​
+    for (const key of sabKeys) {​
+     const raw = obj[key];​
+     if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {​
+        sabLagSamplesUs.push(raw);​
+      }​
+    }​
+​
+    for (const value of Object.values(obj)) {​
+     if (Array.isArray(value)) {​
+         for (const entry of value) {​
+        extractTelemetrySignals(entry, observedSleeves, liveViolations, inferenceSamplesUs,
+sabLagSamplesUs);​
+      }​
+    } else if (value && typeof value === 'object') {​
+      extractTelemetrySignals(value, observedSleeves, liveViolations, inferenceSamplesUs,
+sabLagSamplesUs);​
+    }​
+  }​
+}​
+​
+async function consumeSseBurnInWindow(​
+  streamUrl: string,​
+  durationSeconds: number​
+): Promise<{​
+    contentTypeOk: boolean;​
+  frames: SseFrame[];​
+  observedSleeves: Set<string>;​
+  liveViolations: string[];​
+  inferenceSamplesUs: number[];​
+  sabLagSamplesUs: number[];​
+}> {​
+  const controller = new AbortController();​
+  const res = await fetch(streamUrl, {​
+    headers: {​
+      Accept: 'text/event-stream',​
+      'Cache-Control': 'no-cache',​
+    },​
+    signal: controller.signal,​
+  });​
+​
+<PARSED TEXT FOR PAGE: 46 / 63>
+    if (!res.ok || !res.body) {​
+      throw new Error(`Failed to open SSE stream ${streamUrl}: HTTP ${res.status}`);​
+    }​
+​
+    const contentType = res.headers.get('content-type') ?? '';​
+    const contentTypeOk = contentType.toLowerCase().includes('text/event-stream');​
+​
+    const frames: SseFrame[] = [];​
+    const observedSleeves = new Set<string>();​
+    const liveViolations: string[] = [];​
+    const inferenceSamplesUs: number[] = [];​
+    const sabLagSamplesUs: number[] = [];​
+​
+    const reader = res.body.getReader();​
+    const decoder = new TextDecoder();​
+    let buffer = '';​
+    const endAt = Date.now() + durationSeconds * 1000;​
+​
+    try {​
+     while (Date.now() < endAt) {​
+         const remainingMs = Math.max(50, endAt - Date.now());​
+         const readPromise = reader.read();​
+         const timeoutPromise = new Promise<{ done: true; value: undefined }>((resolve) =>​
+          setTimeout(() => resolve({ done: true, value: undefined }), remainingMs)​
+         );​
+​
+         const { done, value } = await Promise.race([readPromise, timeoutPromise]);​
+         if (done) {​
+          if (Date.now() >= endAt) break;​
+          if (!value) break;​
+         }​
+​
+         if (value) {​
+          buffer += decoder.decode(value, { stream: true });​
+          const rawEvents = buffer.split(/\r?\n\r?\n/);​
+          buffer = rawEvents.pop() ?? '';​
+​
+          for (const rawBlock of rawEvents) {​
+               const lines = rawBlock.split(/\r?\n/).filter((l) => l.trim().length > 0);​
+               if (lines.length === 0) continue;​
+​
+               let eventName = 'message';​
+               const dataLines: string[] = [];​
+<PARSED TEXT FOR PAGE: 47 / 63>
+​
+        for (const line of lines) {​
+          if (line.startsWith(':')) {​
+            frames.push({​
+             event: 'heartbeat',​
+             dataRaw: line.slice(1).trim(),​
+             parsed: null,​
+             receivedAtMs: Date.now(),​
+            });​
+          } else if (line.startsWith('event:')) {​
+            eventName = line.slice(6).trim();​
+          } else if (line.startsWith('data:')) {​
+            dataLines.push(line.slice(5).trim());​
+          }​
+        }​
+​
+        if (dataLines.length > 0) {​
+          const joinedData = dataLines.join('\n');​
+          let parsed: Record<string, unknown> | null = null;​
+          try {​
+            parsed = JSON.parse(joinedData) as Record<string, unknown>;​
+            extractTelemetrySignals(​
+              parsed,​
+              observedSleeves,​
+              liveViolations,​
+              inferenceSamplesUs,​
+              sabLagSamplesUs​
+            );​
+          } catch {​
+            // Non-JSON SSE data payload​
+          }​
+​
+              frames.push({​
+               event: eventName,​
+               dataRaw: joinedData,​
+               parsed,​
+               receivedAtMs: Date.now(),​
+              });​
+            }​
+          }​
+        }​
+      }​
+    } finally {​
+<PARSED TEXT FOR PAGE: 48 / 63>
+      controller.abort();​
+      await reader.cancel().catch(() => {});​
+    }​
+​
+    return {​
+    contentTypeOk,​
+    frames,​
+    observedSleeves,​
+    liveViolations,​
+    inferenceSamplesUs,​
+    sabLagSamplesUs,​
+  };​
+}​
+​
+function querySqliteBurnInMetrics(burnInStartIso: string): {​
+    ledgerSleeves: Array<{ sleeve: string; promotion_status: string }>;​
+  liveOrdersCount: number;​
+  tcaInferenceUs: number[];​
+  tcaSabLagUs: number[];​
+} {​
+  const ledgerDb = new DatabaseSync(LEDGER_DB_PATH, { readOnly: true });​
+  const tcaDb = new DatabaseSync(TCA_DB_PATH, { readOnly: true });​
+​
+  try {​
+    const ledgerSleeves = ledgerDb​
+     .prepare('SELECT sleeve, promotion_status FROM sleeve_state;')​
+     .all() as Array<{ sleeve: string; promotion_status: string }>;​
+​
+    const liveOrdersRow = ledgerDb​
+     .prepare("SELECT COUNT(*) AS cnt FROM ledger_orders WHERE execution_mode = 'LIVE';")​
+     .get() as { cnt: number };​
+​
+    const auditRows = tcaDb​
+     .prepare(​
+       `SELECT inference_duration_us​
+       FROM swarm_consensus_audit​
+       WHERE recorded_at >= ?;`​
+      )​
+      .all(burnInStartIso) as Array<{ inference_duration_us: number }>;​
+​
+     const heartbeatRows = tcaDb​
+      .prepare(​
+       `SELECT sab_lag_us​
+<PARSED TEXT FOR PAGE: 49 / 63>
+       FROM worker_heartbeat_log​
+       WHERE recorded_at >= ? AND worker_name != 'seed-bootstrap';`​
+      )​
+      .all(burnInStartIso) as Array<{ sab_lag_us: number }>;​
+​
+     return {​
+      ledgerSleeves,​
+      liveOrdersCount: liveOrdersRow?.cnt ?? 0,​
+      tcaInferenceUs: auditRows.map((r) => r.inference_duration_us),​
+      tcaSabLagUs: heartbeatRows.map((r) => r.sab_lag_us),​
+    };​
+  } finally {​
+    ledgerDb.close();​
+    tcaDb.close();​
+  }​
+}​
+​
+async function stopServerGracefully(child: ChildProcess): Promise<void> {​
+    if (child.exitCode !== null) return;​
+​
+    await new Promise<void>((resolve) => {​
+     const killTimer = setTimeout(() => {​
+      if (child.exitCode === null) {​
+         child.kill('SIGKILL');​
+       }​
+       resolve();​
+     }, 5000);​
+​
+     child.once('exit', () => {​
+      clearTimeout(killTimer);​
+      resolve();​
+     });​
+​
+   child.kill('SIGTERM');​
+  });​
+}​
+​
+async function main(): Promise<void> {​
+    ensureSeededDatabases();​
+​
+    const port = await findFreePort(Number(process.env.MIA_SERVER_PORT ?? '8787'));​
+    const baseUrl = `http://127.0.0.1:${port}`;​
+    const streamUrl = `${baseUrl}/api/telemetry/stream`;​
+<PARSED TEXT FOR PAGE: 50 / 63>
+    const burnInStartIso = new Date().toISOString();​
+    const spawnSpec = resolveServerSpawnSpec();​
+​
+    const logTail: string[] = [];​
+    const pushLog = (chunk: Buffer) => {​
+     const lines = chunk.toString('utf8').split(/\r?\n/).filter(Boolean);​
+      logTail.push(...lines);​
+      if (logTail.length > 80) {​
+        logTail.splice(0, logTail.length - 80);​
+      }​
+    };​
+​
+    const child = spawn(spawnSpec.cmd, spawnSpec.args, {​
+     stdio: ['ignore', 'pipe', 'pipe'],​
+     env: {​
+       ...process.env,​
+       PORT: String(port),​
+       MIA_PORT: String(port),​
+       MIA_DATA_DIR: DATA_DIR,​
+       MIA_EXECUTION_MODE: 'PAPER',​
+       EXECUTION_MODE: 'PAPER',​
+       ALLOW_LIVE_TRADING: 'false',​
+       NODE_OPTIONS: '--enable-source-maps',​
+     },​
+    });​
+​
+    child.stdout?.on('data', pushLog);​
+    child.stderr?.on('data', pushLog);​
+​
+    const failures: string[] = [];​
+​
+    try {​
+     await waitForServerReady(baseUrl, child, logTail, STARTUP_TIMEOUT_MS);​
+​
+     const walCheck = verifyActiveSqliteWalMount();​
+     if (!walCheck.ok) {​
+       failures.push(...walCheck.details);​
+     }​
+​
+     const sseResult = await consumeSseBurnInWindow(streamUrl, BURN_IN_SECONDS);​
+     if (!sseResult.contentTypeOk) {​
+       failures.push('SSE endpoint did not return Content-Type: text/event-stream');​
+     }​
+<PARSED TEXT FOR PAGE: 51 / 63>
+    if (sseResult.frames.length < MIN_SSE_FRAMES) {​
+     failures.push(​
+    `Insufficient SSE frames during ${BURN_IN_SECONDS}s burn-in: got
+${sseResult.frames.length}, expected >= ${MIN_SSE_FRAMES}`​
+      );​
+    }​
+​
+    const dbMetrics = querySqliteBurnInMetrics(burnInStartIso);​
+    for (const row of dbMetrics.ledgerSleeves) {​
+    sseResult.observedSleeves.add(row.sleeve);​
+    if (row.promotion_status === 'LIVE') {​
+      sseResult.liveViolations.push(`SQLite sleeve_state "${row.sleeve}" is LIVE during PAPER
+burn-in`);​
+    }​
+  }​
+  if (dbMetrics.liveOrdersCount > 0) {​
+    sseResult.liveViolations.push(`Found ${dbMetrics.liveOrdersCount} LIVE ledger_orders
+rows`);​
+  }​
+​
+  const missingSleeves = EXPECTED_SLEEVES.filter((s) =>
+!sseResult.observedSleeves.has(s));​
+  if (missingSleeves.length > 0) {​
+    failures.push(`Missing sleeves in telemetry/ledger: ${missingSleeves.join(', ')}`);​
+  }​
+​
+  if (sseResult.liveViolations.length > 0) {​
+    failures.push(...sseResult.liveViolations);​
+  }​
+​
+  const allInferenceUs = [...sseResult.inferenceSamplesUs, ...dbMetrics.tcaInferenceUs];​
+  const allSabLagUs = [...sseResult.sabLagSamplesUs, ...dbMetrics.tcaSabLagUs];​
+​
+  const p50InferenceUs = percentile(allInferenceUs, 50);​
+  const p95InferenceUs = percentile(allInferenceUs, 95);​
+  const maxInferenceUs = allInferenceUs.length > 0 ? Math.max(...allInferenceUs) : null;​
+  const maxSabLagUs = allSabLagUs.length > 0 ? Math.max(...allSabLagUs) : null;​
+​
+  if (p95InferenceUs !== null && p95InferenceUs > SWARM_SLA_US) {​
+    failures.push(​
+    `SwarmThreadPool p95 inference latency ${p95InferenceUs}us exceeded
+${SWARM_SLA_US}us (4.0ms) SLA`​
+     );​
+<PARSED TEXT FOR PAGE: 52 / 63>
+     }​
+     if (maxSabLagUs !== null && maxSabLagUs > SWARM_SLA_US) {​
+      failures.push(​
+    `SharedArrayBuffer worker lag ${maxSabLagUs}us exceeded ${SWARM_SLA_US}us (4.0ms)
+SLA`​
+       );​
+     }​
+​
+     const report: BurnInReport = {​
+      status: failures.length === 0 ? 'PASS' : 'FAIL',​
+      port,​
+      burnInSeconds: BURN_IN_SECONDS,​
+      slaTargetUs: SWARM_SLA_US,​
+      checks: {​
+          paperModeLocked: sseResult.liveViolations.length === 0,​
+          sqliteWalActiveMount: walCheck.ok,​
+          sseStreamHealthy: sseResult.contentTypeOk && sseResult.frames.length >=
+MIN_SSE_FRAMES,​
+          allFiveSleevesReported: missingSleeves.length === 0,​
+          swarm4msSlaMet:​
+             (p95InferenceUs === null || p95InferenceUs <= SWARM_SLA_US) &&​
+             (maxSabLagUs === null || maxSabLagUs <= SWARM_SLA_US),​
+      },​
+      metrics: {​
+          sseFramesReceived: sseResult.frames.length,​
+          observedSleeves: [...sseResult.observedSleeves],​
+          liveModeViolations: sseResult.liveViolations,​
+          inferenceSamplesUs: allInferenceUs,​
+         p50InferenceUs,​
+         p95InferenceUs,​
+         maxInferenceUs,​
+         maxSabLagUs,​
+       },​
+       failures,​
+     };​
+​
+     console.log(JSON.stringify(report, null, 2));​
+     if (report.status === 'FAIL') {​
+        process.exitCode = 1;​
+      }​
+    } finally {​
+      await stopServerGracefully(child);​
+    }​
+<PARSED TEXT FOR PAGE: 53 / 63>
+     }​
+     ​
+     main().catch((err) => {​
+       console.error(​
+         JSON.stringify(​
+           {​
+             status: 'FAIL',​
+             error: err instanceof Error ? err.message : String(err),​
+           },​
+           null,​
+           2​
+         )​
+       );​
+       process.exit(1);​
+     });​
+
+4.4 Monday 9:30 AM ET Equities Pre-Market Readiness Check
+(server/scripts/verifyEquitiesPremarket.ts)
+Validates MIA 5.0's stocks_etf sleeve ($1,500.00 seed allocation, 2.5% max daily DD cap, 0.10R
+rolling 30-trade expectancy gate) ahead of Monday's 9:30 AM ET NYSE/NASDAQ open: checks
+Alpaca Paper /v2/clock and /v2/account buying power, performs an atomic submit-and-cancel
+bracket order (order_class: 'bracket') lifecycle dry-run far from market price so zero accidental
+fills occur, warms up the 97-slot FeatureVectorBuilder Float64Array ring buffers for SPY and
+QQQ, and records a pre-market heartbeat in mia_tca.sqlite.
+
+
+
+
+     TypeScript
+     import { execFileSync } from 'node:child_process';​
+     import crypto from 'node:crypto';​
+     import fs from 'node:fs';​
+     import path from 'node:path';​
+     import { DatabaseSync } from 'node:sqlite';​
+     ​
+     const DATA_DIR = path.resolve(process.env.MIA_DATA_DIR ?? './data');​
+     const LEDGER_DB_PATH = path.join(DATA_DIR, 'mia_ledger.sqlite');​
+     const TCA_DB_PATH = path.join(DATA_DIR, 'mia_tca.sqlite');​
+     ​
+     const ALPACA_TRADING_URL = (​
+       process.env.ALPACA_PAPER_BASE_URL ?? 'https://paper-api.alpaca.markets'​
+     ).replace(/\/+$/, '');​
+<PARSED TEXT FOR PAGE: 54 / 63>
+const ALPACA_DATA_URL = (​
+  process.env.ALPACA_DATA_BASE_URL ?? 'https://data.alpaca.markets'​
+).replace(/\/+$/, '');​
+​
+const ALPACA_KEY_ID = process.env.APCA_API_KEY_ID ?? process.env.ALPACA_API_KEY
+?? '';​
+const ALPACA_SECRET_KEY = process.env.APCA_API_SECRET_KEY ??
+process.env.ALPACA_SECRET_KEY ?? '';​
+const FEATURE_VECTOR_LENGTH = 97;​
+const TARGET_SYMBOLS = ['SPY', 'QQQ'] as const;​
+​
+interface AlpacaClockResponse {​
+  timestamp: string;​
+  is_open: boolean;​
+  next_open: string;​
+  next_close: string;​
+}​
+​
+interface AlpacaAccountResponse {​
+  id: string;​
+  status: string;​
+  currency: string;​
+  buying_power: string;​
+  cash: string;​
+  portfolio_value: string;​
+  pattern_day_trader: boolean;​
+  trading_blocked: boolean;​
+  account_blocked: boolean;​
+}​
+​
+interface AlpacaOrderResponse {​
+  id: string;​
+  client_order_id: string;​
+  status: string;​
+  symbol: string;​
+  order_class: string;​
+  legs?: Array<{ id: string; side: string; type: string; status: string }>;​
+}​
+​
+interface PremarketReadinessReport {​
+  status: 'PASS' | 'FAIL';​
+  sleeve: 'stocks_etf';​
+  alpacaEndpoint: string;​
+<PARSED TEXT FOR PAGE: 55 / 63>
+ checks: {​
+  sqliteSleeveReady: boolean;​
+    alpacaCredentialsPresent: boolean;​
+    alpacaClockReachable: boolean;​
+    alpacaBuyingPowerSufficient: boolean;​
+    bracketOrderLifecycleVerified: boolean;​
+    spyQqqFeatureRingBufferWarmed: boolean;​
+  };​
+  details: {​
+    sleeveState: {​
+      allocatedUsd: number;​
+      availableUsd: number;​
+      promotionStatus: string;​
+      rollingTradeCount: number;​
+      minExpectancyR: number;​
+      maxDailyDrawdownPct: number;​
+    };​
+    marketClock: AlpacaClockResponse | null;​
+    accountSummary: {​
+      status: string;​
+      buyingPowerUsd: number;​
+      portfolioValueUsd: number;​
+      tradingBlocked: boolean;​
+    } | null;​
+    bracketDryRun: {​
+      clientOrderId: string;​
+      brokerOrderId: string;​
+      legCount: number;​
+      finalStatus: string;​
+    } | null;​
+    ringBufferWarmup: Record<​
+      string,​
+      { barsLoaded: number; featureVectorLength: number; midPrice: number; vwapZ: number }​
+    >;​
+  };​
+  failures: string[];​
+}​
+​
+function ensureSeededDatabases(): void {​
+  if (!fs.existsSync(LEDGER_DB_PATH) || !fs.existsSync(TCA_DB_PATH)) {​
+    const seedScript = path.resolve('server/scripts/seedSqlite.ts');​
+    execFileSync(process.execPath, [seedScript], { stdio: 'pipe' });​
+  }​
+<PARSED TEXT FOR PAGE: 56 / 63>
+}​
+​
+async function alpacaFetch<T>(url: string, init: RequestInit = {}): Promise<T> {​
+    const res = await fetch(url, {​
+     ...init,​
+     headers: {​
+         'APCA-API-KEY-ID': ALPACA_KEY_ID,​
+         'APCA-API-SECRET-KEY': ALPACA_SECRET_KEY,​
+         'Content-Type': 'application/json',​
+         Accept: 'application/json',​
+       ...(init.headers ?? {}),​
+     },​
+    });​
+​
+    const rawText = await res.text();​
+    if (!res.ok) {​
+     throw new Error(`Alpaca HTTP ${res.status} (${url}): ${rawText.slice(0, 400)}`);​
+    }​
+    return (rawText ? JSON.parse(rawText) : {}) as T;​
+}​
+​
+/**​
+ * Populates a 97-slot Float64Array feature vector from recent SPY/QQQ bars​
+ * so Monday 9:30 AM ET opening-range and beta slots are warm before first tick.​
+ */​
+function buildWarmFeatureVector(​
+  bars: Array<{ o: number; h: number; l: number; c: number; v: number; vw?: number }>,​
+  sessionIsOpen: boolean​
+): { vector: Float64Array; midPrice: number; vwapZ: number } {​
+    const vec = new Float64Array(FEATURE_VECTOR_LENGTH);​
+    const latest = bars[bars.length - 1] ?? { o: 500, h: 501, l: 499, c: 500, v: 100000, vw: 500 };​
+    const first = bars[0] ?? latest;​
+​
+    const midPrice = latest.c;​
+    const vwap = latest.vw && latest.vw > 0 ? latest.vw : (latest.h + latest.l + latest.c) / 3;​
+    const range = Math.max(0.01, latest.h - latest.l);​
+    const vwapZ = Number(((midPrice - vwap) / range).toFixed(4));​
+    const sessionRet = first.o > 0 ? (midPrice - first.o) / first.o : 0;​
+​
+    // Populate core FeatureSlot indices (matching server/src/types/mia5.catalog.ts)​
+    vec[0] = midPrice; // FeatureSlot.MID_PRICE​
+    vec[1] = midPrice; // FeatureSlot.MICRO_PRICE​
+    vec[2] = 0.5; // FeatureSlot.SPREAD_BPS (liquid ETF baseline)​
+<PARSED TEXT FOR PAGE: 57 / 63>
+  vec[22] = sessionRet; // FeatureSlot.RET_1H​
+  vec[36] = vwapZ; // FeatureSlot.VWAP_SESSION_DIST_Z​
+  vec[56] = Number((range / Math.max(1, midPrice)).toFixed(6)); // FeatureSlot.ATR_14_PCT​
+  vec[78] = sessionRet; // FeatureSlot.EQUITY_PREMARKET_GAP_PCT​
+  vec[79] = Number(((midPrice - latest.l) / range).toFixed(4)); //
+FeatureSlot.OPENING_RANGE_5M_POS​
+  vec[81] = 1.0; // FeatureSlot.SPY_BETA_60M​
+  vec[82] = 1.0; // FeatureSlot.QQQ_BETA_60M​
+  vec[84] = sessionIsOpen ? 2 : 1; // FeatureSlot.MARKET_SESSION_CODE (2=REGULAR, 1=PRE)​
+​
+  return { vector: vec, midPrice, vwapZ };​
+}​
+​
+async function main(): Promise<void> {​
+  ensureSeededDatabases();​
+​
+  if (!ALPACA_TRADING_URL.includes('paper-api.alpaca.markets')) {​
+    throw new Error(​
+      `Refusing pre-market dry-run against non-paper Alpaca URL: ${ALPACA_TRADING_URL}`​
+    );​
+  }​
+​
+  const failures: string[] = [];​
+  const ledgerDb = new DatabaseSync(LEDGER_DB_PATH);​
+  const tcaDb = new DatabaseSync(TCA_DB_PATH);​
+​
+  try {​
+    const sleeveRow = ledgerDb​
+      .prepare('SELECT * FROM sleeve_state WHERE sleeve = ?;')​
+      .get('stocks_etf') as​
+      | {​
+          sleeve: string;​
+          allocated_usd: number;​
+          available_usd: number;​
+          promotion_status: string;​
+          rolling_trade_count: number;​
+          min_expectancy_r: number;​
+          max_daily_drawdown_pct: number;​
+        }​
+      | undefined;​
+​
+    if (!sleeveRow) {​
+      throw new Error('Missing stocks_etf sleeve in mia_ledger.sqlite');​
+<PARSED TEXT FOR PAGE: 58 / 63>
+    }​
+​
+    const sqliteSleeveReady =​
+      sleeveRow.available_usd > 0 &&​
+      sleeveRow.promotion_status === 'PAPER' &&​
+      sleeveRow.max_daily_drawdown_pct <= 0.025;​
+    if (!sqliteSleeveReady) {​
+      failures.push(​
+    `stocks_etf SQLite sleeve not in expected PAPER pre-market state:
+${JSON.stringify(sleeveRow)}`​
+      );​
+    }​
+​
+    const alpacaCredentialsPresent =​
+      ALPACA_KEY_ID.trim().length > 0 && ALPACA_SECRET_KEY.trim().length > 0;​
+    if (!alpacaCredentialsPresent) {​
+      failures.push(​
+     'Missing Alpaca Paper credentials (set APCA_API_KEY_ID and APCA_API_SECRET_KEY in
+environment).'​
+      );​
+    }​
+​
+    let marketClock: AlpacaClockResponse | null = null;​
+    let accountSummary: PremarketReadinessReport['details']['accountSummary'] = null;​
+    let bracketDryRun: PremarketReadinessReport['details']['bracketDryRun'] = null;​
+    const ringBufferWarmup: PremarketReadinessReport['details']['ringBufferWarmup'] = {};​
+​
+    if (alpacaCredentialsPresent) {​
+     // 1. Check Alpaca Market Clock​
+     try {​
+     marketClock = await
+alpacaFetch<AlpacaClockResponse>(`${ALPACA_TRADING_URL}/v2/clock`);​
+   } catch (err) {​
+     failures.push(​
+            `Alpaca /v2/clock check failed: ${err instanceof Error ? err.message : String(err)}`​
+       );​
+     }​
+​
+     // 2. Check Alpaca Paper Account & Buying Power against stocks_etf allocation​
+     try {​
+         const acct = await
+alpacaFetch<AlpacaAccountResponse>(`${ALPACA_TRADING_URL}/v2/account`);​
+    const buyingPowerUsd = Number(acct.buying_power);​
+<PARSED TEXT FOR PAGE: 59 / 63>
+     const portfolioValueUsd = Number(acct.portfolio_value);​
+     accountSummary = {​
+       status: acct.status,​
+       buyingPowerUsd,​
+       portfolioValueUsd,​
+       tradingBlocked: acct.trading_blocked || acct.account_blocked,​
+     };​
+​
+     if (acct.trading_blocked || acct.account_blocked || acct.status !== 'ACTIVE') {​
+       failures.push(`Alpaca Paper account not active/tradable (status=${acct.status})`);​
+     }​
+     if (!Number.isFinite(buyingPowerUsd) || buyingPowerUsd < sleeveRow.allocated_usd) {​
+       failures.push(​
+       `Alpaca Paper buying power ($${buyingPowerUsd}) is below stocks_etf allocation
+($${sleeveRow.allocated_usd})`​
+       );​
+     }​
+    } catch (err) {​
+      failures.push(​
+       `Alpaca /v2/account check failed: ${err instanceof Error ? err.message : String(err)}`​
+      );​
+    }​
+​
+    // 3. Submit & immediately cancel a far-from-market-price SPY bracket order (zero fill risk)​
+    try {​
+     const clientOrderId = `mia5_premarket_dryrun_${crypto.randomUUID()}`;​
+     const createdOrder = await alpacaFetch<AlpacaOrderResponse>(​
+       `${ALPACA_TRADING_URL}/v2/orders`,​
+       {​
+            method: 'POST',​
+            body: JSON.stringify({​
+             symbol: 'SPY',​
+             qty: '1',​
+             side: 'buy',​
+             type: 'limit',​
+             time_in_force: 'day',​
+             limit_price: '50.00',​
+             order_class: 'bracket',​
+             client_order_id: clientOrderId,​
+             take_profit: { limit_price: '60.00' },​
+             stop_loss: { stop_price: '45.00', limit_price: '44.50' },​
+         }),​
+       }​
+<PARSED TEXT FOR PAGE: 60 / 63>
+     );​
+​
+     await alpacaFetch<void>(`${ALPACA_TRADING_URL}/v2/orders/${createdOrder.id}`, {​
+       method: 'DELETE',​
+     });​
+​
+     const verifiedOrder = await alpacaFetch<AlpacaOrderResponse>(​
+       `${ALPACA_TRADING_URL}/v2/orders/${createdOrder.id}`​
+     );​
+​
+     const legCount = Array.isArray(createdOrder.legs) ? createdOrder.legs.length : 0;​
+     if (legCount < 2) {​
+       failures.push(`Expected 2 bracket child legs (TP + SL), got ${legCount}`);​
+     }​
+​
+      bracketDryRun = {​
+        clientOrderId,​
+        brokerOrderId: createdOrder.id,​
+        legCount,​
+        finalStatus: verifiedOrder.status,​
+      };​
+    } catch (err) {​
+      failures.push(​
+       `Alpaca bracket order dry-run failed: ${err instanceof Error ? err.message : String(err)}`​
+      );​
+    }​
+​
+    // 4. Warm up 97-slot FeatureVectorBuilder ring buffers for SPY and QQQ​
+    for (const sym of TARGET_SYMBOLS) {​
+     try {​
+       const barsPayload = await alpacaFetch<{​
+        bars?: Array<{ o: number; h: number; l: number; c: number; v: number; vw?: number }>;​
+       }>(`${ALPACA_DATA_URL}/v2/stocks/${sym}/bars?timeframe=1Min&limit=60&feed=iex`);​
+​
+       const bars = barsPayload.bars ?? [];​
+       const warmed = buildWarmFeatureVector(bars, Boolean(marketClock?.is_open));​
+       ringBufferWarmup[sym] = {​
+         barsLoaded: bars.length,​
+         featureVectorLength: warmed.vector.length,​
+         midPrice: warmed.midPrice,​
+         vwapZ: warmed.vwapZ,​
+       };​
+     } catch (err) {​
+<PARSED TEXT FOR PAGE: 61 / 63>
+         failures.push(​
+       `FeatureVectorBuilder warmup failed for ${sym}: ${err instanceof Error ? err.message :
+String(err)}`​
+          );​
+        }​
+      }​
+    }​
+​
+    // Record pre-market check heartbeat in mia_tca.sqlite​
+    const nowIso = new Date().toISOString();​
+    const heapMb = Number((process.memoryUsage().heapUsed / (1024 * 1024)).toFixed(2));​
+    tcaDb​
+     .prepare(​
+    `INSERT INTO worker_heartbeat_log (worker_name, heartbeat_seq, heap_used_mb,
+sab_lag_us, status, recorded_at)​
+    VALUES ('equities-premarket-check', 1, ?, 0, ?, ?);`​
+     )​
+     .run(heapMb, failures.length === 0 ? 'READY' : 'FAILED', nowIso);​
+​
+    const report: PremarketReadinessReport = {​
+     status: failures.length === 0 ? 'PASS' : 'FAIL',​
+     sleeve: 'stocks_etf',​
+     alpacaEndpoint: ALPACA_TRADING_URL,​
+     checks: {​
+       sqliteSleeveReady,​
+       alpacaCredentialsPresent,​
+       alpacaClockReachable: marketClock !== null,​
+       alpacaBuyingPowerSufficient:​
+         accountSummary !== null &&​
+         !accountSummary.tradingBlocked &&​
+         accountSummary.buyingPowerUsd >= sleeveRow.allocated_usd,​
+       bracketOrderLifecycleVerified: bracketDryRun !== null && bracketDryRun.legCount >= 2,​
+       spyQqqFeatureRingBufferWarmed:​
+         TARGET_SYMBOLS.every((s) => ringBufferWarmup[s]?.featureVectorLength === 97),​
+     },​
+     details: {​
+       sleeveState: {​
+         allocatedUsd: sleeveRow.allocated_usd,​
+         availableUsd: sleeveRow.available_usd,​
+         promotionStatus: sleeveRow.promotion_status,​
+         rollingTradeCount: sleeveRow.rolling_trade_count,​
+         minExpectancyR: sleeveRow.min_expectancy_r,​
+         maxDailyDrawdownPct: sleeveRow.max_daily_drawdown_pct,​
+<PARSED TEXT FOR PAGE: 62 / 63>
+            },​
+            marketClock,​
+            accountSummary,​
+            bracketDryRun,​
+            ringBufferWarmup,​
+          },​
+          failures,​
+        };​
+    ​
+        console.log(JSON.stringify(report, null, 2));​
+        if (report.status === 'FAIL') {​
+          process.exitCode = 1;​
+        }​
+      } finally {​
+        ledgerDb.close();​
+        tcaDb.close();​
+      }​
+    }​
+    ​
+    main().catch((err) => {​
+      console.error(​
+        JSON.stringify(​
+          {​
+            status: 'FAIL',​
+            error: err instanceof Error ? err.message : String(err),​
+          },​
+          null,​
+          2​
+        )​
+      );​
+      process.exit(1);​
+    });​
+
+
+5. End-to-End Pre-Flight Execution Sequence
+Run the four verification stages in exact sequence before enabling any sleeve promotion:
+
+
+
+
+    Bash
+    # 1. Seed mia_ledger.sqlite and mia_tca.sqlite in WAL mode across all 5 sleeves​
+    node server/scripts/seedSqlite.ts​
+<PARSED TEXT FOR PAGE: 63 / 63>
+​
+# 2. Audit UnifiedRiskGovernor & CanonicalRiskGate 30-trade expectancy promotion/revocation
+gates​
+npx vitest run server/tests/expectancyGateAudit.test.ts​
+​
+# 3. Boot @mia/server in locked PAPER shadow mode & verify 4ms Swarm SLA +
+/api/telemetry/stream SSE​
+node server/scripts/verifyPaperBurnIn.ts​
+​
+# 4. Run Monday 9:30 AM ET Alpaca Paper equities pre-market clock, bracket, & SPY/QQQ warmup
+check​
+node server/scripts/verifyEquitiesPremarket.ts​

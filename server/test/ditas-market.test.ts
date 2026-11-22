@@ -79,6 +79,27 @@ describe('strategy passports and current-version health', () => {
     expect(health).toMatchObject({ samples: 1, expectancyR: 1, excludedUnknownVersion: 1, excludedOtherVersion: 1, status: 'INSUFFICIENT_SAMPLE' });
     expect(health.expectancyCi95).toBeNull();
   });
+  it('scopes DITAS strategy passports to the canonical PAPER account', () => {
+    const seed = (id: string, account: string, resultR: number) => {
+      const decisionId = 'd-' + id;
+      run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,created_at,report) VALUES (?,?,?,?,?,?,?,?,?)',
+        decisionId, id, 'fixture', 'crypto', 'LONG', 'trend_pullback', 'PAPER_TRADE', 1,
+        J({ strategy: { version: '1.0.0' } }));
+      run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,realized_pnl,fees,planned_risk,decision_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        id, account, 'fixture', 'crypto', 'LONG', 'trend_pullback', 0, 100, 95, 95,
+        '{}', 'CLOSED', 1, id === 'paper' ? 2 : 3, resultR * 5, 0, 5, decisionId);
+    };
+    seed('paper', 'paper-bot', 1);
+    seed('external', 'live-account', -100);
+    const p = strategyPassports()[0];
+    expect(p.paperHealth).toMatchObject({
+      samples: 1, expectancyR: 1, observedClosedPositions: 1,
+      excludedUnknownVersion: 0, status: 'INSUFFICIENT_SAMPLE',
+    });
+    expect(p.currentStatus).toBe('RESEARCH');
+    expect(get<{ status: string }>('SELECT status FROM strategies WHERE id=?', 'trend_pullback')!.status).toBe('RESEARCH');
+  });
+
   it('requires sufficient outcomes before a degraded review and never promotes', () => {
     expect(returnHealth([-1])).toMatchObject({ status: 'INSUFFICIENT_SAMPLE', expectancyCi95: null });
     expect(returnHealth(Array(30).fill(-1))).toMatchObject({ status: 'DEGRADED_REVIEW', expectancyCi95: { low: -1, high: -1 } });
