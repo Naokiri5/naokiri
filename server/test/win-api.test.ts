@@ -76,6 +76,7 @@ describe('WIN HTTP integration (owner auth + CSRF, no execution)', () => {
       version: 'WIN-L01', status: 'AWAITING_VERIFIED_LEARNING_INPUTS',
       totalReconstructedClosedLots: 0, studiedRecentClosedLots: 0,
       entryTimeDnaSnapshots: 0, delayedCostedFollowerOutcomes: 0,
+      independentlyVerifiedHistoryCoverage: false,
       sampledWindowIsCompleteHistory: false, automaticModelPromotion: false,
       canTrade: false, canDisableRisk: false, liveExecution: 'LOCKED',
     });
