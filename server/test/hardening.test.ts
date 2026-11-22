@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, readFileSync, statSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
 import { freshDb, seedInstrument } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { assessQuality, QUALITY_LIMITS } from '../src/market/quality.js';
@@ -112,6 +114,30 @@ describe('evidence signing key', () => {
     expect(() => loadEvidenceKey('/nonexistent', 'my-secret-passphrase', true)).toThrow(/64 hex/);
     expect(() => loadEvidenceKey('/nonexistent', 'ab'.repeat(16), true)).toThrow(/64 hex/); // only 16 bytes
     expect(loadEvidenceKey('/nonexistent', 'ab'.repeat(32), true).source).toBe('env');
+  });
+  it('fails closed on unavailable persistent storage and leaves explicit offline ephemeral use working', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mia-key-unavailable-'));
+    try {
+      const file = join(dir, 'regular-file');
+      writeFileSync(file, 'test fixture');
+      expect(() => loadEvidenceKey(file, '', true)).toThrow(/persistent evidence signing key/i);
+      expect(() => loadEvidenceKey(join(file, 'data'), '', true)).toThrow(/persistent evidence signing key/i);
+      const offlineDir = join(dir, 'offline');
+      expect(loadEvidenceKey(offlineDir, '', false)).toMatchObject({ source: 'ephemeral' });
+      expect(existsSync(offlineDir)).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('concurrent fresh processes read one committed evidence key', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mia-key-concurrent-'));
+    try {
+      const args = ['--import', 'tsx', '--input-type=module', '-e',
+        "import { createHash } from 'node:crypto'; import { config } from './src/config.ts'; console.log(createHash('sha256').update(config.evidenceKey).digest('hex')); "];
+      const options = { env: { ...process.env, MIA_DATA_DIR: dir, MIA_EVIDENCE_KEY: '', MIA_OFFLINE: '1' } };
+      const outputs = await Promise.all(Array.from({ length: 6 }, () => promisify(execFile)(process.execPath, args, options)));
+      expect(new Set(outputs.map(({ stdout }) => stdout.trim())).size).toBe(1);
+      expect(outputs[0].stdout.trim()).toMatch(/^[a-f0-9]{64}$/);
+      expect(readdirSync(dir)).toEqual(['evidence.key']);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
 

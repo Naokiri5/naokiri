@@ -71,7 +71,9 @@ export interface BoundedLiveAuthorization {
 }
 export interface VenueReceipt {
   state: VenueOrderState;
+  /** Required for acknowledgements and fills. */
   venueOrderId?: string;
+  /** FILLED means the full submitted quantity. Partial fills require reconciliation. */
   filledQty?: number;
   reason?: string;
 }
@@ -125,6 +127,7 @@ export function allLiveGatesPass(evidence: ReleaseEvidence, runningBuildSha: str
 }
 
 export function validateIntent(intent: ExecutionIntent, now: number): string | null {
+  if (!Number.isSafeInteger(now) || now < 0) return 'INVALID_EXECUTION_CLOCK';
   if (!['DEMO','LIVE'].includes(intent.environment)) return 'INVALID_ENVIRONMENT';
   const ids = [intent.accountId,intent.decisionId,intent.candidateId,intent.traceId,intent.instrumentId,intent.strategyId,intent.strategyVersion,intent.snapshotId];
   if (ids.some(s=>typeof s!=='string' || s.trim().length===0 || s.length>200)) return 'INVALID_IDENTITY';
@@ -144,9 +147,10 @@ export function executionKey(intent: ExecutionIntent): string {
 }
 
 /** No owner override for NEEDS_REVIEW: explicit owner approval uses existing separate approval flow. */
-function validRisk(result: RiskResult): boolean {
-  return result.decision==='ALLOW' && result.policyVersion!==null && Number.isInteger(result.policyVersion) &&
-    !!result.sizing && result.sizing.qty>0 && result.sizing.notional>0 &&
+type ApprovedRisk = RiskResult & { policyVersion: number; sizing: NonNullable<RiskResult['sizing']> };
+function validRisk(result: RiskResult): result is ApprovedRisk {
+  return result.decision==='ALLOW' && result.policyVersion!==null && Number.isSafeInteger(result.policyVersion) &&
+    result.policyVersion>0 && !!result.sizing && result.sizing.qty>0 && result.sizing.notional>0 && result.sizing.plannedMaxLoss>0 &&
     [result.sizing.qty,result.sizing.notional,result.sizing.plannedMaxLoss].every(Number.isFinite);
 }
 function validControl(c: ControlState, intent: ExecutionIntent): boolean {
@@ -162,6 +166,15 @@ function validLiveAuthorization(auth: BoundedLiveAuthorization | null, intent: E
     auth.eligibleInstruments.includes(intent.instrumentId) &&
     auth.verifiedOwnerStepUp===true && auth.isolatedSignerVerified===true &&
     auth.liveVenueVerified===true && auth.protectionVerified===true && auth.reconciliationVerified===true;
+}
+
+function validVenueReceipt(receipt: VenueReceipt, submittedQty: number): boolean {
+  if (!receipt || typeof receipt !== 'object') return false;
+  const noFill = receipt.filledQty === undefined || receipt.filledQty === 0;
+  if (receipt.state === 'REJECTED') return noFill;
+  if (typeof receipt.venueOrderId !== 'string' || !receipt.venueOrderId.trim() || receipt.venueOrderId.length > 200) return false;
+  if (receipt.state === 'ACKNOWLEDGED') return noFill;
+  return receipt.state === 'FILLED' && receipt.filledQty === submittedQty;
 }
 
 /**
@@ -181,20 +194,20 @@ export async function routeEntry(intent: ExecutionIntent, ports: ParityPorts): P
     if (!validControl(currentControl,intent)) return deny('EXECUTION_MODE_OR_SAFETY_BLOCK');
     const risk = await ports.evaluateRisk(intent);
     if (!validRisk(risk)) return deny(`CANONICAL_RISK_${risk.decision}:${risk.reasonCodes.join(',').slice(0,200)}`);
+    const { policyVersion } = risk;
+    const size = { ...risk.sizing };
 
     const fence1 = await ports.currentFenceToken();
     if (!fence1) return deny('ENGINE_NOT_LEADER');
-    let liveAuth: BoundedLiveAuthorization | null = null;
     if (intent.environment==='LIVE') {
       if (!ports.liveVenue) return deny('LIVE_ADAPTER_NOT_INSTALLED');
       if (!allLiveGatesPass(await ports.releaseEvidence(),ports.buildSha())) return deny('G01_G14_NOT_CERTIFIED_FOR_THIS_BUILD');
-      liveAuth = await ports.liveAuthorization(intent);
+      const liveAuth = await ports.liveAuthorization(intent);
       if (!validLiveAuthorization(liveAuth,intent,risk,ports.now(),ports.buildSha())) return deny('LIVE_OWNER_AUTHORIZATION_OR_SIGNER_INVALID');
     }
 
     const venue = intent.environment==='DEMO' ? ports.demoVenue : ports.liveVenue;
     if (!venue || venue.environment!==intent.environment) return deny('VENUE_ENVIRONMENT_MISMATCH');
-    const size = risk.sizing!;
     const p = await venue.preflight(intent,size.qty);
     if (!p.ok) return deny(`VENUE_PREFLIGHT:${p.reason??'failed'}`);
     if (intent.environment==='LIVE' && !p.nativeProtectionAvailable) return deny('NATIVE_LIVE_PROTECTION_UNAVAILABLE');
@@ -208,42 +221,43 @@ export async function routeEntry(intent: ExecutionIntent, ports: ParityPorts): P
       return deny('INVALID_DURABLE_CLIENT_ORDER_ID');
     }
 
-    // Any asynchronous I/O above may have made evidence stale or risk policy outdated.
-    const finalReason = validateIntent(intent,ports.now());
-    const finalControl = await ports.getControl();
+    let finalRelease: ReleaseEvidence | undefined;
+    let finalAuth: BoundedLiveAuthorization | null = null;
+    if (intent.environment==='LIVE') {
+      const lastPreflight = await venue.preflight(intent,size.qty);
+      if (!lastPreflight.ok || !lastPreflight.nativeProtectionAvailable) {
+        await ports.reservation.recordRejection(key,'FINAL_VENUE_PREFLIGHT_FAILED');
+        return deny('FINAL_VENUE_PREFLIGHT_FAILED');
+      }
+      finalRelease = await ports.releaseEvidence();
+      finalAuth = await ports.liveAuthorization(intent);
+    }
+
+    // Re-read the local guards after provider I/O. Evaluate expiry on the last clock reading before submission.
     const finalRisk = await ports.evaluateRisk(intent);
-    const fence2 = await ports.currentFenceToken();
+    const finalControl = await ports.getControl();
+    const finalFence = await ports.currentFenceToken();
+    const submitNow = ports.now();
+    const finalReason = validateIntent(intent,submitNow);
     if (finalReason || !validControl(finalControl,intent) || !validRisk(finalRisk) ||
-        finalRisk.sizing?.qty!==size.qty || finalRisk.sizing?.notional!==size.notional ||
-        finalRisk.policyVersion!==risk.policyVersion || !fence2 || fence1!==fence2) {
+        finalRisk.sizing.qty!==size.qty || finalRisk.sizing.notional!==size.notional ||
+        finalRisk.sizing.plannedMaxLoss!==size.plannedMaxLoss || finalRisk.policyVersion!==policyVersion ||
+        !finalFence || finalFence!==fence1) {
       const reason = finalReason??'LAST_MOMENT_RISK_MODE_OR_FENCE_CHANGED';
       await ports.reservation.recordRejection(key,reason);
       return deny(reason);
     }
     if (intent.environment==='LIVE') {
-      if (!allLiveGatesPass(await ports.releaseEvidence(),ports.buildSha()) ||
-          !validLiveAuthorization(await ports.liveAuthorization(intent),intent,finalRisk,ports.now(),ports.buildSha())) {
+      const build = ports.buildSha();
+      if (!finalRelease || !allLiveGatesPass(finalRelease,build) || !validLiveAuthorization(finalAuth,intent,finalRisk,submitNow,build)) {
         await ports.reservation.recordRejection(key,'LIVE_CERTIFICATION_CHANGED');
         return deny('LIVE_CERTIFICATION_CHANGED');
       }
     }
-
-    // LIVE capability/protection must still hold immediately before venue submission.
-    if (intent.environment==='LIVE') {
-      const lastPreflight = await venue.preflight(intent,finalRisk.sizing!.qty);
-      if (!lastPreflight.ok || !lastPreflight.nativeProtectionAvailable) {
-        await ports.reservation.recordRejection(key,'FINAL_VENUE_PREFLIGHT_FAILED');
-        return deny('FINAL_VENUE_PREFLIGHT_FAILED');
-      }
-    }
-    if (await ports.currentFenceToken() !== fence2) {
-      await ports.reservation.recordRejection(key,'LEADER_FENCE_CHANGED');
-      return deny('LEADER_FENCE_CHANGED');
-    }
-    // Last point where any automatic order can be sent. Production venue adapters
-    // MUST enforce fencing, idempotency and reconciliation as well.
+    // A production adapter must independently enforce the fence and verified authorization at its write boundary.
     try {
-      const receipt = await venue.submit(intent,finalRisk.sizing!.qty,reservation.clientOrderId,fence2);
+      const receipt = await venue.submit(intent,size.qty,reservation.clientOrderId,finalFence);
+      if (!validVenueReceipt(receipt,size.qty)) throw new Error('inconsistent venue receipt');
       await ports.reservation.recordReceipt(key,receipt);
       if (receipt.state==='REJECTED') return deny(`VENUE_REJECTED:${receipt.reason??'unspecified'}`);
       return {status:receipt.state,environment:intent.environment,key,venueOrderId:receipt.venueOrderId,filledQty:receipt.filledQty};

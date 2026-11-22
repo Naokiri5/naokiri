@@ -1,7 +1,8 @@
 import { FeatureEngine } from '../features/indicators.js';
+import { validateCandles } from '../chart/analysis.js';
 import { classifyRegime } from '../regime/regime.js';
 import type { StrategyDef } from './strategies.js';
-import type { Candle } from '../market/types.js';
+import { INTERVAL_MS, type Candle } from '../market/types.js';
 import { newExitState, stepExit } from './exits.js';
 import { quantile } from '../core/util.js';
 
@@ -13,9 +14,19 @@ import { quantile } from '../core/util.js';
 export interface BtCosts { feeRate: number; slippageBps: number; spreadBps: number }
 export interface BtTrade { entryT: number; exitT: number; entry: number; exit: number; r: number; reason: string; regime: string; segment: 'IS' | 'OOS'; bars: number; mfe: number; mae: number }
 export interface BtStats { trades: number; winRate: number; avgR: number; expectancyR: number; profitFactor: number; maxDrawdownR: number; totalR: number; avgBars: number }
-export interface BtResult { strategyId: string; strategyVersion: string; instrument: string; interval: string; bars: number; from: number; to: number; costs: BtCosts; splitAt: number; inSample: BtStats; outOfSample: BtStats; all: BtStats; trades: BtTrade[]; equityR: number[]; warnings: string[] }
+export const BACKTEST_MODEL_VERSION = 2;
+// Stored results produced before model versioning omit modelVersion.
+export interface BtResult { strategyId: string; strategyVersion: string; modelVersion?: number; instrument: string; interval: string; bars: number; from: number; to: number; costs: BtCosts; splitAt: number; inSample: BtStats; outOfSample: BtStats; all: BtStats; trades: BtTrade[]; equityR: number[]; warnings: string[] }
 
 export function backtest(strat: StrategyDef, instrument: string, candles: Candle[], costs: BtCosts = { feeRate: 0.001, slippageBps: 3, spreadBps: 2 }, isFraction = 0.6): BtResult {
+  // Evaluate the data at the last bar's closing boundary so older historical windows stay valid.
+  const duration = INTERVAL_MS[strat.interval];
+  const asOf = (candles.at(-1)?.t ?? NaN) + duration;
+  const issues = validateCandles(candles, strat.interval, asOf);
+  if (candles.some(({ t, closeTime }) => closeTime != null && (closeTime < t + duration - 1 || closeTime >= t + duration))) {
+    issues.push('inconsistent candle close timestamp');
+  }
+  if (issues.length) throw new Error(`invalid backtest history: ${issues.join(', ')}`);
   const eng = new FeatureEngine(); const trades: BtTrade[] = [];
   const splitAt = candles[Math.floor(candles.length * isFraction)]?.t ?? Infinity;
   let pos: { st: ReturnType<typeof newExitState>; entryT: number; regime: string; cost: number; proceeds: number; fees: number } | null = null;
@@ -37,10 +48,10 @@ export function backtest(strat: StrategyDef, instrument: string, candles: Candle
       pos = { st, entryT: next.t, regime, cost: entry, proceeds: 0, fees: entry * costs.feeRate };
     }
     // Stops and targets can execute on the entry candle without counting a held bar.
-    const bar = entering ? { ...next, o: pos.st.entry } : next;
-    const fills = stepExit(pos.st, bar, slip, !entering);
+    const fills = stepExit(pos.st, next, slip, !entering);
     for (const fill of fills) {
-      const price = fill.reason === 'TARGET' ? fill.price * (1 - slip) : fill.price;
+      // The exit capsule already adjusts stop prices. Targets and time exits arrive as raw prices.
+      const price = fill.reason === 'TARGET' || fill.reason === 'TIME' ? fill.price * (1 - slip) : fill.price;
       pos.proceeds += price * fill.qty;
       pos.fees += price * fill.qty * costs.feeRate;
     }
@@ -57,12 +68,13 @@ export function backtest(strat: StrategyDef, instrument: string, candles: Candle
     }
   }
   const warnings: string[] = [];
+  if (pos) warnings.push('History ends with an open position. Closed-trade statistics exclude its unrealized PnL and entry costs.');
   const oos = trades.filter((t) => t.segment === 'OOS');
   if (oos.length < 30) warnings.push(`only ${oos.length} out-of-sample trades — not statistically meaningful`);
   if (candles.length < 1000) warnings.push('short history; single market regime likely');
   warnings.push('parameters are fixed research defaults (not optimized); survivorship bias: universe is today\'s liquid listings');
   let eq = 0; const equityR = trades.map((t) => (eq += t.r));
-  return { strategyId: strat.id, strategyVersion: strat.version, instrument, interval: strat.interval, bars: candles.length, from: candles[0]?.t ?? 0, to: candles[candles.length - 1]?.t ?? 0, costs, splitAt,
+  return { strategyId: strat.id, strategyVersion: strat.version, modelVersion: BACKTEST_MODEL_VERSION, instrument, interval: strat.interval, bars: candles.length, from: candles[0]?.t ?? 0, to: candles[candles.length - 1]?.t ?? 0, costs, splitAt,
     inSample: stats(trades.filter((t) => t.segment === 'IS')), outOfSample: stats(oos), all: stats(trades), trades, equityR, warnings };
 }
 export function stats(ts: BtTrade[]): BtStats {

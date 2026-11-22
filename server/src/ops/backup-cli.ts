@@ -3,10 +3,9 @@
  *   create             write a backup to MIA_BACKUP_DIR (default <data>/backups), verify it, prune to MIA_BACKUP_KEEP
  *   verify <file>      restore check of one backup file (exit 1 if any check fails)
  *   list               list complete backups, newest first
- * Encryption key (optional): MIA_BACKUP_KEY in the environment — never on the command line, where it would be logged.
+ * Online and production backups require MIA_BACKUP_KEY in the environment.
  */
-import { join } from 'node:path';
-import { backupDir, createBackup, listBackups, pruneBackups, verifyBackup } from './backup.js';
+import { createVerifiedBackup, listBackups, pruneBackups, verifyBackup } from './backup.js';
 import { closeDb } from '../db/db.js';
 
 const [cmd, arg] = process.argv.slice(2);
@@ -16,9 +15,8 @@ function print(v: ReturnType<typeof verifyBackup>) {
 }
 try {
   if (cmd === 'create') {
-    const m = createBackup(); const v = verifyBackup(join(backupDir(), m.file)); print(v);
-    const removed = pruneBackups(); if (removed.length) console.log(`Pruned ${removed.length} old backup(s).`);
-    process.exitCode = v.ok ? 0 : 1;
+    const { manifest, verification } = createVerifiedBackup(); print(verification);
+    const removed = pruneBackups(undefined, undefined, manifest.createdAt); if (removed.length) console.log(`Pruned ${removed.length} old backup(s).`);
   } else if (cmd === 'verify' && arg) { const v = verifyBackup(arg); print(v); process.exitCode = v.ok ? 0 : 1; }
   else if (cmd === 'list') { for (const m of listBackups()) console.log(`${new Date(m.createdAt).toISOString()}  ${m.file}  ${m.bytes} bytes  schema v${m.schema}${m.encrypted ? '  encrypted' : ''}`); }
   else { console.error('usage: backup create | verify <file> | list'); process.exitCode = 2; }

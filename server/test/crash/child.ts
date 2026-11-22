@@ -34,8 +34,13 @@ setCrashHook((p) => {
   }
   if (req.crashAt === p && n === (req.occurrence ?? 1)) {
     writeFileSync(join(dir, 'crash-marker.json'), JSON.stringify({ at: p, occurrence: n, pid: process.pid }));
-    process.kill(process.pid, 'SIGKILL');
-    process.exit(1);
+    try {
+      process.kill(process.pid, 'SIGKILL');
+    } catch (error) {
+      process.stderr.write(`Failed to kill the crash-test process: ${error}\n`);
+    }
+    // Use a distinct code if the self-kill returned or failed, so Windows cannot mistake this for a crash.
+    process.exit(76);
   }
 });
 
