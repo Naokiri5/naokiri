@@ -4,7 +4,7 @@ import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
 import { evaluateRisk } from '../risk/gate.js';
 import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
-import { ledger, cashBalance, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
+import { ledger, cashBalance, accountState, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
 import { journal } from '../journal/journal.js';
 import { notify } from '../notify/notify.js';
 import { bus } from '../core/bus.js';
@@ -134,7 +134,25 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       if (fill.impactBps > pol.maxSlippageBps) return { reason: `SLIPPAGE ${fill.impactBps.toFixed(1)}bps at submission` };
       if (fill.price <= s.stopLoss) return { reason: 'PRICE_THROUGH_STOP' };
       if (s.takeProfit.some((t) => t.price <= fill.price)) return { reason: 'PRICE_THROUGH_TARGET: fill would be at or above a take-profit level' };
-      const fee = fill.price * qty * pol.feeRate;
+      const notional = fill.price * qty;
+      if (!Number.isFinite(notional) || notional > fresh.sizing.maxNotional + 1e-9) {
+        return { reason: `POSITION_NOTIONAL_LIMIT: fill ${notional.toFixed(2)}, limit ${fresh.sizing.maxNotional.toFixed(2)}` };
+      }
+      // The canonical risk gate sized against a conservative entry. Defend that invariant again
+      // using the actual depth-walk fill before writing any order, position or financial ledger row.
+      const worstStopFill = fresh.sizing.conservativeStopFill;
+      const actualPlannedMaxLoss = qty * (fill.price - worstStopFill + pol.feeRate * (fill.price + worstStopFill));
+      if (!Number.isFinite(actualPlannedMaxLoss) || actualPlannedMaxLoss <= 0 ||
+          actualPlannedMaxLoss > fresh.sizing.riskBudget + 1e-9) {
+        return { reason: 'EXECUTED_TRADE_RISK_LIMIT: depth-walk fill exceeds the per-trade loss budget' };
+      }
+      const account = accountState(PAPER_ACCOUNT, nowTs);
+      const aggregateRiskLimit = account.equity * (pol.maxOpenRiskPct / 100);
+      if (!Number.isFinite(aggregateRiskLimit) ||
+          account.openRiskUsd + actualPlannedMaxLoss > aggregateRiskLimit + 1e-9) {
+        return { reason: 'EXECUTED_AGGREGATE_RISK_LIMIT: depth-walk fill exceeds the account risk budget' };
+      }
+      const fee = notional * pol.feeRate;
       const R = fill.price - s.stopLoss;
       const tgts = s.takeProfit.map((t) => ({ r: (t.price - fill.price) / R, fraction: t.fraction }));
       const st = newExitState(fill.price, s.stopLoss, qty, tgts, null, 0);
@@ -143,7 +161,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       const maxHoldMs = (strat === 'range_reversion' ? 24 : strat === 'trend_pullback' ? 48 : 72) * 3600_000;
       const trailAfterR = strat === 'trend_pullback' ? 1 : strat === 'donchian_breakout' ? 1.5 : null;
       const cash = cashBalance(PAPER_ACCOUNT);
-      const total = fill.price * qty + fee;
+      const total = notional + fee;
       if (!Number.isFinite(total) || total > cash + 1e-9) {
         return { reason: `INSUFFICIENT_CASH: need ${total.toFixed(2)}, have ${cash.toFixed(2)}` };
       }
@@ -153,14 +171,14 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, fill.price, fee, 'TAKER', Date.now());
       crashpoint('entry.fill');
       run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,max_hold_ms,decision_id,planned_risk) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-        posId, PAPER_ACCOUNT, s.instrumentId, s.market, 'LONG', strat, qty, fill.price, s.stopLoss, s.stopLoss, J({ qtyInit: qty, trailAfterR, targets: st.targets, lastPx: fill.price }), 'OPEN', Date.now(), -fee, fee, maxHoldMs, s.id, qty * (fill.price - s.stopLoss * (1 - pol.stopFillBufferPct / 100)) + fee);
+        posId, PAPER_ACCOUNT, s.instrumentId, s.market, 'LONG', strat, qty, fill.price, s.stopLoss, s.stopLoss, J({ qtyInit: qty, trailAfterR, targets: st.targets, lastPx: fill.price }), 'OPEN', Date.now(), -fee, fee, maxHoldMs, s.id, actualPlannedMaxLoss);
       crashpoint('entry.position');
       // Protective stop: paper venue has no exchange-native stop; OMS monitors it. Recorded explicitly.
       insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: 'STOP_MARKET (OMS-monitored, paper)', qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId });
       crashpoint('entry.stop');
-      ledger(PAPER_ACCOUNT, 'BUY', -fill.price * qty, oid, `${s.asset} entry`); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee');
+      ledger(PAPER_ACCOUNT, 'BUY', -notional, oid, `${s.asset} entry`); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee');
       crashpoint('entry.precommit');
-      return { orderId: oid, posId, qty, fill, fee, fresh, strat, plannedMaxLoss: fresh.sizing.plannedMaxLoss };
+      return { orderId: oid, posId, qty, fill, fee, fresh, strat, plannedMaxLoss: actualPlannedMaxLoss };
     }); } catch (e: any) {
       if (e instanceof EntryStateChanged) return { conflict: 'ORDER_STATE_CHANGED: entry order changed before submission' };
       // UNIQUE(client_order_id) is the last line of defence against a concurrent duplicate submission.

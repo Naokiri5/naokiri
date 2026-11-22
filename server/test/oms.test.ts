@@ -144,6 +144,42 @@ describe('Order-book freshness and fill accounting', () => {
     expect(openPositions()).toHaveLength(0);
     expect(accountState().cash).toBe(10_000);
   });
+  it('limits the real depth-walk loss including the entry and buffered exit fees', () => {
+    const book = market.deep.get(id)!.book!;
+    const ask = market.price(id)!.ask!;
+    // A fill near the allowable slippage boundary must remain within the trade budget.
+    book.asks = [[ask, 0.01], [ask * 1.0016, 50]];
+    const result = submitEntry(report(id, last), 'bot');
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const pos = openPositions()[0];
+    const bufferedStop = pos.stop_price * (1 - DEFAULT_POLICY.stopFillBufferPct / 100);
+    const executedRisk = pos.qty * (pos.entry_price - bufferedStop +
+      DEFAULT_POLICY.feeRate * (pos.entry_price + bufferedStop));
+    expect(pos.planned_risk).toBeCloseTo(executedRisk, 8);
+    expect(executedRisk).toBeLessThanOrEqual(10_000 * DEFAULT_POLICY.riskPerTradePct / 100 + 1e-8);
+    expect(all('SELECT id FROM fills')).toHaveLength(1);
+  });
+
+  it('rejects a fill whose depth-walk notional exceeds the policy cap', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 1 });
+    const book = market.deep.get(id)!.book!;
+    const ask = market.price(id)!.ask!;
+    book.asks = [[ask, 0.05], [ask * 1.0008, 50]];
+    expect(submitEntry(report(id, last), 'bot')).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('POSITION_NOTIONAL_LIMIT'),
+    });
+    expect(openPositions()).toHaveLength(0);
+    expect(all('SELECT id FROM fills')).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
+  });
+  it('accepts the capped size when the executable depth fits within the policy cap', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 1 });
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    expect(pos.qty * pos.entry_price).toBeLessThanOrEqual(100);
+    expect(reconcile().ok).toBe(true);
+  });
   it('never prices a stop-out from a stale book or a ticker fallback: keeps it open and raises the alert', () => {
     // CLAUDE.md invariant #4 (PR #4): no synthetic fills. Originally (PR #3) this exit filled at a quote-based price.
     expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
