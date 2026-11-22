@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import './landing.css';
+import { EditorialMarquee, MotionSwitch, ResearchThesis, ScrollProgress, useLandingExperience } from './LandingExperience';
 
 type IconName = 'scan' | 'layers' | 'brain' | 'shield' | 'arrow' | 'lock' | 'chart' | 'spark' | 'check' | 'terminal' | 'menu' | 'close' | 'radar';
 
@@ -118,6 +119,8 @@ function TerminalPreview() {
 
 export default function Landing() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [motionEnabled, setMotionEnabled] = useState(() => !window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  useLandingExperience(motionEnabled);
   useEffect(() => {
     const onEsc = (event: KeyboardEvent) => { if (event.key === 'Escape') setMenuOpen(false); };
     window.addEventListener('keydown', onEsc);
@@ -129,34 +132,41 @@ export default function Landing() {
     if (meta) meta.content = 'MIA: coordinated market research, evidence-driven intelligence and disciplined paper-trading risk controls.';
     return () => { document.title = 'MIA 4.1 Terminal'; };
   }, []);
-  return <div className="palazzo">
+  return <div className="palazzo palazzo-v2" data-motion={motionEnabled ? "on" : "off"}>
+    <ScrollProgress />
     <a href="#palazzo-content" className="palazzo-skip">Skip to content</a>
     <header className="palazzo-header">
       <a href="#top" className="palazzo-brand" aria-label="MIA home"><span className="palazzo-brand-mark">Ⅲ</span><span className="palazzo-brand-name">MIA</span><span className="palazzo-brand-caption">MULTI-MARKET<br />INTELLIGENCE PLATFORM</span></a>
       <nav className="palazzo-nav" aria-label="Landing navigation">{navItems.map((item) => <a key={item.target} href={'#' + item.target}>{item.label}</a>)}</nav>
-      <Link className="palazzo-pill palazzo-enter" to="/app">Enter Terminal <Icon name="arrow" size={17} /></Link>
+      <MotionSwitch enabled={motionEnabled} onToggle={() => setMotionEnabled((current) => !current)} />
+      <Link className="palazzo-pill palazzo-enter palazzo-magnetic" to="/app">Enter Terminal <Icon name="arrow" size={17} /></Link>
       <button className="palazzo-mobile-toggle" type="button" onClick={() => setMenuOpen(!menuOpen)} aria-expanded={menuOpen} aria-controls="palazzo-mobile-nav" aria-label={menuOpen ? 'Close menu' : 'Open menu'}><Icon name={menuOpen ? 'close' : 'menu'} /></button>
     </header>
     {menuOpen && <nav id="palazzo-mobile-nav" className="palazzo-mobile-nav" aria-label="Mobile landing navigation">{navItems.map((item) => <a key={item.target} href={'#' + item.target} onClick={() => setMenuOpen(false)}>{item.label}</a>)}<Link to="/app" onClick={() => setMenuOpen(false)}>Enter Terminal <Icon name="arrow" size={16}/></Link></nav>}
     <main className="palazzo-main" id="palazzo-content">
       <section className="palazzo-hero" id="top" aria-labelledby="palazzo-hero-heading">
         <div className="palazzo-hero-grid" aria-hidden="true" />
+        <div className="palazzo-hero-lightwell" aria-hidden="true" />
+        <div className="palazzo-hero-giant-index" aria-hidden="true">01</div>
         <div className="palazzo-hero-content">
           <div className="palazzo-eyebrow"><span className="palazzo-rule" /> MIA / INTELLIGENCE PLATFORM <span className="palazzo-rule" /></div>
-          <h1 id="palazzo-hero-heading">THE ART OF<br />INTELLIGENT<br /><em>DECISIONS.</em></h1>
+          <div className="palazzo-hero-edition">A NEW ERA OF MARKET RESEARCH&nbsp; / &nbsp;EDITORIAL Nº 01</div>
+          <h1 id="palazzo-hero-heading"><span className="palazzo-title-line">THE ART OF</span><span className="palazzo-title-line">INTELLIGENT</span><em className="palazzo-title-line">DECISIONS.</em></h1>
           <p className="palazzo-hero-description">Explore markets through coordinated intelligence, evidence-driven research, and disciplined risk controls.</p>
-          <div className="palazzo-actions"><Link to="/app" className="palazzo-pill palazzo-pill-large">Enter Terminal <Icon name="arrow" size={18} /></Link><a href="#philosophy" className="palazzo-outline">Explore MIA <Icon name="arrow" size={17} /></a></div>
+          <div className="palazzo-actions"><Link to="/app" className="palazzo-pill palazzo-pill-large palazzo-magnetic">Enter Terminal <Icon name="arrow" size={18} /></Link><a href="#philosophy" className="palazzo-outline">Explore MIA <Icon name="arrow" size={17} /></a></div>
           <div className="palazzo-hero-note"><span className="palazzo-small-dash" /> RESEARCH BEFORE EXECUTION <span className="palazzo-text-star">✳</span> PAPER-TRADING SYSTEM</div>
         </div>
-        <HeroSculpture />
+        <div className="palazzo-sculpture-station"><HeroSculpture /><span className="palazzo-sculpture-caption" aria-hidden="true">MUSEUM OF INTELLIGENCE<br />ARTWORK Nº 001 / THE THINKING FORM</span></div>
         <div className="palazzo-hero-ticker" aria-label="Platform capabilities">{capabilities.map((item) => <div className="palazzo-ticker-item" key={item.id}><Icon name={item.icon} size={29} /><div><strong>{item.name}</strong><span>{item.detail.split('.')[0]}</span></div></div>)}</div>
       </section>
 
+      <EditorialMarquee />
       <section className="palazzo-philosophy palazzo-section" id="philosophy"><div className="palazzo-philosophy-inner">
         <div><div className="palazzo-kicker palazzo-kicker-dark">02 / THE PHILOSOPHY</div><h2>Evidence.<br />Discipline.<br /><em>Intelligence.</em></h2></div>
         <div className="palazzo-philosophy-side"><div className="palazzo-da-vinci" aria-hidden="true"><div /><span>✧</span></div><p>Markets reward neither noise nor certainty. MIA is designed to put observation, multi-perspective analysis, and disciplined risk controls into one coordinated research process.</p><a href="#engine" className="palazzo-text-link">DISCOVER THE ENGINE <Icon name="arrow" size={18} /></a></div>
       </div></section>
 
+      <ResearchThesis />
       <section className="palazzo-section palazzo-engine" id="engine"><div className="palazzo-section-top"><span className="palazzo-kicker">03 / THE INTELLIGENCE ENGINE</span><span className="palazzo-side-note">A RESEARCH FABRIC / NOT A PROFIT PROMISE</span></div><div className="palazzo-section-heading"><h2>From data to<br /><em>decision.</em></h2><p>Multiple layers of analysis are coordinated into research evidence. Existing workers and indicator specialists inform decisions; the risk gate remains authoritative.</p></div>
         <div className="palazzo-engine-grid">{capabilities.map((item) => <article key={item.id} className="palazzo-engine-card"><span className="palazzo-card-number">/{item.id}</span><div className="palazzo-engine-icon"><Icon name={item.icon} size={48}/></div><h3>{item.name}</h3><p>{item.detail}</p></article>)}</div>
       </section>

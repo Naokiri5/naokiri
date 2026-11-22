@@ -34,3 +34,21 @@ test('public page does not depend on authenticated API data', async ({ page }) =
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
   expect(calls).toEqual([]);
 });
+
+test('kinetic editorial manifesto is usable and visual motion can be switched off', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: /NOT EVERY SIGNAL DESERVES ACTION/i })).toBeVisible();
+  const motion = page.getByRole('button', { name: 'Turn off visual motion' });
+  await expect(motion).toBeVisible();
+  await motion.click();
+  await expect(page.locator('.palazzo')).toHaveAttribute('data-motion', 'off');
+  await expect(page.getByRole('button', { name: 'Turn on visual motion' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('link', { name: /ENTER THE RESEARCH TERMINAL/i })).toHaveAttribute('href', '/app');
+});
+
+test('honors reduced motion and keeps editorial text visible', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/');
+  await expect(page.locator('.palazzo')).toHaveAttribute('data-motion', 'off');
+  await expect(page.getByRole('heading', { name: /THE ART OF INTELLIGENT DECISIONS/i })).toBeVisible();
+});
