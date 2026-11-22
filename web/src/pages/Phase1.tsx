@@ -73,19 +73,96 @@ export function SecurityCenter() {
 
 /** Copy Trading — honest dependency state; no simulated wallets. */
 export function CopyTrading() {
-  const { data, error } = useApi('/api/copy');
-  return <Page title="Copy Trading" sub="Follow verified whale wallets — every copied trade still goes through safety, QCI, the decision engine and your risk limits.">
+  const [tab, setTab] = useState('FAST · Wallet Follow');
+  const [wallet, setWallet] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const { data, error, reload } = useApi('/api/copy');
+  const { data: observations, error: observationError, reload: reloadObservations } = useApi('/api/copy/observations');
+  const { data: deep, error: deepError } = useApi('/api/whales/deep', { topics: ['whale'], every: 60_000 });
+  const win = data?.win;
+  const follow = win?.followedWallet;
+
+  const updateFollow = async (stop = false) => {
+    if (busy) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      if (stop) await api('/api/copy/follow', { method: 'DELETE' });
+      else await api('/api/copy/follow', { body: { walletAddress: wallet.trim() } });
+      await reload();
+      await reloadObservations();
+      setNotice(stop ? 'Wallet follow disabled. No position or order was changed.'
+        : 'Wallet saved for READ-ONLY monitoring. No trading or transaction feed has been enabled.');
+      if (!stop) setWallet('');
+    } catch (e: any) { setNotice(e?.message ?? 'Unable to update the read-only watchlist'); }
+    finally { setBusy(false); }
+  };
+
+  return <Page title="Whale Intelligence" sub="WIN-FAST follows one public Solana wallet; WIN-DEEP studies anonymous market footprints. MIA independently evaluates all evidence — neither mode is approved for automatic execution.">
     <ErrorLine e={error} />
-    <div className="banner stale">Not available yet: copy trading needs an on-chain data provider to see wallet activity. Nothing on this page is simulated.</div>
-    <div className="grid g2">
-      <Card title="What it needs"><table><tbody>{(data?.requirements ?? []).map((r: any) => <tr key={r.providerId}><td>{r.name}</td><td><Badge v={r.status} /></td></tr>)}</tbody></table><div className="hint" style={{ marginTop: 8 }}>When you are ready, Claude will ask for the provider key through a secure form — never paste keys into chat. <Link to="/connections">Connections Hub →</Link></div></Card>
-      <Card title="How it will work (safety pipeline)"><ol style={{ margin: 0, paddingLeft: 18 }}>{(data?.pipeline ?? []).map((p: string) => <li key={p} className="muted">{p}</li>)}</ol></Card>
-    </div>
+    <div className="banner stale">Trading remains BLOCKED. Solana RPC transaction ingestion, token security, qualified fills, signed QCI and a Solana OMS adapter are not connected. Live execution also requires G01–G14 certification.</div>
+    <Tabs tabs={['FAST · Wallet Follow', 'DEEP · Footprints']} value={tab} onChange={setTab} />
+    {tab === 'FAST · Wallet Follow' ? <>
+      <div className="grid g2" style={{ marginTop: 14 }}>
+        <Card title="Follow one Solana wallet">
+          <div className="hint">Save a public address to the read-only watchlist. Do not enter a seed phrase or private key.</div>
+          <div className="row" style={{ marginTop: 10 }}>
+            <input aria-label="Public Solana wallet address" placeholder="Public Solana address (base58)"
+              value={wallet} onChange={(e) => setWallet(e.target.value)}
+              maxLength={44} autoComplete="off" style={{ flex: 1, minWidth: 180 }} />
+            <button disabled={busy || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet.trim())}
+              onClick={() => void updateFollow()}>Follow (read-only)</button>
+          </div>
+          {follow && <div style={{ marginTop: 12 }}>
+            <div className="hint">Selected wallet</div>
+            <code style={{ overflowWrap: 'anywhere' }}>{follow.walletAddress}</code>
+            <div className="row" style={{ marginTop: 8 }}>
+              <Badge v={follow.active ? 'READ_ONLY_WATCHLIST' : 'DISABLED'} />
+              {follow.active && <button className="ghost sm" disabled={busy} onClick={() => void updateFollow(true)}>Unfollow</button>}
+            </div>
+          </div>}
+          {notice && <div className="hint" role="status" style={{ marginTop: 10 }}>{notice}</div>}
+        </Card>
+        <Card title="WIN-FAST engineering status">
+          <div className="row"><span className="muted">Wallet selection</span><Badge v={win?.status ?? 'NOT_CONFIGURED'} /></div>
+          <div className="row"><span className="muted">Verified source events</span><strong>{win?.verifiedObservationCount ?? 0}</strong></div>
+          <div className="row"><span className="muted">Source provider</span><Badge v={win?.sourceProvider ?? 'NOT_WIRED'} /></div>
+          <div className="row"><span className="muted">Paper Solana execution</span><Badge v="NOT_WIRED" /></div>
+          <div className="row"><span className="muted">Live execution</span><Badge v="LOCKED" /></div>
+          <div className="hint">No wallet events are fabricated. A saved public wallet is not a funded account or an order authorization.</div>
+        </Card>
+      </div>
+      <Card title="Verified followed-wallet events" flush>
+        <ErrorLine e={observationError} />
+        <div className="tablewrap"><table><thead><tr><th>Time</th><th>Mint address</th><th>Side</th><th>Source proof</th></tr></thead>
+          <tbody>{(observations?.events ?? []).map((x: any) => <tr key={x.evidenceId}>
+            <td>{fmt.time(x.observedAt)}</td><td><code style={{ overflowWrap: 'anywhere' }}>{x.mintAddress}</code></td>
+            <td><Badge v={x.side} /></td><td><span className="hint">{x.signature}</span></td></tr>)}</tbody></table>
+          {!observations?.events?.length && <Empty>No finalized, provider-verified wallet swaps have been ingested.</Empty>}
+        </div>
+      </Card>
+    </> : <>
+      <Card title="WIN-DEEP · Research-only large-print footprints" flush>
+        <ErrorLine e={deepError} />
+        <div className="banner info" style={{ margin: 12 }}>These are anonymous Binance prints. They are NOT identified whales, winning strategies, exact entry zones or trading signals.</div>
+        <div className="tablewrap"><table><thead><tr><th>Time</th><th>Asset</th><th>Flow</th><th className="num">Notional</th><th>Attribution</th></tr></thead>
+        <tbody>{(deep?.footprints ?? []).map((x: any, idx: number) => <tr key={x.instrumentId + ':' + x.observedAt + ':' + idx}>
+          <td>{fmt.time(x.observedAt)}</td><td>{x.symbol}</td><td><Badge v={x.direction} /></td>
+          <td className="num">{fmt.usd(x.notionalUsd, 0)}</td><td><Badge v={x.attribution} /></td></tr>)}</tbody></table>
+          {!deep?.footprints?.length && <Empty>Waiting for verified large-print market data.</Empty>}
+        </div>
+      </Card>
+      <div className="hint">Futures, forex, stocks and ETF strategy reconstruction require product-specific licensed feeds, point-in-time validation and supported brokers. Research-only until those integrations pass review.</div>
+    </>}
     <div className="grid g2" style={{ marginTop: 14 }}>
-      <Card title="Followed wallets"><Empty>No wallets — wallet tracking is not connected.</Empty></Card>
-      <Card title="Copy rules"><Empty>Rules (max size per copy, allowed assets, delay limits) become available once wallet data is connected.</Empty></Card>
+      <Card title="Data requirements"><table><tbody>{(data?.requirements ?? []).map((r: any) =>
+        <tr key={r.providerId}><td>{r.name}</td><td><Badge v={r.status} /></td></tr>)}</tbody></table></Card>
+      <Card title="Canonical safety pipeline"><ol style={{ margin: 0, paddingLeft: 18 }}>
+        {(data?.pipeline ?? []).map((p: string) => <li key={p} className="muted">{p}</li>)}
+      </ol><div className="hint">The existing QCI, decision engine, risk gate and OMS retain exclusive trade authority.</div></Card>
     </div>
-    <div className="hint" style={{ marginTop: 12 }}>Meanwhile, large exchange trades are tracked on the <Link to="/whales">Whale & Launch Monitor</Link>.</div>
+    <div className="hint" style={{ marginTop: 12 }}>See <Link to="/whales">Whale & Launch Monitor</Link> for exchange prints and <Link to="/qa">Release Gates</Link> for live readiness.</div>
   </Page>;
 }
 
