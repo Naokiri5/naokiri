@@ -25,6 +25,7 @@ function example(i: number, pnl: number, group = Math.floor(i / 2)): WinLearning
     outcomeId: `lot-${i}`, walletAddress: wallet(group),
     instrumentId: instrument, mintAddress: '3'.repeat(32),
     entryEvidenceId: `buy-${i}`, exitEvidenceId: `sell-${i}`,
+    exitEvidenceIds: [`sell-${i}`], exitSourceSnapshotIds: [`exit-${i}`],
     entryAt: entry, entryReceivedAt: entry + 200,
     exitAt: entry + 80_000, exitReceivedAt: entry + 80_100,
     entrySourceSnapshotId: `entry-${i}`, exitSourceSnapshotId: `exit-${i}`,
@@ -90,6 +91,19 @@ describe('WIN-L01 outcome-conditioned market DNA learning (no trade authority)',
     const r = assessWinAdaptiveLearning(noFollower, candidate);
     expect(r.matchingClosedLots).toBe(0);
     expect(r.meanSimulatedFollowerPnlUsd).toBeNull();
+    expect(r.signal).toBe('INSUFFICIENT_EVIDENCE');
+  });
+
+  it('refuses an incomplete or contradictory exit-proof chain', () => {
+    const tampered = { ...wins[0], outcome: {
+      ...wins[0].outcome, exitEvidenceIds: ['different-exit'],
+    } };
+    const missing = { ...wins[1], outcome: {
+      ...wins[1].outcome, exitSourceSnapshotIds: [],
+    } };
+    const r = assessWinAdaptiveLearning([tampered, missing, ...wins.slice(2)], candidate);
+    expect(r.rejectedEvidence).toBe(2);
+    expect(r.matchingClosedLots).toBe(4);
     expect(r.signal).toBe('INSUFFICIENT_EVIDENCE');
   });
 
