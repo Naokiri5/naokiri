@@ -104,3 +104,85 @@ export function actionFor(id: FeatureId): IntegrationAction {
   if (!feature) throw new Error(`unknown MIA feature: ${id}`);
   return feature.proposedAction;
 }
+
+/**
+ * Evidence-based DEMO/LIVE capability inventory for the existing owner-only parity endpoint.
+ * These classifications describe code ownership and integration wiring; they are NOT
+ * exchange certifications, test results, profitability estimates, or trade permissions.
+ * Keep this catalog here, alongside the existing canonical feature manifest.
+ */
+export type ParityEvidenceStatus =
+  | 'SOURCE_IN_MAIN'       // shared analytical/policy source exists, not certified as a live execution path
+  | 'PAPER_WIRED'          // used by the running paper bot/OMS
+  | 'PROPOSAL_ONLY'        // branch/contract without verified production wiring
+  | 'NOT_OPERATIONAL'      // no operational live implementation on this inspected main
+  | 'UNVERIFIED'           // must be traced and tested, not inferred from source presence
+  | 'NOT_APPLICABLE';      // a paper-only or live-only execution responsibility
+
+export interface TradingParityCapability {
+  featureId: FeatureId;
+  label: string;
+  owner: string;
+  canonicalPath: string | null;
+  candidatePr: number | null;
+  demo: ParityEvidenceStatus;
+  live: ParityEvidenceStatus;
+  integrationGap: string;
+}
+
+/**
+ * Focused critical-path audit, not a second feature registry. IDs, owners, paths
+ * and candidate PRs are derived from MIA_FEATURES so they cannot silently diverge.
+ */
+const PARITY_ASSESSMENTS: readonly Pick<TradingParityCapability, 'featureId' | 'label' | 'demo' | 'live' | 'integrationGap'>[] = [
+  { featureId: 'market_ingestion', label: 'Market data ingestion', demo: 'SOURCE_IN_MAIN', live: 'SOURCE_IN_MAIN',
+    integrationGap: 'Shared market data does not imply an executable brokerage connection.' },
+  { featureId: 'market_quality', label: 'Source freshness and data quality', demo: 'SOURCE_IN_MAIN', live: 'SOURCE_IN_MAIN',
+    integrationGap: 'Verify venue-specific book freshness and quality at any future live write boundary.' },
+  { featureId: 'feature_calculations', label: 'Indicator features', demo: 'SOURCE_IN_MAIN', live: 'SOURCE_IN_MAIN',
+    integrationGap: 'One canonical indicator source; runtime parity requires exact-snapshot comparisons.' },
+  { featureId: 'worker_evidence', label: 'Deterministic worker evidence', demo: 'SOURCE_IN_MAIN', live: 'SOURCE_IN_MAIN',
+    integrationGap: 'Worker output is advisory evidence, never independent execution authorization.' },
+  { featureId: 'qci_consensus', label: 'QCI consensus', demo: 'SOURCE_IN_MAIN', live: 'SOURCE_IN_MAIN',
+    integrationGap: 'Live decisions must reuse this evidence without authorizing orders directly.' },
+  { featureId: 'central_decision', label: 'Trading decision engine', demo: 'PAPER_WIRED', live: 'UNVERIFIED',
+    integrationGap: 'Running bot dispatches PAPER_TRADE to OMS; live dispatch is not production-wired.' },
+  { featureId: 'risk_authority', label: 'Deterministic risk gate', demo: 'PAPER_WIRED', live: 'UNVERIFIED',
+    integrationGap: 'Existing evaluateRisk() must be used with isolated live account and venue semantics.' },
+  { featureId: 'trading_modes', label: 'Mode and emergency authority', demo: 'PAPER_WIRED', live: 'NOT_OPERATIONAL',
+    integrationGap: 'BOUNDED_LIVE is release-locked; reconcile direct-call invariant repair in draft PR #117.' },
+  { featureId: 'paper_oms', label: 'Entries, stops and take-profits', demo: 'PAPER_WIRED', live: 'NOT_OPERATIONAL',
+    integrationGap: 'Simulated book fills/exits are not exchange acknowledgments or native protective orders.' },
+  { featureId: 'financial_ledger', label: 'Orders, positions and P&L accounting', demo: 'PAPER_WIRED', live: 'NOT_OPERATIONAL',
+    integrationGap: 'Durable venue fills and live account/ledger reconciliation are not certified.' },
+  { featureId: 'ditas_memory', label: 'Trade evidence and learning history', demo: 'SOURCE_IN_MAIN', live: 'UNVERIFIED',
+    integrationGap: 'Live order/fill outcome linkage has no independently validated production flow.' },
+  { featureId: 'engine_lease', label: 'Scheduler and leader authority', demo: 'PAPER_WIRED', live: 'UNVERIFIED',
+    integrationGap: 'External submission fencing and crash recovery require venue-specific tests.' },
+  { featureId: 'release_gates', label: 'G01-G14 release evidence', demo: 'SOURCE_IN_MAIN', live: 'NOT_OPERATIONAL',
+    integrationGap: 'All live gates and explicit owner authorization must pass for the exact running build.' },
+  { featureId: 'three_environments', label: 'Paper/testnet/live adapters', demo: 'PROPOSAL_ONLY', live: 'PROPOSAL_ONLY',
+    integrationGap: 'Review draft PR #92; a proposed environment contract is not a certified adapter.' },
+  { featureId: 'live_order_state', label: 'External order lifecycle', demo: 'NOT_APPLICABLE', live: 'PROPOSAL_ONLY',
+    integrationGap: 'Review draft PR #97; durable ACK/partial-fill/cancel/unknown reconciliation is pending.' },
+  { featureId: 'live_adapter', label: 'Live venue submission', demo: 'NOT_APPLICABLE', live: 'NOT_OPERATIONAL',
+    integrationGap: 'No certified live adapter or transaction firewall in inspected main.' },
+  { featureId: 'isolated_signer', label: 'Isolated live signer', demo: 'NOT_APPLICABLE', live: 'NOT_OPERATIONAL',
+    integrationGap: 'No independently verified signing/custody boundary in inspected main.' },
+  { featureId: 'native_live_protection', label: 'Live stop and exit protection', demo: 'NOT_APPLICABLE', live: 'NOT_OPERATIONAL',
+    integrationGap: 'No verified native protective orders with recovery and execution reconciliation.' },
+];
+
+/** Pure read model: cannot submit orders, update controls or unlock live trading. */
+export function tradingParityInventory(): TradingParityCapability[] {
+  return PARITY_ASSESSMENTS.map(assessment => {
+    const feature = MIA_FEATURES.find(f => f.id === assessment.featureId);
+    if (!feature) throw new Error('unknown parity feature: ' + assessment.featureId);
+    return {
+      ...assessment,
+      owner: feature.owner,
+      canonicalPath: feature.inspectedMainPath ?? null,
+      candidatePr: feature.candidatePr ?? null,
+    };
+  });
+}
