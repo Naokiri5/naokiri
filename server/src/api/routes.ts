@@ -212,10 +212,10 @@ export async function routes(app: FastifyInstance) {
     reply.hijack(); // we own the raw socket from here; Fastify must not try to send a second response
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff', 'x-request-id': String(req.id) });
     streams++;
-    sseHealth.opened();
+    const streamHealthId = sseHealth.opened();
     let closed = false; let backlog = 0;
-    const close = () => { if (closed) return; closed = true; streams--; sseHealth.closed(); bus.off('*', send); clearInterval(ka); reply.raw.end(); };
-    const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) { backlog = 0; sseHealth.emitted(); } else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
+    const close = () => { if (closed) return; closed = true; streams--; sseHealth.closed(streamHealthId); bus.off('*', send); clearInterval(ka); reply.raw.end(); };
+    const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) { backlog = 0; sseHealth.emitted(streamHealthId); } else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
     write(': connected\n\n');
     const send = (e: { topic: string; payload: unknown }) => write(`event: ${e.topic}\ndata: ${JSON.stringify(e.payload)}\n\n`);
     // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.
