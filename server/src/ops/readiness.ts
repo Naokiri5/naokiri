@@ -6,6 +6,7 @@ import { currentPolicy } from '../risk/policy.js';
 import { notify } from '../notify/notify.js';
 import { journal } from '../journal/journal.js';
 import { config } from '../config.js';
+import { runtimeHealthChecks } from './runtimeHealth.js';
 
 /**
  * Readiness for an always-on paper server (Phase 1). `ready` answers one question for a supervisor or load balancer:
@@ -51,6 +52,8 @@ export function readiness(e: EngineView, nowTs = Date.now()) {
     checks.push(e.monitorFailing ? { name: 'monitor', status: 'fail', detail: 'last position-monitor pass failed' } : laneCheck('monitor', e.lastMonitorAt, lim.tickerMs, e, nowTs));
     checks.push(laneCheck('scanner', e.lastScanAt, lim.scanMs, e, nowTs));
   }
+  // Share the canonical resource checks with the entry risk gate; a failing runtime is not ready.
+  checks.push(...runtimeHealthChecks(nowTs));
   const ps = providers().filter((p) => p.status !== 'DISABLED');
   checks.push({ name: 'providers', status: 'info', detail: `${ps.filter((p) => p.status === 'LIVE').length}/${ps.length} live` });
   checks.push({ name: 'risk policy', status: 'info', detail: currentPolicy() ? 'accepted' : 'not accepted (no paper entries until accepted)' });
