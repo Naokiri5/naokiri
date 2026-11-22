@@ -29,8 +29,12 @@ export function auditPaperOmsRecovery(): { ok: boolean; detail: string; problems
   const orders = all<{ id: string; position_id: string; purpose: string; side: string;
     status: string; filled_qty: number; fees: number }>(
     `SELECT id,position_id,purpose,side,status,filled_qty,fees FROM orders
-       WHERE account=? AND venue=? AND position_id IS NOT NULL
-       AND (purpose='ENTRY' OR purpose LIKE 'EXIT_%')`, account, venue,
+       WHERE account=? AND venue=? AND (
+         purpose LIKE 'EXIT_%'
+         OR (purpose='ENTRY' AND (
+           position_id IS NOT NULL OR status IN ('NEW','SUBMITTED','PARTIALLY_FILLED')
+         ))
+       )`, account, venue,
   );
   const positionsById = new Map(positions.map((p) => [p.id, p]));
   const quantities = new Map<string, { entry: number; exit: number }>();
@@ -95,7 +99,7 @@ export function auditPaperOmsRecovery(): { ok: boolean; detail: string; problems
   return {
     ok: problems.length === 0,
     detail: problems.length
-      ? `restart OMS evidence mismatch in ${problems.length} check(s); see recovery audit`
+      ? `restart OMS evidence mismatch in ${problems.length} check(s): ${problems.slice(0, 3).join('; ').slice(0, 320)}`
       : `PAPER OMS fills, ledger and quantities agree (${positions.length} position(s))`,
     problems,
   };
