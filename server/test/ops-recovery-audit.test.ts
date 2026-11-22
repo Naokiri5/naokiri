@@ -80,6 +80,26 @@ describe('crash/restart paper OMS evidence reconciliation', () => {
       'order o-pending: unverified EXIT_STOP state NEW');
   });
 
+  it('halts on a ghost NEW entry with no local position, but does not invent its fill', () => {
+    run(`INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,
+      status,purpose,created_at,updated_at) VALUES
+      ('o-ghost','entry-ghost',?,?,?,?,?,?,?,?,?,?)`,
+      PAPER_ACCOUNT, 'binance-paper', instrument, 'BUY', 'MARKET', 1,
+      'NEW', 'ENTRY', now, now);
+    expect(auditPaperOmsRecovery().problems).toContain(
+      'order o-ghost: no open/closed position');
+  });
+
+  it('halts on a disconnected exit intent, including one with no position link', () => {
+    run(`INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,
+      status,purpose,created_at,updated_at) VALUES
+      ('o-disconnected','exit-orphan',?,?,?,?,?,?,?,?,?,?)`,
+      PAPER_ACCOUNT, 'binance-paper', instrument, 'SELL', 'MARKET', 0.5,
+      'SUBMITTED', 'EXIT_STOP', now, now);
+    expect(auditPaperOmsRecovery().problems).toContain(
+      'order o-disconnected: no open/closed position');
+  });
+
   it('allows an owner-approval entry with no position; only materialized fills are reconciled', () => {
     run(`INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,
       status,purpose,created_at,updated_at) VALUES
