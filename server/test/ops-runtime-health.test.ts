@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { freshDb } from './helpers.js';
+import { buildApp } from '../src/index.js';
 import {
   runtimeHealthChecks, runtimeEntryBlocks, sampleRuntimeHealth, sseHealth,
   type RuntimeHealthSample,
@@ -80,5 +81,24 @@ describe('SSE health integration', () => {
     expect(liveSample.databaseError).toBe(false);
     expect(['pass', 'skip']).toContain(status(liveSample, 'runtime.sqlite'));
     expect(liveSample.heapLimitBytes).toBeGreaterThan(0);
+  });
+});
+
+describe('public readiness integration', () => {
+  beforeEach(() => freshDb());
+  it('uses the existing Fastify /api/ready endpoint and reports real resource checks', async () => {
+    const app = await buildApp();
+    try {
+      const response = await app.inject({ method: 'GET', url: '/api/ready' });
+      expect([200, 503]).toContain(response.statusCode); // market lanes may be stopped; health is still reported
+      const body = response.json();
+      const names = body.checks.map((check: { name: string }) => check.name);
+      expect(names).toContain('runtime.heap');
+      expect(names).toContain('runtime.sqlite');
+      expect(names).toContain('runtime.sse');
+      expect(JSON.stringify(body)).not.toContain('MIA_EVIDENCE_KEY');
+    } finally {
+      await app.close(); // must clear the periodic watchdog timer
+    }
   });
 });
