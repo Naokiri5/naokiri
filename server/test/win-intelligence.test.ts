@@ -99,6 +99,33 @@ describe('WIN read-only research and hard execution locks', () => {
     }).eligibleForPaperOmsReview).toBe(false);
   });
 
+  it('charges follower fees against the actual quote size, not the maximum capital cap', () => {
+    const follow = { walletAddress: wallet, accountId: 'paper-bot', selectedBy: 'USER' as const,
+      observeOnly: false, maxSignalAgeMs: 10_000, maxQuoteAgeMs: 5_000,
+      maxEntryDriftBps: 200, maxPriceImpactBps: 80, minLiquidityUsd: 100_000,
+      maxNotionalUsd: 100, requiredFinality: 'FINALIZED' as const };
+    const safety = { mintAddress: mint, verdict: 'PASS' as const,
+      vetoReasons: [], verifiedSellRoute: true, verifiedAt: at - 200,
+      expiresAt: at + 10_000 };
+    const quote = { mintAddress: mint, side: 'BUY' as const,
+      quoteReceivedAt: at - 100, quoteExpiresAt: at + 5_000,
+      priceUsd: 0.00101, priceImpactBps: 10,
+      poolLiquidityUsd: 200_000, estimatedTotalFeesUsd: 0.2,
+      notionalUsd: 100, quoteSourceId: 'read-only-test-quote' };
+    const accepted = evaluateFastWhaleCandidate({
+      observation: swap(), follow, mintSafety: safety,
+      obtainableQuote: quote, now: at, estimatedExpectedMoveBps: 400
+    });
+    expect(accepted.verdict).toBe('CANDIDATE');
+    const tinyQuote = evaluateFastWhaleCandidate({
+      observation: swap(), follow, mintSafety: safety,
+      obtainableQuote: { ...quote, notionalUsd: 1 },
+      now: at, estimatedExpectedMoveBps: 400
+    });
+    expect(tinyQuote.verdict).toBe('REJECTED');
+    expect(tinyQuote.reasonCodes).toContain('NONPOSITIVE_EXPECTED_EDGE_AFTER_COSTS');
+  });
+
   it('DEEP requires point-in-time data and rejects historical lookahead', () => {
     const d = {
       id: 'h1', instrumentId: 'future:BTC', market: 'CRYPTO_PERPETUAL' as const,
