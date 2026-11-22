@@ -21,10 +21,11 @@ Scope: ten owner-provided PDF uploads (nine unique documents); `main` is the bas
 
 - `server/src/ops/runtimeHealth.ts`: samples **real V8 heap** and **real canonical SQLite WAL** from the shared `getDb()` connection. Tracks **the actual authenticated SSE stream** only when clients are connected; no clients is not an outage. Does not checkpoint or write to WAL during checks.
 - `server/src/ops/readiness.ts`: appends resource status to existing unauthenticated /api/ready. A critical heap, unavailable database, unexpected journal mode, or stalled connected stream makes readiness return HTTP 503.
-- `server/src/api/routes.ts`: active stream open/write/close updates the resource monitor. Preserves session revocation, backpressure, auth and the existing /api/stream path.
+- `server/src/api/routes.ts`: active stream open/write/close updates the resource monitor using **per-connection IDs**. The oldest outstanding client frame determines the liveness signal, so a working SSE client cannot hide a stalled peer; closing an ID is idempotent and a late emission cannot resurrect a closed connection. Preserves session revocation, backpressure, auth and the existing /api/stream path.
 - `server/src/index.ts`: starts a 10-second periodic watchdog when Fastify is ready; stops it at close. Emits deduplicated alerts and internal health bus events on degraded/recovered status transitions.
 - `server/src/risk/gate.ts`: critical V8 heap or canonical SQLite WAL failure rejects **new entries**. The existing OMS protective exit monitor is not blocked by a telemetry client or this new entry interlock.
-- `server/test/ops-runtime-health.test.ts`: deterministic threshold, WAL, SSE, risk-interlock and live Fastify readiness tests.
+- `server/test/ops-runtime-health.test.ts`: deterministic threshold, WAL, multi-client SSE stall/close, risk-interlock and actual Fastify readiness tests.
+- `server/test/risk.test.ts`: proves that critical V8 utilization denies a **real canonical PAPER risk evaluation**, then clears without changing the risk policy or enabling LIVE.
 
 This is **active server-side functionality**, not a preview panel or second trading engine. It does not certify the whole system for live settlement.
 
