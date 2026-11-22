@@ -74,6 +74,11 @@ function trustworthyExample(e: WinLearningExample, at: number): boolean {
       e.fingerprintAvailableAt! > o.entryAt ||
       e.entryFingerprint.instrumentId !== o.instrumentId ||
       !o.entryEvidenceId || !o.exitEvidenceId ||
+      !o.exitEvidenceIds?.length || !o.exitSourceSnapshotIds?.length ||
+      o.exitEvidenceIds.length !== o.exitSourceSnapshotIds.length ||
+      new Set(o.exitEvidenceIds).size !== o.exitEvidenceIds.length ||
+      o.exitEvidenceIds[o.exitEvidenceIds.length - 1] !== o.exitEvidenceId ||
+      o.exitSourceSnapshotIds.some(id => !id) ||
       !o.entrySourceSnapshotId || !o.exitSourceSnapshotId ||
       !o.outcomeId || !o.walletAddress ||
       !Number.isFinite(o.grossWhalePnlUsd) ||
