@@ -66,6 +66,17 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(body.live).toMatchObject({ environment: 'LIVE', mode: 'BOUNDED_LIVE', account: null, canPlaceRealOrders: false });
     expect(body.live.unmetGates).toContain('G07');
     expect(body.releaseSummary).toMatch(/live execution LOCKED/);
+    expect(body.capabilityAudit.interpretation).toMatch(/not live venue certification/);
+    expect(body.capabilityAudit.features.length).toBeGreaterThanOrEqual(15);
+    expect(body.capabilityAudit.features.find((f: any) => f.featureId === 'paper_oms')).toMatchObject({
+      owner: 'execution', demo: 'PAPER_WIRED', live: 'NOT_OPERATIONAL',
+    });
+    expect(body.capabilityAudit.liveGaps.find((f: any) => f.featureId === 'live_adapter')).toMatchObject({
+      owner: 'execution', status: 'NOT_OPERATIONAL',
+    });
+    expect(body.capabilityAudit.liveGaps.find((f: any) => f.featureId === 'live_order_state')).toMatchObject({
+      candidatePr: 97, status: 'PROPOSAL_ONLY',
+    });
   });
   it('risk-increasing actions require step-up; risk-reducing ones do not', async () => {
     const password = 'correct horse battery'; const id = STRATEGIES[0].id; const worker = WORKERS[0].id;
