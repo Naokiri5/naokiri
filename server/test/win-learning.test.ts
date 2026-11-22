@@ -128,6 +128,8 @@ describe('WIN-L01 outcome-conditioned market DNA learning (no trade authority)',
     const wrongRegime = wins.map(e => ({ ...e, entryFingerprint: dna(e.outcome.entryAt - 1000,
       { regime: 'RANGE' }) }));
     expect(assessWinAdaptiveLearning(wrongRegime, candidate).matchingClosedLots).toBe(0);
+    const equityCandidate = dna(candidate.asOf, { instrumentId: 'equity:alpaca:SPY' });
+    expect(assessWinAdaptiveLearning(wins, equityCandidate).matchingClosedLots).toBe(0);
   });
 
   it('cannot treat invalid, unknown or unavailable candidate DNA as authorization', () => {
