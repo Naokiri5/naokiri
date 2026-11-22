@@ -113,6 +113,41 @@ const MIGRATIONS: string[] = [
   CREATE TABLE runtime_leases (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at INTEGER NOT NULL,
     renewed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   `,
+  // v6 — WIN-01 read-only whale registry and immutable provider evidence.
+  // This migration stays append-only; re-number on integration if another open PR claims v6.
+  `
+  CREATE TABLE win_whale_follows (
+    account TEXT PRIMARY KEY,
+    wallet_address TEXT NOT NULL,
+    execution_mode TEXT NOT NULL CHECK(execution_mode='READ_ONLY'),
+    active INTEGER NOT NULL CHECK(active IN (0,1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL);
+  CREATE INDEX win_follow_wallet ON win_whale_follows(wallet_address,active);
+  CREATE TABLE win_whale_observations (
+    evidence_id TEXT PRIMARY KEY,
+    signature TEXT NOT NULL,
+    wallet_address TEXT NOT NULL,
+    mint_address TEXT NOT NULL,
+    instrument TEXT NOT NULL,
+    instruction_leg INTEGER NOT NULL CHECK(instruction_leg>=0),
+    side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+    token_amount_atomic TEXT NOT NULL,
+    token_decimals INTEGER NOT NULL CHECK(token_decimals BETWEEN 0 AND 18),
+    observed_at INTEGER NOT NULL,
+    available_at INTEGER NOT NULL,
+    received_at INTEGER NOT NULL,
+    finality TEXT NOT NULL CHECK(finality='FINALIZED'),
+    source_snapshot TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    effective_price_usd REAL NOT NULL CHECK(effective_price_usd>0),
+    UNIQUE(wallet_address,signature,instruction_leg,mint_address));
+  CREATE INDEX win_obs_wallet_ts ON win_whale_observations(wallet_address,observed_at DESC);
+  CREATE TRIGGER win_obs_no_update BEFORE UPDATE ON win_whale_observations
+    BEGIN SELECT RAISE(ABORT, 'WIN observations are immutable'); END;
+  CREATE TRIGGER win_obs_no_delete BEFORE DELETE ON win_whale_observations
+    BEGIN SELECT RAISE(ABORT, 'WIN observations are immutable'); END;
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
