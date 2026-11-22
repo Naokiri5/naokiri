@@ -205,10 +205,18 @@ function winLearningExamples(accountId: string, asOf: number): {
   examples: WinLearningExample[];
   totalClosed: number;
   preEntryDnaCount: number;
+  independentlyCovered: boolean;
 } {
   const read = getWinReadOnlyProfile(accountId, asOf);
   if (read.status !== 'RESEARCH_ONLY' || !read.profile) {
-    return { examples: [], totalClosed: 0, preEntryDnaCount: 0 };
+    return { examples: [], totalClosed: 0, preEntryDnaCount: 0, independentlyCovered: false };
+  }
+  // A bounded wallet-window or quarantined history cannot prove that losses,
+  // hidden unsold lots, or earlier entries were not selectively omitted.
+  if (read.profile.status === 'QUARANTINED' ||
+      read.profile.coverageRatio === null || read.profile.coverageRatio < 0.85) {
+    return { examples: [], totalClosed: read.profile.closedLots.length,
+      preEntryDnaCount: 0, independentlyCovered: false };
   }
   const outcomes = [...read.profile.closedLots]
     .sort((a, b) => b.exitReceivedAt - a.exitReceivedAt)
@@ -241,7 +249,8 @@ function winLearningExamples(accountId: string, asOf: number): {
     return { outcome, entryFingerprint: fingerprint,
       fingerprintAvailableAt: snapshot.created_at, fingerprintSourceId: snapshot.id };
   });
-  return { examples, totalClosed: read.profile.closedLots.length, preEntryDnaCount: dnaCount };
+  return { examples, totalClosed: read.profile.closedLots.length,
+    preEntryDnaCount: dnaCount, independentlyCovered: true };
 }
 
 /**
@@ -269,6 +278,7 @@ export function getWinLearningReadOnlyStatus(accountId: string, asOf = Date.now(
     studiedRecentClosedLots: source.examples.length,
     entryTimeDnaSnapshots: source.preEntryDnaCount,
     delayedCostedFollowerOutcomes: followerCosted,
+    independentlyVerifiedHistoryCoverage: source.independentlyCovered,
     sampledWindowIsCompleteHistory: false as const,
     automaticModelPromotion: false as const,
     canTrade: false as const,
