@@ -62,18 +62,96 @@ function stripComments(source) {
   return output;
 }
 
-function relativeImports(filename) {
-  const src = stripComments(fs.readFileSync(filename, 'utf8'));
-  const references = new Set();
-  const patterns = [
-    /(?:^|[;\n])\s*(?:import|export)\s+(?:(?:type\s+)?[^;]*?\bfrom\s+)?['"](\.[^'"]+)['"]/g,
-    /\b(?:import|require)\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g,
-    /\bnew\s+URL\(\s*['"](\.[^'"]+)['"]\s*,\s*import\.meta\.url\s*\)/g,
-  ];
-  for (const pattern of patterns) {
-    for (const match of src.matchAll(pattern)) references.add(match[1]);
+/**
+ * Tokenize enough TypeScript source to recognize module edges without evaluating
+ * source and without the removed TypeScript 7 JavaScript compiler API.
+ * Strings and comments are isolated so fake import text cannot become an edge.
+ * This remains a conservative advisory reachability scan, not a full parser.
+ */
+function tokenizeImports(text) {
+  const out = [];
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i], next = text[i + 1];
+    if (/\s/.test(ch)) { i++; continue; }
+    if (ch === '/' && next === '/') {
+      i = text.indexOf('\n', i + 2);
+      if (i === -1) break;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end === -1 ? text.length : end + 2;
+      continue;
+    }
+    // Ignore template string bodies: imports inside text are not module edges.
+    if (ch.charCodeAt(0) === 96) {
+      i++;
+      while (i < text.length) {
+        if (text[i] === '\\') { i += 2; continue; }
+        if (text.charCodeAt(i++) === 96) break;
+      }
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      const quote = ch;
+      let value = '';
+      i++;
+      while (i < text.length && text[i] !== quote) {
+        if (text[i] === '\\' && i + 1 < text.length) {
+          i++;
+          value += text[i++];
+        } else value += text[i++];
+      }
+      if (i < text.length) i++;
+      out.push({ type: 'string', value });
+      continue;
+    }
+    if (/[A-Za-z_$]/.test(ch)) {
+      let word = ch;
+      i++;
+      while (i < text.length && /[A-Za-z0-9_$]/.test(text[i])) word += text[i++];
+      out.push({ type: 'id', value: word });
+      continue;
+    }
+    if ('(){};,.'.includes(ch)) out.push({ type: 'punct', value: ch });
+    i++;
   }
-  return [...references];
+  return out;
+}
+
+function relativeImports(filename) {
+  const tokens = tokenizeImports(fs.readFileSync(filename, 'utf8'));
+  const result = [];
+  const add = (token) => {
+    if (token?.type === 'string' && token.value.startsWith('.')) result.push(token.value);
+  };
+  const val = (index) => tokens[index]?.value;
+  const fromAfter = (at) => {
+    // Handle import type { X } from './x' and export * from './x'.
+    // End at statement boundary; no trailing JS string can be mistaken for it.
+    for (let j = at + 1; j < Math.min(tokens.length, at + 120); j++) {
+      if (val(j) === 'from' && tokens[j + 1]?.type === 'string') { add(tokens[j + 1]); break; }
+      if (val(j) === ';' || val(j) === 'import' || val(j) === 'export') break;
+    }
+  };
+  for (let i = 0; i < tokens.length; i++) {
+    const t = val(i);
+    if (t === 'import') {
+      if (val(i + 1) === '(') add(tokens[i + 2]);
+      else if (tokens[i + 1]?.type === 'string') add(tokens[i + 1]);
+      else if (val(i + 1) !== '.') fromAfter(i);
+    } else if (t === 'export') {
+      fromAfter(i);
+    } else if (t === 'require' && val(i + 1) === '(') {
+      add(tokens[i + 2]);
+    } else if (t === 'new' && val(i + 1) === 'URL' && val(i + 2) === '(' &&
+      val(i + 4) === ',' && val(i + 5) === 'import' && val(i + 6) === '.' &&
+      val(i + 7) === 'meta' && val(i + 8) === '.' && val(i + 9) === 'url') {
+      add(tokens[i + 3]);
+    }
+  }
+  return result;
 }
 
 function resolveImport(from, specifier, files) {
