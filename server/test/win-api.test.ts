@@ -68,6 +68,19 @@ describe('WIN HTTP integration (owner auth + CSRF, no execution)', () => {
     expect(p.profile.reasonCodes).toContain('NO_INDEPENDENT_HISTORY_COVERAGE');
   });
 
+  it('learning memory is authenticated, source-backed and cannot auto-trade', async () => {
+    expect((await app.inject({ url: '/api/copy/learning' })).statusCode).toBe(401);
+    const res = await app.inject({ url: '/api/copy/learning', headers: { cookie } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      version: 'WIN-L01', status: 'AWAITING_VERIFIED_LEARNING_INPUTS',
+      totalReconstructedClosedLots: 0, studiedRecentClosedLots: 0,
+      entryTimeDnaSnapshots: 0, delayedCostedFollowerOutcomes: 0,
+      sampledWindowIsCompleteHistory: false, automaticModelPromotion: false,
+      canTrade: false, canDisableRisk: false, liveExecution: 'LOCKED',
+    });
+  });
+
   it('DEEP returns only inferred anonymous research from existing large-print source', async () => {
     const r = await app.inject({ url: '/api/whales/deep', headers: { cookie } });
     expect(r.statusCode).toBe(200);
