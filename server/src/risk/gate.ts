@@ -13,7 +13,7 @@ import { openIncidentFor } from '../exec/incidents.js';
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
 export interface RiskProposal { instrumentId: string; strategyId: string; side: 'buy'; entryPrice: number; stopPrice: number; idempotencyKey: string; traceId: string; account?: string }
-export interface Sizing { qty: number; notional: number; riskBudget: number; plannedMaxLoss: number; perUnitLoss: number; conservativeStopFill: number; estEntry: number; estFees: number }
+export interface Sizing { qty: number; notional: number; maxNotional: number; riskBudget: number; plannedMaxLoss: number; perUnitLoss: number; conservativeStopFill: number; estEntry: number; estFees: number }
 export interface RiskDecision { decision: RiskDecisionKind; reasonCodes: string[]; evaluated: Record<string, number | string | boolean | null>; sizing: Sizing | null; policyVersion: number | null; ts: string; traceId: string }
 
 export function evaluateRisk(p: RiskProposal, nowTs = Date.now()): RiskDecision {
@@ -98,7 +98,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   if (qty <= 0 || qty < inst.minQty || notional < Math.max(inst.minNotional, 5)) deny.push(`SIZE_BELOW_VENUE_MINIMUM qty=${qty} notional=${notional.toFixed(2)}`);
   const plannedMaxLoss = qty * perUnitLoss;
   // NaN compares false against every limit, so a non-finite input would otherwise slip through as ALLOW.
-  if (![acct.equity, acct.cash, acct.dailyPnlPct, acct.weeklyPnlPct, acct.drawdownPct, estEntry, perUnitLoss, qty, notional, plannedMaxLoss].every(Number.isFinite)) deny.push('NON_FINITE_INPUT (risk cannot be computed)');
+  if (![acct.equity, acct.cash, acct.dailyPnlPct, acct.weeklyPnlPct, acct.drawdownPct, estEntry, perUnitLoss, qty, notional, maxNotional, plannedMaxLoss].every(Number.isFinite)) deny.push('NON_FINITE_INPUT (risk cannot be computed)');
   if (acct.openRiskUsd + plannedMaxLoss > acct.equity * (pol.maxOpenRiskPct / 100) + 1e-9) deny.push(`AGGREGATE_OPEN_RISK ${(((acct.openRiskUsd + plannedMaxLoss) / acct.equity) * 100).toFixed(2)}% > ${pol.maxOpenRiskPct}%`);
   const imp = bookImpact(d?.book ?? null, 'buy', Math.max(notional, 1));
   const age = bookAge(d?.book, nowTs); ev.bookAgeMs = age;
@@ -112,7 +112,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
     ev.costR = round(costR, 4);
     if (costR > pol.maxCostR) deny.push(`COST_R ${costR.toFixed(3)} > ${pol.maxCostR}`);
   }
-  const sizing: Sizing = { qty, notional: round(notional, 2), riskBudget: round(riskBudget, 2), plannedMaxLoss: round(plannedMaxLoss, 2), perUnitLoss, conservativeStopFill, estEntry, estFees: round(pol.feeRate * notional * 2, 4) };
+  const sizing: Sizing = { qty, notional: round(notional, 2), maxNotional, riskBudget: round(riskBudget, 2), plannedMaxLoss: round(plannedMaxLoss, 2), perUnitLoss, conservativeStopFill, estEntry, estFees: round(pol.feeRate * notional * 2, 4) };
   return out(sizing);
 
   function out(sz: Sizing | null = null): RiskDecision {

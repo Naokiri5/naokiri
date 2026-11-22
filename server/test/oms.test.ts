@@ -144,6 +144,26 @@ describe('Order-book freshness and fill accounting', () => {
     expect(openPositions()).toHaveLength(0);
     expect(accountState().cash).toBe(10_000);
   });
+  it('rejects a fill whose depth-walk notional exceeds the policy cap', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 1 });
+    const book = market.deep.get(id)!.book!;
+    const ask = market.price(id)!.ask!;
+    book.asks = [[ask, 0.05], [ask * 1.0008, 50]];
+    expect(submitEntry(report(id, last), 'bot')).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('POSITION_NOTIONAL_LIMIT'),
+    });
+    expect(openPositions()).toHaveLength(0);
+    expect(all('SELECT id FROM fills')).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
+  });
+  it('accepts the capped size when the executable depth fits within the policy cap', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 1 });
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    expect(pos.qty * pos.entry_price).toBeLessThanOrEqual(100);
+    expect(reconcile().ok).toBe(true);
+  });
   it('never prices a stop-out from a stale book or a ticker fallback: keeps it open and raises the alert', () => {
     // CLAUDE.md invariant #4 (PR #4): no synthetic fills. Originally (PR #3) this exit filled at a quote-based price.
     expect(submitEntry(report(id, last), 'bot').ok).toBe(true);

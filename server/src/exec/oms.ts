@@ -134,7 +134,11 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       if (fill.impactBps > pol.maxSlippageBps) return { reason: `SLIPPAGE ${fill.impactBps.toFixed(1)}bps at submission` };
       if (fill.price <= s.stopLoss) return { reason: 'PRICE_THROUGH_STOP' };
       if (s.takeProfit.some((t) => t.price <= fill.price)) return { reason: 'PRICE_THROUGH_TARGET: fill would be at or above a take-profit level' };
-      const fee = fill.price * qty * pol.feeRate;
+      const notional = fill.price * qty;
+      if (!Number.isFinite(notional) || notional > fresh.sizing.maxNotional + 1e-9) {
+        return { reason: `POSITION_NOTIONAL_LIMIT: fill ${notional.toFixed(2)}, limit ${fresh.sizing.maxNotional.toFixed(2)}` };
+      }
+      const fee = notional * pol.feeRate;
       const R = fill.price - s.stopLoss;
       const tgts = s.takeProfit.map((t) => ({ r: (t.price - fill.price) / R, fraction: t.fraction }));
       const st = newExitState(fill.price, s.stopLoss, qty, tgts, null, 0);
@@ -143,7 +147,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       const maxHoldMs = (strat === 'range_reversion' ? 24 : strat === 'trend_pullback' ? 48 : 72) * 3600_000;
       const trailAfterR = strat === 'trend_pullback' ? 1 : strat === 'donchian_breakout' ? 1.5 : null;
       const cash = cashBalance(PAPER_ACCOUNT);
-      const total = fill.price * qty + fee;
+      const total = notional + fee;
       if (!Number.isFinite(total) || total > cash + 1e-9) {
         return { reason: `INSUFFICIENT_CASH: need ${total.toFixed(2)}, have ${cash.toFixed(2)}` };
       }
@@ -158,7 +162,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       // Protective stop: paper venue has no exchange-native stop; OMS monitors it. Recorded explicitly.
       insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: 'STOP_MARKET (OMS-monitored, paper)', qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId });
       crashpoint('entry.stop');
-      ledger(PAPER_ACCOUNT, 'BUY', -fill.price * qty, oid, `${s.asset} entry`); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee');
+      ledger(PAPER_ACCOUNT, 'BUY', -notional, oid, `${s.asset} entry`); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee');
       crashpoint('entry.precommit');
       return { orderId: oid, posId, qty, fill, fee, fresh, strat, plannedMaxLoss: fresh.sizing.plannedMaxLoss };
     }); } catch (e: any) {
