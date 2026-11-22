@@ -32,6 +32,8 @@ export interface PaperExpectancyCohort {
   winRatePct: number | null;
   rollingExpectancyUsd: number | null;
   rollingExpectancyR: number | null;
+  /** Peak-to-trough realized drawdown in R units, NOT portfolio equity drawdown percent. */
+  rollingMaxDrawdownR: number | null;
   profitFactor: number | null;
   status: ExpectancyStatus;
   note: string;
@@ -57,11 +59,11 @@ export function assessPaperExpectancyCohort(rows: readonly ClosedPaperTrade[]): 
     Number.isFinite(r.closed_at) && r.closed_at > 0 &&
     Number.isFinite(r.realized_pnl) &&
     Number.isFinite(r.planned_risk) && r.planned_risk > 0,
-  );
+  ) && new Set(rows.map(r => r.id)).size === rows.length;
   if (!valid) return {
     ...base, winningTrades: null, winRatePct: null, rollingExpectancyUsd: null,
-    rollingExpectancyR: null, profitFactor: null, status: 'INVALID_EVIDENCE',
-    note: 'Missing or invalid stored PnL, planned risk or closing time; fail closed.',
+    rollingExpectancyR: null, rollingMaxDrawdownR: null, profitFactor: null, status: 'INVALID_EVIDENCE',
+    note: 'Missing/invalid stored PnL, planned risk, closing time or duplicate position ID; fail closed.',
   };
 
   const wins = rows.filter(r => r.realized_pnl > 0).length;
@@ -70,10 +72,20 @@ export function assessPaperExpectancyCohort(rows: readonly ClosedPaperTrade[]): 
   const expectancyUsd = rows.reduce((n, r) => n + r.realized_pnl, 0) / rows.length;
   const expectancyR = rows.reduce((n, r) => n + r.realized_pnl / r.planned_risk, 0) / rows.length;
   const factor = loss > 0 ? profit / loss : null;
-  if (![profit, loss, expectancyUsd, expectancyR].every(Number.isFinite) ||
+  // Source SQL selects newest-first; drawdown must be evaluated oldest-first.
+  // Start at a zero-R watermark and never fabricate a percent of sleeve equity.
+  let realizedEquityR = 0;
+  let peakR = 0;
+  let maxDrawdownR = 0;
+  for (const row of [...rows].sort((a, b) => a.closed_at - b.closed_at || a.id.localeCompare(b.id))) {
+    realizedEquityR += row.realized_pnl / row.planned_risk;
+    peakR = Math.max(peakR, realizedEquityR);
+    maxDrawdownR = Math.max(maxDrawdownR, peakR - realizedEquityR);
+  }
+  if (![profit, loss, expectancyUsd, expectancyR, realizedEquityR, maxDrawdownR].every(Number.isFinite) ||
       (factor !== null && !Number.isFinite(factor))) return {
     ...base, winningTrades: null, winRatePct: null, rollingExpectancyUsd: null,
-    rollingExpectancyR: null, profitFactor: null, status: 'INVALID_EVIDENCE',
+    rollingExpectancyR: null, rollingMaxDrawdownR: null, profitFactor: null, status: 'INVALID_EVIDENCE',
     note: 'An aggregation overflowed or returned non-finite evidence; fail closed.',
   };
   const meetsThresholds = rows.length >= SAMPLE_TARGET &&
@@ -85,6 +97,7 @@ export function assessPaperExpectancyCohort(rows: readonly ClosedPaperTrade[]): 
   return {
     ...base, winningTrades: wins, winRatePct: (wins / rows.length) * 100,
     rollingExpectancyUsd: expectancyUsd, rollingExpectancyR: expectancyR,
+    rollingMaxDrawdownR: maxDrawdownR,
     profitFactor: factor, status,
     note: factor === null
       ? 'Profit factor not measurable without losses; never treat as automatic live eligibility.'
@@ -124,6 +137,7 @@ export function rollingPaperExpectancy() {
       'Groups by stored market and strategy; PDF setup category and venue-level TCA are not present in this ledger.',
       'The 30-trade thresholds are exploratory; no out-of-sample, independent execution-cost or slippage certification.',
       'Profit/loss uses stored realized_pnl without inventing independent fee or fill measurements.',
+      'Rolling max drawdown is realized peak-to-trough R, not intraday or equity drawdown percent; it cannot certify the PDF drawdown gate.',
     ],
   };
 }
