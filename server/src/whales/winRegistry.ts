@@ -1,4 +1,7 @@
-import { all, get, run, tx } from '../db/db.js';
+import { all, get, run, tx, P } from '../db/db.js';
+import { sha256 } from '../core/util.js';
+import type { MarketFingerprint } from '../ditas/fingerprint.js';
+import { assessWinAdaptiveLearning, type WinLearningExample } from './winLearning.js';
 import type { VerifiedWalletSwap } from './winEvidence.js';
 import { profileVerifiedWalletSwaps } from './winProfiler.js';
 import { makeWalletObservationKey, parseAtomicQuantity } from './winEvidence.js';
@@ -189,5 +192,94 @@ export function getWinReadOnlyProfile(accountId: string, asOf = Date.now()) {
     source: 'WIN_FINALIZED_EVIDENCE_ONLY' as const,
     executable: false as const,
     note: 'Gross matched-swap PnL is not audited wallet net PnL. Missing hedges, fees, incomplete history and sellable liquidity prevent automatic whale ranking.'
+  };
+}
+
+/**
+ * WIN-L01: derive outcome memory from the existing immutable WIN observations
+ * and the existing immutable DITAS pre-entry snapshots. Nothing is rewritten.
+ * Historic follower quote evidence is NOT yet persisted by WIN; consequently
+ * gross whale wins/losses cannot automatically become trained follower labels.
+ */
+function winLearningExamples(accountId: string, asOf: number): {
+  examples: WinLearningExample[];
+  totalClosed: number;
+  preEntryDnaCount: number;
+} {
+  const read = getWinReadOnlyProfile(accountId, asOf);
+  if (read.status !== 'RESEARCH_ONLY' || !read.profile) {
+    return { examples: [], totalClosed: 0, preEntryDnaCount: 0 };
+  }
+  const outcomes = [...read.profile.closedLots]
+    .sort((a, b) => b.exitReceivedAt - a.exitReceivedAt)
+    .slice(0, 100); // Strict read-only bounded study set; never claim full wallet history.
+  let dnaCount = 0;
+  const examples: WinLearningExample[] = outcomes.map(outcome => {
+    // The DITAS snapshot MUST predate the original whale entry, and its
+    // immutable content hash must still match. No future market view is used.
+    const snapshot = get<{ id: string; created_at: number; payload: string; hash: string }>(
+      'SELECT id,created_at,payload,hash FROM ditas_snapshots ' +
+      'WHERE instrument=? AND created_at<=? AND created_at>=? ' +
+      'ORDER BY created_at DESC LIMIT 1',
+      outcome.instrumentId, outcome.entryAt, outcome.entryAt - 300_000);
+    if (!snapshot || sha256(snapshot.payload) !== snapshot.hash ||
+        snapshot.id !== 'snap_' + snapshot.hash) {
+      return { outcome, entryFingerprint: null,
+        fingerprintAvailableAt: null, fingerprintSourceId: null };
+    }
+    let fingerprint: MarketFingerprint | null = null;
+    try {
+      const parsed = P(snapshot.payload) as { fingerprint?: MarketFingerprint | null };
+      fingerprint = parsed.fingerprint ?? null;
+    } catch { /* Malformed historic data is not trusted. */ }
+    if (!fingerprint || fingerprint.instrumentId !== outcome.instrumentId ||
+        fingerprint.asOf > snapshot.created_at) {
+      return { outcome, entryFingerprint: null,
+        fingerprintAvailableAt: null, fingerprintSourceId: null };
+    }
+    dnaCount++;
+    return { outcome, entryFingerprint: fingerprint,
+      fingerprintAvailableAt: snapshot.created_at, fingerprintSourceId: snapshot.id };
+  });
+  return { examples, totalClosed: read.profile.closedLots.length, preEntryDnaCount: dnaCount };
+}
+
+/**
+ * Callable by a FUTURE reviewed THINK adapter with its own canonical market
+ * fingerprint. No immediate OMS/risk/decision integration is made here.
+ */
+export function assessWinLearningForCandidate(
+  accountId: string, candidate: MarketFingerprint, asOf = candidate.asOf
+) {
+  const evidence = winLearningExamples(accountId, asOf);
+  return assessWinAdaptiveLearning(evidence.examples, candidate, asOf);
+}
+
+/** Existing owner-authenticated GET /api/copy/learning exposes truthful readiness. */
+export function getWinLearningReadOnlyStatus(accountId: string, asOf = Date.now()) {
+  const source = winLearningExamples(accountId, asOf);
+  const followerCosted = source.examples.filter(x =>
+    x.outcome.simulatedFollowerNetPnlUsd !== null).length;
+  return {
+    version: 'WIN-L01' as const,
+    status: followerCosted >= 6 && source.preEntryDnaCount >= 6
+      ? 'RESEARCH_INPUTS_PRESENT' as const : 'AWAITING_VERIFIED_LEARNING_INPUTS' as const,
+    source: 'WIN_IMMUTABLE_SWAPS_AND_DITAS_SNAPSHOTS' as const,
+    totalReconstructedClosedLots: source.totalClosed,
+    studiedRecentClosedLots: source.examples.length,
+    entryTimeDnaSnapshots: source.preEntryDnaCount,
+    delayedCostedFollowerOutcomes: followerCosted,
+    sampledWindowIsCompleteHistory: false as const,
+    automaticModelPromotion: false as const,
+    canTrade: false as const,
+    canDisableRisk: false as const,
+    liveExecution: 'LOCKED' as const,
+    nextRequirements: [
+      'Certified continuous wallet ingestion and complete history coverage',
+      'Independent delayed historical follower buy/sell quotes and transaction fees',
+      'Source-hashed pre-entry market fingerprints for each studied instrument',
+      'Independent-wallet holdout and walk-forward validation before any abstain-only THINK wiring',
+    ],
+    note: 'Research memory is reconstructed from existing immutable source events. Gross whale PnL is not an actual follower win/loss, and no unverified setup can automatically enter trading decisions.',
   };
 }
