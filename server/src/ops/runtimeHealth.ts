@@ -35,24 +35,32 @@ const maxSseIdleMs = () => {
   return Number.isFinite(n) && n >= 25_000 && n <= 300_000 ? n : 45_000;
 };
 
-let activeStreams = 0;
-let lastFrameAtMs = 0;
+// Keep a timestamp for every connected SSE client. A healthy client must not
+// mask another stalled client; this also keeps close/error cleanup idempotent.
+let nextStreamId = 0;
+const streamFrames = new Map<number, number>();
 
 /** Attach to the canonical authenticated GET /api/stream, not the proposed /api/telemetry/stream. */
 export const sseHealth = {
-  opened(nowMs = Date.now()) {
-    activeStreams++;
-    lastFrameAtMs = nowMs;
+  opened(nowMs = Date.now()): number {
+    const id = ++nextStreamId;
+    streamFrames.set(id, nowMs);
+    return id;
   },
-  emitted(nowMs = Date.now()) {
-    if (activeStreams) lastFrameAtMs = nowMs;
+  emitted(id: number, nowMs = Date.now()): void {
+    if (streamFrames.has(id)) streamFrames.set(id, nowMs);
   },
-  closed() {
-    activeStreams = Math.max(0, activeStreams - 1);
-    if (!activeStreams) lastFrameAtMs = 0;
+  closed(id: number): void {
+    streamFrames.delete(id);
   },
   state() {
-    return { activeStreams, lastFrameAtMs };
+    // Oldest stream is the limiting liveness signal.
+    const timestamps = streamFrames.values();
+    let oldest = 0;
+    for (const at of timestamps) {
+      if (!oldest || at < oldest) oldest = at;
+    }
+    return { activeStreams: streamFrames.size, lastFrameAtMs: oldest };
   },
 };
 
