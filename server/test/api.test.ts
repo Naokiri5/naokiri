@@ -145,10 +145,19 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(JSON.stringify(getControl())).not.toContain('password');
   });
   it('every GET workspace endpoint responds', async () => {
-    for (const u of ['/api/overview', '/api/markets', '/api/scanner', '/api/intelligence', '/api/risk', '/api/bot', '/api/portfolio', '/api/orders', '/api/journal', '/api/calendar', '/api/lab', '/api/news', '/api/whales', '/api/wallet', '/api/connections', '/api/notifications', '/api/settings', '/api/qa', '/api/audit', '/api/joe', '/api/bubbles', '/api/dex', '/api/fx'])
+    for (const u of ['/api/overview', '/api/markets', '/api/scanner', '/api/sequence', '/api/intelligence', '/api/risk', '/api/bot', '/api/portfolio', '/api/orders', '/api/journal', '/api/calendar', '/api/lab', '/api/news', '/api/whales', '/api/wallet', '/api/connections', '/api/notifications', '/api/settings', '/api/qa', '/api/audit', '/api/joe', '/api/bubbles', '/api/dex', '/api/fx'])
       expect((await app.inject({ url: u, headers: { cookie } })).statusCode, u).toBe(200);
     const intel = (await app.inject({ url: '/api/intelligence', headers: { cookie } })).json();
     expect(intel.workers).toHaveLength(100); expect(intel.indicatorSpecialists).toHaveLength(50);
+  });
+  it('sequence diagnostics are authenticated, bounded and not a write path', async () => {
+    expect((await app.inject({ url: '/api/sequence' })).statusCode).toBe(401);
+    expect((await app.inject({ url: '/api/sequence?limit=999', headers: { cookie } })).statusCode).toBe(400);
+    expect((await app.inject({ url: '/api/sequence?limit=1&limit=2', headers: { cookie } })).statusCode).toBe(400);
+    const data = (await app.inject({ url: '/api/sequence?limit=5', headers: { cookie } })).json();
+    expect(data.advisoryOnly).toBe(true);
+    expect(Array.isArray(data.items)).toBe(true);
+    expect((await app.inject({ url: '/api/sequence/nonexistent', headers: { cookie } })).statusCode).toBe(404);
   });
   it('analyzes the existing closed cache and rejects unsupported instrument intervals', async () => {
     seedInstrument('CHARTUSDT');
