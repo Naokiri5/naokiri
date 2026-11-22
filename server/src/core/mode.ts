@@ -15,6 +15,13 @@ export function displayMode(c = getControl()) {
 }
 export function updateControl(actor: string, patch: Partial<ControlState>, gateCheck?: (m: Mode) => { ok: boolean; reason?: string }) {
   const cur = getControl();
+  // LIVE is not implemented or certified. Enforce this at the canonical mode authority,
+  // not only at HTTP routes: an internal owner-context caller may omit gateCheck or
+  // supply a permissive callback. Future LIVE support requires a server-owned,
+  // non-optional certification/authorization check here before this lock is removed.
+  if (patch.mode === 'BOUNDED_LIVE') {
+    throw new Error('BOUNDED_LIVE blocked: no certified live venue, signer or core authorization is available');
+  }
   if (patch.mode && patch.mode !== cur.mode) {
     if (actor !== 'owner') throw new Error('only the authenticated owner may change execution mode');
     const g = gateCheck?.(patch.mode) ?? { ok: true };
