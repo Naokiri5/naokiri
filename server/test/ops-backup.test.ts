@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,13 +6,17 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { freshDb } from './helpers.js';
 import { audit } from '../src/core/audit.js';
-import { backupKey, createBackup, decrypt, encrypt, listBackups, pruneBackups, verifyBackup } from '../src/ops/backup.js';
+import * as auditModule from '../src/core/audit.js';
+import { config } from '../src/config.js';
+import { run } from '../src/db/db.js';
+import { backupKey, createBackup, decrypt, encrypt, listBackups, maybeScheduledBackup, pruneBackups, verifyBackup } from '../src/ops/backup.js';
 
 const KEY = Buffer.alloc(32, 7);
 let dir: string;
 describe('database backups', () => {
+  const wasOffline = config.offline;
   beforeEach(() => { freshDb(); audit('test', 'seed', { n: 1 }); audit('test', 'seed', { n: 2 }); dir = mkdtempSync(join(tmpdir(), 'mia-bk-')); });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => { config.offline = wasOffline; vi.unstubAllEnvs(); rmSync(dir, { recursive: true, force: true }); });
 
   it('writes a plaintext snapshot with a manifest that passes the restore check', () => {
     const m = createBackup({ dir, key: null, nowTs: 1_800_000_000_000 });
@@ -52,6 +56,70 @@ describe('database backups', () => {
     expect(() => backupKey('too-short')).toThrow(/32 bytes/);
     expect(backupKey('')).toBeNull(); expect(backupKey(undefined)).toBeNull();
     expect(backupKey('07'.repeat(32))).toEqual(KEY); expect(backupKey(KEY.toString('base64'))).toEqual(KEY);
+  });
+  it('requires encryption before writing a snapshot on an online or production instance', () => {
+    vi.stubEnv('MIA_BACKUP_KEY', '');
+    config.offline = false;
+    expect(() => createBackup({ dir })).toThrow(/MIA_BACKUP_KEY is required/);
+    expect(() => createBackup({ dir, key: null })).toThrow(/MIA_BACKUP_KEY is required/);
+    config.offline = true;
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(() => createBackup({ dir })).toThrow(/MIA_BACKUP_KEY is required/);
+    expect(readdirSync(dir)).toEqual([]);
+    vi.stubEnv('MIA_BACKUP_KEY', KEY.toString('hex'));
+    const backup = createBackup({ dir, nowTs: 1_800_000_000_000 });
+    expect(backup.encrypted).toBe(true);
+    expect(verifyBackup(join(dir, backup.file), KEY).ok).toBe(true);
+    expect(readdirSync(dir).sort()).toEqual([backup.file, `${backup.file}.json`]);
+  });
+  it('replaces a recent plaintext snapshot with a verified encrypted scheduled backup online', () => {
+    const t = 1_800_000_000_000;
+    const earlier = createBackup({ dir, key: null, nowTs: t });
+    vi.stubEnv('MIA_BACKUP_DIR', dir);
+    vi.stubEnv('MIA_BACKUP_KEY', KEY.toString('hex'));
+    vi.stubEnv('MIA_BACKUP_INTERVAL_H', '1');
+    config.offline = false;
+    const next = maybeScheduledBackup(t + 1000);
+    expect(next).toMatchObject({ encrypted: true });
+    expect(verifyBackup(join(dir, next!.file), KEY).ok).toBe(true);
+    expect(existsSync(join(dir, earlier.file))).toBe(true);
+  });
+  it('preserves the last verified snapshot when a new scheduled snapshot fails its restore check', () => {
+    const t = 1_800_000_000_000;
+    const earlier = createBackup({ dir, key: KEY, nowTs: t });
+    vi.stubEnv('MIA_BACKUP_DIR', dir);
+    vi.stubEnv('MIA_BACKUP_KEY', KEY.toString('hex'));
+    vi.stubEnv('MIA_BACKUP_INTERVAL_H', '1');
+    vi.stubEnv('MIA_BACKUP_KEEP', '1');
+    run("UPDATE audit_log SET action='modified' WHERE id=(SELECT MIN(id) FROM audit_log)");
+    expect(() => maybeScheduledBackup(t + 3_600_000)).toThrow(/restore check failed.*audit chain/i);
+    expect(listBackups(dir).map(({ file }) => file)).toEqual([earlier.file]);
+    expect(verifyBackup(join(dir, earlier.file), KEY).ok).toBe(true);
+  });
+  it('keeps a candidate out of retention until restore verification succeeds', () => {
+    const first = createBackup({ dir, key: KEY, nowTs: 1_800_000_000_000 });
+    const verifyAuditChain = auditModule.verifyAuditChain;
+    const verify = vi.spyOn(auditModule, 'verifyAuditChain').mockImplementationOnce((entries) => {
+      expect(listBackups(dir).map(({ file }) => file)).toEqual([first.file]);
+      return verifyAuditChain(entries);
+    });
+    try {
+      const second = createBackup({ dir, key: KEY, nowTs: first.createdAt + 1000 });
+      expect(verify).toHaveBeenCalledOnce();
+      expect(listBackups(dir).map(({ file }) => file)).toEqual([second.file, first.file]);
+    } finally { verify.mockRestore(); }
+  });
+  it('keeps a due backup even if an existing manifest is future-dated', () => {
+    const t = 1_800_000_000_000;
+    const future = createBackup({ dir, key: KEY, nowTs: t + 3_600_000 });
+    vi.stubEnv('MIA_BACKUP_DIR', dir);
+    vi.stubEnv('MIA_BACKUP_KEY', KEY.toString('hex'));
+    vi.stubEnv('MIA_BACKUP_INTERVAL_H', '1');
+    vi.stubEnv('MIA_BACKUP_KEEP', '1');
+    const current = maybeScheduledBackup(t);
+    expect(current).not.toBeNull();
+    expect(verifyBackup(join(dir, current!.file), KEY).ok).toBe(true);
+    expect(listBackups(dir).map(({ file }) => file)).toEqual([future.file, current!.file]);
   });
   it('round-trips encryption and keeps only the newest N backups', () => {
     expect(decrypt(encrypt(Buffer.from('hello'), KEY), KEY).toString()).toBe('hello');

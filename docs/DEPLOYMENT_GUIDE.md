@@ -9,8 +9,9 @@
 - Secrets only via environment variables (`.env.example`). They never reach the browser, logs (redacted), or LLM prompts.
 
 ## Backup & restore
-- Data lives in `$MIA_DATA_DIR/mia.db` (SQLite WAL). Back up with `sqlite3 data/mia.db ".backup data/backup-$(date +%F).db"`
-  while running. Restore by stopping the server and replacing `mia.db` (delete `-wal`/`-shm`).
+- Data lives in `$MIA_DATA_DIR/mia.db` (SQLite WAL). Set `MIA_BACKUP_KEY` in the server environment before the first Privy owner binding and before creating online or production backups. Set a 32-byte key as hex or base64 and retain a protected copy separate from backup files.
+- Run `npm run backup -- create` to create and verify an encrypted snapshot before retention. Run `npm run backup -- verify <snapshot>` with the original backup key to verify a stored snapshot. Legacy plaintext snapshots remain readable for recovery. The backup and data volumes must support hard links for atomic publication. Use a service-account-private temporary directory on protected storage for local snapshot and verification work files.
+- Preserve the original evidence signing key separately. If you use `MIA_EVIDENCE_KEY`, restore that same value. Otherwise restore `$MIA_DATA_DIR/evidence.key` with the database before startup. MIA requires a usable persistent key when online or using an explicit data directory.
 - Migrations are append-only (`server/src/db/migrations.ts`). Roll back code by redeploying the previous commit together
   with a pre-upgrade backup.
 
