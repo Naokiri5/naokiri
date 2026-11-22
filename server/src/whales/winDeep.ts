@@ -7,7 +7,8 @@ export interface DeepFootprint {
   readonly instrumentId: string;
   readonly symbol: string;
   readonly observedAt: number;
-  readonly availableAt: number;
+  /** Public aggregate print timestamp is NOT a verified first-availability timestamp. */
+  readonly availableAt: null;
   readonly direction: 'BUY' | 'SELL';
   readonly notionalUsd: number;
   readonly status: 'RESEARCH_ONLY';
@@ -29,7 +30,7 @@ export function reconstructReadOnlyDeepFootprints(
       instrumentId: p.instrumentId,
       symbol: p.symbol,
       observedAt: p.ts,
-      availableAt: p.ts,
+      availableAt: null,
       direction: p.side,
       notionalUsd: p.notional,
       status: 'RESEARCH_ONLY' as const
