@@ -1,6 +1,7 @@
 import { STRATEGIES } from '../lab/strategies.js';
 import { strategyStats } from '../lab/lab.js';
 import { all, get, P } from '../db/db.js';
+import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
 const RULES: Record<string, { entry: string[]; stop: string; exit: string; dependencies: string[]; weaknesses: string[] }> = {
   trend_pullback: {
@@ -43,7 +44,7 @@ export function strategyPassports() {
   return STRATEGIES.map(s => {
     const registry = get<{ status: string; version: string }>('SELECT status, version FROM strategies WHERE id=?', s.id);
     const recent = all<{ realized_pnl: number; planned_risk: number; report: string | null }>(`SELECT p.realized_pnl, p.planned_risk, d.report FROM positions p LEFT JOIN decisions d ON d.id=p.decision_id
-      WHERE p.strategy=? AND p.status='CLOSED' ORDER BY p.closed_at DESC LIMIT ?`, s.id, WINDOW);
+      WHERE p.strategy=? AND p.account=? AND p.status='CLOSED' ORDER BY p.closed_at DESC LIMIT ?`, s.id, PAPER_ACCOUNT, WINDOW);
     const valid: number[] = []; let unknownVersion = 0, otherVersion = 0, invalidRisk = 0;
     for (const p of recent.reverse()) {
       let version: string | undefined;

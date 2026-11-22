@@ -13,6 +13,7 @@ import { getControl, updateControl } from '../core/mode.js';
 import { stepExit, newExitState, type ExitState } from '../lab/exits.js';
 import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
+import { paperExperience } from '../ditas/experience.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { crashpoint } from './crashpoint.js';
 
@@ -107,6 +108,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
   if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
   if (actor === 'bot' && ctl.mode !== 'PAPER') return { ok: false, reason: `mode ${ctl.mode} does not permit automatic paper entries` };
   if (Date.parse(report.consensus.expiresAt) <= Date.now()) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data');
+  const experience = paperExperience(s.strategy.id, s.strategy.version, s.regime, nowTs);
+  if (experience.mode === 'PAPER_ENFORCE' && experience.signal === 'DEGRADED_REVIEW')
+    return reject('PAPER_EXPERIENCE_DEGRADED: recent same-version, same-regime paper outcomes require review');
   // Last-moment revalidation: fresh risk evaluation on current data
   const fresh = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId });
   const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');

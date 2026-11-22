@@ -1,4 +1,5 @@
 import { executionQuality } from './execution.js';
+import { paperExperienceOverview } from './experience.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../core/audit.js';
@@ -8,6 +9,7 @@ import { ditasOverview, runDecisionTwin, similarEnvironments, addForecast, addOu
 /** Registered on existing authenticated API instance; state changes inherit its CSRF boundary. */
 export async function ditasRoutes(app: FastifyInstance) {
   app.get('/api/ditas/execution', async req => executionQuality(z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query).limit));
+  app.get('/api/ditas/experience', async () => paperExperienceOverview());
   const id = z.string().min(1).max(150);
   const params = (r: any) => z.object({ id }).parse(r.params).id;
   const candle = z.object({ t: z.number().int().nonnegative(), o: z.number().positive(), h: z.number().positive(), l: z.number().positive(), c: z.number().positive(), v: z.number().nonnegative(), closeTime: z.number().optional() });

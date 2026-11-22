@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
 
-const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Foundation coverage'];
+const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'No-trade experience', 'Calibration', 'Execution quality', 'Foundation coverage'];
 const count = (v: unknown) => Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0;
 
 /** Read-only DITAS evidence. No control, strategy promotion, simulation or execution authority. */
@@ -71,6 +71,15 @@ export function Ditas() {
     {data && tab === 'Strategy passports' && <div className="col" style={{ gap: 14 }}>{(data.passports ?? []).map((p: any) => <Card key={p.id ?? p.strategyId} title={`${p.name ?? p.id ?? p.strategyId} · v${p.version ?? p.strategyVersion}`} right={<Badge v={p.ditasState ?? p.currentStatus ?? 'RESEARCH'} />}>
       <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
+    {data && tab === 'No-trade experience' && <div className="col" style={{ gap: 14 }}>
+      <div className="banner info">Paper experience mode: <b>{data.experience?.mode ?? 'SHADOW'}</b>. This does not predict profits. The historical review never changes owner risk limits or authorizes an entry.</div>
+      {(data.experience?.strategies ?? []).map((e: any) => <Card key={e.strategyId} title={e.strategyId + ' · v' + e.strategyVersion} right={<Badge v={e.signal} tone={e.signal === 'DEGRADED_REVIEW' ? 'b-warn' : undefined} />}>
+        <div className="kv"><span>Version-matched paper closes</span><span>{e.health?.samples ?? 0}</span><span>Net expectancy (R)</span><span>{fmt.num(e.health?.expectancyR, 3)}</span><span>Profit factor</span><span>{fmt.num(e.health?.profitFactor, 2)}</span><span>Last closed</span><span>{e.lastClosedAt == null ? '—' : fmt.time(e.lastClosedAt)}</span></div>
+        <p className="hint">{e.health?.status === 'INSUFFICIENT_SAMPLE' ? 'Insufficient outcome history for an evidence-based trade veto.' : 'Assessment assumes independent trades and can change across market regimes.'} The 50-match window is not a probability forecast.</p>
+        <div className="row"><button className="sm" onClick={() => setDetail({ title: 'Paper-only experience, exclusion counts and trade records', value: e })}>Inspect evidence</button><Link to="/history">Trading history</Link></div>
+      </Card>)}
+      {!data.experience?.strategies?.length && <Empty>No registered strategies available for paper-outcome review.</Empty>}
+    </div>}
     {tab === 'Execution quality' && <ExecutionQuality refreshKey={refreshKey} />}
     {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibrationStatus} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
