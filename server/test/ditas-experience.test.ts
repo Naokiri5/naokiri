@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { freshDb } from './helpers.js';
 import { all, closeDb, J, run } from '../src/db/db.js';
 import { paperExperience, paperExperienceOverview } from '../src/ditas/experience.js';
@@ -8,6 +8,7 @@ import type { DecisionReport } from '../src/decision/engine.js';
 
 const strategyId = 'trend_pullback';
 const instrumentId = 'crypto:binance:EXPERIENCEUSDT';
+const testTime = Date.UTC(2026, 0, 15, 12);
 const now = () => Date.now();
 function closePaperPosition(id: string, opts: { account?: string; version?: string | null; regime?: string; netR?: number; closedAt?: number; badRisk?: boolean } = {}) {
   const account = opts.account ?? 'paper-bot', version = opts.version === undefined ? '1.0.0' : opts.version;
@@ -23,8 +24,18 @@ function closePaperPosition(id: string, opts: { account?: string; version?: stri
 
 describe('DITAS account-scoped actual-paper experience and no-trade review', () => {
   let originalMode: string | undefined;
-  beforeEach(() => { originalMode = process.env.MIA_EXPERIENCE_NO_TRADE_MODE; delete process.env.MIA_EXPERIENCE_NO_TRADE_MODE; freshDb(false); });
-  afterEach(() => { closeDb(); if (originalMode === undefined) delete process.env.MIA_EXPERIENCE_NO_TRADE_MODE; else process.env.MIA_EXPERIENCE_NO_TRADE_MODE = originalMode; });
+  beforeEach(() => {
+    vi.spyOn(Date, 'now').mockReturnValue(testTime);
+    originalMode = process.env.MIA_EXPERIENCE_NO_TRADE_MODE;
+    delete process.env.MIA_EXPERIENCE_NO_TRADE_MODE;
+    freshDb(false);
+  });
+  afterEach(() => {
+    closeDb();
+    vi.restoreAllMocks();
+    if (originalMode === undefined) delete process.env.MIA_EXPERIENCE_NO_TRADE_MODE;
+    else process.env.MIA_EXPERIENCE_NO_TRADE_MODE = originalMode;
+  });
 
   it('does not infer profitability from empty evidence', () => {
     const e = paperExperience(strategyId, '1.0.0', 'TREND_UP');
@@ -37,7 +48,7 @@ describe('DITAS account-scoped actual-paper experience and no-trade review', () 
     closePaperPosition('external', { account: 'live-account', netR: 999 });
     closePaperPosition('old', { version: '0.9.0', netR: 999 });
     closePaperPosition('unknown', { version: null, netR: 999 });
-    closePaperPosition('other-regime', { regime: 'RANGE', netR: 999 });
+    closePaperPosition('other-regime', { regime: 'RANGE', netR: 3 });
     closePaperPosition('invalid-risk', { badRisk: true, netR: 999 });
     closePaperPosition('future', { netR: 999, closedAt: now() + 60000 });
     const e = paperExperience(strategyId, '1.0.0', 'TREND_UP');
@@ -45,8 +56,11 @@ describe('DITAS account-scoped actual-paper experience and no-trade review', () 
     expect(e.exclusions).toMatchObject({ otherVersion: 1, unknownVersion: 1, otherRegime: 1, invalidFinancials: 1 });
     expect(e.episodes.map(x => x.positionId)).toEqual(['valid']);
     expect(paperExperience(strategyId, '1.0.0', 'TREND_UP', now() - 120000).health.samples).toBe(0);
-    expect(strategyPassports()[0].paperHealth.excludedOtherVersion).toBe(1);
-    expect(strategyPassports()[0].paperHealth.samples).toBe(4); // valid, other-regime, invalid-risk excluded by passport, future included
+    // Passports span regimes. Only the valid and other-regime fixtures enter the average.
+    expect(strategyPassports().find(passport => passport.id === strategyId)?.paperHealth).toMatchObject({
+      samples: 2, expectancyR: 1, observedClosedPositions: 5,
+      excludedOtherVersion: 1, excludedUnknownVersion: 1, excludedInvalidRisk: 1,
+    });
   });
 
   it('defaults to SHADOW and only exposes a restrictive paper flag after 30 matching closed outcomes', () => {
