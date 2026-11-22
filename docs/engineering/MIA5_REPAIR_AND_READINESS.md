@@ -1,0 +1,60 @@
+# MIA 5.0 system repair and readiness report
+
+Audit snapshot November 23, 2026, Asia/Manila. GitHub `main` was `a39ddaa597172619d8c897e49464910ebad6681f` (275 tracked files). The two paper OMS repairs below passed local end-to-end verification. Application-wide paper release certification remains **incomplete**. Live trading is **blocked**.
+
+- [Architecture, feature inventory and requirements trace](MIA5_ARCHITECTURE_TRACE.md)
+- [Branch ancestry, conflicts, checks and review discussions for all 86 original open PRs](MIA5_PR_RECONCILIATION.md)
+- [Historical data provenance, chronological replay, cost sensitivity and bootstrap results](MIA5_HISTORICAL_REPLAY.md)
+
+## Defect register and repair batches
+
+| ID | Severity and root cause | Correction and reproduction evidence | Review state |
+| --- | --- | --- | --- |
+| OMS-01 | High. `server/src/exec/oms.ts:submitEntry` reused a pending order after its status could change, creating a second fill or filling after cancellation. Other pending transitions also updated by ID without checking prior status. | Reused the SQLite immediate transaction and pending-state guard from #45 (1494b48). The two `oms.test.ts` hook-based interleavings failed on baseline and passed after the patch. They check terminal order state, fill and position counts, and ledger reconciliation. | Draft, NOT READY. `codex/mia-paper-approval-atomic` at `71fa81a4fb89162bfebc763442768402c1704ebc`. Exact-head core and browser CI passed. Vercel server and Cloudflare Workers checks failed. [PR #118](https://github.com/Naokiri5/naokiri/pull/118) · [CI](https://github.com/Naokiri5/naokiri/actions/runs/45068017365) |
+| OMS-02 | High. `submitEntry` calculated approval, size, book freshness and cash before acquiring the write lock. A pause committed at the existing pre-transaction checkpoint still permitted a paper fill. | Run the existing deterministic gate, consensus/quote checks, simulation and cash read under the same lock as the fill. Retain duplicate-order and pending-state checks. `oms.test.ts` reproduced the fill after a pause on the parent commit. At final head it refused with `NEW_ORDERS_PAUSED` and preserved cash, positions and fills. Multi-process duplicate-entry and crash tests passed. | Draft, NOT READY. `codex/mia-paper-entry-risk-lock` at `01c4312aedf172b40dc41a727591c9b152489133` stacks on #118. Local full suite passed. Vercel server and Cloudflare Workers checks failed. [PR #119](https://github.com/Naokiri5/naokiri/pull/119) · [CI](https://github.com/Naokiri5/naokiri/actions/runs/45068509474) |
+| OMS-03 | High candidate. `risk/gate.ts:evaluateRisk` sizes at the current top ask. `exec/oms.ts:simulateEntryFill` may fill higher after walking depth. | Independent source review confirmed the price difference. Reproduce the resulting cap boundary with multi-level depth and prove actual fill notional and conservative stop risk against policy before release. No measured violation or fix is claimed here. | Open. Compare #45 and #53 before implementing any sizing change. |
+| OPS-01 | High candidate. `bot/bot.ts:onDecision` checks lease ownership before writing. A process can wait for SQLite after that check. | Exact-head source review identified the gap. A two-process lease-expiry test at the transaction boundary is needed to measure its reach and validate the fence. | Open. Compare #45 and #116. |
+| OPS-02 | Medium candidate. The core fill commits before the journal and notifications. | Source review and the crashpoint layout identify a possible gap in user-facing evidence. Core ledger atomicity passed crash recovery tests. Verify post-commit replay or delivery on restart. | Open. |
+| MODE-01 | Defense-in-depth. `core/mode.ts:updateControl` can accept a direct owner call to set `BOUNDED_LIVE` when the caller omits the optional gate. | Existing #117 addresses the low-level transition. The HTTP route has its own gate and no production live order path was identified. Review the existing patch with #45 and confirm deployment and independent sign-off. | Draft, blocked for integration. [PR #117](https://github.com/Naokiri5/naokiri/pull/117) |
+
+Both repairs use the existing authenticated approval API, scheduled entry caller, risk policy, OMS, order IDs, positions and ledger. No schema migrations were introduced. The changes extend the write transaction over risk and depth computation, so representative SQLite contention warrants measurement. Protective exits retain their existing path and passed the neighboring tests. The release boundary remains paper-only.
+
+## Exact-head verification
+
+Local environment used Node v24.22.3, npm 11.19.1, Linux on AMD EPYC 9V74, a two-core CPU quota and an 8 GiB memory limit. CI uses the repository's Node 22 pin. Initial npm and browser installs failed to write their default home caches. Explicit workspace-local paths resolved both, with the lockfile kept intact.
+
+| Check | Command or entry point | Result |
+| --- | --- | --- |
+| Locked dependency install | `npm ci --cache /workspace/work/npm-cache` | PASS |
+| Secret scan and high-severity dependency audit | `npm run scan:secrets`, `npm audit --audit-level=high --cache /workspace/work/npm-cache` | PASS. 273 files scanned by the script and zero reported dependency vulnerabilities. |
+| Static types and production bundles | `npm run typecheck`, `npm run build` | PASS. Server and web. |
+| Focused fault interleavings | `npm exec -w server -- vitest run test/oms.test.ts -t 'preserves the winning\|honors a pause'` | PASS. Three regressions on #119. |
+| Unit, component and integration suites | `npm test` | PASS on #119. 564 server tests passed, 3 skipped by default, and 19 web tests passed. #118 had 563 server tests passed, 3 skipped, and 19 web tests passed. |
+| Browser | `PLAYWRIGHT_BROWSERS_PATH=/workspace/work/pw-browsers npm run test:e2e` | PASS. 60 tests on each repair head using the repository's offline fixture server. Includes mobile shells and API-backed user flows exercised by the suite. |
+| Real external observations and paper round trip | `npm run test:live -w server` | PASS. Two opt-in tests on each repair head. Public providers supplied real observations and the paper OMS settled a BTCUSDT entry and exit against the Binance book, followed by ledger reconciliation. |
+| Process crash recovery, lease and backup | Existing `crash.oms.test.ts`, `ops-lease*.test.ts`, `ops-backup.test.ts`, `ops-readiness.test.ts` in `npm test` | PASS in disposable environments. Includes multi-process duplicate entry, interruption inside accounting writes, lease takeover, encrypted backup verification and corruption detection. |
+| Actual compiled startup | `node server/dist/main.js`; `MIA_OFFLINE=1`, loopback, ephemeral port and temporary data directory | PASS. Root UI, `/api/health` and `/api/ready` returned HTTP 200 at cold startup and restart. Readiness reported SQLite schema v5 and OFFLINE engine role. SIGTERM drained and exited cleanly both times. |
+| Local health request sample | 240 loopback `GET /api/health` requests at concurrency 12 on the offline compiled server | PASS. 240 HTTP 200 responses, 1,052 requests/s, p50 6.75 ms, p95 23.91 ms and p99 32.77 ms including client overhead. |
+| Chart latency sample | `node --import tsx scripts/benchmark-chart.mjs` | PASS. 400 synthetic bars, 200 warmups and 2,000 runs. p50 0.015 ms, p95 0.066 ms and p99 3.03 ms. No provider, HTTP, AI or OMS timing in this measurement. |
+| Production throughput, SSE slow-client and multi-lane stress | Representative workload and a controlled deployment environment | NOT RUN. Local liveness timing measures one inexpensive endpoint. |
+| External deployment smoke and production restore rehearsal | Server preview and controlled persistent volume | BLOCKED. Vercel server and Cloudflare Workers deployment checks failed on both repairs. Successful Cloudflare Pages status covers the Pages build. Build failure cause and persistent-volume behavior are unresolved. |
+
+## Paper lifecycle and security assessment
+
+- **Entry and authorization.** The paper round trip verifies a real observation-to-OMS-to-ledger slice. Source tracing establishes the scheduler, scanner, worker, QCI and decision connections. An unattended live-provider scheduler run that discovers and fills a new candidate remains unverified. Owner approval is exercised by the OMS suite. Exact-head API and browser evidence cover passphrase sessions, owner controls, CSRF and rate-limit cases. Independent production Privy and wallet custody validation requires a configured account and secure environment.
+- **Fill and position protection.** OMS tests verify insufficient book depth, stale quotes, partial-position take-profit, protective stops, manual close and accounting. Entries remain all-or-none in this paper path. Paper protection waits for fresh executable depth and raises an incident if that cannot be obtained. Actual paper fill-price exposure under a marginal risk cap remains open.
+- **Accounting and recovery.** Transactional order, fill, ledger and position persistence passed deterministic process-kill and reconciliation suites. Event delivery after a committed crash, independent restore on the target volume, and operator rollback rehearsal remain open. The deployment guide documents key retention and previous-version backup requirements.
+- **Defensive security evidence.** Reviewed the session/CSRF, Privy identity, owner-control, input schema, outbound provider, read-only wallet and release-gate source paths. Existing exact-head tests exercise access scopes, invalid inputs, rate limits, stale data and fail-closed execution. The secret and dependency scanners passed. Dedicated review for SSRF, XSS, SQL injection, path traversal, untrusted assistant prompts, webhook replay, and production key and log handling remains incomplete.
+- **Quantitative evidence.** All three strategies had negative out-of-sample R on the captured BTCUSDT series. Sample sizes, cost sensitivity and bootstrap results are in the historical replay report. Prospective paper evidence, a representative cross-market universe and venue-specific execution costs remain prerequisites for strategy certification.
+
+## Release scorecard and action
+
+| Tier | Verdict | Evidence required to proceed |
+| --- | --- | --- |
+| Local paper OMS repair | PASS for the three reproduced interleavings | Retain exact-head checks and independent review before merge. |
+| Local paper application | PARTIAL | Prove the unattended provider-to-OMS lifecycle and the remaining runtime wiring, limit, lease and recovery cases. |
+| Production paper deployment | BLOCKED | Resolve Vercel server and Cloudflare Workers failures for the intended target, then prove persistent-volume backup, recovery and rollback. |
+| Strategy promotion | BLOCKED for the evaluated evidence | Obtain favorable, adequately sampled out-of-sample and prospective results under predefined costs and criteria. |
+| Live execution | BLOCKED | Verified venue adapter, isolated signing and custody, risk and reconciliation certification, independent security and operator approval. |
+
+Both code PRs remain draft and unmerged. Main and all pre-existing PR branches were left intact. The broad #45 stack changes 363 files and conflicts with current main in 32 paths. The reconciliation matrix records where to carry the focused repairs back into the existing architecture. The next paper safety investigation is OMS-03, followed by OPS-01. Keep those independent of the unrelated FAST/DEEP, DITAS and runtime telemetry integration decisions.
