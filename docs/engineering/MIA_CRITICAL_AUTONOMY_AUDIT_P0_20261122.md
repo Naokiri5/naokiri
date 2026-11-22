@@ -4,7 +4,7 @@
 **Inspected baseline:** `main@a39ddaa597172619d8c897e49464910ebad6681f`  
 **Scope:** A strictly bounded first implementation increment of the owner's *MIA 5.0 Autonomous Trading System: Critical Debugging, Integration Audit, Backtesting & Repair Master Prompt*.  
 **Security verdict:** LIVE is **not certified**; all real-money authorization remains locked.  
-**Execution evidence:** Source review plus newly committed regression tests; full CI and runtime reproduction are **pending** unless separately linked from the PR checks.
+**Execution evidence:** The original mode-lock revision passed GitHub CI. The November 23 follow-up reproduces the legacy state regression in the direct and HTTP paths and verifies the fix locally. The pull request records exact-head checks. [Original GitHub CI](https://github.com/Naokiri5/naokiri/actions/runs/45013458543)
 
 ## A. Critical health report: evidence-grounded findings
 
@@ -36,17 +36,17 @@ flowchart LR
   G -. LIVE: locked .-> K[Missing certified venue / signer]
 ```
 
-The proposed change lives *only* in `core/mode.ts`; it does not create a risk engine, venue adapter, signer, ledger, or separate execution authority.
+The enforcement owner is `core/mode.ts`. The control route delegates to it and keeps the existing paper-policy and owner step-up checks.
 
 ## C. Confirmed defect, minimal repair, and tests
 
 **Root cause:** `updateControl` originally fell back to `{ok:true}` when `gateCheck` was absent. Non-HTTP callers running in an owner context could persist `BOUNDED_LIVE` even though HTTP callers were correctly denied. The absence of a live venue adapter means this is an **authorization-state bypass**, not evidence of real trades.
 
-**Patch:** Unconditionally reject any attempt to set `patch.mode === 'BOUNDED_LIVE'` at the canonical mode authority until an independently certified, non-optional server-controlled authorization mechanism exists. No caller-provided callback can grant LIVE. Preserve ordinary OBSERVE/PAPER/APPROVAL behavior and permit risk-reducing pauses even if an obsolete LIVE value was previously persisted.
+**Patch.** The canonical owner rejects any attempt to set `BOUNDED_LIVE` before consulting a caller-supplied callback. Reads project a previously stored LIVE value as `OBSERVE`. Reads preserve the raw database record. The next permitted control update persists the safe mode and records the original value in the existing audit event. OBSERVE, PAPER, APPROVAL, and risk-reducing pauses retain their existing authorization.
 
-**Regression:** `server/test/mode-live-lock.test.ts` covers direct calls with no gate, permissive gate, preservation of existing PAPER behavior, and safe pause of a previously persisted LIVE state. Existing `server/test/api.test.ts` covers HTTP LIVE denial and owner step-up.
+**Regression.** `server/test/mode-live-lock.test.ts` covers direct calls with no gate, permissive gate, existing paper behavior, and safe pause of a previously persisted LIVE state. The HTTP test exercises the effective read-only state through `/api/shell` and checks that a denied mode change leaves the legacy record intact. Both legacy tests failed on the original PR head and passed after the follow-up.
 
-**Remaining caveat:** This is a defense-in-depth repair, not full LIVE certification or a proof that no other privileged persisted-settings caller exists. Audit all direct `setSetting('control', ...)` and restart handling paths before any live-readiness promotion.
+**Operational boundary.** The release gates, durable venue execution, isolated signing, and independent review remain prerequisites. The application source scan found control-key reads and writes in the canonical owner. For rollback, reconcile the stored control to `OBSERVE` using the authenticated control path before deploying an older revision. Preserve normal backup and release-lock procedures.
 
 ## D. PR dependency / overlap map (initial, not exhaustive)
 
