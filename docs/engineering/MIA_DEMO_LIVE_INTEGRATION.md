@@ -117,3 +117,26 @@ The full critical-path inventory is **now available** under \`capabilityAudit.fe
 4. Build exact-snapshot parity regressions against the **real canonical** decision and risk services for controlled PAPER and non-executing LIVE evaluation. Distinguish a shared rule from an authorized, operational live path.
 5. Leave any missing venue adapter, signer, native protection or unresolved release gate as a **hard LIVE blocker**.
 
+
+
+## 2026-11-23 — Phase B: canonical risk parity + uncertified LIVE decision fail-closed
+
+**Baseline:** stacked on draft PR #124, exact head \`4226c34e12b6043a7a5fd2fcd7fb7d02a6763e6d\`. Changes are intentionally limited to \`decision/engine.ts\`, canonical-mode parity tests and this document, not a new decision/risk or venue subsystem.
+
+### Verified source-level gap
+
+In the existing decision engine, any non-\`OBSERVE\` mode that reached the favorable-consensus and risk-ALLOW branch could be mapped to \`PAPER_TRADE\` unless the mode was \`APPROVAL\`. Consequently a legacy persisted \`BOUNDED_LIVE\` value could produce a paper-labeled positive decision even though the bot's paper OMS later refused it. This was misleading cross-layer permission evidence. This phase adds an explicit PAPER/APPROVAL allowlist in the canonical decision engine and marks the execution-permission pipeline step FAIL for other modes. Direct mode authority repair is **separately owned by draft #117**; do not duplicate, bypass or overwrite its control fix.
+
+### Integration verification
+
+- Test the actual existing \`risk/gate.ts:evaluateRisk()\` with one deterministic market snapshot in PAPER and APPROVAL modes. The financial account is \`PAPER_ACCOUNT\` in both cases; equality here is **paper-mode policy equivalence**, not proof of production LIVE account parity.
+- Test a real \`scanner.buildContext()\` and \`qci.runConsensus()\` context with deterministically forced favorable consensus, so the decision-mode branch is exercised. Verify PAPER still produces \`PAPER_TRADE\`, while a deliberately injected legacy stored \`BOUNDED_LIVE\` value cannot emit \`PAPER_TRADE\`, an executable LIVE decision, or any sized entry.
+- The QCI score and indicators must remain unchanged across modes for the same synthetic market snapshot. Tests are synthetic and use an intentionally favorable consensus fixture to isolate permission branching. They are not backtest outcomes, calibrated probabilities or venue evidence.
+- Risk-reducing emergency controls must deny new risk in PAPER and APPROVAL.
+
+### External dependencies and next phase
+
+- Review and reconcile #117 (fail-closed mode authority) and #45 (large overlapping changes) independently.
+- Reconcile OMS transaction and fill-price risk drafts #118 → #119 → #121 before modifying order/cash/position state. Avoid conflicting risk changes on the unmerged #121 stack.
+- Only then develop a durable, account-isolated TESTNET execution boundary with full ack/partial-fill/cancel/unknown reconciliation and dedicated protective exit tests. PR #92/#97/#98 contain candidate contracts but **not certified LIVE capability**.
+- Real-money LIVE remains disabled. No signer, credentials, live adapter, authorization gate, release evidence, or deployment change in this phase. A successfully verified test suite does not establish production readiness.

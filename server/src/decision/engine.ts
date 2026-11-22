@@ -60,16 +60,19 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
   else if (qci.state === 'NO_QUORUM' || qci.state === 'MIXED_CONSENSUS') decision = 'WAIT_FOR_CONFIRMATION';
   else if (opp.score < pol.minOpportunityScore) decision = 'APPROVED_FOR_MONITORING';
   else if (mode === 'OBSERVE') decision = 'APPROVED_FOR_MONITORING';
+  // Defense in depth: a stale or directly persisted LIVE mode must never produce a
+  // PAPER_TRADE decision. PR #117 also protects the lower-level mode authority;
+  // this decision engine remains non-executing until a certified LIVE path exists.
+  else if (mode !== 'PAPER' && mode !== 'APPROVAL') decision = 'REJECTED';
   else {
     risk = evaluateRisk({ instrumentId: cand.instrumentId, strategyId: cand.strategyId, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stop, idempotencyKey: `entry-${cand.id}`, traceId: cand.traceId });
     decision = risk.decision === 'DENY' ? 'REJECTED' : risk.decision === 'NEEDS_REVIEW' ? 'APPROVED_FOR_USER_CONFIRMATION' : mode === 'APPROVAL' ? 'APPROVED_FOR_USER_CONFIRMATION' : 'PAPER_TRADE';
-    // BOUNDED_LIVE is unreachable: mode change is blocked by the release gate.
   }
   step('Expected fees / slippage / impact', risk?.evaluated.costR != null ? (Number(risk.evaluated.costR) <= pol.maxCostR ? 'PASS' : 'FAIL') : 'SKIP', risk ? `cost ${risk.evaluated.costR}R, spread ${risk.evaluated.spreadBps}bps, impact ${risk.evaluated.impactBps}bps` : 'computed by risk engine when eligible');
   step('Position size', risk?.sizing ? 'PASS' : 'SKIP', risk?.sizing ? `qty ${risk.sizing.qty} ($${risk.sizing.notional}), planned max loss $${risk.sizing.plannedMaxLoss}` : '—');
   step('Portfolio correlation & exposure', correlatedOpen > 0 ? 'WARN' : 'PASS', `${correlatedOpen} correlated open positions`);
   step('Independent deterministic risk approval (Part 17)', risk ? (risk.decision === 'ALLOW' ? 'PASS' : risk.decision === 'NEEDS_REVIEW' ? 'WARN' : 'FAIL') : 'SKIP', risk ? `${risk.decision} ${risk.reasonCodes.join('; ')}` : 'not reached');
-  step('Execution permission (Part 9)', mode === 'OBSERVE' ? 'FAIL' : 'PASS', `mode ${mode}`);
+  step('Execution permission (Part 9)', mode === 'PAPER' || mode === 'APPROVAL' ? 'PASS' : 'FAIL', `mode ${mode}; only PAPER or APPROVAL is currently eligible`);
   step('Last-moment revalidation', 'SKIP', 'performed by OMS immediately before submission');
 
   const sup = qci.challenge.find((c) => c.reviewer === 'BULL')?.findings ?? [];
