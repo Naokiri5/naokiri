@@ -44,7 +44,7 @@ export function strategyPassports() {
   return STRATEGIES.map(s => {
     const registry = get<{ status: string; version: string }>('SELECT status, version FROM strategies WHERE id=?', s.id);
     const recent = all<{ realized_pnl: number; planned_risk: number; report: string | null }>(`SELECT p.realized_pnl, p.planned_risk, d.report FROM positions p LEFT JOIN decisions d ON d.id=p.decision_id
-      WHERE p.strategy=? AND p.account=? AND p.status='CLOSED' ORDER BY p.closed_at DESC LIMIT ?`, s.id, PAPER_ACCOUNT, WINDOW);
+      WHERE p.strategy=? AND p.account=? AND p.status='CLOSED' AND p.closed_at IS NOT NULL AND p.closed_at<? ORDER BY p.closed_at DESC LIMIT ?`, s.id, PAPER_ACCOUNT, Date.now(), WINDOW);
     const valid: number[] = []; let unknownVersion = 0, otherVersion = 0, invalidRisk = 0;
     for (const p of recent.reverse()) {
       let version: string | undefined;
