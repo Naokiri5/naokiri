@@ -9,6 +9,7 @@ import { all, get } from '../db/db.js';
 import { iso } from '../core/util.js';
 import { getSetting } from '../core/settings.js';
 import { openIncidentFor } from '../exec/incidents.js';
+import { runtimeEntryBlocks } from '../ops/runtimeHealth.js';
 
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
@@ -31,6 +32,8 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const pol: RiskPolicy = pv.policy; const account = p.account ?? PAPER_ACCOUNT;
   const ctl = getControl();
   ev.mode = ctl.mode;
+  // One shared, fail-closed entry gate; protective exits retain the existing OMS path.
+  deny.push(...runtimeEntryBlocks(nowTs));
   if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');
   if (ctl.pausedNewOrders) deny.push('NEW_ORDERS_PAUSED');
   if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
