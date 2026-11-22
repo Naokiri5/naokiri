@@ -41,6 +41,20 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/BOUNDED_LIVE blocked/);
     expect((await app.inject({ url: '/api/qa', headers: { cookie } })).json().liveAllowed).toBe(false);
   });
+  it('treats a persisted legacy LIVE mode as read-only through authenticated HTTP', async () => {
+    const current = getControl();
+    const legacy = { ...current, mode: 'BOUNDED_LIVE' };
+    setSetting('control', legacy);
+    try {
+      const shell = await app.inject({ url: '/api/shell', headers: { cookie } });
+      expect(shell.statusCode).toBe(200);
+      expect(shell.json()).toMatchObject({ control: { mode: 'OBSERVE' }, display: 'READ-ONLY', liveAllowed: false });
+      const denied = await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'BOUNDED_LIVE', password: 'correct horse battery' } });
+      expect(denied.statusCode).toBe(400);
+      expect(denied.json().error).toMatch(/BOUNDED_LIVE blocked/);
+      expect(getSetting('control', null)).toEqual(legacy);
+    } finally { setSetting('control', current); }
+  });
   it('shell carries what the status ribbon needs: server clock, live lock, policy limits, engine cadence', async () => {
     const before = Date.now();
     const s = (await app.inject({ url: '/api/shell', headers: { cookie } })).json();
