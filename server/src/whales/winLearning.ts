@@ -51,6 +51,8 @@ const MIN_WALLETS = 3;
 const MAX_PER_WALLET = 4;
 const MAX_TRAINING_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const isTime = (x: number): boolean => Number.isSafeInteger(x) && x >= 0;
+/** Prevent a Solana whale example from being generalized to stocks or futures. */
+const instrumentFamily = (id: string): string => id.split(':').slice(0, 2).join(':');
 
 function validFingerprint(f: MarketFingerprint | null): f is MarketFingerprint {
   if (!f || f.version !== 'market-dna-v1' || f.dataQuality !== 'PASS' ||
@@ -136,7 +138,8 @@ export function assessWinAdaptiveLearning(
     }
     seenEntry.add(entryKey);
     seenOutcome.add(o.outcomeId);
-    if (e.entryFingerprint!.timeframe !== candidate.timeframe ||
+    if (instrumentFamily(o.instrumentId) !== instrumentFamily(candidate.instrumentId) ||
+        e.entryFingerprint!.timeframe !== candidate.timeframe ||
         e.entryFingerprint!.regime !== candidate.regime) continue;
     const similarity = compareFingerprints(e.entryFingerprint!, candidate);
     if (!similarity.comparable || similarity.similarity === null ||
