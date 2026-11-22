@@ -29,7 +29,10 @@ export interface WinFinalizedTransactionWitness {
   readonly finalized: boolean;
   readonly verifiedDexSwapInvocation: boolean;
   readonly verifiedProgramId: string;
+  /** Must be taken from a reviewed server-owned adapter, never user input. */
   readonly approvedSwapProgramIds: readonly string[];
+  readonly trustedQuoteMints: readonly string[];
+  readonly quotePriceSnapshotId: string;
   readonly preTokenBalances: readonly WinSolanaTokenBalance[];
   readonly postTokenBalances: readonly WinSolanaTokenBalance[];
   readonly selectedBaseMint: string;
@@ -79,8 +82,9 @@ export function normalizeFinalizedSolanaSwapFromBalances(
   if (!ADDRESS.test(x.walletAddress) || !ADDRESS.test(x.selectedBaseMint) ||
       !ADDRESS.test(x.quoteMint) || x.selectedBaseMint === x.quoteMint ||
       !ADDRESS.test(x.verifiedProgramId) || !x.approvedSwapProgramIds.includes(x.verifiedProgramId) ||
+      !x.trustedQuoteMints.includes(x.quoteMint) || !x.quotePriceSnapshotId ||
       !x.transactionSucceeded || !x.finalized || !x.verifiedDexSwapInvocation ||
-      typeof x.signature !== 'string' || !ADDRESS.test(x.signature.slice(0,44)) ||
+      typeof x.signature !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{64,90}$/.test(x.signature) ||
       !isInt(x.slot) || !isInt(x.instructionLeg) || !isInt(x.observedAt) ||
       !isInt(x.availableAt) || !isInt(x.receivedAt) ||
       x.observedAt > x.availableAt || x.availableAt > x.receivedAt ||
