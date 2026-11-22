@@ -38,7 +38,7 @@ Local environment used Node v24.22.3, npm 11.19.1, Linux on AMD EPYC 9V74, a two
 | Local health request sample | 240 loopback `GET /api/health` requests at concurrency 12 on the offline compiled server | PASS. 240 HTTP 200 responses, 1,052 requests/s, p50 6.75 ms, p95 23.91 ms and p99 32.77 ms including client overhead. |
 | Chart latency sample | `node --import tsx scripts/benchmark-chart.mjs` | PASS. 400 synthetic bars, 200 warmups and 2,000 runs. p50 0.015 ms, p95 0.066 ms and p99 3.03 ms. No provider, HTTP, AI or OMS timing in this measurement. |
 | Production throughput, SSE slow-client and multi-lane stress | Representative workload and a controlled deployment environment | NOT RUN. Local liveness timing measures one inexpensive endpoint. |
-| External deployment smoke and production restore rehearsal | Server preview and controlled persistent volume | BLOCKED. Vercel server and Cloudflare Workers deployment checks failed on all three repair heads. Successful Cloudflare Pages status covers the Pages build. Build failure cause and persistent-volume behavior are unresolved. |
+| External deployment smoke and production restore rehearsal | Server preview and controlled persistent volume | BLOCKED. Vercel server and Cloudflare Workers deployment checks failed on all three repair heads. Successful Cloudflare Pages status covers the Pages build. Authenticated Vercel logs identify TS2688 during its TypeScript transpilation step on all three repair previews. The step cannot resolve the Node type declarations after the project runs `npm install --prefix=..`. The standard workspace build passes. Cloudflare Workers build logs and persistent-volume behavior remain unverified. [Latest Vercel preview](https://vercel.com/mia-a3d2/naokiri-server/EsqBQZwEHJd8Feu7wHcTk9ba29R7) |
 
 ## Paper lifecycle and security assessment
 
@@ -47,6 +47,10 @@ Local environment used Node v24.22.3, npm 11.19.1, Linux on AMD EPYC 9V74, a two
 - **Accounting and recovery.** Transactional order, fill, ledger and position persistence passed deterministic process-kill and reconciliation suites. Event delivery after a committed crash, independent restore on the target volume, and operator rollback rehearsal remain open. The deployment guide documents key retention and previous-version backup requirements.
 - **Defensive security evidence.** Reviewed the session/CSRF, Privy identity, owner-control, input schema, outbound provider, read-only wallet and release-gate source paths. Existing exact-head tests exercise access scopes, invalid inputs, rate limits, stale data and fail-closed execution. The secret and dependency scanners passed. Dedicated review for SSRF, XSS, SQL injection, path traversal, untrusted assistant prompts, webhook replay, and production key and log handling remains incomplete.
 - **Quantitative evidence.** All three strategies had negative out-of-sample R on the captured BTCUSDT series. Sample sizes, cost sensitivity and bootstrap results are in the historical replay report. Prospective paper evidence, a representative cross-market universe and venue-specific execution costs remain prerequisites for strategy certification.
+
+## Deployment target
+
+The documented server depends on a long-lived process for the scheduler and authenticated SSE, and a persistent writable SQLite WAL volume for accounting and recovery. Repairing the Vercel preview compilation error would still leave those runtime requirements to demonstrate. PR #116 contains a persistent-container proposal. Its overlap and external check blockers are recorded in the reconciliation matrix. [Runtime recovery draft](https://github.com/Naokiri5/naokiri/pull/116)
 
 ## Release scorecard and action
 
