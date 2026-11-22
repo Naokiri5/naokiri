@@ -83,7 +83,7 @@ describe('crash/restart paper OMS evidence reconciliation', () => {
   it('allows an owner-approval entry with no position; only materialized fills are reconciled', () => {
     run(`INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,
       status,purpose,created_at,updated_at) VALUES
-      ('o-approval','entry-pending',?,?,?,?,?,?,?,?,?)`,
+      ('o-approval','entry-pending',?,?,?,?,?,?,?,?,?,?)`,
       PAPER_ACCOUNT, 'binance-paper', instrument, 'BUY', 'MARKET', 1,
       'PENDING_APPROVAL', 'ENTRY', now, now);
     expect(auditPaperOmsRecovery().ok).toBe(true);
