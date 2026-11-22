@@ -20,7 +20,8 @@ export function hp97MarketSnapshot(instrumentId: string, nowMs = Date.now()) {
   };
 
   // Snapshot-independent quote evidence; the market store already selects the best current price.
-  if (ticker) set('LAST_TRADE_PRICE', ticker.last, ticker.receivedAt, 'market.tickers:' + ticker.source);
+  if (ticker && nowMs - ticker.receivedAt >= 0 && nowMs - ticker.receivedAt <= QUALITY_LIMITS.maxExecQuoteAgeMs)
+    set('LAST_TRADE_PRICE', ticker.last, ticker.receivedAt, 'market.tickers:' + ticker.source);
 
   const book = d?.book;
   const age = bookAge(book, nowMs);
@@ -75,7 +76,9 @@ export function hp97MarketSnapshot(instrumentId: string, nowMs = Date.now()) {
     }
   }
 
-  const projection = builder.capture(nowMs, QUALITY_LIMITS.maxExecBookAgeMs);
+  // Closed 1h indicators remain valid for their own bar horizon; the fresh book and quote
+  // were checked independently above against their much shorter execution freshness windows.
+  const projection = builder.capture(nowMs, INTERVAL_MS['1h']);
   const quality = assessQuality(instrumentId, '1h', nowMs);
   const eligible = projection.coverage.eligibleForSpotResearch && quality.status !== 'FAIL' && instrument.market === 'crypto';
   return {
