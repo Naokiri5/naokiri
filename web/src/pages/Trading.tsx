@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, authInfo, fmt, useApi } from '../api';
+import { api, ApiError, authInfo, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter } from '../ui';
 
 export const StepUp = ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
@@ -189,6 +189,56 @@ export function Calendar() {
 export function Lab() {
   const { data, error, reload } = useApi('/api/lab'); const [strat, setStrat] = useState('trend_pullback'); const [sym, setSym] = useState('BTCUSDT'); const [bars, setBars] = useState(3000);
   const [res, setRes] = useState<any>(null); const [pw, setPw] = useState('');
+  const [running, setRunning] = useState<string | null>(null);
+  const batch = useRef<AbortController | null>(null);
+  const batchSymbols = (data?.universe ?? []).slice(0, 12) as string[];
+  useEffect(() => () => batch.current?.abort(), []);
+
+  async function runOne() {
+    setRunning(`Running ${sym}`);
+    try {
+      setRes(await api('/api/lab/backtest', { body: { strategyId: strat, symbol: sym, bars } }));
+      await reload();
+    } finally {
+      setRunning(null);
+    }
+  }
+
+  async function runBatch() {
+    const controller = new AbortController();
+    const { signal } = controller;
+    batch.current = controller;
+    const failures: string[] = [];
+    try {
+      for (const [index, symbol] of batchSymbols.entries()) {
+        setRunning(`Running ${index + 1} of ${batchSymbols.length} · ${symbol}`);
+        const request = { body: { strategyId: strat, symbol, bars }, signal };
+        try {
+          try {
+            await api('/api/lab/backtest', request);
+          } catch (error) {
+            // The API rate limit rejects before starting the backtest. Only that response can be retried safely.
+            if (!(error instanceof ApiError) || error.status !== 429) throw error;
+            const retryAfter = error.retryAfterSeconds;
+            if (retryAfter == null || retryAfter > 10) throw error;
+            setRunning(`Waiting for the rate limit · ${symbol} (${index + 1} of ${batchSymbols.length})`);
+            await new Promise((resolve) => window.setTimeout(resolve, retryAfter * 1000));
+            if (signal.aborted) return;
+            await api('/api/lab/backtest', request);
+          }
+        } catch (error) {
+          if (signal.aborted) return;
+          failures.push(`${symbol} · ${error instanceof Error ? error.message : 'backtest failed'}`);
+        }
+      }
+      await reload();
+      if (failures.length) throw new Error(`${batchSymbols.length - failures.length} of ${batchSymbols.length} backtests completed. ${failures.join(' | ')}`);
+    } finally {
+      batch.current = null;
+      if (!signal.aborted) setRunning(null);
+    }
+  }
+
   const S = (x: any) => x ? `${x.trades} trades · win ${(x.winRate * 100).toFixed(0)}% · E ${x.expectancyR.toFixed(3)}R · PF ${Number.isFinite(x.profitFactor) ? x.profitFactor.toFixed(2) : '∞'} · maxDD ${x.maxDrawdownR.toFixed(1)}R` : '—';
   return <Page title="Strategy Lab" sub="Point-in-time backtests on real Binance history with fees, spread, slippage, next-bar entries, conservative intrabar ordering and a chronological in-sample / out-of-sample split. Only OUT-OF-SAMPLE results feed live scoring.">
     <ErrorLine e={error} />
@@ -196,12 +246,12 @@ export function Lab() {
       <select value={strat} onChange={(e) => setStrat(e.target.value)} aria-label="Strategy">{(data?.strategies ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
       <input list="lab-syms" value={sym} onChange={(e) => setSym(e.target.value.toUpperCase())} style={{ width: 140 }} aria-label="Symbol" /><datalist id="lab-syms">{(data?.universe ?? []).map((s: string) => <option key={s} value={s} />)}</datalist>
       <select value={bars} onChange={(e) => setBars(Number(e.target.value))} aria-label="History"><option value={1500}>1,500 bars</option><option value={3000}>3,000 bars</option><option value={6000}>6,000 bars</option></select>
-      <Action className="primary" label="Run" run={async () => { setRes(await api('/api/lab/backtest', { body: { strategyId: strat, symbol: sym, bars } })); reload(); }} />
-      <Action label="Run on whole deep tier" run={async () => { for (const s of (data?.universe ?? []).slice(0, 12)) { try { await api('/api/lab/backtest', { body: { strategyId: strat, symbol: s, bars } }); } catch { /* continue */ } } reload(); }} />
-    </div>{res && <div className="col" style={{ marginTop: 12 }}><div className="kv"><span>In-sample</span><span className="mono">{S(res.inSample)}</span><span>Out-of-sample</span><span className="mono">{S(res.outOfSample)}</span><span>Period</span><span>{fmt.time(res.from)} → {fmt.time(res.to)} ({res.bars} bars)</span></div><Sparkline values={[0, ...res.equityR]} height={90} /><ul className="hint" style={{ margin: 0 }}>{res.warnings.map((w: string) => <li key={w}>{w}</li>)}</ul></div>}</Card>
+      <Action className="primary" label="Run" disabled={running !== null} run={runOne} />
+      <Action label={batchSymbols.length === 0 ? 'Run batch' : `Run first ${batchSymbols.length} ${batchSymbols.length === 1 ? 'symbol' : 'symbols'}`} disabled={running !== null || batchSymbols.length === 0} run={runBatch} />
+    </div>{running && <div className="hint" role="status">{running}</div>}{res && <div className="col" style={{ marginTop: 12 }}><div className="kv"><span>In-sample</span><span className="mono">{S(res.inSample)}</span><span>Out-of-sample</span><span className="mono">{S(res.outOfSample)}</span><span>Period</span><span>{fmt.time(res.from)} → {fmt.time(res.to)} ({res.bars} bars)</span></div><Sparkline values={[0, ...res.equityR]} height={90} /><ul className="hint" style={{ margin: 0 }}>{res.warnings.map((w: string) => <li key={w}>{w}</li>)}</ul></div>}</Card>
     <div style={{ height: 14 }} />
     <Card title="Strategy lifecycle (Part 18)" right={<StepUp value={pw} onChange={setPw} />} flush><table><thead><tr><th>Strategy</th><th>Status</th><th>OOS aggregate</th><th>Monte Carlo (100 trades @0.5%)</th><th>Paper</th><th>Actions</th></tr></thead>
-      <tbody>{(data?.strategies ?? []).map((s: any) => <tr key={s.id}><td><b>{s.name}</b><div className="hint">{s.note}</div></td><td><Badge v={s.status} /></td><td className="mono" style={{ fontSize: 12 }}>{s.stats ? `${S(s.stats)} · ${s.stats.instruments} instr.` : '—'}</td>
+      <tbody>{(data?.strategies ?? []).map((s: any) => <tr key={s.id}><td><b>{s.name}</b><div className="hint">{s.note}</div></td><td><Badge v={s.status} /></td><td className="mono" style={{ fontSize: 12 }}>{s.stats ? `${S(s.stats)} · ${s.stats.instruments} instr.${s.stats.modelVersion === 1 ? ' · earlier fill model' : ''}` : '—'}</td>
         <td className="mono" style={{ fontSize: 12 }}>{s.stats?.monteCarlo ? `P5 ${fmt.pct(s.stats.monteCarlo.returnP5 * 100, 1)} · P50 ${fmt.pct(s.stats.monteCarlo.returnP50 * 100, 1)} · DD95 ${(s.stats.monteCarlo.maxDdP95 * 100).toFixed(1)}%` : '—'}</td>
         <td className="mono">{s.live ? `${s.live.trades} · ${s.live.expectancyR.toFixed(2)}R` : '—'}</td>
         <td className="row">{s.status !== 'PAPER' && <Action className="sm" label="Promote to paper" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'PAPER', password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}{s.status !== 'SUSPENDED' && <Action className="sm" label="Suspend" run={async () => { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'SUSPENDED' } }); reload(); }} />}<Action className="sm" label="Live candidate" title="Blocked until release gates pass" run={async () => { try { await api(`/api/lab/strategy/${s.id}/status`, { body: { status: 'LIVE_CANDIDATE', password: pw || undefined } }); } finally { setPw(''); } }} /></td></tr>)}</tbody></table></Card>

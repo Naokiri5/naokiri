@@ -83,7 +83,12 @@ async function completes(req: ChildRequest) {
 }
 async function killedAt(req: ChildRequest & { crashAt: CrashPoint }) {
   const o = await runChild(req);
-  expect(o.signal, describeChild(o)).toBe('SIGKILL');
+  if (process.platform === 'win32') {
+    // Windows reports a self-termination via SIGKILL as exit code 1 without a signal.
+    expect(o, describeChild(o)).toMatchObject({ code: 1, signal: null });
+  } else {
+    expect(o.signal, describeChild(o)).toBe('SIGKILL');
+  }
   expect(o.marker).toMatchObject({ at: req.crashAt, occurrence: req.occurrence ?? 1 });
   expect(o.result).toBeUndefined();
 }

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { basename, join, normalize, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { config, REPO_ROOT } from '../src/config.js';
 import * as gates from '../src/qa/gates.js';
@@ -34,7 +34,7 @@ describe('test-derived release gate evidence', () => {
 
   it.each([
     ref.file, './' + ref.file, 'test/quality.test.ts', './test/quality.test.ts',
-    join(REPO_ROOT, ref.file), join(REPO_ROOT, ref.file).replaceAll('/', '\\'),
+    join(REPO_ROOT, ref.file).replaceAll('\\', '/'), join(REPO_ROOT, ref.file).replaceAll('/', '\\'),
     'server/test/../test/quality.test.ts',
   ])('normalizes repository and server-relative reporter paths: %s', path => {
     const input = report(); input.testResults[0].name = path;
@@ -182,7 +182,8 @@ describe('release gate manifest and certification gaps', () => {
       join(REPO_ROOT, 'node_modules/vitest/vitest.mjs'), 'list', '--json', '--no-static-parse', ...files.map(file => relative(join(REPO_ROOT, 'server'), join(REPO_ROOT, file))),
     ], { cwd: join(REPO_ROOT, 'server'), env: { ...process.env, MIA_LIVE_TESTS: '1', MIA_OFFLINE: '1' }, encoding: 'utf8' }));
     for (const item of refs) {
-      expect(listed.filter(test => test.file === join(REPO_ROOT, item.file) && test.name.split(' > ').join(' ') === item.fullName), `${item.file}: ${item.fullName}`).toHaveLength(1);
+      const file = join(REPO_ROOT, item.file);
+      expect(listed.filter(test => normalize(test.file) === file && test.name.split(' > ').join(' ') === item.fullName), `${item.file}: ${item.fullName}`).toHaveLength(1);
     }
     expect(files).not.toContain('server/test/joe.test.ts');
     expect(gates.TEST_GATE_REQUIREMENTS.G09).toHaveLength(2);
@@ -202,7 +203,7 @@ describe('release gate manifest and certification gaps', () => {
 
   it('keeps G02 pending in an offline report with skipped live provider assertions', () => {
     const input = report(gates.TEST_GATE_REQUIREMENTS.G01);
-    const live = input.testResults.find(file => file.name.endsWith('/live.providers.test.ts'))!;
+    const live = input.testResults.find(file => basename(file.name) === 'live.providers.test.ts')!;
     for (const assertion of live.assertionResults) { assertion.status = 'skipped'; input.numPassedTests--; input.numPendingTests++; }
     const gate = gates.releaseGates(input).gates.find(g => g.id === 'G02')!;
     expect(gate.status).toBe('PENDING'); expect(gate.evidence).toContain('live.providers.test.ts'); expect(gate.evidence).toContain('skipped');

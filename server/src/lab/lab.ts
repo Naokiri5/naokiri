@@ -1,12 +1,12 @@
 import { STRATEGIES, strategyById } from './strategies.js';
-import { backtest, stats, monteCarlo, type BtResult, type BtTrade } from './backtest.js';
+import { BACKTEST_MODEL_VERSION, backtest, stats, monteCarlo, type BtResult, type BtTrade } from './backtest.js';
 import { fetchProvider } from '../providers/http.js';
 import { all, get, run, J, P } from '../db/db.js';
 import { uid } from '../core/util.js';
 import { audit } from '../core/audit.js';
 import { market } from '../market/store.js';
 import { getSetting, setSetting } from '../core/settings.js';
-import type { Candle } from '../market/types.js';
+import { INTERVAL_MS, type Candle, type Interval } from '../market/types.js';
 
 /** Part 18 lifecycle: RESEARCH → BACKTESTED → PAPER → (LIVE_CANDIDATE, gated) | SUSPENDED | RETIRED */
 export type StrategyStatus = 'RESEARCH' | 'BACKTESTED' | 'PAPER' | 'LIVE_CANDIDATE' | 'SUSPENDED' | 'RETIRED';
@@ -27,8 +27,11 @@ export function setStrategyStatus(actor: string, id: string, status: StrategySta
   setSetting('suspendedStrategies', [...susp]);
   audit(actor, 'strategy.status', { id, status, note });
 }
-export async function fetchHistory(symbol: string, interval: string, bars = 3000): Promise<Candle[]> {
-  const out: Candle[] = []; let end: number | undefined;
+export async function fetchHistory(symbol: string, interval: Interval, bars = 3000, cutoff = Date.now()): Promise<Candle[]> {
+  const duration = INTERVAL_MS[interval];
+  // Freeze the last closed interval before the first request. Pagination can cross a candle boundary.
+  const closedThrough = Math.floor(cutoff / duration) * duration;
+  const out: Candle[] = []; let end = closedThrough - 1;
   while (out.length < bars) {
     const lim = Math.min(1000, bars - out.length);
     const batch = await klinesBefore(symbol, interval, lim, end);
@@ -36,7 +39,7 @@ export async function fetchHistory(symbol: string, interval: string, bars = 3000
     out.unshift(...batch); end = batch[0].t - 1;
     if (batch.length < lim) break;
   }
-  return out.filter((c) => (c.closeTime ?? 0) < Date.now());
+  return out.filter((c) => c.t + duration <= closedThrough && (c.closeTime ?? 0) < closedThrough);
 }
 async function klinesBefore(symbol: string, interval: string, limit: number, endTime?: number) {
   const raw: any[] = await fetchProvider('binance', `https://data-api.binance.vision/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}${endTime ? `&endTime=${endTime}` : ''}`);
@@ -55,16 +58,33 @@ export async function runBacktest(actor: string, strategyId: string, symbol: str
   audit(actor, 'lab.backtest', { id, strategyId, symbol, bars: candles.length, oos: res.outOfSample });
   return { id, ...summary(res) };
 }
-const summary = (r: BtResult) => ({ strategyId: r.strategyId, instrument: r.instrument, bars: r.bars, from: r.from, to: r.to, inSample: r.inSample, outOfSample: r.outOfSample, all: r.all, warnings: r.warnings, equityR: r.equityR, costs: r.costs, trades: r.trades.slice(-200) });
+const summary = (r: BtResult) => ({
+  strategyId: r.strategyId, modelVersion: r.modelVersion ?? 1, instrument: r.instrument, bars: r.bars, from: r.from, to: r.to,
+  inSample: r.inSample, outOfSample: r.outOfSample, all: r.all,
+  warnings: r.modelVersion == null ? ['This backtest used the earlier fill model. Rerun it to include the current cost and gap handling.', ...r.warnings] : r.warnings,
+  equityR: r.equityR, costs: r.costs, trades: r.trades.slice(-200),
+});
 export function listBacktests(limit = 50) { return all<any>('SELECT id, strategy_id, created_at, instrument, interval, result FROM backtests ORDER BY created_at DESC LIMIT ?', limit).map((r) => ({ id: r.id, created_at: r.created_at, ...summary(P(r.result)) })); }
-/** Aggregate current-version OUT-OF-SAMPLE stats across the most recent backtest per instrument. */
+/** Aggregate the latest out-of-sample evidence per instrument within one strategy and fill-model version. */
 export function strategyStats(strategyId: string) {
   const definition = strategyById(strategyId); if (!definition) return null;
-  const rows = all<any>('SELECT instrument, result FROM backtests WHERE strategy_id=? ORDER BY created_at DESC', strategyId);
-  const seen = new Set<string>(); const trades: BtTrade[] = [];
-  for (const r of rows) { const result = P<BtResult>(r.result); if (result.strategyVersion !== definition.version || seen.has(r.instrument)) continue; seen.add(r.instrument); trades.push(...result.trades.filter((t) => t.segment === 'OOS')); }
+  const rows = all<{ instrument: string; result: string }>('SELECT instrument, result FROM backtests WHERE strategy_id=? ORDER BY created_at DESC', strategyId);
+  const legacy = { modelVersion: 1, instruments: new Set<string>(), trades: [] as BtTrade[] };
+  const current = { modelVersion: BACKTEST_MODEL_VERSION, instruments: new Set<string>(), trades: [] as BtTrade[] };
+  for (const row of rows) {
+    const result = P<BtResult>(row.result);
+    if (result.strategyVersion !== definition.version) continue;
+    const modelVersion = result.modelVersion ?? legacy.modelVersion;
+    if (modelVersion !== current.modelVersion && modelVersion !== legacy.modelVersion) continue;
+    const cohort = modelVersion === current.modelVersion ? current : legacy;
+    if (cohort.instruments.has(row.instrument)) continue;
+    cohort.instruments.add(row.instrument);
+    cohort.trades.push(...result.trades.filter((trade) => trade.segment === 'OOS'));
+  }
+  // Keep existing evidence usable until a run with the current fill model is available for this strategy.
+  const { modelVersion, instruments, trades } = current.instruments.size ? current : legacy;
   if (!trades.length) return null;
-  const s = stats(trades); return { ...s, instruments: seen.size, monteCarlo: monteCarlo(trades.map((t) => t.r)) };
+  return { ...stats(trades), modelVersion, instruments: instruments.size, monteCarlo: monteCarlo(trades.map((trade) => trade.r)) };
 }
 /** Realized paper performance per strategy (Part 18.5 decay detection input). */
 export function paperStats(strategyId: string) {
