@@ -6,6 +6,7 @@ import * as dexscreener from '../providers/dexscreener.js';
 import * as frankfurter from '../providers/frankfurter.js';
 import { market, type DeepState } from './store.js';
 import { validateCandles } from '../chart/analysis.js';
+import { validateTicker24 } from './quality.js';
 import { INTERVAL_MS, type Candle, type Instrument, type Interval } from './types.js';
 import { bus } from '../core/bus.js';
 import { FeatureEngine } from '../features/indicators.js';
@@ -41,17 +42,51 @@ export async function refreshRules() {
   rulesFetchedAt = Date.now();
 }
 
+export interface TickerIngressReport {
+  accepted: number;
+  rejected: number;
+  outOfOrder: number;
+  unknown: number;
+}
+
+/** Structural/source-time checks run before state mutation. Bad rows cannot displace good quotes. */
+export function ingestTickerSnapshot(tickers: readonly binance.Ticker24[], receivedAt: number): TickerIngressReport {
+  const report: TickerIngressReport = { accepted: 0, rejected: 0, outOfOrder: 0, unknown: 0 };
+  for (const t of tickers) {
+    if (!t || typeof t.symbol !== 'string') { report.rejected++; continue; }
+    const id = `crypto:binance:${t.symbol}`;
+    const inst = market.instruments.get(id);
+    if (!inst) { report.unknown++; continue; }
+    if (validateTicker24(t, inst, receivedAt) !== null) { report.rejected++; continue; }
+    const prev = market.tickers.get(id);
+    if (prev && t.closeTime < prev.providerTs) { report.outOfOrder++; continue; }
+    market.tickers.set(id, {
+      instrumentId: id, symbol: t.symbol, base: inst.base, quote: inst.quote,
+      last: t.lastPrice, bid: t.bidPrice, ask: t.askPrice,
+      changePct: t.priceChangePercent, quoteVolume: t.quoteVolume,
+      high: t.highPrice, low: t.lowPrice, open: t.openPrice,
+      trades: t.count, providerTs: t.closeTime, receivedAt, source: 'binance',
+    });
+    report.accepted++;
+  }
+  return report;
+}
+
 export async function refreshTickers() {
   const ts = await timed('fabric.tickers', () => binance.tickers24h());
   const recv = Date.now();
-  for (const t of ts) {
-    const id = `crypto:binance:${t.symbol}`; const inst = market.instruments.get(id);
-    if (!inst) continue;
-    // Out-of-order / replayed payload: never overwrite a newer exchange timestamp with an older one.
-    const prev = market.tickers.get(id);
-    if (prev && Number.isFinite(t.closeTime) && t.closeTime < prev.providerTs) continue;
-    if (!(t.lastPrice > 0)) continue;
-    market.tickers.set(id, { instrumentId: id, symbol: t.symbol, base: inst.base, quote: inst.quote, last: t.lastPrice, bid: t.bidPrice, ask: t.askPrice, changePct: t.priceChangePercent, quoteVolume: t.quoteVolume, high: t.highPrice, low: t.lowPrice, open: t.openPrice, trades: t.count, providerTs: t.closeTime, receivedAt: recv, source: 'binance' });
+  const ingest = ingestTickerSnapshot(ts, recv);
+  if (ingest.rejected > 0 || ingest.accepted === 0) {
+    // One bounded summary per source batch: no unbounded raw-frame dead-letter writes or secret payload logs.
+    bus.publish('health', {
+      type: 'market-ticker-ingress', source: 'binance', at: recv,
+      status: ingest.accepted === 0 ? 'FAIL' : 'WARN', ...ingest,
+    });
+  }
+  if (ingest.accepted === 0) {
+    // A provider HTTP 200 without valid fresh tracked quotes is not a successful market refresh.
+    // Keep previous quote timestamps untouched so the existing deterministic risk gate fails stale.
+    throw new Error('Binance ticker batch had no fresh validated tracked quotes');
   }
   market.tickersFetchedAt = recv;
   if (recv - universeAt > 10 * 60_000 || !market.universe.length) selectUniverse();
