@@ -19,6 +19,23 @@ export interface Snapshot { lastUpdateId: number; bids: [number, number][]; asks
 export interface StreamBook { bids: [number, number][]; asks: [number, number][]; ts: number; lastUpdateId: number }
 export type SyncState = 'BUFFERING' | 'SYNCED';
 
+/**
+ * Reject malformed or forged REST snapshots BEFORE changing any local book state.
+ * A snapshot can only bridge the buffered diff-depth stream when the entire
+ * snapshot is sane, ordered, and carries an exact safe update ID.
+ */
+export function validDepthSnapshot(snapshot: Snapshot): boolean {
+  if (!snapshot || !Number.isSafeInteger(snapshot.lastUpdateId) || snapshot.lastUpdateId < 0) return false;
+  const validSide = (levels: [number, number][], descending: boolean) =>
+    Array.isArray(levels) && levels.length > 0 && levels.every((level, index) =>
+      Array.isArray(level) && level.length === 2 &&
+      Number.isFinite(level[0]) && level[0] > 0 &&
+      Number.isFinite(level[1]) && level[1] > 0 &&
+      (index === 0 || (descending ? level[0] < levels[index - 1][0] : level[0] > levels[index - 1][0])));
+  return validSide(snapshot.bids, true) && validSide(snapshot.asks, false) &&
+    snapshot.bids[0][0] < snapshot.asks[0][0];
+}
+
 const MAX_BUFFER = 2_000;
 /** Snapshot retry policy (MA-10): per-symbol exponential backoff with jitter, and a cap on concurrent snapshot requests. */
 export const SNAPSHOT_BACKOFF_MIN_MS = 1_000, SNAPSHOT_BACKOFF_MAX_MS = 60_000, MAX_CONCURRENT_SNAPSHOTS = 5;
@@ -84,7 +101,8 @@ export class BookSync {
     return true;
   }
   /** Feed the REST snapshot while buffering. */
-  onSnapshot(s: Snapshot): 'SYNCED' | 'SNAPSHOT_TOO_OLD' | 'WAITING' {
+  onSnapshot(s: Snapshot): 'SYNCED' | 'SNAPSHOT_TOO_OLD' | 'WAITING' | 'SNAPSHOT_INVALID' {
+    if (!validDepthSnapshot(s)) return 'SNAPSHOT_INVALID';
     const L = s.lastUpdateId;
     if (L < this.requiredSnapshotId) return 'SNAPSHOT_TOO_OLD';
     const pending = this.buffer.filter((e) => e.u > L);
@@ -106,7 +124,7 @@ export class BookSync {
     return 'SYNCED';
   }
   book(ts: number): StreamBook | null {
-    if (this.state !== 'SYNCED') return null;
+    if (this.state !== 'SYNCED' || !Number.isSafeInteger(ts) || ts < 0) return null;
     const bids = [...this.bids].sort((x, y) => y[0] - x[0]).slice(0, this.depth);
     const asks = [...this.asks].sort((x, y) => x[0] - y[0]).slice(0, this.depth);
     if (!bids.length || !asks.length || bids[0][0] >= asks[0][0]) return null; // empty or crossed: never publish
@@ -170,7 +188,7 @@ export interface StreamDeps {
 export const binanceStreamUrl = (symbols: string[]) =>
   `wss://data-stream.binance.vision/stream?streams=${symbols.map((s) => `${s.toLowerCase()}@depth@100ms`).join('/')}`;
 
-export interface StreamStatus { connected: boolean; symbols: string[]; lastMessageAt: number; reconnects: number; resyncs: number; synced: number }
+export interface StreamStatus { connected: boolean; symbols: string[]; lastMessageAt: number; reconnects: number; resyncs: number; synced: number; invalidSnapshots: number }
 /**
  * One combined connection for a set of symbols. Reconnects with exponential backoff + jitter (1 s … 60 s); every
  * (re)connect starts every symbol from BUFFERING and a fresh snapshot, so no book survives a disconnect.
@@ -178,7 +196,7 @@ export interface StreamStatus { connected: boolean; symbols: string[]; lastMessa
 export function startDepthStream(symbols: string[], deps: StreamDeps) {
   const now = deps.now ?? Date.now; const rand = deps.random ?? Math.random; const WS = deps.WebSocketImpl ?? (globalThis as any).WebSocket;
   const syncs = new Map(symbols.map((s) => [s, new BookSync(s)]));
-  const status: StreamStatus = { connected: false, symbols, lastMessageAt: 0, reconnects: 0, resyncs: 0, synced: 0 };
+  const status: StreamStatus = { connected: false, symbols, lastMessageAt: 0, reconnects: 0, resyncs: 0, synced: 0, invalidSnapshots: 0 };
   let ws: WebSocket | null = null; let stopped = false; let attempt = 0; let timer: ReturnType<typeof setTimeout> | null = null;
   /** Connection generation: a snapshot that completes after stop() or after a reconnect belongs to an old connection and
    *  must not touch the current book (CodeRabbit PR #18). */
@@ -199,6 +217,11 @@ export function startDepthStream(symbols: string[], deps: StreamDeps) {
         const snap = await deps.snapshot(sym);
         if (stopped || gen !== generation) return; // stale completion: discard
         const r = syncs.get(sym)!.onSnapshot(snap);
+        if (r === 'SNAPSHOT_INVALID') {
+          status.invalidSnapshots++;
+          invalidate(sym);
+          continue; // bounded retry, then existing per-symbol backoff; never publish malformed depth
+        }
         if (r === 'SYNCED') {
           failures.delete(sym);
           nextSnapshotAt.delete(sym);

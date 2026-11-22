@@ -13,11 +13,14 @@ import { timed } from '../core/latency.js';
 import { config } from '../config.js';
 import { openPositions } from '../portfolio/ledger.js';
 import type { Book } from '../providers/binance.js';
+import { validBook } from './quality.js';
 import { startDepthStream, binanceStreamUrl, type StreamBook, type StreamDeps } from './depthStream.js';
 
 /** Install a book snapshot unless it is older than the one already held (concurrent refreshes can land out of order). */
 /** Install a book unless it is older than the held one. Returns whether it was installed. */
 function setBook(id: string, b: Book): boolean {
+  // Reject the book before it can replace known-good state or appear fresh to the OMS.
+  if (!validBook(b) || (b.lastUpdateId !== undefined && (!Number.isSafeInteger(b.lastUpdateId) || b.lastUpdateId < 0))) return false;
   const d = market.deep.get(id); if (!d) return false;
   const cur = d.book;
   if (cur && ((b.lastUpdateId != null && cur.lastUpdateId != null && b.lastUpdateId < cur.lastUpdateId) || b.ts < cur.ts)) return false;
@@ -166,8 +169,12 @@ export async function refreshDeep(ids = market.universe) {
           try { await refreshCandles(id, iv); } catch { /* provider health tracked; quality gate fails closed on stale candles */ }
         }
       }
-      try { setBook(id, await timed('fabric.book', () => binance.depth(inst.symbol, 100))); }
-      catch { /* a book that could not be refreshed keeps its old timestamp and ages out of the execution limit */ }
+      // The deep scanner and position hot lane share one verified book. Avoid a duplicate REST
+      // request when streaming is continuous; preserve REST as the immediate fallback.
+      if (!streamFresh(id)) {
+        try { setBook(id, await timed('fabric.book', () => binance.depth(inst.symbol, 100))); }
+        catch { /* failed refresh preserves old timestamp; execution freshness expires normally */ }
+      }
     }
   }));
   await refreshCross(ids);
@@ -191,7 +198,11 @@ async function refreshCross(ids: string[]) {
 /** Last time a sequence-checked stream book was published per instrument (REST skips symbols the stream keeps fresh). */
 const streamBookAt = new Map<string, number>();
 export const STREAM_FRESH_MS = 2_000;
-export const streamFresh = (id: string, nowTs = Date.now()) => nowTs - (streamBookAt.get(id) ?? 0) <= STREAM_FRESH_MS;
+export const streamFresh = (id: string, nowTs = Date.now()) => {
+  const publishedAt = streamBookAt.get(id);
+  return publishedAt !== undefined && Number.isSafeInteger(nowTs) &&
+    nowTs >= publishedAt && nowTs - publishedAt <= STREAM_FRESH_MS;
+};
 let depthStream: ReturnType<typeof startDepthStream> | null = null; let streamKey = '';
 /**
  * Keep one combined depth stream for `ids` (open positions + deep tier). Restarted only when the set changes. Each
@@ -203,6 +214,7 @@ export function syncDepthStreams(ids: string[], seams: Partial<Pick<StreamDeps, 
   const key = symbols.join(',');
   if (key === streamKey && depthStream) return depthStream;
   depthStream?.stop(); depthStream = null; streamKey = key;
+  streamBookAt.clear(); // a replacement generation must not inherit the old stream's freshness evidence
   if (!symbols.length) return null;
   depthStream = startDepthStream(symbols, {
     url: binanceStreamUrl,

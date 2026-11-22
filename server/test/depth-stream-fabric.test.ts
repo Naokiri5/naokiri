@@ -106,3 +106,32 @@ describe('streaming books wired into the market fabric', () => {
     expect(streamFresh(inst.id)).toBe(false); // REST keeps refreshing this symbol
   });
 });
+
+describe('Phase 1: stream admission into canonical market store', () => {
+  it('rejects a malformed snapshot and leaves the REST fallback eligible', async () => {
+    const { inst, last } = seedInstrument('STRM7USDT');
+    Object.assign(config, { streaming: true, offline: false });
+    const original = market.deep.get(inst.id)!.book;
+    const h = syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any,
+      snapshot: async () => ({ lastUpdateId: 10, ts: Date.now(),
+        bids: [[last * 1.01, 1]] as [number, number][],
+        asks: [[last * 1.001, 1]] as [number, number][] }),
+    })!;
+    await tick(); await tick();
+    expect(h.status().invalidSnapshots).toBe(3);
+    expect(market.deep.get(inst.id)!.book).toEqual(original);
+    expect(streamFresh(inst.id)).toBe(false);
+  });
+
+  it('rejects a future freshness query even when a stream book is currently stored', async () => {
+    const { inst, last } = seedInstrument('STRM8USDT');
+    Object.assign(config, { streaming: true, offline: false });
+    syncDepthStreams([inst.id], { WebSocketImpl: FakeWS as any,
+      snapshot: async () => ({ lastUpdateId: 10, ts: Date.now(),
+        bids: [[last * 0.999, 2]], asks: [[last * 1.001, 2]] }),
+    });
+    await tick(); await tick();
+    expect(streamFresh(inst.id)).toBe(true);
+    expect(streamFresh(inst.id, Date.now() - 1)).toBe(false);
+  });
+});

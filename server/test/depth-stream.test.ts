@@ -44,7 +44,7 @@ describe('BookSync (Binance diff-depth synchronization)', () => {
     s.onEvent(ev(103, 104));
     expect(s.onSnapshot(snap(100))).toBe('WAITING');
     expect(s.onSnapshot(snap(103))).toBe('SNAPSHOT_TOO_OLD');
-    expect(s.onSnapshot({ ...snap(104), bids: [[102, 1]] })).toBe('WAITING');
+    expect(s.onSnapshot({ ...snap(104), bids: [[102, 1]] })).toBe('SNAPSHOT_INVALID');
     expect(s.book(1)).toBeNull();
     expect(s.onSnapshot(snap(104))).toBe('SYNCED');
   });
@@ -250,5 +250,56 @@ describe('CodeRabbit PR #18 stream findings (SAFE-03)', () => {
     await tick(); h.stop();
     resolve(snap(10)); await tick(); await tick();
     expect(published).toHaveLength(0);
+  });
+});
+
+describe('Phase 1: snapshot truth and fail-closed transport', () => {
+  it('never synchronizes from malformed, empty, crossed, unordered or unsafe-ID snapshots', () => {
+    const baseline = snap(10);
+    const invalid = [
+      { ...baseline, lastUpdateId: Number.NaN },
+      { ...baseline, lastUpdateId: Number.MAX_SAFE_INTEGER + 1 },
+      { ...baseline, lastUpdateId: -1 },
+      { ...baseline, bids: [] },
+      { ...baseline, asks: [] },
+      { ...baseline, bids: [[100, 1], [100, 2]] },
+      { ...baseline, asks: [[102, 1], [101, 1]] },
+      { ...baseline, bids: [[102, 1]] },
+      { ...baseline, asks: [[101, Number.POSITIVE_INFINITY]] },
+      { ...baseline, bids: [[100, Number.NaN]] },
+    ];
+    for (const payload of invalid) {
+      const sync = new BookSync('BTCUSDT');
+      expect(sync.onSnapshot(payload as any)).toBe('SNAPSHOT_INVALID');
+      expect(sync.state).toBe('BUFFERING');
+      expect(sync.book(1)).toBeNull();
+    }
+  });
+
+  it('does not replace a synced book with a malformed snapshot', () => {
+    const sync = new BookSync('BTCUSDT');
+    expect(sync.onSnapshot(snap(20))).toBe('SYNCED');
+    expect(sync.onSnapshot({ ...snap(21), bids: [[101, 1]] })).toBe('SNAPSHOT_INVALID');
+    expect(sync.book(100)!.lastUpdateId).toBe(20);
+    expect(sync.book(Number.NaN)).toBeNull();
+    expect(sync.book(-1)).toBeNull();
+  });
+
+  it('refuses invalid provider snapshots, retries with a finite budget, and publishes nothing', async () => {
+    const published: StreamBook[] = [];
+    let calls = 0;
+    const h = startDepthStream(['BTCUSDT'], {
+      url: () => 'wss://test',
+      snapshot: async () => { calls++; return { ...snap(10), lastUpdateId: Number.NaN }; },
+      publish: (_symbol, book) => published.push(book),
+      now: () => 50_000, random: () => 0.999, WebSocketImpl: FakeWS as any,
+    });
+    try {
+      await tick(); await tick();
+      expect(calls).toBe(3);
+      expect(published).toHaveLength(0);
+      expect(h.status().invalidSnapshots).toBe(3);
+      expect(h.status().synced).toBe(0);
+    } finally { h.stop(); }
   });
 });
