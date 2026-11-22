@@ -2,7 +2,8 @@ import { all, get } from '../db/db.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { reconcile } from '../portfolio/calendar.js';
-import { protectPositions } from '../exec/oms.js';
+import { protectPositions, VENUE } from '../exec/oms.js';
+import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import { verifyMemory } from '../ditas/memory.js';
 import type { VerifyResult } from './backup.js';
 /**
@@ -17,8 +18,8 @@ import type { VerifyResult } from './backup.js';
  */
 export function auditPaperOmsRecovery(): { ok: boolean; detail: string; problems: string[] } {
   const problems: string[] = [];
-  const account = 'paper-bot';
-  const venue = 'binance-paper';
+  const account = PAPER_ACCOUNT;
+  const venue = VENUE;
   const approx = (a: number, b: number, unit: number) =>
     Number.isFinite(a) && Number.isFinite(b) &&
     Math.abs(a - b) <= Math.max(unit, Math.abs(a) * 1e-8, Math.abs(b) * 1e-8);
