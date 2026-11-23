@@ -15,8 +15,14 @@ const MODES = [
   ['BOUNDED_LIVE', 'Bounded live', 'LOCKED — requires every release gate, an isolated signer and your explicit authorization.'],
 ];
 
+type ChoicePanelCandidate = { decisionId: string; instrumentId: string; strategyId: string; opportunityScore: number | null; estimatedCostR: number | null; disposition: string };
+type ChoicePanelRound = { roundId: string; completedAt: number; totalReportsObserved: number; selectedDecisionId: string | null; firstEligibleDecisionId: string | null; noTradeReason: string | null; changedFromFirstEligible: boolean; candidates: ChoicePanelCandidate[] };
+
 export function Bot() {
   const { data, error, reload } = useApi('/api/bot', { topics: ['bot', 'order', 'position', 'mode'], every: 20_000 });
+  const { data: choice, error: choiceError } = useApi<{ rolloutMode: 'SHADOW_ONLY'; releaseReadiness: string; reason: string; rounds: ChoicePanelRound[] }>('/api/choice/shadow', { topics: ['scan'], every: 30_000 });
+  const lastChoice = choice?.rounds[0];
+  const selectedChoice = lastChoice?.candidates.find((c) => c.decisionId === lastChoice.selectedDecisionId);
   const [pw, setPw] = useState(''); const [amt, setAmt] = useState('10000');
   const s = data?.status; const a = data?.account;
   return <Page title="Bot Account" sub="Dedicated paper strategy allocation (Part 26). The bot can never withdraw, transfer, change destinations, raise its allocation or its own permissions.">
@@ -45,6 +51,23 @@ export function Bot() {
         <div className="tablewrap" style={{ maxHeight: 180 }}><table><tbody>{(data?.ledger ?? []).slice(0, 30).map((l: any) => <tr key={l.id}><td className="faint">{fmt.ago(l.ts)}</td><td><Badge v={l.kind} /></td><td className="num">{fmt.usd(l.amount)}</td><td className="muted">{l.note}</td></tr>)}</tbody></table></div>
       </div></Card>
     </div>
+    <div style={{ height: 14 }} />
+    <Card title="Choice Management — observed shadow comparison" right={<Badge v="SHADOW ONLY" tone="b-info" />}>
+      <ErrorLine e={choiceError} />
+      <div className="hint">Ranks already evaluated paper candidates for research. Does not delay, authorize, replace or submit any orders. Scores are not win probabilities or expected returns; active arbitration and live execution are not certified.</div>
+      {!lastChoice ? <Empty>No completed scan comparison has been stored yet.</Empty> : <>
+        <div className="grid g3" style={{ marginTop: 10 }}>
+          <Stat k="Last observed scan" v={fmt.ago(lastChoice.completedAt)} s={lastChoice.roundId} />
+          <Stat k="Evaluated candidates" v={String(lastChoice.totalReportsObserved)} s={lastChoice.noTradeReason ?? 'research selection available'} />
+          <Stat k="First vs top-ranked" v={lastChoice.changedFromFirstEligible ? 'Different' : 'Same / none'} s="Observed comparison, not causal evidence" />
+        </div>
+        <div className="hint" style={{ marginTop: 8 }}>{selectedChoice ? <>Research preference: <b>{selectedChoice.instrumentId.split(':').pop()}</b> ({selectedChoice.strategyId}). No execution action is associated with this preference.</> : <>No research preference: {lastChoice.noTradeReason ?? 'insufficient evidence'}.</>}</div>
+        {lastChoice.candidates.length > 0 && <div className="tablewrap" style={{ maxHeight: 220, marginTop: 8 }}><table><thead><tr><th>Candidate</th><th>Strategy</th><th>Decision</th><th className="num">Research score</th><th className="num">Cost R</th></tr></thead><tbody>
+          {lastChoice.candidates.slice(0, 15).map((c) => <tr key={c.decisionId}><td><Link to={'/decision/' + c.decisionId}>{c.instrumentId.split(':').pop()}</Link></td><td>{c.strategyId}</td><td><Badge v={c.disposition} /></td><td className="num">{fmt.num(c.opportunityScore, 1)}</td><td className="num">{fmt.num(c.estimatedCostR, 3)}</td></tr>)}
+        </tbody></table></div>}
+      </>}
+      <div className="hint">Release status: {choice?.releaseReadiness ?? 'NOT CERTIFIED'} · {choice?.reason ?? 'Awaiting genuine observed paper outcomes and controlled comparison evidence.'}</div>
+    </Card>
     <div style={{ height: 14 }} />
     <Card title={`Pending approvals (${data?.pending.length ?? 0})`} flush>{data?.pending.length ? <table><thead><tr><th>Created</th><th>Instrument</th><th className="num">Qty</th><th className="num">Stop</th><th>Decision</th><th /></tr></thead><tbody>{data.pending.map((o: any) => <tr key={o.id}><td className="faint">{fmt.ago(o.created_at)}</td><td>{o.instrument.split(':')[2]}</td><td className="num">{o.qty}</td><td className="num">{fmt.px(o.stop_price)}</td><td><Link to={`/decision/${o.decision_id}`}>explain</Link></td><td className="row"><Action className="primary sm" label="Approve" run={async () => { const r = await api(`/api/orders/${o.id}/approve`, { body: {} }); if (!r.ok) throw new Error(r.reason); reload(); }} /><Action className="sm" label="Reject" run={async () => { await api(`/api/orders/${o.id}/reject`, { body: {} }); reload(); }} /></td></tr>)}</tbody></table> : <Empty>No orders awaiting approval. Approvals expire with their consensus window (5 min).</Empty>}</Card>
     <div style={{ height: 14 }} />
