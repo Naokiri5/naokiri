@@ -4,7 +4,6 @@ import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { config } from './config.js';
 import { openDb } from './db/db.js';
-import { recoverDurableSessionOnBoot } from './ops/durableSession.js';
 import './providers/binance.js'; import './providers/coinbase.js'; import './providers/kraken.js'; import './providers/coingecko.js';
 import './providers/dexscreener.js'; import './providers/frankfurter.js'; import './providers/googlenews.js'; import './providers/pending.js';
 import { routes } from './api/routes.js';
@@ -15,7 +14,7 @@ import { seedCatalog, resumeIngestion } from './knowledge/store.js';
 import { seedConcepts } from './knowledge/concepts.js';
 
 export async function buildApp() {
-  openDb(); recoverDurableSessionOnBoot(); seedStrategies(); seedCatalog(); seedConcepts(); resumeIngestion();
+  openDb(); seedStrategies(); seedCatalog(); seedConcepts(); resumeIngestion();
   const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'req.body.accessToken', 'req.body.password', 'req.body.current', 'req.body.next', 'req.body.otp', 'req.body.consoleCode'] }, bodyLimit: 256 * 1024 });
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('x-request-id', req.id);

@@ -24,6 +24,7 @@ import type { DecisionReport } from '../decision/engine.js';
 import { acquireOrRenewLease, ownsLease, releaseLease, LeaseLostError, type LeaseFence } from '../ops/lease.js';
 import { checkScanStall, protectionIntervalMs, staleAfter } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
+import { recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
 import { record } from '../core/latency.js';
 import { hostname } from 'node:os';
@@ -81,6 +82,11 @@ function takeoverAllowed(lease: LeaseFence): boolean {
     const result = takeoverIntegrity();
     if (result.ok) {
       expireApprovals(lease);
+      try { recoverDurableSessionAfterTakeover(lease); } catch (error) {
+        if (error instanceof LeaseLostError) throw error;
+        // The previous session cannot authorize this lease generation. Keep paper protection running.
+        botStatus.lastError = `session recovery: ${errorText(error).slice(0, 200)}`;
+      }
       return true;
     }
     failed = result.checks.filter((check) => !check.ok);

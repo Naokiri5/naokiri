@@ -1,6 +1,6 @@
 import { get, run, tx } from '../db/db.js';
 import { getControl } from '../core/mode.js';
-import { currentLease, ownsLease, type LeaseFence } from './lease.js';
+import { LeaseLostError, ownsLease, type LeaseFence } from './lease.js';
 import { sessionPreflight, type SessionMind } from './sessionPreflight.js';
 import type { EngineView } from './readiness.js';
 import { unreconciledPaperOrders } from '../exec/recovery.js';
@@ -96,11 +96,15 @@ export function openDurablePaperSession(engine: EngineView, mind: SessionMind, f
   });
 }
 
-/** No implicit autorun after a crash, even when the previous state said RUNNING. */
-export function recoverDurableSessionOnBoot(at = Date.now()) {
+/** Only the lease holder can recover a session left by an earlier engine generation. */
+export function recoverDurableSessionAfterTakeover(fence: LeaseFence, clock?: number) {
   return tx(() => {
+    const at = clock ?? Date.now();
+    if (fence.name !== 'engine' || !ownsLease(fence, at)) throw new LeaseLostError();
     const old = durableSessionStatus();
     if (!old || !['RUNNING','CLOSING_DRAINING_ENTRIES','RECOVERING_ON_BOOT'].includes(old.state))
+      return old;
+    if (old.state !== 'RECOVERING_ON_BOOT' && old.lease_holder === fence.holder && old.lease_acquired_at === fence.acquired_at)
       return old;
     const recovering = old.state === 'RECOVERING_ON_BOOT' ? old
       : persist(old, 'RECOVERING_ON_BOOT', 'BOOT_RECOVERY_STARTED', at, {
