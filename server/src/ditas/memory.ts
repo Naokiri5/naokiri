@@ -9,8 +9,9 @@ import type { DecisionReport } from '../decision/engine.js';
 import { classifyRegime } from '../regime/regime.js';
 import { STRATEGIES, strategyById } from '../lab/strategies.js';
 import { fingerprint } from './fingerprint.js';
+import type { ChoiceShadowRound } from '../choice/arbitration.js';
 
-export type MemoryKind = 'NO_SIGNAL' | 'REJECTED' | 'PROPOSAL' | 'DECISION' | 'CORRECTION';
+export type MemoryKind = 'NO_SIGNAL' | 'REJECTED' | 'PROPOSAL' | 'DECISION' | 'CORRECTION' | 'CHOICE_SHADOW';
 export interface MemoryEvent {
   id: string; kind: MemoryKind; instrumentId: string; strategyId: string | null; decisionId: string | null;
   createdAt: number; snapshotId: string | null; parentEventId: string | null; payload: any; hash: string;
@@ -57,6 +58,37 @@ export function recordOpportunity(input: { kind: Exclude<MemoryKind, 'CORRECTION
     run('INSERT INTO ditas_events(id,dedupe_key,created_at,kind,instrument,strategy,decision_id,snapshot_id,parent_event_id,payload,prev_hash,hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)', id, row.dedupe_key, ts, row.kind, row.instrument, row.strategy, row.decision_id, snapshotId, null, payload, prevHash, hashEvent(row));
     return eventRow({ ...row, hash: hashEvent(row) });
   });
+}
+
+/**
+ * Append a completed, observational choice comparison to the canonical DITAS
+ * hash chain. No synthetic instrument snapshot or financial ledger write is
+ * created; the round references existing immutable decision ids.
+ */
+export function recordShadowChoice(round: ChoiceShadowRound): MemoryEvent {
+  return atomic(() => {
+    const key = 'choice-shadow:' + round.roundId;
+    const existing = get<any>('SELECT * FROM ditas_events WHERE dedupe_key=?', key);
+    if (existing) return eventRow(existing);
+    const ts = Date.now(), id = uid('evt');
+    const payload = J({ reason: round.noTradeReason ?? 'SHADOW_RANKING_ONLY', comparison: round });
+    const prevHash = get<any>('SELECT hash FROM ditas_events ORDER BY seq DESC LIMIT 1')?.hash ?? 'GENESIS';
+    const row = {
+      id, dedupe_key: key, created_at: ts, kind: 'CHOICE_SHADOW',
+      instrument: 'portfolio:choice', strategy: null, decision_id: null,
+      snapshot_id: null, parent_event_id: null, payload, prev_hash: prevHash,
+    };
+    const hash = hashEvent(row);
+    run('INSERT INTO ditas_events(id,dedupe_key,created_at,kind,instrument,strategy,decision_id,snapshot_id,parent_event_id,payload,prev_hash,hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+      id, key, ts, row.kind, row.instrument, null, null, null, null, payload, prevHash, hash);
+    return eventRow({ ...row, hash });
+  });
+}
+/** Only committed, source-linked shadow rounds, never projected live orders. */
+export function recentChoiceShadows(limit = 20): ChoiceShadowRound[] {
+  const n = Math.max(1, Math.min(100, Math.floor(limit)));
+  return all<{ payload: string }>("SELECT payload FROM ditas_events WHERE kind='CHOICE_SHADOW' ORDER BY seq DESC LIMIT ?", n)
+    .map((r) => P<{ comparison: ChoiceShadowRound }>(r.payload).comparison);
 }
 
 export function correctEvent(eventId: string, reason: string, correction: string) {
