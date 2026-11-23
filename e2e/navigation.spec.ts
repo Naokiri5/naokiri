@@ -36,6 +36,7 @@ test('exactly four main links lead to existing functional views without altering
   await page.goto('/app');
   const sidebar = page.getByRole('navigation', { name: 'Main' });
   await expect(sidebar.getByRole('link')).toHaveCount(4);
+  await expect(page.locator('.mode')).not.toHaveText(/^(CHECKING|…|UNKNOWN)$/);
   const before = await page.locator('.mode').textContent();
   for (const [name, path] of DESTINATIONS) {
     const link = sidebar.getByRole('link', { name, exact: true });
