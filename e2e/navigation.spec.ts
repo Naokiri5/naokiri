@@ -71,7 +71,9 @@ test('legacy deep links stay functional and highlight the owning primary section
 
 test('command palette still discovers old screens and the existing risk-reducing action', async () => {
   await page.goto('/app');
+  await expect(page.locator('h1')).toBeVisible();
   await page.keyboard.press('Control+k');
+  await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
   const input = page.getByRole('textbox', { name: 'Command' });
   const options = page.getByRole('option');
   await input.fill('ai bots');
