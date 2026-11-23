@@ -56,6 +56,7 @@ describe('Autopilot session preflight', () => {
       checks: expect.arrayContaining([
         expect.objectContaining({ id: 'execution-lane', status: 'BLOCKED', detail: expect.stringMatching(/sell route/i) }),
         expect.objectContaining({ id: 'session-lifecycle', status: 'BLOCKED' }),
+        expect.objectContaining({ id: 'brainos-dependencies', detail: expect.any(String) }),
         expect.objectContaining({ id: 'risk-policy', status: 'BLOCKED' }),
         expect.objectContaining({ id: 'paper-account', status: 'BLOCKED' }),
         expect.objectContaining({ id: 'market-data', status: 'UNVERIFIED' }),
