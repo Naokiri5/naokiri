@@ -93,7 +93,8 @@ export function scoreMulticlassForecast(
   realized: ScenarioOutcomeClass,
 ): MulticlassScenarioScore {
   if (!SCENARIO_CLASSES.includes(realized)) throw new Error('INVALID_SCENARIO_OUTCOME');
-  const values = SCENARIO_CLASSES.map(key => probabilities?.[key]);
+  if (!probabilities || typeof probabilities !== 'object') throw new Error('INVALID_SCENARIO_DISTRIBUTION');
+  const values = SCENARIO_CLASSES.map(key => probabilities[key]);
   if (values.some(p => !Number.isFinite(p) || p < 0 || p > 1)
       || Math.abs(values.reduce((a, b) => a + b, 0) - 1) > 1e-7)
     throw new Error('INVALID_SCENARIO_DISTRIBUTION');
