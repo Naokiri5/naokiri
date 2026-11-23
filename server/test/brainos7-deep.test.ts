@@ -1,6 +1,7 @@
 import { describe,expect,it,vi } from 'vitest';
 import type { BrainAgentContract, BrainSkillContract, BrainKnowledgeClaim } from '../src/knowledge/cognitive/contracts.js';
 import { runDeepCognitiveCycle,type FrozenMarketSnapshot,type SpecialistFinding } from '../src/knowledge/cognitive/deepCycle.js';
+import type { ClaimDriftSignal } from '../src/knowledge/cognitive/claims.js';
 
 const NOW=Date.UTC(2026,10,23,18);
 const proofSources=[
@@ -55,7 +56,7 @@ function deps() {
   return {
     roles,skillsById:{S01:skill('S01'),S02:skill('S02')},
     retrieveCandidateClaims:vi.fn(async()=>[claim]),
-    getClaimDriftSignal:()=>undefined,
+    getClaimDriftSignal:(_id:string):ClaimDriftSignal|undefined=>undefined,
     evaluateRole,
     calibratedOutcome:{
       verified:true,sampleCount:120,cohort:'btc-15m-v1',asOf:NOW,
