@@ -4,6 +4,7 @@ import { notify } from '../notify/notify.js';
 import { journal } from '../journal/journal.js';
 import { audit } from '../core/audit.js';
 import { bus } from '../core/bus.js';
+import { assertWriteFence, type LeaseFence } from '../ops/lease.js';
 
 /**
  * Persistent protection incidents (CLAUDE.md invariant #4). When an open paper position cannot be evaluated or exited
@@ -21,10 +22,11 @@ export class IncidentError extends Error { constructor(msg: string, public statu
 const active = (positionId: string) => get<Incident>("SELECT * FROM protection_incidents WHERE position_id=? AND status IN ('OPEN','RECOVERED')", positionId);
 
 /** Record (or refresh) an incident for a position that cannot currently be protected. Idempotent per position. */
-export function reportUnprotected(p: { id: string; instrument: string }, reason: string, nowTs = Date.now()) {
-  const cur = active(p.id);
+export function reportUnprotected(p: { id: string; instrument: string }, reason: string, nowTs = Date.now(), fence?: LeaseFence) {
   let alert = false; let id: string;
   tx(() => {
+    assertWriteFence(fence);
+    const cur = active(p.id);
     if (!cur) {
       id = uid('inc'); alert = true;
       run(`INSERT INTO protection_incidents(id,position_id,instrument,status,reason,opened_at,last_seen_at,last_notified_at,occurrences) VALUES (?,?,?,?,?,?,?,?,1)`,
@@ -43,13 +45,19 @@ export function reportUnprotected(p: { id: string; instrument: string }, reason:
   return id!;
 }
 /** Executable data is back (or the position closed): OPEN → RECOVERED. It still awaits owner acknowledgement. */
-export function markRecovered(positionId: string, nowTs = Date.now()) {
-  const r = run("UPDATE protection_incidents SET status='RECOVERED', recovered_at=? WHERE position_id=? AND status='OPEN'", nowTs, positionId);
+export function markRecovered(positionId: string, nowTs = Date.now(), fence?: LeaseFence) {
+  const r = tx(() => {
+    assertWriteFence(fence);
+    return run("UPDATE protection_incidents SET status='RECOVERED', recovered_at=? WHERE position_id=? AND status='OPEN'", nowTs, positionId);
+  });
   if (Number(r.changes)) { journal('RISK', 'Protection restored: executable market data available again', positionId); bus.publish('risk', { positionId, status: 'RECOVERED' }); }
 }
 /** Positions that closed (e.g. manually) cannot stay "unprotected". */
-export function sweepClosedPositions(nowTs = Date.now()) {
-  run("UPDATE protection_incidents SET status='RECOVERED', recovered_at=? WHERE status='OPEN' AND position_id IN (SELECT id FROM positions WHERE status<>'OPEN')", nowTs);
+export function sweepClosedPositions(nowTs = Date.now(), fence?: LeaseFence) {
+  tx(() => {
+    assertWriteFence(fence);
+    run("UPDATE protection_incidents SET status='RECOVERED', recovered_at=? WHERE status='OPEN' AND position_id IN (SELECT id FROM positions WHERE status<>'OPEN')", nowTs);
+  });
 }
 export function openIncidentFor(instrumentId: string) { return get<Incident>("SELECT * FROM protection_incidents WHERE instrument=? AND status='OPEN' ORDER BY opened_at LIMIT 1", instrumentId) ?? null; }
 export function listIncidents(includeAcknowledged = false, limit = 100) {

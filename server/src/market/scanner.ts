@@ -68,7 +68,7 @@ export function buildContext(cand: Candidate): WorkerContext {
   };
 }
 
-export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
+export async function scanOnce(onDecision?: (r: DecisionReport) => void, continueScan?: () => boolean) {
   const t0 = performance.now();
   const ctl = getControl();
   let candidates = 0;
@@ -107,6 +107,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
       const proposalMemory = recordOpportunity({ kind: 'PROPOSAL', instrumentId: id, strategyId: s.id, dedupeKey: `proposal:${cand.id}`, reason: sig.reasons.join('; '), candidate: cand, ctx });
       ctx.memorySnapshotId = proposalMemory.snapshotId ?? undefined;
       const qci = await runConsensus(ctx);
+      if (continueScan && !continueScan()) return { candidates, universe: market.universe.length };
       const correlatedOpen = openPositions().filter((p) => { const c = correlation(p.instrument, id); return c == null || c >= (currentPolicy()?.policy ?? DEFAULT_POLICY).correlationThreshold; }).length;
       const rep = decide(cand, ctx, qci, ctx.strategyStats, correlatedOpen);
       record('pipeline.candidate_to_decision', Date.now() - cand.createdAt);
