@@ -17,6 +17,7 @@ import { all, get, run, P } from '../db/db.js';
 import { provider } from '../providers/http.js';
 import { audit } from '../core/audit.js';
 import { knowledgeForAssistant } from '../knowledge/integration.js';
+import { brainOverview } from '../knowledge/brain.js';
 
 /**
  * Part 5 Trader Joe. Authority boundary (Part 9): Joe can READ, ANALYZE (no submission), and take
@@ -37,7 +38,7 @@ type ToolDef = Anthropic.Tool & { run: (input: any) => Promise<unknown> | unknow
 const sym = (s: string) => market.bySymbol(String(s ?? ''));
 const TOOLS: ToolDef[] = [
   { name: 'get_status', description: 'Current execution mode, bot state, data-provider health, risk-policy status.', input_schema: { type: 'object', properties: {}, additionalProperties: false },
-    run: () => ({ mode: displayMode(), control: getControl(), policyVersion: currentPolicy()?.version ?? null, tickersAgeSec: market.tickersFetchedAt ? Math.round((Date.now() - market.tickersFetchedAt) / 1000) : null, universe: market.universe.length }) },
+    run: () => ({ mode: displayMode(), control: getControl(), policyVersion: currentPolicy()?.version ?? null, tickersAgeSec: market.tickersFetchedAt ? Math.round((Date.now() - market.tickersFetchedAt) / 1000) : null, universe: market.universe.length, internalIntelligence: brainOverview() }) },
   { name: 'get_market_overview', description: 'Market breadth, top gainers/losers by 24h change among liquid crypto pairs, BTC regime, and FX reference rates.', input_schema: { type: 'object', properties: {}, additionalProperties: false },
     run: () => { const b = bubbleMap({ limit: 100 }); const s = [...b.crypto].sort((x, y) => y.changePct - x.changePct); const btc = market.deep.get('crypto:binance:BTCUSDT')?.engines['1h'].last ?? null;
       return { breadth: b.breadth, topGainers: s.slice(0, 6).map((x) => ({ s: x.symbol, chg: +x.changePct.toFixed(2), tags: x.tags })), topLosers: s.slice(-6).reverse().map((x) => ({ s: x.symbol, chg: +x.changePct.toFixed(2), tags: x.tags })), btcRegime: classifyRegime(btc).regime, fx: b.forex.slice(0, 6).map((f) => ({ pair: f.symbol, rate: f.price, date: (f as any).date })), asOf: new Date(b.asOf).toISOString() }; } },
@@ -127,6 +128,18 @@ export async function commandMode(text: string): Promise<string> {
   }
   if (/^(brief|briefing|morning|daily)/.test(lower)) return dailyBriefing();
   if (/^(portfolio|positions|balance)/.test(lower)) { const p: any = await call('get_portfolio'); return `Paper equity $${p.account.equity.toFixed(2)} (cash $${p.account.cash.toFixed(2)}), day ${p.account.dailyPnlPct.toFixed(2)}%, drawdown ${p.account.drawdownPct.toFixed(2)}%, ${p.open.length} open: ${p.open.map((o: any) => o.instrument.split(':')[2]).join(', ') || 'none'}`; }
+  if (/^(brain|settings status|system status|agent status|capabilities)/.test(lower)) {
+    const current = brainOverview();
+    const settings = current.settings.latest?.capabilities ?? [];
+    const tools = current.latest?.capabilities ?? [];
+    const lines = [
+      'MIA internal intelligence · read-only capability health',
+      tools.length ? `Autopilot capabilities: ${tools.length} tracked` : 'Autopilot evidence has not refreshed yet.',
+      settings.length ? 'Settings capabilities:\\n' + settings.map((x) => `• ${x.id}: ${x.state} — ${x.reason}`).join('\\n') : 'Settings capability evidence has not refreshed yet.',
+      'Automatic monitoring is not authorization to change risk policy, credentials, or LIVE trading.',
+    ];
+    return lines.join('\\n');
+  }
   if (/^(risk)/.test(lower)) { const r: any = await call('get_risk_status'); return `Policy ${r.policy ? `v${r.policy.version} accepted` : 'NOT accepted'} · mode ${displayMode()} · open risk ${r.account.openRiskPct.toFixed(2)}% · day ${r.account.dailyPnlPct.toFixed(2)}% · loss streak ${r.account.consecutiveLosses}`; }
   if (/^(news)/.test(lower)) { const n: any[] = await call('get_news', { limit: 8 }) as any; return n.map((x) => `• [${x.impact}] ${x.title} — ${x.source}`).join('\n') || 'No recent headlines.'; }
   if (/^(opportunit|signals|scan)/.test(lower)) { const o: any[] = await call('get_opportunities', { limit: 10 }) as any; return o.map((x) => `• ${x.asset} ${x.strategy}: ${x.decision} (score ${x.score}, ${x.consensus})`).join('\n') || 'No candidates yet this session — the scanner evaluates strategies on each closed 1h candle.'; }
