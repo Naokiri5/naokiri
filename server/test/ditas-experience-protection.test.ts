@@ -121,6 +121,13 @@ describe('DITAS paper learning + no-trade guard (single canonical OMS)', () => {
     const p = paperExperience(STRATEGY);
     expect(p).toMatchObject({ verified: { samples: 0 }, excludedUnverifiedFills: 1 });
     expect(recordClosedPaperOutcome('mismatch-quantities')).toBeNull();
+    autopsy('mismatch-quantities');
+    expect(get<{ title: string }>(
+      "SELECT title FROM notifications WHERE title LIKE 'Paper closure not verified:%' LIMIT 1",
+    )?.title).toMatch(/Paper closure not verified/);
+    expect(get<{ title: string }>(
+      "SELECT title FROM notifications WHERE title LIKE 'Paper position closed:%' LIMIT 1",
+    )).toBeUndefined();
     expect(memoryEvents().filter(e => e.kind === 'TRADE_OUTCOME')).toHaveLength(0);
   });
 
@@ -141,6 +148,7 @@ describe('DITAS paper learning + no-trade guard (single canonical OMS)', () => {
     expect(submitEntry(d, 'bot').ok).toBe(true);
     const p = openPositions(PAPER_ACCOUNT)[0];
     expect(p).toBeDefined();
+    expect(verifyPaperClosure(p.id)).toMatchObject({ status: 'OPEN', verified: false });
     const result = executeExit(p.id, p.qty, 'MANUAL_CLOSE');
     expect(result?.closed).toBe(true);
     expect(verifyPaperClosure(p.id)).toMatchObject({ verified: true, status: 'VERIFIED_CLOSED' });
