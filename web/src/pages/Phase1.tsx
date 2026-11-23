@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Page, Stat, Tabs } from '../ui';
 import { StepUp } from './Trading';
+import { LatencyReliabilityCockpit } from '../components/LatencyReliabilityCockpit';
 
 /** Asset Discovery — ranked lists from live feeds only. */
 export function Discover() {
@@ -34,8 +35,7 @@ export function Qhef() {
       <Stat k="Process" v={data ? `${data.process.rssMb} MB` : '—'} s={data ? `heap ${data.process.heapUsedMb} MB · up ${Math.round(data.process.uptimeSec / 60)} min · Node ${data.process.node}` : ''} />
       <Stat k="Scan tiers" v={data ? `${data.tiers.t2Deep} deep` : '—'} s={data ? `${data.tiers.t1Broad} pairs in broad tier · ${data.scheduler.cycles} scan cycles` : ''} />
     </div>
-    <Card title="Hot-path latency budgets (MIA-controlled stages)" flush><table><thead><tr><th>Stage</th><th>Lane</th><th>What it measures</th><th className="num">Samples</th><th className="num">p50</th><th className="num">p95</th><th className="num">p99</th><th className="num">Budget</th><th>Status</th></tr></thead>
-      <tbody>{(data?.budgets ?? []).map((b: any) => <tr key={b.stage}><td className="mono">{b.stage}</td><td>{b.lane}</td><td className="muted">{b.description}</td><td className="num">{b.samples}</td><td className="num">{b.p50 ?? '—'}</td><td className="num">{b.p95 ?? '—'}</td><td className="num">{b.p99 ?? '—'}</td><td className="num">{b.metric} ≤ {b.budgetMs} ms</td><td><Badge v={b.status} tone={tone(b.status)} /></td></tr>)}</tbody></table></Card>
+    <LatencyReliabilityCockpit />
     <div className="grid g2" style={{ marginTop: 14 }}>
       <Card title="Provider round trips (outside MIA's control)" flush><table><thead><tr><th>Stage</th><th className="num">n</th><th className="num">p50</th><th className="num">p95</th><th className="num">p99</th></tr></thead><tbody>{(data?.providers ?? []).map((p: any) => <tr key={p.stage}><td className="mono">{p.stage}</td><td className="num">{p.samples}</td><td className="num">{p.p50}</td><td className="num">{p.p95}</td><td className="num">{p.p99}</td></tr>)}</tbody></table>{!data?.providers?.length && <Empty>No provider samples yet (offline or just started).</Empty>}</Card>
       <Card title="Fabric configuration"><div className="kv">
