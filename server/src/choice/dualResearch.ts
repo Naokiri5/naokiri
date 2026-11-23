@@ -35,7 +35,7 @@ export function assessFastMemecoinResearch(pairs: readonly DexPair[], sourceAsOf
       && p.pairCreatedAt <= nowTs && nowTs - p.pairCreatedAt <= 24 * 60 * 60_000)
     .sort((a, b) => (b.pairCreatedAt ?? 0) - (a.pairCreatedAt ?? 0)
       || a.pairAddress.localeCompare(b.pairAddress))
-    .slice(0, 20).map((p) => {
+    .slice(0, 200).map((p) => {
       const safety = assessDexPair(p, nowTs);
       return {
         chainId: p.chainId, pairAddress: p.pairAddress, mintAddress: p.baseAddress,
