@@ -17,6 +17,7 @@ import { reportUnprotected, markRecovered, sweepClosedPositions } from './incide
 import { crashpoint } from './crashpoint.js';
 import { assertWriteFence, LeaseLostError, type LeaseFence } from '../ops/lease.js';
 import { unreconciledPaperOrders } from './recovery.js';
+import { recordPaperFill } from './fillEvents.js';
 
 /**
  * Paper OMS (Part 26 / 32.6). Fills are simulated by walking the LIVE Binance order book
@@ -201,7 +202,8 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
       run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);
       crashpoint('entry.order');
-      run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, fill.price, fee, 'TAKER', nowTs);
+      const fillId = uid('fil');
+      run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', fillId, oid, qty, fill.price, fee, 'TAKER', nowTs);
       crashpoint('entry.fill');
       run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,max_hold_ms,decision_id,planned_risk) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         posId, PAPER_ACCOUNT, s.instrumentId, s.market, 'LONG', strat, qty, fill.price, s.stopLoss, s.stopLoss, J({ qtyInit: qty, trailAfterR, targets: st.targets, lastPx: fill.price }), 'OPEN', nowTs, -fee, fee, maxHoldMs, s.id, actualPlannedMaxLoss);
@@ -212,6 +214,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       ledger(PAPER_ACCOUNT, 'BUY', -notional, oid, `${s.asset} entry`, nowTs);
       crashpoint('entry.buy');
       ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee', nowTs);
+      recordPaperFill({ fillId, orderId: oid, positionId: posId, instrumentId: s.instrumentId, decisionId: s.id,
+        side: 'BUY', qty, price: fill.price, fee, impactBps: fill.impactBps, at: nowTs, closed: false, strategy: strat,
+        netPnlAfterFill: -fee, policyVersion: fresh.policyVersion, report });
       crashpoint('entry.precommit');
       return { orderId: oid, posId, qty, fill, fee, fresh, strat, plannedMaxLoss: actualPlannedMaxLoss };
     }); } catch (e: any) {
@@ -380,7 +385,8 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   // A remainder smaller than one lot (or the venue minimum) could never be sold later: close it with this fill.
   if (remaining < Math.max(step, inst?.minQty ?? 0, 1e-12) - 1e-12) { qty = p.qty; remaining = 0; }
   if (!(qty > 0)) return { price: 0, pnl: 0, closed: false, qty: 0 }; // slice below one lot: nothing to sell yet
-  const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
+  const pv = currentPolicy();
+  const pol = pv?.policy ?? DEFAULT_POLICY;
   const fill = simulateExitFill(p.instrument, qty, pol.stopFillBufferPct, nowTs, consumedQty);
   if (!fill) return null;
   // Project invariant (CLAUDE.md #4, PR #4): never invent a fill from a ticker fallback. Every exit — protective or
@@ -393,7 +399,8 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   const oid = insertOrder({ clientOrderId: `exit-${positionId}-${seq}`, instrument: p.instrument, side: 'SELL', type: 'MARKET', qty, status: 'FILLED', purpose: `EXIT_${reason}`, positionId, at: nowTs });
   run('UPDATE orders SET filled_qty=?, avg_price=?, fees=? WHERE id=?', qty, px, fee, oid);
   crashpoint('exit.order');
-  run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, px, fee, 'TAKER', nowTs);
+  const fillId = uid('fil');
+  run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', fillId, oid, qty, px, fee, 'TAKER', nowTs);
   crashpoint('exit.fill');
   ledger(PAPER_ACCOUNT, 'SELL', px * qty, oid, `${p.instrument} exit ${reason}`, nowTs); crashpoint('exit.sell'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'exit fee', nowTs);
   run('UPDATE positions SET qty=?, realized_pnl=realized_pnl+?, fees=fees+?, status=?, closed_at=?, exit_price=?, exit_reason=? WHERE id=?',
@@ -402,6 +409,9 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
   if (closed) run("UPDATE orders SET status='CANCELLED', updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", nowTs, positionId);
   else run("UPDATE orders SET qty=?, updated_at=? WHERE position_id=? AND purpose='PROTECTIVE_STOP' AND status='ACTIVE'", remaining, nowTs, positionId);
   crashpoint('exit.stop');
+  recordPaperFill({ fillId, orderId: oid, positionId, instrumentId: p.instrument, decisionId: p.decision_id,
+    side: 'SELL', qty, price: px, fee, impactBps: fill.impactBps, at: nowTs, closed, strategy: p.strategy,
+    netPnlAfterFill: p.realized_pnl + pnl, policyVersion: pv?.version });
   after.push(() => {
     journal('EXIT', `SELL ${qty} ${p.instrument.split(':')[2]} @ ${px.toPrecision(6)} — ${reason}, PnL ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}${fill.basis === 'BOOK' ? '' : ` [${fill.basis}]`}`, positionId, { fill, fee, reason });
     if (closed) autopsy(positionId);
