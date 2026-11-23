@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { commandMode, JOE_TOOL_NAMES } from '../src/joe/joe.js';
 import {
   SETTINGS_CAPABILITIES,
   buildSettingsCapabilitySnapshot,
@@ -60,6 +61,15 @@ describe('MIA BrainOS seven Settings capabilities', () => {
     expect(byId({ ...baseline, providerHealth: { total: 7, live: 2, unhealthy: 1, waiting: 4 } }, 'connections_hub').state).toBe('DEGRADED');
     expect(byId({ ...baseline, securityChecks: { fail: 1, warn: 0 } }, 'security_center').state).toBe('DEGRADED');
     expect(byId(baseline, 'security_center').state).toBe('OBSERVING');
+  });
+
+  it('exposes capability health to Trader Joe without adding privileged control tools', async () => {
+    const message = await commandMode('settings status');
+    expect(message).toContain('MIA internal intelligence');
+    expect(message).toContain('Settings');
+    expect(JOE_TOOL_NAMES).not.toContain('change_risk_policy');
+    expect(JOE_TOOL_NAMES).not.toContain('enable_live_trading');
+    expect(JOE_TOOL_NAMES).not.toContain('promote_strategy');
   });
 
   it('fails to unavailable for missing sources and rejects malformed clocks', () => {
