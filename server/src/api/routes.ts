@@ -26,7 +26,6 @@ import { QCI_POLICY, DOMAIN_WEIGHTS } from '../qci/coordinator.js';
 import { providers } from '../providers/http.js';
 import { latencyReport, resetLatency } from '../core/latency.js';
 import { latencyTelemetrySnapshot, resetLoopDelay } from '../qhef/qhef.js';
-import { audit } from '../core/audit.js';
 import { getControl, updateControl, displayMode } from '../core/mode.js';
 import { acceptPolicy, currentPolicy, DEFAULT_POLICY, policyHistory } from '../risk/policy.js';
 import { accountState, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio/ledger.js';

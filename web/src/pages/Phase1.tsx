@@ -26,7 +26,6 @@ export function Discover() {
 /** QHEF performance dashboard — measured latency vs budgets (Part 33.18/33.21). */
 export function Qhef() {
   const { data, error } = useApi('/api/qhef', { every: 10_000 });
-  const tone = (s: string) => (s === 'WITHIN_BUDGET' ? 'b-good' : s === 'OVER_BUDGET' ? 'b-bad' : 'b-neutral');
   return <Page title="QHEF Performance" sub={<>Quantum HyperSpeed Execution Fabric: measured speed of MIA's own processing against engineering budgets. "Quantum" is a name for parallel analysis; no quantum hardware is used. {data?.note}</>}>
     <ErrorLine e={error} />
     <div className="grid g4" style={{ marginBottom: 14 }}>
