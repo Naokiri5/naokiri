@@ -2,7 +2,8 @@ import { config } from '../config.js';
 import { market } from '../market/store.js';
 import { recentNews } from '../news/news.js';
 import { recentPrints } from '../whales/prints.js';
-import { settingsCapabilityOverview } from './settingsCapabilities.js';
+import { SETTINGS_CAPABILITIES, settingsCapabilityOverview } from './settingsCapabilities.js';
+import { buildCapabilityNetwork } from './capabilityGraph.js';
 import { capabilitySnapshotView } from './capabilitySnapshot.js';
 import { CAPABILITY_READ_CONTRACT, type CapabilityEvidenceContract } from './capabilityContract.js';
 
@@ -177,15 +178,23 @@ export function refreshBrainSnapshot(now = Date.now()): BrainSnapshot {
 export function brainOverview(at = Date.now()) {
   const view = capabilitySnapshotView(latest, at);
   const snapshot = view.latest;
+  const current = snapshot ? {
+    ...snapshot,
+    capabilities: buildBrainSnapshot({ ...snapshot.sources, now: at }).capabilities,
+  } : null;
+  const settings = settingsCapabilityOverview(at);
   return {
     ...view,
     readContract: CAPABILITY_READ_CONTRACT,
     registry: BRAIN_CAPABILITIES,
-    settings: settingsCapabilityOverview(at),
-    latest: snapshot ? {
-      ...snapshot,
-      capabilities: buildBrainSnapshot({ ...snapshot.sources, now: at }).capabilities,
-    } : null,
+    settings,
+    // A single dependency-aware, fail-closed evidence view for Academy, Trader Joe and
+    // future orchestrator preflights. This NEVER authorizes trading or stores executable code.
+    network: buildCapabilityNetwork({
+      at, autopilot: current, settings: settings.latest,
+      autopilotRegistry: BRAIN_CAPABILITIES, settingsRegistry: SETTINGS_CAPABILITIES,
+    }),
+    latest: current,
     memoryAuthority: 'Existing knowledge A-F, DITAS append-only events, and canonical portfolio ledger',
   };
 }
