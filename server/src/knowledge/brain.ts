@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { market } from '../market/store.js';
 import { recentNews } from '../news/news.js';
 import { recentPrints } from '../whales/prints.js';
+import { settingsCapabilityOverview } from './settingsCapabilities.js';
 
 /**
  * MIA Brain Capability Bridge.
@@ -137,6 +138,7 @@ export function refreshBrainSnapshot(now = Date.now()): BrainSnapshot {
 export function brainOverview() {
   return {
     registry: BRAIN_CAPABILITIES,
+    settings: settingsCapabilityOverview(),
     latest,
     status: latest ? 'REFRESHED' as const : 'NOT_YET_REFRESHED' as const,
     memoryAuthority: 'Existing knowledge A-F, DITAS append-only events, and canonical portfolio ledger',
