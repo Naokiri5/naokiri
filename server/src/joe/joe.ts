@@ -175,6 +175,7 @@ export async function commandMode(text: string): Promise<string> {
         : current.status === 'STALE' ? 'The last Autopilot capability snapshot expired.' : 'Autopilot evidence has not refreshed yet.',
       settings.length ? 'Settings capabilities:\n' + settings.map((x) => `• ${x.id}: ${x.state} — ${x.reason}`).join('\n')
         : current.settings.status === 'STALE' ? 'The last Settings capability snapshot expired.' : 'Settings capability evidence has not refreshed yet.',
+      `BrainOS dependency graph: ${current.network.evidenceReady.length}/18 capabilities have ready evidence; ${current.network.blocked.length} remain blocked, incomplete, or unverified. This is not trading eligibility.`,
       'Automatic monitoring is not authorization to change risk policy, credentials, or LIVE trading.',
     ];
     return lines.join('\n');
