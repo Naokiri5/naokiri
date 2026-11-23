@@ -6,6 +6,7 @@ import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js';
 import { paperExperience, experienceGuard } from '../src/ditas/passports.js';
+import { verifyPaperClosure, executionQuality } from '../src/ditas/execution.js';
 import { evaluateRisk } from '../src/risk/gate.js';
 import { memoryEvents, recordClosedPaperOutcome, recordOpportunity, verifyMemory } from '../src/ditas/memory.js';
 import { executeExit, submitEntry, autopsy } from '../src/exec/oms.js';
@@ -113,6 +114,10 @@ describe('DITAS paper learning + no-trade guard (single canonical OMS)', () => {
     closedFixture('mismatch-quantities');
     // One valid entry and exit fill still exist; the quantities no longer reconcile.
     run('UPDATE fills SET qty=? WHERE id=?', 0.75, 'fill-EXIT_STOP-mismatch-quantities');
+    const evidence = verifyPaperClosure('mismatch-quantities');
+    expect(evidence).toMatchObject({ status: 'NEEDS_REVIEW', verified: false });
+    expect(evidence.reasonCodes).toContain('ENTRY_EXIT_QTY_MISMATCH');
+    expect(executionQuality().closures.find(p => p.positionId === 'mismatch-quantities')?.verified).toBe(false);
     const p = paperExperience(STRATEGY);
     expect(p).toMatchObject({ verified: { samples: 0 }, excludedUnverifiedFills: 1 });
     expect(recordClosedPaperOutcome('mismatch-quantities')).toBeNull();
@@ -122,6 +127,7 @@ describe('DITAS paper learning + no-trade guard (single canonical OMS)', () => {
   it('refuses false closure when a recorded order fill quantity disagrees with its fills', () => {
     closedFixture('order-fill-disagreement');
     run('UPDATE orders SET filled_qty=? WHERE id=?', 0.5, 'ord-ENTRY-order-fill-disagreement');
+    expect(verifyPaperClosure('order-fill-disagreement').reasonCodes).toContain('ORDER_FILL_QTY_MISMATCH');
     expect(paperExperience(STRATEGY).verified.samples).toBe(0);
     expect(recordClosedPaperOutcome('order-fill-disagreement')).toBeNull();
   });
@@ -137,6 +143,7 @@ describe('DITAS paper learning + no-trade guard (single canonical OMS)', () => {
     expect(p).toBeDefined();
     const result = executeExit(p.id, p.qty, 'MANUAL_CLOSE');
     expect(result?.closed).toBe(true);
+    expect(verifyPaperClosure(p.id)).toMatchObject({ verified: true, status: 'VERIFIED_CLOSED' });
     const outcomes = memoryEvents().filter(e => e.kind === 'TRADE_OUTCOME');
     expect(outcomes).toHaveLength(1);
     expect(outcomes[0]).toMatchObject({ decisionId: d.id, parentEventId: decisionEvent.id, snapshotId: decisionEvent.snapshotId });
