@@ -3,7 +3,7 @@ import type { Candle, Interval } from '../src/market/types.js';
 import type { DexPair } from '../src/providers/dexscreener.js';
 import { market } from '../src/market/store.js';
 import { buildApp } from '../src/index.js';
-import { closeDb } from '../src/db/db.js';
+import { all, closeDb } from '../src/db/db.js';
 import { freshDb } from './helpers.js';
 import { INTERVAL_MS } from '../src/market/types.js';
 import { parseFuturesResearchCandles, type fetchFuturesResearchSnapshot } from '../src/providers/binanceFuturesResearch.js';
@@ -97,5 +97,7 @@ describe('Read-only authenticated dual intelligence API', () => {
     expect(deep.statusCode).toBe(200);
     expect(deep.json()).toMatchObject({ lane: 'DEEP_FUTURES', state: 'NO_TRADE', tradingAuthority: false, plan: null });
     expect((await app.inject({ url: '/api/choice/dual/deep?symbol=UNKNOWN', headers: { cookie } })).statusCode).toBe(400);
+    for (const table of ['orders', 'fills', 'positions', 'ledger_entries'])
+      expect(all('SELECT * FROM ' + table)).toHaveLength(0);
   });
 });
