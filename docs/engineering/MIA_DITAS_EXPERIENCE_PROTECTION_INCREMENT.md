@@ -75,3 +75,17 @@ Reuse the existing 100-role senior engineering/review roster documented in PR #2
 ## Follow-on work, intentionally not attempted here
 
 Prospective calibrated prediction training; regime-conditioned outcome cohorts; adversarial strategy arena; provider/source authenticity verification; whale wallet streaming/copy execution; memecoin token safety and real exit routing; live venue/signers; synchronized multi-market position lifecycle; learned worker reweighting; and autonomous strategy promotion. These remain separate independently reviewable increments, with the same canonical risk and release controls.
+
+## 2026-11-23 — Typed closure proof (adapted from the supplied Jev/Grok desk article)
+
+The attachment's useful principle is **"no fill, no done"**. MIA already owns intelligence in QCI/Decision, risk in `risk/gate.ts`, accounting in its canonical ledger, and execution in `exec/oms.ts`. This increment does **not** add Grok seats, Jev/TypeSafe, Freqtrade, a second decision authority or order-capable agent bridge.
+
+- Reuse `ditas/execution.ts` for a pure, typed `verifyPaperClosure(positionId)` read projection. A paper position must be CLOSED with zero remaining quantity, a valid close time, exactly one filled BUY entry order, at least one filled SELL exit order, positive valid price/quantity/fee observations, and matching order/fill quantities and total entry/exit quantities. Scope orders to the canonical paper account and Binance paper venue.
+- Reuse this exact function in `ditas/memory.ts` before immutable `TRADE_OUTCOME` append, and in `ditas/passports.ts` before classifying paper outcomes as **fill verified**. Old partial or fabricated records remain observable but cannot drive verified experience-veto samples.
+- Reuse the result in the existing `exec/oms.ts` post-commit autopsy path. If closure is not provable, log a SYSTEM review event and notify about missing proof, rather than stating that the simulated position settled successfully or training an outcome.
+- Add `closures` to the **existing authenticated** `GET /api/ditas/execution` response (no additional route) with `VERIFIED_CLOSED`, `NEEDS_REVIEW`, `OPEN` or `NOT_FOUND`. The field indicates verification of **simulated local paper fills only**, not exchange acknowledgement or proof that a strategy was profitable.
+- Added regression fixtures for mismatched entry and exit quantities, mismatch between an order's recorded fill quantity and its fills, open positions, and a genuinely OMS-closed simulated paper trade. Historical fixture `filled_qty` is now populated consistently with its synthetic fills.
+- No DB migration, policy edit, external provider API, wallets, credentials, executable trading authority, or live unlock.
+
+**Known limits:** This is a local paper-fill proof, not a full venue reconciler or proof that the exit matched the intended plan/target. LIVE reconciliation belongs to separate draft #64/#72/#97, entry atomicity to #118/#119/#121, and alternate DITAS no-trade work to #113. Reconcile overlapping PRs and run complete exact-head CI, security and risk review plus replay before considering a merge. Leave real-money trading locked.
+
