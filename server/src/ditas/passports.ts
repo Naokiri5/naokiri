@@ -2,6 +2,7 @@ import { STRATEGIES } from '../lab/strategies.js';
 import { strategyStats } from '../lab/lab.js';
 import { all, get, P } from '../db/db.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
+import { verifyPaperClosure } from './execution.js';
 
 const RULES: Record<string, { entry: string[]; stop: string; exit: string; dependencies: string[]; weaknesses: string[] }> = {
   trend_pullback: {
@@ -49,15 +50,11 @@ export function returnHealth(returns: number[]) {
  */
 export function paperExperience(strategyId: string, account = PAPER_ACCOUNT) {
   const definition = STRATEGIES.find(s => s.id === strategyId);
-  const recent = all<{ realized_pnl: number; planned_risk: number; report: string | null;
-    entry_fill: number; exit_fill: number }>(`SELECT p.realized_pnl, p.planned_risk, d.report,
-      EXISTS(SELECT 1 FROM orders o JOIN fills f ON f.order_id=o.id
-        WHERE o.position_id=p.id AND o.account=p.account AND o.purpose='ENTRY' AND o.status='FILLED' AND f.qty>0) AS entry_fill,
-      EXISTS(SELECT 1 FROM orders o JOIN fills f ON f.order_id=o.id
-        WHERE o.position_id=p.id AND o.account=p.account AND o.purpose LIKE 'EXIT_%' AND o.status='FILLED' AND f.qty>0) AS exit_fill
+  const recent = all<{ id: string; realized_pnl: number; planned_risk: number; report: string | null }>(
+    `SELECT p.id,p.realized_pnl,p.planned_risk,d.report
       FROM positions p LEFT JOIN decisions d ON d.id=p.decision_id
       WHERE p.strategy=? AND p.account=? AND p.status='CLOSED'
-      ORDER BY p.closed_at DESC, p.id DESC LIMIT ?`, strategyId, account, WINDOW);
+      ORDER BY p.closed_at DESC,p.id DESC LIMIT ?`, strategyId, account, WINDOW);
   const valid: number[] = [], verified: number[] = [];
   let unknownVersion = 0, otherVersion = 0, invalidRisk = 0, excludedUnverifiedFills = 0;
   for (const p of recent.reverse()) {
@@ -70,7 +67,7 @@ export function paperExperience(strategyId: string, account = PAPER_ACCOUNT) {
     const outcomeR = p.realized_pnl / p.planned_risk;
     if (!Number.isFinite(outcomeR)) { invalidRisk++; continue; }
     valid.push(outcomeR);
-    if (p.entry_fill && p.exit_fill) verified.push(outcomeR);
+    if (verifyPaperClosure(p.id, account).verified) verified.push(outcomeR);
     else excludedUnverifiedFills++;
   }
   return { ...returnHealth(valid), account, source: 'PAPER_OMS_POSITIONS',
