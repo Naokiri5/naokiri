@@ -15,12 +15,109 @@ const MODES = [
   ['BOUNDED_LIVE', 'Bounded live', 'LOCKED — requires every release gate, an isolated signer and your explicit authorization.'],
 ];
 
+type CommandLane = {
+  inFlight: boolean;
+  completedAt: number;
+  error: string | null;
+  deferReason?: string | null;
+};
+type CommandStatus = {
+  readiness: { ready: boolean; role: string; checks: { name: string; status: string; detail: string }[] };
+  ledger: { reconciled: boolean; closedPositions: number; netPnl: number };
+  recovery: { unresolvedOrders: number; positions: number; verifiedPositions: number };
+  activity: { count: number; denials: number };
+  execution: { fills: number; fees: number; lastFillAt: number | null };
+  providers: { live: number; total: number };
+  research: {
+    fast: { checkedAt: number; stale: boolean; count: number | null };
+    deep: { checkedAt: number; stale: boolean; symbol: string | null; error: boolean; state: string | null; fundingRate: number | null; openInterest: number | null };
+  };
+  choice: null | {
+    at: number; observed: number; reason: string | null; selected: string | null;
+    outcome: null | { netPnl: number | null; fees: number; entrySlippageBps: number | null };
+  };
+  latency: { stage: string; samples: number; p95: number | null; p99: number | null }[];
+};
+const COMMAND_LANES = [
+  ['protection', 'Protective exits', 'monitor'],
+  ['positionBooks', 'Position order books', ''],
+  ['ticker', 'Market tickers', 'tickers'],
+  ['scan', 'Market scan and QCI', 'scanner'],
+  ['research', 'FAST / DEEP research', ''],
+  ['background', 'Maintenance', ''],
+] as const;
+
+function CentralCommand({ command, lanes, mode }: { command?: CommandStatus; lanes?: Record<string, CommandLane>; mode?: string }) {
+  return <section className="col" aria-label="MIA Central Command">
+    <Card title="MIA Central Command" right={<Link to="/qa">Release gates</Link>}>
+      {command ? <>
+        <div className="grid g4">
+          <Stat k="Engine authority" v={<Badge v={command.readiness.role} />} s={mode ?? 'Awaiting mode'} />
+          <Stat k="Readiness" v={command.readiness.role === 'OFFLINE' ? 'Offline' : command.readiness.ready ? 'Ready' : 'Degraded'}
+            s={command.recovery.unresolvedOrders ? `${command.recovery.unresolvedOrders} orders require reconciliation` : 'Paper account'} />
+          <Stat k="Closed-position ledger" v={command.ledger.reconciled ? 'Reconciled' : 'Mismatch'}
+            s={`${command.ledger.closedPositions} closed · ${fmt.usd(command.ledger.netPnl)} net`} />
+          <Stat k="Position protection" v={command.recovery.positions ? `${command.recovery.verifiedPositions} / ${command.recovery.positions} verified` : 'No open positions'}
+            s={<Link to="/risk">Risk Center</Link>} />
+        </div>
+        {command.readiness.checks.filter((check) => check.status === 'fail').map((check) =>
+          <div className="hint warn" key={check.name}>{check.detail}</div>)}
+      </> : <Empty>Awaiting command status.</Empty>}
+    </Card>
+    {command && <>
+      <div className="grid g2">
+        <Card title="Operating lanes" right={<Link to="/connections">{command.providers.live} / {command.providers.total} public sources report live</Link>} flush>
+          <div className="tablewrap"><table>
+            <thead><tr><th>Lane</th><th>Status</th><th>Last completion</th></tr></thead>
+            <tbody>{COMMAND_LANES.map(([id, label, readinessCheck]) => {
+              const lane = lanes?.[id];
+              const check = command.readiness.checks.find((item) => item.name === readinessCheck);
+              const state = command.readiness.role === 'OFFLINE' ? 'Offline' : command.readiness.role === 'STANDBY' ? 'Standby' :
+                lane?.error ? 'Error' : check?.status === 'fail' ? 'Overdue' : lane?.deferReason ? 'Deferred' :
+                lane?.inFlight ? 'Running' : lane?.completedAt ? 'Completed' : 'Awaiting first pass';
+              return <tr key={id}><td>{label}</td><td>{state}{lane?.deferReason && <div className="hint">{lane.deferReason}</div>}</td>
+                <td className="faint">{fmt.ago(lane?.completedAt)}</td></tr>;
+            })}</tbody>
+          </table></div>
+        </Card>
+        <Card title="Trading intelligence" right={<Link to="/ditas">DITAS</Link>}>
+          <div className="kv">
+            <span>FAST memecoin</span><span>{command.research.fast.checkedAt
+              ? command.research.fast.stale ? 'Stale evidence' : `${command.research.fast.count ?? 0} pairs reviewed`
+              : 'Awaiting data'}</span>
+            <span>DEEP futures</span><span>{command.research.deep.error ? 'Source unavailable' :
+              command.research.deep.checkedAt ? `${command.research.deep.symbol ?? 'Futures'} · ${command.research.deep.stale ? 'Stale evidence' : command.research.deep.state ?? 'Awaiting data'}` :
+              'Awaiting data'}</span>
+            <span>Funding / open interest</span><span>{fmt.pct(command.research.deep.fundingRate === null ? null : command.research.deep.fundingRate * 100, 4)} / {fmt.num(command.research.deep.openInterest, 1)}</span>
+            <span>Shadow choice</span><span>{command.choice?.selected?.split(':').at(-1) ?? command.choice?.reason?.replaceAll('_', ' ') ?? 'Awaiting first comparison'}</span>
+            <span>Recent risk denials</span><span>{command.activity.denials} / {command.activity.count} decisions</span>
+            {command.choice?.outcome && <>
+              <span>Selected paper outcome</span><span>{fmt.usd(command.choice.outcome.netPnl)} net · {fmt.usd(command.choice.outcome.fees)} fees</span>
+            </>}
+          </div>
+        </Card>
+      </div>
+      <Card title="Execution and latency" right={<Link to="/qhef">QHEF performance</Link>}>
+        <div className="grid g3">
+          <Stat k="Paper fills" v={String(command.execution.fills)} s={`${fmt.usd(command.execution.fees)} fees · last ${fmt.ago(command.execution.lastFillAt)}`} />
+          {([['decision.engine', 'Decision latency'], ['bot.protection', 'Protection latency']] as const).map(([stage, label]) => {
+            const sample = command.latency.find((item) => item.stage === stage);
+            return <Stat key={stage} k={label} v={sample ? `${fmt.num(sample.p95)} ms` : 'Awaiting samples'}
+              s={sample ? `p95 · p99 ${fmt.num(sample.p99)} ms · ${sample.samples} samples` : undefined} />;
+          })}
+        </div>
+      </Card>
+    </>}
+  </section>;
+}
+
 export function Bot() {
-  const { data, error, reload } = useApi('/api/bot', { topics: ['bot', 'order', 'position', 'mode'], every: 20_000 });
+  const { data, error, reload } = useApi('/api/bot', { topics: ['bot', 'order', 'position', 'mode', 'risk', 'health'], every: 20_000 });
   const [pw, setPw] = useState(''); const [amt, setAmt] = useState('10000');
   const s = data?.status; const a = data?.account;
   return <Page title="Bot Account" sub="Dedicated paper strategy allocation (Part 26). The bot can never withdraw, transfer, change destinations, raise its allocation or its own permissions.">
     <ErrorLine e={error} />
+    <div style={{ marginBottom: 14 }}><CentralCommand command={data?.command} lanes={s?.lanes} mode={s?.display} /></div>
     <div className="grid g4" style={{ marginBottom: 14 }}>
       <Stat k="Bot state" v={<Badge v={s?.state ?? '…'} tone={s?.state === 'EMERGENCY' ? 'b-bad' : s?.state === 'PAPER_TRADING' ? 'b-violet' : s?.state === 'PAUSED' ? 'b-warn' : 'b-neutral'} />} s={s ? `${s.cycles} scan cycles · last ${fmt.ago(s.lastScanAt)}` : ''} />
       <Stat k="Allocation equity (paper)" v={fmt.usd(a?.equity)} s={`deposits ${fmt.usd(a?.deposits)} · cash ${fmt.usd(a?.cash)}`} />

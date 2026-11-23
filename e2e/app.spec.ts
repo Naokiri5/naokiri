@@ -52,6 +52,18 @@ test('status ribbon tells the truth about an offline server', async () => {
   await ribbon.locator('[data-seg=engine]').click(); await expect(page).toHaveURL(/\/bot$/);
 });
 
+test('Central Command renders offline, paper reconciliation and research states from the backend', async () => {
+  await page.goto('/bot');
+  const command = page.getByRole('region', { name: 'MIA Central Command' });
+  await expect(command.getByText('Engine authority', { exact: true })).toBeVisible();
+  await expect(command.getByText('OFFLINE', { exact: true }).first()).toBeVisible();
+  await expect(command.getByText('Reconciled', { exact: true })).toBeVisible();
+  await expect(command.getByText('No open positions', { exact: true })).toBeVisible();
+  await expect(command.getByText('Awaiting first comparison', { exact: true })).toBeVisible();
+  await expect(command.getByText('Awaiting samples', { exact: true })).toHaveCount(2);
+  await expect(command.getByRole('link', { name: 'Release gates' })).toHaveAttribute('href', '/qa');
+});
+
 test('accept risk policy (step-up) → fund → PAPER mode', async () => {
   await page.goto('/risk'); await page.getByPlaceholder('Owner passphrase (step-up)').last().fill(PW);
   await page.getByRole('button', { name: 'Accept policy' }).click(); await expect(page.getByText(/Risk policy v1/)).toBeVisible();
