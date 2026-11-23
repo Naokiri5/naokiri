@@ -4,15 +4,38 @@ import { config, ensureDataDir } from '../config.js';
 import { migrate } from './migrations.js';
 
 let db: DatabaseSync | null = null;
+const BUSY_TIMEOUT_MS = 5_000;
+
+function enableWal(connection: DatabaseSync) {
+  const until = Date.now() + BUSY_TIMEOUT_MS;
+  const wait = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      connection.exec('PRAGMA journal_mode=WAL');
+      return;
+    } catch (error) {
+      // A concurrent first open can hit SQLITE_BUSY during the journal-mode upgrade even with a busy handler.
+      if (!(error instanceof Error) || !('errcode' in error) || error.errcode !== 5 || Date.now() >= until) throw error;
+      Atomics.wait(wait, 0, 0, Math.min(25, Math.max(0, until - Date.now())));
+    }
+  }
+}
 
 export function openDb(file?: string) {
   if (db) return db;
   let path = file;
   if (!path) { ensureDataDir(); path = join(config.dataDir, 'mia.db'); }
-  db = new DatabaseSync(path);
-  db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
-  migrate(db);
-  return db;
+  const connection = new DatabaseSync(path);
+  try {
+    connection.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}; PRAGMA foreign_keys=ON;`);
+    enableWal(connection);
+    migrate(connection);
+    db = connection;
+    return connection;
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
 }
 export function getDb() { return db ?? openDb(); }
 export function closeDb() { db?.close(); db = null; }

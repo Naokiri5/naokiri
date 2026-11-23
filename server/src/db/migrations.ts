@@ -117,16 +117,19 @@ const MIGRATIONS: string[] = [
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
 export function migrate(db: DatabaseSync, target = MIGRATIONS.length) {
-  db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
-  const row = db.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number | null };
-  const current = row?.v ?? 0;
-  for (let i = current; i < Math.min(target, MIGRATIONS.length); i++) {
-    db.exec('BEGIN');
-    try {
+  // Read the schema version under the write lock so simultaneous starters cannot both apply the same migration.
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
+    const row = db.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number | null };
+    for (let i = row.v ?? 0; i < Math.min(target, MIGRATIONS.length); i++) {
       db.exec(MIGRATIONS[i]);
       db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(i + 1, Date.now());
-      db.exec('COMMIT');
-    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
 }
 export const SCHEMA_VERSION = MIGRATIONS.length;

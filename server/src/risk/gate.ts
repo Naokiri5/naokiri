@@ -9,14 +9,18 @@ import { all, get } from '../db/db.js';
 import { iso } from '../core/util.js';
 import { getSetting } from '../core/settings.js';
 import { openIncidentFor } from '../exec/incidents.js';
+import { unreconciledPaperOrders } from '../exec/recovery.js';
 
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
-export interface RiskProposal { instrumentId: string; strategyId: string; side: 'buy'; entryPrice: number; stopPrice: number; idempotencyKey: string; traceId: string; account?: string }
-export interface Sizing { qty: number; notional: number; riskBudget: number; plannedMaxLoss: number; perUnitLoss: number; conservativeStopFill: number; estEntry: number; estFees: number }
+export interface RiskProposal { instrumentId: string; strategyId: string; strategyVersion?: string; side: 'buy'; entryPrice: number; stopPrice: number; idempotencyKey: string; traceId: string; account?: string }
+export interface Sizing { qty: number; notional: number; maxNotional: number; riskBudget: number; remainingOpenRisk: number; plannedMaxLoss: number; perUnitLoss: number; conservativeStopFill: number; estEntry: number; estFees: number }
 export interface RiskDecision { decision: RiskDecisionKind; reasonCodes: string[]; evaluated: Record<string, number | string | boolean | null>; sizing: Sizing | null; policyVersion: number | null; ts: string; traceId: string }
 
 export function evaluateRisk(p: RiskProposal, nowTs = Date.now()): RiskDecision {
+  if (p.account !== undefined && p.account !== PAPER_ACCOUNT) {
+    return { decision: 'DENY', reasonCodes: ['ACCOUNT_UNSUPPORTED'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
+  }
   try { return evaluateInner(p, nowTs); }
   catch (e: any) { return { decision: 'DENY', reasonCodes: [`RISK_ENGINE_EXCEPTION: ${String(e?.message ?? e).slice(0, 200)}`], evaluated: {}, sizing: null, policyVersion: currentPolicySafe(), ts: iso(nowTs), traceId: p.traceId }; }
 }
@@ -28,19 +32,22 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const deny: string[] = []; const review: string[] = []; const ev: RiskDecision['evaluated'] = {};
   const pv = currentPolicy();
   if (!pv) return { decision: 'DENY', reasonCodes: ['POLICY_NOT_ACCEPTED: owner must review and accept a risk policy'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
-  const pol: RiskPolicy = pv.policy; const account = p.account ?? PAPER_ACCOUNT;
+  const pol: RiskPolicy = pv.policy; const account = PAPER_ACCOUNT;
   const ctl = getControl();
   ev.mode = ctl.mode;
   if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');
   if (ctl.pausedNewOrders) deny.push('NEW_ORDERS_PAUSED');
   if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
+  else if (ctl.mode !== 'PAPER' && ctl.mode !== 'APPROVAL') deny.push('MODE_NOT_PAPER');
+  if (unreconciledPaperOrders()) deny.push('UNRECONCILED_PAPER_ORDERS');
   if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
   const suspended = getSetting<string[]>('suspendedStrategies', []);
   if (suspended.includes(p.strategyId)) deny.push(`STRATEGY_SUSPENDED:${p.strategyId}`);
   // Part 18 lifecycle: only strategies the owner promoted (after reviewing a backtest) may trade.
-  const st = get<{ status: string }>('SELECT status FROM strategies WHERE id=?', p.strategyId);
+  const st = get<{ status: string; version: string }>('SELECT status,version FROM strategies WHERE id=?', p.strategyId);
   if (!st) deny.push(`STRATEGY_NOT_REGISTERED:${p.strategyId}`);
   else if (!['PAPER', 'LIVE_CANDIDATE'].includes(st.status)) deny.push(`STRATEGY_NOT_PROMOTED:${p.strategyId} is ${st.status} (promote to PAPER in Strategy Lab)`);
+  else if (p.strategyVersion !== undefined && p.strategyVersion !== st.version) deny.push('STRATEGY_VERSION_MISMATCH');
 
   const inst = market.instruments.get(p.instrumentId);
   if (!inst) { deny.push('INSTRUMENT_UNKNOWN'); return out(); }
@@ -75,7 +82,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const open = openPositions(account);
   if (open.length >= pol.maxConcurrentPositions) deny.push(`MAX_CONCURRENT_POSITIONS ${open.length}`);
   if (open.some((o) => o.instrument === p.instrumentId)) deny.push('DUPLICATE_INSTRUMENT_POSITION');
-  const pending = all("SELECT id FROM orders WHERE instrument=? AND status IN ('NEW','PENDING_APPROVAL','PARTIALLY_FILLED') AND purpose='ENTRY' AND client_order_id<>?", p.instrumentId, p.idempotencyKey);
+  const pending = all("SELECT id FROM orders WHERE account=? AND instrument=? AND status='PENDING_APPROVAL' AND purpose='ENTRY' AND client_order_id<>?", account, p.instrumentId, p.idempotencyKey);
   if (pending.length) deny.push('PENDING_ENTRY_ORDER_EXISTS');
   if (all("SELECT id FROM orders WHERE client_order_id=? AND status<>'PENDING_APPROVAL'", p.idempotencyKey).length) deny.push('DUPLICATE_REQUEST (idempotency key reused)');
   // correlation / concentration (conservative when unknown)
@@ -88,7 +95,10 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const d = market.deep.get(p.instrumentId);
   const estEntry = px.ask || px.price;
   const conservativeStopFill = p.stopPrice * (1 - pol.stopFillBufferPct / 100);
-  const perUnitLoss = estEntry - conservativeStopFill + pol.feeRate * (estEntry + conservativeStopFill);
+  // Size from the worst entry permitted by the slippage policy; actual fills are rechecked by the OMS.
+  // Keep the top ask for the separate notional cap, which must be enforced at the executed price.
+  const worstPermittedEntry = estEntry * (1 + pol.maxSlippageBps / 10_000);
+  const perUnitLoss = worstPermittedEntry - conservativeStopFill + pol.feeRate * (worstPermittedEntry + conservativeStopFill);
   const riskBudget = acct.equity * (pol.riskPerTradePct / 100);
   let qty = perUnitLoss > 0 ? riskBudget / perUnitLoss : 0;
   const maxNotional = Math.min(acct.equity * (pol.maxPositionNotionalPct / 100), acct.cash * 0.98);
@@ -97,9 +107,10 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const notional = qty * estEntry;
   if (qty <= 0 || qty < inst.minQty || notional < Math.max(inst.minNotional, 5)) deny.push(`SIZE_BELOW_VENUE_MINIMUM qty=${qty} notional=${notional.toFixed(2)}`);
   const plannedMaxLoss = qty * perUnitLoss;
+  const remainingOpenRisk = acct.equity * (pol.maxOpenRiskPct / 100) - acct.openRiskUsd;
   // NaN compares false against every limit, so a non-finite input would otherwise slip through as ALLOW.
-  if (![acct.equity, acct.cash, acct.dailyPnlPct, acct.weeklyPnlPct, acct.drawdownPct, estEntry, perUnitLoss, qty, notional, plannedMaxLoss].every(Number.isFinite)) deny.push('NON_FINITE_INPUT (risk cannot be computed)');
-  if (acct.openRiskUsd + plannedMaxLoss > acct.equity * (pol.maxOpenRiskPct / 100) + 1e-9) deny.push(`AGGREGATE_OPEN_RISK ${(((acct.openRiskUsd + plannedMaxLoss) / acct.equity) * 100).toFixed(2)}% > ${pol.maxOpenRiskPct}%`);
+  if (![acct.equity, acct.cash, acct.dailyPnlPct, acct.weeklyPnlPct, acct.drawdownPct, estEntry, perUnitLoss, qty, notional, maxNotional, riskBudget, remainingOpenRisk, plannedMaxLoss].every(Number.isFinite)) deny.push('NON_FINITE_INPUT (risk cannot be computed)');
+  if (plannedMaxLoss > remainingOpenRisk + 1e-9) deny.push(`AGGREGATE_OPEN_RISK ${(((acct.openRiskUsd + plannedMaxLoss) / acct.equity) * 100).toFixed(2)}% > ${pol.maxOpenRiskPct}%`);
   const imp = bookImpact(d?.book ?? null, 'buy', Math.max(notional, 1));
   const age = bookAge(d?.book, nowTs); ev.bookAgeMs = age;
   if (!imp || age == null) deny.push('NO_ORDER_BOOK (cannot estimate slippage)');
@@ -112,7 +123,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
     ev.costR = round(costR, 4);
     if (costR > pol.maxCostR) deny.push(`COST_R ${costR.toFixed(3)} > ${pol.maxCostR}`);
   }
-  const sizing: Sizing = { qty, notional: round(notional, 2), riskBudget: round(riskBudget, 2), plannedMaxLoss: round(plannedMaxLoss, 2), perUnitLoss, conservativeStopFill, estEntry, estFees: round(pol.feeRate * notional * 2, 4) };
+  const sizing: Sizing = { qty, notional: round(notional, 2), maxNotional, riskBudget, remainingOpenRisk, plannedMaxLoss: round(plannedMaxLoss, 2), perUnitLoss, conservativeStopFill, estEntry, estFees: round(pol.feeRate * notional * 2, 4) };
   return out(sizing);
 
   function out(sz: Sizing | null = null): RiskDecision {

@@ -24,6 +24,36 @@ export const VENUE = 'binance-paper';
 const feeRate = () => (currentPolicy()?.policy ?? DEFAULT_POLICY).feeRate;
 
 export class OmsError extends Error {}
+class EntryStateChanged extends Error {}
+
+interface ApprovalOrder {
+  id: string;
+  status: string;
+  client_order_id: string;
+  account: string;
+  venue: string;
+  side: string;
+  purpose: string;
+  decision_id: string | null;
+  instrument: string;
+}
+
+function matchesApproval(order: ApprovalOrder, report: DecisionReport) {
+  return order.status === 'PENDING_APPROVAL' && order.account === PAPER_ACCOUNT && order.venue === VENUE &&
+    order.purpose === 'ENTRY' && order.side === 'BUY' && report.decision === 'APPROVED_FOR_USER_CONFIRMATION' &&
+    order.decision_id === report.id && order.instrument === report.instrumentId &&
+    order.client_order_id === `entry-${report.candidateId}`;
+}
+
+function readApproval(order: ApprovalOrder, json: string | null): DecisionReport | null {
+  try {
+    const report = P<DecisionReport | null>(json);
+    if (report && matchesApproval(order, report) && typeof report.strategy?.id === 'string' &&
+        typeof report.strategy.version === 'string' && typeof report.consensus?.expiresAt === 'string' &&
+        Number.isFinite(report.entryRef) && Number.isFinite(report.stopLoss) && Array.isArray(report.takeProfit)) return report;
+  } catch { /* Unreadable evidence invalidates this approval. */ }
+  return null;
+}
 
 function insertOrder(o: { clientOrderId: string; instrument: string; side: 'BUY' | 'SELL'; type: string; qty: number; limit?: number | null; stop?: number | null; status: string; purpose: string; positionId?: string | null; decisionId?: string | null; reject?: string | null; at?: number }) {
   const id = uid('ord'); const t = o.at ?? Date.now(); // `at`: same timestamp as the fill/ledger rows written with it
@@ -97,70 +127,119 @@ function simulateExitFill(instrumentId: string, qty: number, bufferPct: number, 
 }
 
 /** Entry submission with Part 29 L5 last-moment validation. */
-export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowTs = Date.now()): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
+export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', executionTs?: number): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
   const t0 = performance.now();
   const s = report;
   const coid = `entry-${report.candidateId}`;
-  const existing = get<any>('SELECT * FROM orders WHERE client_order_id=?', coid);
+  const existing = get<ApprovalOrder>('SELECT * FROM orders WHERE client_order_id=?', coid);
   if (existing && existing.status !== 'PENDING_APPROVAL') return { ok: false, reason: `DUPLICATE: order ${existing.id} already ${existing.status}` };
+  if (existing && (actor !== 'owner' || !matchesApproval(existing, report))) return { ok: false, reason: 'PENDING_APPROVAL_MISMATCH' };
+  if (actor === 'owner' && !existing) return { ok: false, reason: 'PENDING_APPROVAL_REQUIRED' };
   const ctl = getControl();
   if (actor === 'bot' && report.decision !== 'PAPER_TRADE') return { ok: false, reason: `decision ${report.decision} does not permit automatic entry` };
   if (actor === 'bot' && ctl.mode !== 'PAPER') return { ok: false, reason: `mode ${ctl.mode} does not permit automatic paper entries` };
-  if (Date.parse(report.consensus.expiresAt) <= Date.now()) return reject('CONSENSUS_EXPIRED: re-evaluate from fresh data');
-  // Last-moment revalidation: fresh risk evaluation on current data
-  const fresh = evaluateRisk({ instrumentId: s.instrumentId, strategyId: s.strategy.id, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId });
-  const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');
-  if (!allowed || !fresh.sizing) return reject(`LAST_MOMENT_RISK_${fresh.decision}: ${fresh.reasonCodes.join('; ')}`);
-  const qty = fresh.sizing.qty;
-  const sim = simulateEntryFill(s.instrumentId, qty, nowTs);
-  if (!sim.fill) return reject(sim.reason!);
-  const fill = sim.fill;
-  const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
-  if (fill.impactBps > pol.maxSlippageBps) return reject(`SLIPPAGE ${fill.impactBps.toFixed(1)}bps at submission`);
-  if (fill.price <= s.stopLoss) return reject('PRICE_THROUGH_STOP');
-  if (s.takeProfit.some((t) => t.price <= fill.price)) return reject('PRICE_THROUGH_TARGET: fill would be at or above a take-profit level');
-  const fee = fill.price * qty * pol.feeRate;
-  const cash = cashBalance(PAPER_ACCOUNT);
-  if (fill.price * qty + fee > cash + 1e-9) return reject(`INSUFFICIENT_CASH: need ${(fill.price * qty + fee).toFixed(2)}, have ${cash.toFixed(2)}`);
-  const R = fill.price - s.stopLoss;
-  const tgts = s.takeProfit.map((t) => ({ r: (t.price - fill.price) / R, fraction: t.fraction }));
-  const st = newExitState(fill.price, s.stopLoss, qty, tgts, null, 0);
-  const posId = uid('pos');
-  const strat = s.strategy.id;
-  const maxHoldMs = (strat === 'range_reversion' ? 24 : strat === 'trend_pullback' ? 48 : 72) * 3600_000;
-  const trailAfterR = strat === 'trend_pullback' ? 1 : strat === 'donchian_breakout' ? 1.5 : null;
-  let orderId: string;
-  crashpoint('entry.preTx');
-  try { orderId = tx(() => {
-    const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id });
-    run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, Date.now(), oid);
-    crashpoint('entry.order');
-    run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, fill.price, fee, 'TAKER', Date.now());
-    crashpoint('entry.fill');
-    run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,max_hold_ms,decision_id,planned_risk) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      posId, PAPER_ACCOUNT, s.instrumentId, s.market, 'LONG', strat, qty, fill.price, s.stopLoss, s.stopLoss, J({ qtyInit: qty, trailAfterR, targets: st.targets, lastPx: fill.price }), 'OPEN', Date.now(), -fee, fee, maxHoldMs, s.id, qty * (fill.price - s.stopLoss * (1 - pol.stopFillBufferPct / 100)) + fee);
-    crashpoint('entry.position');
-    // Protective stop: paper venue has no exchange-native stop; OMS monitors it. Recorded explicitly.
-    insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: 'STOP_MARKET (OMS-monitored, paper)', qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId });
-    crashpoint('entry.stop');
-    ledger(PAPER_ACCOUNT, 'BUY', -fill.price * qty, oid, `${s.asset} entry`); crashpoint('entry.buy'); ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee');
-    crashpoint('entry.precommit');
-    return oid;
-  }); } catch (e: any) {
-    // UNIQUE(client_order_id) is the last line of defence against a concurrent duplicate submission.
-    if (/UNIQUE|constraint/i.test(String(e?.message))) return { ok: false, reason: `DUPLICATE: entry ${coid} was already submitted` };
-    throw e;
-  }
+  const outcome = (() => {
+    crashpoint('entry.preTx');
+    try { return tx(() => {
+      // Check current order state and run the canonical risk gate under the same SQLite write lock as the fill.
+      const current = get<ApprovalOrder>('SELECT * FROM orders WHERE client_order_id=?', coid);
+      if (existing && (!current || current.id !== existing.id || !matchesApproval(current, report))) {
+        throw new EntryStateChanged();
+      }
+      if (!existing && current) return { conflict: `DUPLICATE: order ${current.id} already ${current.status}` };
+      const authority = getControl();
+      if (actor === 'bot' && authority.mode !== 'PAPER') return { reason: 'LAST_MOMENT_MODE_CHANGED: automatic entry requires PAPER mode' };
+      const nowTs = executionTs ?? Date.now();
+      const expiresAt = Date.parse(report.consensus?.expiresAt);
+      if (!Number.isFinite(expiresAt) || expiresAt <= nowTs) return { reason: 'CONSENSUS_EXPIRED: re-evaluate from fresh data' };
+      // Last-moment revalidation: fresh risk evaluation on current data
+      const proposal = { instrumentId: s.instrumentId, strategyId: s.strategy.id, strategyVersion: s.strategy.version, side: 'buy' as const, entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId };
+      const fresh = evaluateRisk(proposal, nowTs);
+      const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');
+      if (!allowed || !fresh.sizing) return { reason: `LAST_MOMENT_RISK_${fresh.decision}: ${fresh.reasonCodes.join('; ')}` };
+      const qty = fresh.sizing.qty;
+      const sim = simulateEntryFill(s.instrumentId, qty, nowTs);
+      if (!sim.fill) return { reason: sim.reason! };
+      const fill = sim.fill;
+      const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
+      if (fill.impactBps > pol.maxSlippageBps) return { reason: `SLIPPAGE ${fill.impactBps.toFixed(1)}bps at submission` };
+      if (fill.price <= s.stopLoss) return { reason: 'PRICE_THROUGH_STOP' };
+      if (s.takeProfit.some((t) => !Number.isFinite(t?.price) || !Number.isFinite(t?.fraction) || t.fraction <= 0) ||
+          s.takeProfit.reduce((total, target) => total + target.fraction, 0) > 1 + 1e-9) return { reason: 'INVALID_TARGETS' };
+      if (s.takeProfit.some((t) => t.price <= fill.price)) return { reason: 'PRICE_THROUGH_TARGET: fill would be at or above a take-profit level' };
+      const notional = fill.price * qty;
+      if (!Number.isFinite(notional) || notional > fresh.sizing.maxNotional + 1e-9) {
+        return { reason: `POSITION_NOTIONAL_LIMIT: fill ${notional.toFixed(2)}, limit ${fresh.sizing.maxNotional.toFixed(2)}` };
+      }
+      // The canonical risk gate sized against a conservative entry. Defend that invariant again
+      // using the actual depth-walk fill before writing any order, position or financial ledger row.
+      const worstStopFill = fresh.sizing.conservativeStopFill;
+      const actualPlannedMaxLoss = qty * (fill.price - worstStopFill + pol.feeRate * (fill.price + worstStopFill));
+      if (!Number.isFinite(actualPlannedMaxLoss) || actualPlannedMaxLoss <= 0 ||
+          actualPlannedMaxLoss > fresh.sizing.riskBudget + 1e-9) {
+        return { reason: 'EXECUTED_TRADE_RISK_LIMIT: depth-walk fill exceeds the per-trade loss budget' };
+      }
+      if (actualPlannedMaxLoss > fresh.sizing.remainingOpenRisk + 1e-9) {
+        return { reason: 'EXECUTED_AGGREGATE_RISK_LIMIT: depth-walk fill exceeds the account risk budget' };
+      }
+      const fee = notional * pol.feeRate;
+      const R = fill.price - s.stopLoss;
+      const tgts = s.takeProfit.map((t) => ({ r: (t.price - fill.price) / R, fraction: t.fraction }));
+      const st = newExitState(fill.price, s.stopLoss, qty, tgts, null, 0);
+      const posId = uid('pos');
+      const strat = s.strategy.id;
+      const maxHoldMs = (strat === 'range_reversion' ? 24 : strat === 'trend_pullback' ? 48 : 72) * 3600_000;
+      const trailAfterR = strat === 'trend_pullback' ? 1 : strat === 'donchian_breakout' ? 1.5 : null;
+      const cash = cashBalance(PAPER_ACCOUNT);
+      const total = notional + fee;
+      if (!Number.isFinite(total) || !Number.isFinite(cash) || total > cash + 1e-9) {
+        return { reason: `INSUFFICIENT_CASH: need ${total.toFixed(2)}, have ${cash.toFixed(2)}` };
+      }
+      const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
+      run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);
+      crashpoint('entry.order');
+      run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)', uid('fil'), oid, qty, fill.price, fee, 'TAKER', nowTs);
+      crashpoint('entry.fill');
+      run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,max_hold_ms,decision_id,planned_risk) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        posId, PAPER_ACCOUNT, s.instrumentId, s.market, 'LONG', strat, qty, fill.price, s.stopLoss, s.stopLoss, J({ qtyInit: qty, trailAfterR, targets: st.targets, lastPx: fill.price }), 'OPEN', nowTs, -fee, fee, maxHoldMs, s.id, actualPlannedMaxLoss);
+      crashpoint('entry.position');
+      // Protective stop: paper venue has no exchange-native stop; OMS monitors it. Recorded explicitly.
+      insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: 'STOP_MARKET (OMS-monitored, paper)', qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId, at: nowTs });
+      crashpoint('entry.stop');
+      ledger(PAPER_ACCOUNT, 'BUY', -notional, oid, `${s.asset} entry`, nowTs);
+      crashpoint('entry.buy');
+      ledger(PAPER_ACCOUNT, 'FEE', -fee, oid, 'entry fee', nowTs);
+      crashpoint('entry.precommit');
+      return { orderId: oid, posId, qty, fill, fee, fresh, strat, plannedMaxLoss: actualPlannedMaxLoss };
+    }); } catch (e: any) {
+      if (e instanceof EntryStateChanged) return { conflict: 'ORDER_STATE_CHANGED: entry order changed before submission' };
+      // UNIQUE(client_order_id) is the last line of defence against a concurrent duplicate submission.
+      if (/UNIQUE|constraint/i.test(String(e?.message))) return { conflict: `DUPLICATE: entry ${coid} was already submitted` };
+      throw e;
+    }
+  })();
+  if ('conflict' in outcome) return { ok: false, reason: outcome.conflict };
+  if (outcome.reason !== undefined) return reject(outcome.reason);
+  const { orderId, posId, qty, fill, fee, fresh, strat, plannedMaxLoss } = outcome;
   crashpoint('entry.committed');
   record('oms.submit', performance.now() - t0);
   journal('FILL', `BUY ${qty} ${s.asset} @ ${fill.price.toPrecision(6)} (${strat}) — stop ${s.stopLoss.toPrecision(6)}, slippage ${fill.impactBps.toFixed(1)}bps`, posId, { decisionId: s.id, fill, fee, risk: fresh, actor });
-  notify('INFO', `Paper entry: ${s.asset}`, `${qty} @ ${fill.price.toPrecision(6)}, stop ${s.stopLoss.toPrecision(6)}, planned max loss $${fresh.sizing.plannedMaxLoss}`, 'oms');
+  notify('INFO', `Paper entry: ${s.asset}`, `${qty} @ ${fill.price.toPrecision(6)}, stop ${s.stopLoss.toPrecision(6)}, planned max loss $${plannedMaxLoss}`, 'oms');
   bus.publish('order', { orderId, positionId: posId, status: 'FILLED' }); bus.publish('position', { positionId: posId });
   return { ok: true, orderId, positionId: posId };
 
   function reject(reason: string) {
-    if (existing) run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=?", reason, Date.now(), existing.id);
-    else insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
+    if (existing) {
+      const changed = run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", reason, Date.now(), existing.id);
+      if (Number(changed.changes) !== 1) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry is no longer pending approval' };
+    } else {
+      const inserted = tx(() => {
+        if (get('SELECT 1 FROM orders WHERE client_order_id=?', coid)) return false;
+        insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
+        return true;
+      });
+      if (!inserted) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry order changed before rejection' };
+    }
     journal('ORDER', `Entry rejected for ${s.asset}: ${reason}`, s.id);
     bus.publish('order', { status: 'REJECTED', reason });
     return { ok: false, reason };
@@ -170,26 +249,47 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', nowT
 /** APPROVAL mode: queue a pending order for the owner. */
 export function queueForApproval(report: DecisionReport) {
   const coid = `entry-${report.candidateId}`;
-  if (get('SELECT 1 FROM orders WHERE client_order_id=?', coid)) return null;
-  const id = insertOrder({ clientOrderId: coid, instrument: report.instrumentId, side: 'BUY', type: 'MARKET', qty: report.positionSize?.qty ?? 0, stop: report.stopLoss, status: 'PENDING_APPROVAL', purpose: 'ENTRY', decisionId: report.id });
+  if (report.decision !== 'APPROVED_FOR_USER_CONFIRMATION') return null;
+  const id = tx(() => {
+    const { mode, emergency, pausedNewOrders } = getControl();
+    if (emergency || pausedNewOrders || (mode !== 'PAPER' && mode !== 'APPROVAL')) return null;
+    if (get('SELECT 1 FROM orders WHERE client_order_id=?', coid)) return null;
+    return insertOrder({ clientOrderId: coid, instrument: report.instrumentId, side: 'BUY', type: 'MARKET', qty: report.positionSize?.qty ?? 0, stop: report.stopLoss, status: 'PENDING_APPROVAL', purpose: 'ENTRY', decisionId: report.id });
+  });
+  if (!id) return null;
   notify('WARNING', `Approval requested: ${report.asset}`, `${report.strategy.id} · score ${report.opportunity.score} · expires ${report.consensus.expiresAt}`, 'oms');
   bus.publish('order', { orderId: id, status: 'PENDING_APPROVAL' });
   return id;
 }
 export function decideApproval(orderId: string, approve: boolean) {
-  const o = get<any>('SELECT * FROM orders WHERE id=?', orderId);
+  const o = get<ApprovalOrder>("SELECT * FROM orders WHERE id=? AND account=? AND venue=? AND purpose='ENTRY' AND side='BUY'", orderId, PAPER_ACCOUNT, VENUE);
   if (!o || o.status !== 'PENDING_APPROVAL') throw new OmsError('order is not pending approval');
   audit('owner', approve ? 'order.approve' : 'order.reject', { orderId });
-  if (!approve) { run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=?", Date.now(), orderId); journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId); return { ok: true }; }
-  const rep = get<any>('SELECT report FROM decisions WHERE id=?', o.decision_id);
-  if (!rep) throw new OmsError('decision record missing');
-  return submitEntry(P(rep.report), 'owner');
+  if (!approve) {
+    const changed = run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), orderId);
+    if (Number(changed.changes) !== 1) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry is no longer pending approval' };
+    journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId);
+    return { ok: true };
+  }
+  const rep = readApproval(o, get<{ report: string }>('SELECT report FROM decisions WHERE id=?', o.decision_id)?.report ?? null);
+  if (!rep) throw new OmsError('approval evidence is missing or invalid');
+  return submitEntry(rep, 'owner');
 }
 export function expireApprovals() {
-  for (const o of all<any>("SELECT o.id, d.report FROM orders o JOIN decisions d ON d.id=o.decision_id WHERE o.status='PENDING_APPROVAL'")) {
-    const r = P<DecisionReport>(o.report);
-    if (Date.parse(r.consensus.expiresAt) <= Date.now()) run("UPDATE orders SET status='EXPIRED', reject_reason='consensus validity window elapsed', updated_at=? WHERE id=?", Date.now(), o.id);
-  }
+  tx(() => {
+    const now = Date.now();
+    const pending = all<ApprovalOrder & { report: string | null }>(
+      "SELECT o.*,d.report FROM orders o LEFT JOIN decisions d ON d.id=o.decision_id WHERE o.account=? AND o.venue=? AND o.status='PENDING_APPROVAL'",
+      PAPER_ACCOUNT, VENUE,
+    );
+    for (const order of pending) {
+      const report = readApproval(order, order.report);
+      const expiresAt = report ? Date.parse(report.consensus.expiresAt) : NaN;
+      if (Number.isFinite(expiresAt) && expiresAt > now) continue;
+      const reason = Number.isFinite(expiresAt) ? 'consensus validity window elapsed' : 'approval evidence is missing or invalid';
+      run("UPDATE orders SET status='EXPIRED', reject_reason=?, updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", reason, now, order.id);
+    }
+  });
 }
 
 class ExitUnavailable extends Error {}
@@ -335,7 +435,7 @@ export function autopsy(positionId: string) {
 // ── Part 17.8 emergency semantics — distinct actions with distinct reported states ──
 export function pauseNewOrders(actor: string) { updateControl(actor, { pausedNewOrders: true }); journal('INTERVENTION', `New orders paused by ${actor}`); return { state: 'CONFIRMED' }; }
 export function cancelPendingEntries(actor: string) {
-  const r = run("UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=? WHERE purpose='ENTRY' AND status IN ('NEW','PENDING_APPROVAL')", `cancelled by ${actor}`, Date.now());
+  const r = run("UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=? WHERE account=? AND venue=? AND purpose='ENTRY' AND status='PENDING_APPROVAL'", `cancelled by ${actor}`, Date.now(), PAPER_ACCOUNT, VENUE);
   audit(actor, 'orders.cancelPendingEntries', { count: Number(r.changes) }); journal('INTERVENTION', `${r.changes} pending entries cancelled by ${actor}`);
   return { state: 'CONFIRMED', cancelled: Number(r.changes) };
 }

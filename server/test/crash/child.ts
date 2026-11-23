@@ -46,7 +46,7 @@ setCrashHook((p) => {
 
 function op(): unknown {
   switch (req.op) {
-    case 'enter': return submitEntry(JSON.parse(readFileSync(join(dir, 'report.json'), 'utf8')), 'bot');
+    case 'enter': return submitEntry(JSON.parse(readFileSync(join(dir, req.reportFile ?? 'report.json'), 'utf8')), 'bot');
     case 'approve':
       try { return decideApproval(get<{ id: string }>("SELECT id FROM orders WHERE purpose='ENTRY'")!.id, true); }
       catch (e) { if (e instanceof OmsError) return { error: e.message }; throw e; }
