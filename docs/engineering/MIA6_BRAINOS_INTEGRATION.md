@@ -261,7 +261,7 @@ This increment is **real repository code**, integrated into the existing BrainOS
 ### What is implemented
 
 - Schema v6: append-only SQLite migration with durable brainos session checkpoints/audits, FLIN research candidates, and DEEP post-close decisions.
-- `ops/durableSession.ts`: atomic `tx()`-based state transitions, versioned audit events, canonical leader lease checks, crash recovery that always suspends new entries, owner-close drain checks, and permanent exit/reconciliation obligations. `buildApp()` invokes recovery on boot. Actual RUN remains unavailable because `sessionPreflight().canRun` is not certified; LIVE remains blocked.
+- `ops/durableSession.ts`: atomic `tx()`-based state transitions, versioned audit events, canonical leader lease checks, crash recovery that suspends new entries, and owner-close drain checks. The scheduler recovers the checkpoint after taking the engine lease. A standby boot leaves the leader's session intact. A checkpoint recovery error leaves durable entries blocked while the independent paper protection pass continues. Run remains unavailable pending execution-lane certification. Live remains locked.
 - `market/flinQueue.ts`: bounded ingestion (250 records per pass) of already-fetched **DEX profile observations**, stable candidate IDs, persisted replay-safe deduplication and newer-evidence protection. This does **not** detect all on-chain deployments; true Solana program event subscriptions, RPC mint checks and Jupiter execution are still missing.
 - `choice/dualRuntime.ts`: FLIN intake piggybacks on the existing background research owner only when a DB is already open. Failures do not affect protective exits. The research status includes intake statistics; `dualResearch.ts` can compare up to 200 fresh observed candidates in a pass instead of 20.
 - `market/flinQueue.ts`: adversarial permission/extension/sell-route gate for **caller-supplied verified evidence**; no RPC verification is implied by the interface, no fabricated buy/sell quote, and even `RESEARCH_QUALIFIED` has `tradingAuthority: false`.
@@ -274,7 +274,7 @@ This increment is **real repository code**, integrated into the existing BrainOS
 
 - `test/flin-queue.test.ts`: 150 token observations, deduplication, rate bounds, source replay ordering, incomplete permissions, Token-2022 flags, unsellable routes and nonpositive all-in expected edge.
 - `test/dpbm-postclose.test.ts`: staged weights, aggregate exposure, unreconciled exits, adverse close recovery, idempotency and zero OMS/ledger mutations.
-- `test/durable-session.test.ts`: WAL reopen/crash suspension, stale lease rejection, draining pending orders, risk/emergency shutdown and versioned audit trail.
+- `test/durable-session.test.ts`: shared-volume standby startup, lease expiry and takeover, checkpoint recovery errors with a continuing protection pass, draining pending orders, risk and emergency shutdown, and versioned audit evidence.
 - `test/deep-scenarios.test.ts`: valid and mismatched candle snapshots, three-way proper scores, regime separation and independent promotion review.
 
 ### Hard release blockers (do not merge or enable LIVE)
