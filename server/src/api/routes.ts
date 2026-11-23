@@ -86,7 +86,7 @@ const httpError = (code: number, msg: string) => Object.assign(new Error(msg), {
 const isServerFault = (e: any) => e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError
   || /^ERR_SQLITE|^SQLITE/.test(String(e?.code ?? '')) || /SQLITE_|database is locked/i.test(String(e?.message ?? ''));
 // Per-session budgets for routes that call paid APIs, many upstream endpoints, or run long CPU work.
-const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2) };
+const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2), futuresResearch: limiter(8, 2) };
 
 export async function routes(app: FastifyInstance) {
   /**
@@ -276,6 +276,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/choice/dual/fast', async () =>
     assessFastMemecoinResearch(market.dex, market.dexFetchedAt));
   app.get('/api/choice/dual/deep', async (req) => {
+    limit(req, 'futuresResearch', 'futures chart research');
     const { symbol } = z.object({
       symbol: z.enum(FUTURES_RESEARCH_SYMBOLS).default('BTCUSDT'),
     }).parse(req.query ?? {});
