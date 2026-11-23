@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { NAV_GROUPS, groupForPath, type NavGroup } from './nav';
+import { ALL_PAGES, NAV_GROUPS, groupForPath, type NavGroup } from './nav';
 
 /** Four primary operator destinations; legacy views remain accessible by URL and command search. */
 const store = { get<T>(k: string, d: T): T { try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : d; } catch { return d; } },
@@ -33,14 +33,26 @@ function Group({ g, active, expanded, collapsed, onToggle }: { g: NavGroup; acti
   </div>;
 }
 
-/** Sibling pages of the current group, as tabs under the top bar: one tap between related screens on any device. */
+/**
+ * Secondary tools remain directly accessible without cluttering the four
+ * top-level destinations. Derived from the existing page catalogue: no
+ * duplicate screen registrations or hidden workspaces.
+ */
 export function GroupTabs() {
-  const loc = useLocation(); const g = groupForPath(loc.pathname);
-  if (!g || g.pages.length < 2) return null;
-  return <nav className="grouptabs" aria-label={`${g.label} pages`}>
-    <span className="grouptabs-title" aria-hidden>{g.icon} {g.label}</span>
-    {g.pages.map((p) => <NavLink key={p.to} to={p.to} title={p.desc}>{p.label}</NavLink>)}
-  </nav>;
+  const loc = useLocation();
+  const group = groupForPath(loc.pathname);
+  if (!group) return null;
+  const tools = ALL_PAGES.filter((page) =>
+    !group.pages.some((primary) => primary.to === page.to) &&
+    groupForPath(page.to)?.id === group.id,
+  );
+  if (!tools.length) return null;
+  return <details className="section-tools">
+    <summary>Explore {group.label} tools <span className="hint">({tools.length})</span></summary>
+    <nav className="section-tool-links" aria-label={`${group.label} tools`}>
+      {tools.map((page) => <NavLink key={page.to} to={page.to} title={page.desc}>{page.label}</NavLink>)}
+    </nav>
+  </details>;
 }
 
 /** Mobile: four destinations plus "More" (opens the full menu). The operating-mode badge stays in the top bar. */
