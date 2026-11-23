@@ -15,6 +15,8 @@ import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { crashpoint } from './crashpoint.js';
+import { assertWriteFence, LeaseLostError, type LeaseFence } from '../ops/lease.js';
+import { unreconciledPaperOrders } from './recovery.js';
 
 /**
  * Paper OMS (Part 26 / 32.6). Fills are simulated by walking the LIVE Binance order book
@@ -127,7 +129,7 @@ function simulateExitFill(instrumentId: string, qty: number, bufferPct: number, 
 }
 
 /** Entry submission with Part 29 L5 last-moment validation. */
-export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', executionTs?: number): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
+export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', executionTs?: number, fence?: LeaseFence): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
   const t0 = performance.now();
   const s = report;
   const coid = `entry-${report.candidateId}`;
@@ -141,6 +143,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
   const outcome = (() => {
     crashpoint('entry.preTx');
     try { return tx(() => {
+      assertWriteFence(fence);
       // Check current order state and run the canonical risk gate under the same SQLite write lock as the fill.
       const current = get<ApprovalOrder>('SELECT * FROM orders WHERE client_order_id=?', coid);
       if (existing && (!current || current.id !== existing.id || !matchesApproval(current, report))) {
@@ -229,17 +232,17 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
   return { ok: true, orderId, positionId: posId };
 
   function reject(reason: string) {
-    if (existing) {
-      const changed = run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", reason, Date.now(), existing.id);
-      if (Number(changed.changes) !== 1) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry is no longer pending approval' };
-    } else {
-      const inserted = tx(() => {
-        if (get('SELECT 1 FROM orders WHERE client_order_id=?', coid)) return false;
-        insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
-        return true;
-      });
-      if (!inserted) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry order changed before rejection' };
-    }
+    const recorded = tx(() => {
+      assertWriteFence(fence);
+      if (existing) {
+        const changed = run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", reason, Date.now(), existing.id);
+        return Number(changed.changes) === 1;
+      }
+      if (get('SELECT 1 FROM orders WHERE client_order_id=?', coid)) return false;
+      insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty: 0, status: 'REJECTED', purpose: 'ENTRY', decisionId: s.id, reject: reason });
+      return true;
+    });
+    if (!recorded) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry order changed before rejection' };
     journal('ORDER', `Entry rejected for ${s.asset}: ${reason}`, s.id);
     bus.publish('order', { status: 'REJECTED', reason });
     return { ok: false, reason };
@@ -247,12 +250,14 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
 }
 
 /** APPROVAL mode: queue a pending order for the owner. */
-export function queueForApproval(report: DecisionReport) {
+export function queueForApproval(report: DecisionReport, fence?: LeaseFence) {
   const coid = `entry-${report.candidateId}`;
   if (report.decision !== 'APPROVED_FOR_USER_CONFIRMATION') return null;
   const id = tx(() => {
+    assertWriteFence(fence);
     const { mode, emergency, pausedNewOrders } = getControl();
     if (emergency || pausedNewOrders || (mode !== 'PAPER' && mode !== 'APPROVAL')) return null;
+    if (unreconciledPaperOrders()) return null;
     if (get('SELECT 1 FROM orders WHERE client_order_id=?', coid)) return null;
     return insertOrder({ clientOrderId: coid, instrument: report.instrumentId, side: 'BUY', type: 'MARKET', qty: report.positionSize?.qty ?? 0, stop: report.stopLoss, status: 'PENDING_APPROVAL', purpose: 'ENTRY', decisionId: report.id });
   });
@@ -275,8 +280,9 @@ export function decideApproval(orderId: string, approve: boolean) {
   if (!rep) throw new OmsError('approval evidence is missing or invalid');
   return submitEntry(rep, 'owner');
 }
-export function expireApprovals() {
+export function expireApprovals(fence?: LeaseFence) {
   tx(() => {
+    assertWriteFence(fence);
     const now = Date.now();
     const pending = all<ApprovalOrder & { report: string | null }>(
       "SELECT o.*,d.report FROM orders o LEFT JOIN decisions d ON d.id=o.decision_id WHERE o.account=? AND o.venue=? AND o.status='PENDING_APPROVAL'",
@@ -300,12 +306,12 @@ class StaleSnapshot extends Error {}
  * (targets hit, trailed stop) and the fills it implies are committed in ONE transaction: if any fill cannot be
  * executed nothing is persisted, so a target is never marked done without its quantity being sold.
  */
-export function monitorPositions(nowTs = Date.now()) {
+export function monitorPositions(nowTs = Date.now(), fence?: LeaseFence) {
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
-  sweepClosedPositions(nowTs);
+  sweepClosedPositions(nowTs, fence);
   for (const p of openPositions()) {
     const px = market.price(p.instrument);
-    if (!px || !quoteAgeOk(px.ts, nowTs)) { flagUnprotected(p, 'stale, future-dated or missing price — stop cannot be evaluated'); continue; }
+    if (!px || !quoteAgeOk(px.ts, nowTs)) { reportUnprotected(p, 'stale, future-dated or missing price — stop cannot be evaluated', nowTs, fence); continue; }
     const meta = P<any>(p.targets);
     const st: ExitState = { entry: p.entry_price, stop: p.stop_price, initialStop: p.initial_stop, qtyLeft: p.qty, qtyInit: meta.qtyInit, targets: meta.targets, trailAfterR: meta.trailAfterR, barsHeld: 0, maxHoldBars: Infinity, mfe: p.mfe, mae: p.mae };
     const last = meta.lastPx ?? p.entry_price; const bid = px.bid || px.price;
@@ -324,6 +330,7 @@ export function monitorPositions(nowTs = Date.now()) {
       }
       crashpoint('monitor.preTx');
       tx(() => {
+        assertWriteFence(fence);
         // Compare-and-set against the snapshot the exits were computed from, so a concurrent monitor or manual close cannot
         // make this pass sell the same target twice or act on a position that is no longer open.
         const cas = run("UPDATE positions SET stop_price=?, targets=?, mfe=?, mae=? WHERE id=? AND status='OPEN' AND qty=? AND stop_price=? AND targets=?", st.stop, J(meta), st.mfe, st.mae, p.id, p.qty, p.stop_price, p.targets);
@@ -346,11 +353,12 @@ export function monitorPositions(nowTs = Date.now()) {
       // Recovery needs more than a fresh ticker: a fresh book must be able to absorb what is still open.
       const left = get<{ qty: number; status: string }>('SELECT qty, status FROM positions WHERE id=?', p.id);
       const book = market.deep.get(p.instrument)?.book ?? null;
-      if (left?.status !== 'OPEN' || (bookFreshForExecution(book, nowTs) && walkBook(book!, 'sell', left.qty)?.filledFully)) markRecovered(p.id, nowTs);
-      else flagUnprotected(p, 'order book missing, stale or too thin to execute the stop');
+      if (left?.status !== 'OPEN' || (bookFreshForExecution(book, nowTs) && walkBook(book!, 'sell', left.qty)?.filledFully)) markRecovered(p.id, nowTs, fence);
+      else reportUnprotected(p, 'order book missing, stale or too thin to execute the stop', nowTs, fence);
     } catch (e: any) {
       if (e instanceof StaleSnapshot) continue;
-      flagUnprotected(p, e instanceof ExitUnavailable ? 'no fresh executable price for exit' : `exit failed: ${String(e?.message ?? e).slice(0, 160)}`);
+      if (e instanceof LeaseLostError) throw e;
+      reportUnprotected(p, e instanceof ExitUnavailable ? 'no fresh executable price for exit' : `exit failed: ${String(e?.message ?? e).slice(0, 160)}`, nowTs, fence);
     }
   }
 }
