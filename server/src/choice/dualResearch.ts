@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { analyzeChart, type ChartReport } from '../chart/analysis.js';
+import { analyzeDeepScenarios, type DeepScenarioAnalysis } from '../chart/scenarios.js';
 import { FeatureEngine } from '../features/indicators.js';
 import { INTERVAL_MS } from '../market/types.js';
 import type { DexPair } from '../providers/dexscreener.js';
@@ -66,6 +67,7 @@ export interface DeepFuturesResearchResult {
   reason: string;
   marketContext: FuturesMarketContext;
   chartEvidence: Record<'15m' | '1h' | '4h', ChartReport>;
+  scenarioAnalysis: DeepScenarioAnalysis | null;
   plan: null | {
     planId: string;
     strategyId: 'multi_timeframe_structure_research';
@@ -102,6 +104,7 @@ export function reconstructDeepFuturesResearch(snapshot: FuturesResearchSnapshot
     rolloutMode: 'RESEARCH_ONLY' as const, tradingAuthority: false as const,
     market: 'CRYPTO_PERPETUAL_FUTURES' as const, symbol: snapshot.symbol,
     source: snapshot.source, asOf: snapshot.asOf, chartEvidence, marketContext,
+    scenarioAnalysis: analyzeDeepScenarios(chartEvidence),
   };
   if (Object.values(chartEvidence).some((x) => x.status !== 'VALID'))
     return { ...common, state: 'NO_TRADE', reason: 'INVALID_OR_INSUFFICIENT_CLOSED_CANDLES', plan: null };
