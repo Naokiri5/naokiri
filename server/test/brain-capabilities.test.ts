@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BRAIN_CAPABILITIES, buildBrainSnapshot, type BrainSignals } from '../src/knowledge/brain.js';
+import { SETTINGS_CAPABILITIES } from '../src/knowledge/settingsCapabilities.js';
+import { CAPABILITY_READ_CONTRACT } from '../src/knowledge/capabilityContract.js';
 
 const NOW = 1_800_000_000_000;
 const healthy: BrainSignals = {
@@ -12,6 +14,7 @@ const healthy: BrainSignals = {
   newsCount: 4,
   lastNewsAt: NOW - 60_000,
   largePrintCount: 2,
+  lastLargePrintAt: NOW - 120_000,
 };
 const getState = (signals: BrainSignals, id: string) => {
   const value = buildBrainSnapshot(signals).capabilities.find((c) => c.id === id);
@@ -27,6 +30,19 @@ describe('MIA BrainOS capability bridge (read-only)', () => {
     expect(snapshot.capabilities).toHaveLength(11);
     expect(snapshot.tradingAuthority).toBe(false);
     expect(snapshot.capabilities.every((c) => c.tradingAuthority === false)).toBe(true);
+  });
+
+  it('publishes evidence and failure contracts for all 18 registered capabilities', () => {
+    const contracts = [...BRAIN_CAPABILITIES, ...SETTINGS_CAPABILITIES];
+    expect(new Set(contracts.map(({ id }) => id)).size).toBe(18);
+    expect(CAPABILITY_READ_CONTRACT.permission).toBe('READ_ONLY');
+    expect(CAPABILITY_READ_CONTRACT.maxRuntimeMs).toBeNull();
+    for (const { evidence } of contracts) {
+      expect(evidence).toEqual({
+        input: expect.any(String), output: expect.any(String), dependencies: expect.any(String),
+        freshness: expect.any(String), provenance: expect.any(String), whenUnavailable: expect.any(String),
+      });
+    }
   });
 
   it('reports current canonical sources as available and unresolved tools as blocked', () => {
@@ -57,6 +73,13 @@ describe('MIA BrainOS capability bridge (read-only)', () => {
     expect(c.state).toBe('PARTIAL');
     expect(c.reason).toContain('wallet tracking is not certified');
     expect(getState(healthy, 'copy_trading').tradingAuthority).toBe(false);
+  });
+
+  it('does not treat an expired or future-dated exchange print as current evidence', () => {
+    for (const lastLargePrintAt of [0, NOW - 6 * 3600_000 - 1, NOW + 1]) {
+      const unavailable = getState({ ...healthy, dexPairCount: 0, lastLargePrintAt }, 'whale_launch_monitor');
+      expect(unavailable.state).toBe('WAITING_FOR_DATA');
+    }
   });
 
   it('rejects impossible snapshot timestamps', () => {

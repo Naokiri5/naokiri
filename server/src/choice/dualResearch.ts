@@ -7,6 +7,7 @@ import type { FuturesMarketContext, FuturesResearchSnapshot } from '../providers
 import { assessDexPair } from '../safety/safety.js';
 
 export const DUAL_RESEARCH_VERSION = 'mia-dual-research-v1';
+export const FAST_RESEARCH_MAX_AGE_MS = 4 * 60_000; // DEX data refreshes every three minutes.
 type MissingFuturesEvidence = 'FUTURES_FUNDING' | 'OPEN_INTEREST' | 'MARGIN' | 'LIQUIDATION_STRESS' | 'EXECUTABLE_BOOK' | 'VALIDATED_STRATEGY_EDGE';
 
 export interface FastResearchResult {
@@ -28,7 +29,7 @@ export interface FastResearchResult {
 export function assessFastMemecoinResearch(pairs: readonly DexPair[], sourceAsOf: number, nowTs = Date.now()): FastResearchResult {
   if (!Number.isSafeInteger(nowTs) || nowTs < 0) throw new Error('INVALID_RESEARCH_TIME');
   const stale = !Number.isSafeInteger(sourceAsOf) || sourceAsOf <= 0
-    || sourceAsOf > nowTs || nowTs - sourceAsOf > 4 * 60_000; // upstream DEX refresh is every 3 minutes
+    || sourceAsOf > nowTs || nowTs - sourceAsOf > FAST_RESEARCH_MAX_AGE_MS;
   const candidates = stale ? [] : [...pairs]
     .filter((p) => p.pairCreatedAt !== null && Number.isSafeInteger(p.pairCreatedAt)
       && p.pairCreatedAt <= nowTs && nowTs - p.pairCreatedAt <= 24 * 60 * 60_000)

@@ -10,10 +10,10 @@ type JoeState = { history: Message[]; llm: boolean; model: string };
 type JoeReply = { reply: string; mode: 'LLM' | 'COMMAND'; toolsUsed: string[] };
 
 const prompts = [
+  { label: 'FAST paper readiness', command: 'session FAST PAPER' },
+  { label: 'DEEP paper readiness', command: 'session DEEP PAPER' },
   { label: 'Market briefing', command: 'brief' },
   { label: 'Paper portfolio', command: 'portfolio' },
-  { label: 'Current risks', command: 'risk' },
-  { label: 'Analyze BTC', command: 'analyze BTC' },
 ];
 
 function JoeAvatar({ thinking = false }: { thinking?: boolean }) {
@@ -61,7 +61,7 @@ function Chat({ context, compact = false }: { context?: string; compact?: boolea
     <div className="chat mia-chat-transcript" role="log" aria-label="Trader Joe conversation" ref={transcript}>
       {!history.length && !pending && <div className="mia-chat-empty">
         <Icon name="message" size={25} /><strong>What would you like to understand?</strong>
-        <p>Check a market, review a decision, or ask about your paper account.</p>
+        <p>Check session readiness, review a decision, or ask about your paper account.</p>
       </div>}
       {history.map((item) => <div key={item.id} className={'msg ' + item.role}>
         <span className="mia-chat-author">{item.role === 'assistant' ? 'Joe' : 'You'} <time title={fmt.time(item.ts)}>{new Date(item.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></span>
@@ -72,9 +72,9 @@ function Chat({ context, compact = false }: { context?: string; compact?: boolea
     {!!tools.length && !pending && <details className="mia-chat-sources"><summary>Tools used in the latest reply</summary><ul>{tools.map((tool) => <li key={tool}>{tool.replaceAll('_', ' ')}</li>)}</ul></details>}
     <ErrorLine e={sendError ?? error} />
     {error && <button type="button" className="sm" onClick={() => void reload()}>Refresh conversation</button>}
-    {!compact && <div className="mia-chat-prompts" role="group" aria-label="Suggested questions">
-      {prompts.map(({ label, command }) => <button key={label} type="button" className="sm" onClick={() => void send(command)} disabled={!data || !!pending}>{label}</button>)}
-    </div>}
+    <div className="mia-chat-prompts" role="group" aria-label="Suggested questions">
+      {(compact ? prompts.slice(0, 2) : prompts).map(({ label, command }) => <button key={label} type="button" className="sm" onClick={() => void send(command)} disabled={!data || !!pending}>{label}</button>)}
+    </div>
     <form className="mia-chat-form" onSubmit={(event) => { event.preventDefault(); void send(message); }}>
       <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Message Trader Joe…" disabled={!data || !!pending}
         maxLength={4000 - contextPrefix.length} aria-label="Message" />
@@ -92,6 +92,7 @@ export function JoePage() {
         <div>
           <Badge v="Evidence assistant" tone="b-warn" />
           <h2>Review the source</h2>
+          <Link to="/autopilot">Session readiness <Icon name="arrow-up-right" size={14} /></Link>
           <Link to="/ditas">Decision records <Icon name="arrow-up-right" size={14} /></Link>
           <Link to="/risk">Risk Center <Icon name="arrow-up-right" size={14} /></Link>
         </div>
@@ -102,7 +103,11 @@ export function JoePage() {
 
 export function JoeDrawer({ context, onClose }: { context: string; onClose: () => void }) {
   const close = useRef<HTMLButtonElement>(null);
-  useEffect(() => { close.current?.focus(); }, []);
+  useEffect(() => {
+    const opener = document.activeElement;
+    close.current?.focus();
+    return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); };
+  }, []);
   return <div className="drawer mia-joe-drawer" role="dialog" aria-label="Trader Joe" onKeyDown={(event) => {
     if (event.key === 'Escape') onClose();
   }}>

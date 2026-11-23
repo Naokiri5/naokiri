@@ -4,7 +4,9 @@ import { latencyReport } from '../core/latency.js';
 import { providers } from '../providers/http.js';
 import { listNotifications } from '../notify/notify.js';
 import { securityOverview } from '../security/security.js';
-import { releaseGates } from '../qa/gates.js';
+import { recentReleaseGateEvidence } from '../qa/gates.js';
+import { capabilitySnapshotView } from './capabilitySnapshot.js';
+import type { CapabilityEvidenceContract } from './capabilityContract.js';
 
 /**
  * The seven Settings screens are advisory capabilities of the existing MIA core.
@@ -12,14 +14,35 @@ import { releaseGates } from '../qa/gates.js';
  * continue to be owned by their existing, authenticated services.
  */
 export const SETTINGS_CAPABILITIES = [
-  { id: 'risk_center', owner: 'risk/gate.ts + risk/policy.ts', automation: 'AUTOMATIC_VETO_OWNER_POLICY' },
-  { id: 'strategy_lab', owner: 'lab/lab.ts', automation: 'AUTOMATIC_HEALTH_SUSPENSION_OWNER_PROMOTION' },
-  { id: 'qhef_performance', owner: 'qhef/qhef.ts + core/latency.ts', automation: 'AUTOMATIC_MEASUREMENT' },
-  { id: 'connections_hub', owner: 'providers/http.ts', automation: 'AUTOMATIC_HEALTH_TRACKING' },
-  { id: 'notifications', owner: 'notify/notify.ts', automation: 'AUTOMATIC_ALERT_ROUTING' },
-  { id: 'security_center', owner: 'security/security.ts', automation: 'AUTOMATIC_CHECKS_OWNER_REMEDIATION' },
-  { id: 'release_gates', owner: 'qa/gates.ts', automation: 'AUTOMATIC_EVALUATION_OWNER_RELEASE' },
-] as const;
+  { id: 'risk_center', owner: 'risk/gate.ts + risk/policy.ts', automation: 'AUTOMATIC_VETO_OWNER_POLICY', evidence: {
+    input: 'Owner-accepted policy version', output: 'Policy presence or owner action', dependencies: 'Versioned risk policy store',
+    freshness: 'Read on background pass', provenance: 'currentPolicy()', whenUnavailable: 'UNAVAILABLE or NEEDS_OWNER_ACTION',
+  } },
+  { id: 'strategy_lab', owner: 'lab/lab.ts', automation: 'AUTOMATIC_HEALTH_SUSPENSION_OWNER_PROMOTION', evidence: {
+    input: 'Registered strategy IDs and statuses', output: 'Strategy registry availability', dependencies: 'Strategy Lab registry',
+    freshness: 'Read on background pass', provenance: 'listStrategies()', whenUnavailable: 'UNAVAILABLE or OBSERVING',
+  } },
+  { id: 'qhef_performance', owner: 'qhef/qhef.ts + core/latency.ts', automation: 'AUTOMATIC_MEASUREMENT', evidence: {
+    input: 'Count of stages with samples', output: 'Latency measurement availability', dependencies: 'Process-local latency sampler',
+    freshness: 'Read on background pass', provenance: 'latencyReport()', whenUnavailable: 'UNAVAILABLE or OBSERVING',
+  } },
+  { id: 'connections_hub', owner: 'providers/http.ts', automation: 'AUTOMATIC_HEALTH_TRACKING', evidence: {
+    input: 'Provider status counts', output: 'Aggregated connection health', dependencies: 'Provider registry',
+    freshness: 'Read latest reported statuses on background pass', provenance: 'providers()', whenUnavailable: 'UNAVAILABLE, DEGRADED, or OBSERVING',
+  } },
+  { id: 'notifications', owner: 'notify/notify.ts', automation: 'AUTOMATIC_ALERT_ROUTING', evidence: {
+    input: 'Recent notification history', output: 'Notification records availability', dependencies: 'Notification store',
+    freshness: 'Read up to 20 latest records on background pass', provenance: 'listNotifications()', whenUnavailable: 'UNAVAILABLE or OBSERVING',
+  } },
+  { id: 'security_center', owner: 'security/security.ts', automation: 'AUTOMATIC_CHECKS_OWNER_REMEDIATION', evidence: {
+    input: 'Security warning and failure counts', output: 'Security findings summary', dependencies: 'Canonical security checks',
+    freshness: 'Evaluated on background pass', provenance: 'securityOverview()', whenUnavailable: 'UNAVAILABLE or DEGRADED',
+  } },
+  { id: 'release_gates', owner: 'qa/gates.ts', automation: 'AUTOMATIC_EVALUATION_OWNER_RELEASE', evidence: {
+    input: 'Gate status counts and live eligibility', output: 'Release readiness summary', dependencies: 'Release gate evaluator and evidence',
+    freshness: 'Evaluated on background pass using release evidence age rules', provenance: 'releaseGates()', whenUnavailable: 'UNAVAILABLE or BLOCKED',
+  } },
+] as const satisfies readonly { id: string; owner: string; automation: string; evidence: CapabilityEvidenceContract }[];
 
 export type SettingsCapabilityId = typeof SETTINGS_CAPABILITIES[number]['id'];
 export type SettingsCapabilityState =
@@ -82,10 +105,7 @@ export function collectSettingsEvidence(): SettingsEvidence {
     const s = securityOverview().summary;
     return { fail: s.fail, warn: s.warn };
   });
-  const gates = safelyRead(() => {
-    const g = releaseGates();
-    return { liveAllowed: g.liveAllowed, passed: g.gates.filter((x) => x.status === 'PASS').length, total: g.gates.length };
-  });
+  const gates = security.available ? recentReleaseGateEvidence() : null;
   return {
     riskPolicyVersion: risk.value,
     riskSourceAvailable: risk.available,
@@ -94,7 +114,7 @@ export function collectSettingsEvidence(): SettingsEvidence {
     providerHealth: sources.value,
     notificationRecords: notifications.value,
     securityChecks: security.value,
-    release: gates.value,
+    release: gates ? { liveAllowed: gates.liveAllowed, passed: gates.passed, total: gates.total } : null,
   };
 }
 
@@ -170,11 +190,10 @@ export function refreshSettingsCapabilitySnapshot(now = Date.now()): SettingsCap
   return latest;
 }
 
-export function settingsCapabilityOverview() {
+export function settingsCapabilityOverview(at = Date.now()) {
   return {
+    ...capabilitySnapshotView(latest, at),
     registry: SETTINGS_CAPABILITIES,
-    latest,
-    status: latest ? 'REFRESHED' as const : 'NOT_YET_REFRESHED' as const,
   };
 }
 

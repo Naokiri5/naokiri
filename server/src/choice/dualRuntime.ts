@@ -1,7 +1,7 @@
 import { market } from '../market/store.js';
 import { fetchFuturesResearchSnapshot, FUTURES_RESEARCH_SYMBOLS, type FuturesResearchSymbol } from '../providers/binanceFuturesResearch.js';
 import {
-  assessFastMemecoinResearch, reconstructDeepFuturesResearch,
+  assessFastMemecoinResearch, FAST_RESEARCH_MAX_AGE_MS, reconstructDeepFuturesResearch,
   type FastResearchResult, type DeepFuturesResearchResult,
 } from './dualResearch.js';
 
@@ -11,7 +11,7 @@ import {
  * PAPER and a future certified LIVE environment can consume the same observations.
  */
 const DEEP_POLL_MS = 5 * 60_000;
-const DEEP_STALE_MS = 20 * 60_000;
+export const DEEP_RESEARCH_MAX_AGE_MS = 20 * 60_000;
 type FuturesReader = typeof fetchFuturesResearchSnapshot;
 
 let fast: FastResearchResult | null = null;
@@ -40,9 +40,9 @@ export interface DualResearchRuntimeStatus {
 /** A snapshot is always explicitly labeled stale; old plans must never be treated as fresh. */
 export function dualResearchStatus(now = Date.now()): DualResearchRuntimeStatus {
   const fastStale = !fast || !Number.isSafeInteger(fast.sourceAsOf)
-    || fast.sourceAsOf <= 0 || now < fast.sourceAsOf || now - fast.sourceAsOf > 4 * 60_000;
+    || fast.sourceAsOf <= 0 || now < fast.sourceAsOf || now - fast.sourceAsOf > FAST_RESEARCH_MAX_AGE_MS;
   const deepStale = !deep || !deepSuccessAt || now < deep.asOf
-    || now - deep.asOf > DEEP_STALE_MS
+    || now - deep.asOf > DEEP_RESEARCH_MAX_AGE_MS
     || (deep.plan != null && now >= deep.plan.expiresAt);
   return {
     version: 'dual-runtime-v1', tradingAuthority: false, backgroundRunning: running,
