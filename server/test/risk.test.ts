@@ -76,4 +76,48 @@ describe('Risk gate (Part 17)', () => {
     updateControl('trader-joe', { pausedNewOrders: true });
     expect(() => updateControl('trader-joe', { pausedNewOrders: false })).toThrow();
   });
+
+  it('automatically blocks same-instrument reentry for 30 minutes after a fully closed STOP or TRAIL_STOP', () => {
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const ts = Date.now();
+    const historicalStop = (positionId: string, reason: string, closedAt: number, instrument = id, account = PAPER_ACCOUNT, status = 'CLOSED') => {
+      run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,realized_pnl,fees,planned_risk,exit_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        positionId, account, instrument, 'crypto', 'LONG', 'trend_pullback', 0, last, last * 0.97, last * 0.97, '{}', status,
+        closedAt - 60_000, closedAt, 0, 0, 1, reason);
+    };
+    historicalStop('recent-stop', 'STOP', ts - 60_000);
+    const blocked = evaluateRisk(prop(id, last), ts);
+    expect(blocked.decision).toBe('DENY');
+    expect(blocked.reasonCodes.join(' ')).toMatch(/STOP_REENTRY_COOLDOWN/);
+    expect(blocked.evaluated.stopReentryCooldownUntil).toBe(new Date(ts - 60_000 + 30 * 60_000).toISOString());
+
+    // Exactly 30 minutes after closing, this specific guard expires. Other data freshness
+    // rules may still deny the entry if quotes are no longer current.
+    const after = evaluateRisk(prop(id, last), ts - 60_000 + 30 * 60_000);
+    expect(after.reasonCodes.join(' ')).not.toMatch(/STOP_REENTRY_COOLDOWN/);
+
+    historicalStop('recent-trail', 'TRAIL_STOP', ts - 10_000);
+    expect(evaluateRisk(prop(id, last), ts).reasonCodes.join(' ')).toMatch(/STOP_REENTRY_COOLDOWN/);
+  });
+
+  it('scopes stop memory to account, instrument, completed exits and evidence time', () => {
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const ts = Date.now(); const otherInstrument = 'crypto:binance:BTCUSDT';
+    const excluded = [
+      ['other-instrument', otherInstrument, PAPER_ACCOUNT, 'STOP', ts - 1000, 'CLOSED'],
+      ['other-account', id, 'separate-account', 'STOP', ts - 1000, 'CLOSED'],
+      ['non-stop', id, PAPER_ACCOUNT, 'TARGET', ts - 1000, 'CLOSED'],
+      ['manual', id, PAPER_ACCOUNT, 'MANUAL_CLOSE', ts - 1000, 'CLOSED'],
+      ['future-close', id, PAPER_ACCOUNT, 'STOP', ts + 1000, 'CLOSED'],
+      ['still-open', id, PAPER_ACCOUNT, 'STOP', ts - 1000, 'OPEN'],
+    ] as const;
+    for (const [positionId, instrument, account, exitReason, closedAt, status] of excluded) {
+      run('INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,realized_pnl,fees,planned_risk,exit_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        positionId, account, instrument, 'crypto', 'LONG', 'trend_pullback', 0, last, last * 0.97, last * 0.97, '{}', status,
+        closedAt - 60_000, closedAt, 0, 0, 1, exitReason);
+    }
+    const evaluated = evaluateRisk(prop(id, last), ts);
+    expect(evaluated.reasonCodes.join(' ')).not.toMatch(/STOP_REENTRY_COOLDOWN/);
+    expect(evaluated.evaluated.stopReentryCooldownUntil).toBeUndefined();
+  });
 });
