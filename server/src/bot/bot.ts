@@ -1,6 +1,7 @@
 import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBooks } from '../market/fabric.js';
 import { scanOnce } from '../market/scanner.js';
 import { evaluateShadowChoices, MAX_SHADOW_CANDIDATES } from '../choice/arbitration.js';
+import { runDualResearchPass } from '../choice/dualRuntime.js';
 import { recordShadowChoice } from '../ditas/memory.js';
 import { uid } from '../core/util.js';
 import { monitorPositions, expireApprovals, submitEntry, queueForApproval } from '../exec/oms.js';
@@ -144,6 +145,10 @@ async function backgroundPass() {
   if (!stillLeader()) return; // backups and strategy suspension write: only the current leader, re-checked after the awaits
   backupPass();
   try { const s = checkStrategyHealth(); if (s.length) notify('WARNING', 'Strategy auto-suspended', s.join(', '), 'strategy-health'); } catch { /* */ }
+  // Background research is advisory and uses the existing refreshed provider state.
+  // A research outage must never interrupt the independent hot-lane exit monitor.
+  try { await runDualResearchPass(); }
+  catch (e: any) { botStatus.lastError = 'dual-research: ' + String(e?.message ?? e).slice(0, 200); }
 }
 
 /** Scheduled backup + restore check (leader only, from the background lane). Failures alert at most hourly. */
