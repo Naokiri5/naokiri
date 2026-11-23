@@ -7,6 +7,8 @@ import { setSetting } from '../src/core/settings.js';
 import { ledger, PAPER_ACCOUNT, accountState, openPositions } from '../src/portfolio/ledger.js';
 import { submitEntry, monitorPositions, emergencyStop, cancelPendingEntries, closeAllPositions, closePosition, executeExit, queueForApproval, decideApproval, expireApprovals, listOrders } from '../src/exec/oms.js';
 import { setCrashHook } from '../src/exec/crashpoint.js';
+import { paperFillEvents } from '../src/exec/fillEvents.js';
+import { paperChoiceOutcomes } from '../src/ditas/execution.js';
 import { reconcile, calendar } from '../src/portfolio/calendar.js';
 import { verifyAuditChain } from '../src/core/audit.js';
 import { run, all, get, J } from '../src/db/db.js';
@@ -27,7 +29,8 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   });
   it('enters with book-walk fill, attaches OMS-monitored stop, exits on stop, reconciles', () => {
-    const r = submitEntry(report(id, last), 'bot');
+    const entry = report(id, last);
+    const r = submitEntry(entry, 'bot');
     expect(r.ok).toBe(true);
     const pos = openPositions()[0]; expect(pos.entry_price).toBeGreaterThan(last); // paid the ask + impact
     expect(listOrders().some((o: any) => o.purpose === 'PROTECTIVE_STOP' && o.status === 'ACTIVE')).toBe(true);
@@ -39,6 +42,24 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     expect(rec.positionsRealized).toBeGreaterThan(-60); // ≈ planned max loss (0.5% of 10k) incl. fees & gap
     const cal = calendar(new Date().toISOString().slice(0, 7)); expect(cal.summary.trades).toBe(1);
     expect(accountState().equity).toBeCloseTo(10_000 + rec.positionsRealized, 6);
+    const entryEvent = paperFillEvents(0, 1);
+    const exitEvent = paperFillEvents(entryEvent.nextAfter, 1);
+    expect(entryEvent.events).toMatchObject([{ eventType: 'fill.recorded.v1', environment: 'PAPER', payload: { side: 'BUY', orderId: r.orderId } }]);
+    expect(exitEvent.events).toMatchObject([{ payload: { side: 'SELL', closed: true, decisionId: entry.id } }]);
+    expect(paperFillEvents(exitEvent.nextAfter, 1).events).toHaveLength(0);
+    const [feedback] = paperChoiceOutcomes([entry.id, 'no-paper-trade']);
+    expect(feedback.netPnl).toBeCloseTo(rec.positionsRealized, 9);
+    expect(feedback.fees).toBeGreaterThan(0);
+    expect(verifyAuditChain().ok).toBe(true);
+  });
+  it('rolls back a fill envelope with the failed OMS transaction', () => {
+    const entry = report(id, last);
+    setCrashHook((point) => { if (point === 'entry.precommit') throw new Error('fault before commit'); });
+    try { expect(() => submitEntry(entry, 'bot')).toThrow('fault before commit'); }
+    finally { setCrashHook(null); }
+    expect(paperFillEvents(0, 5).events).toHaveLength(0);
+    expect(openPositions()).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
   });
   it('takes partial profit, trails stop to breakeven (never widens), then exits', () => {
     expect(submitEntry(report(id, last), 'bot').ok).toBe(true);

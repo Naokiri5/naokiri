@@ -68,7 +68,7 @@ export function buildContext(cand: Candidate): WorkerContext {
   };
 }
 
-export async function scanOnce(onDecision?: (r: DecisionReport) => void, continueScan?: () => boolean) {
+export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: string) => void, continueScan?: () => boolean) {
   const t0 = performance.now();
   const ctl = getControl();
   let candidates = 0;
@@ -115,7 +115,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void, continu
       if (rep.decision === 'REJECTED' || rep.decision === 'INSUFFICIENT_DATA') rejectLog(inst.symbol, 'decision', `${s.id}: ${rep.decision} — ${[...qci.reason_codes, ...(rep.risk?.reasonCodes ?? [])].slice(0, 3).join('; ')}`);
       lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
       processed.add(key);
-      onDecision?.(rep);
+      onDecision?.(rep, ctx.memorySnapshotId);
       } catch (e: any) {
         // One failing candidate must not abort the scan for the rest of the universe; it is retried next cycle.
         processed.delete(key); rejectLog(inst.symbol, 'error', `${s.id}: ${String(e?.message ?? e).slice(0, 200)}`);

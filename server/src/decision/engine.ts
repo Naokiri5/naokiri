@@ -12,6 +12,7 @@ import { record } from '../core/latency.js';
 import { bus } from '../core/bus.js';
 import { readIndicators } from '../workers/indicators.js';
 import { strategyKnowledge, type KnowledgeRef } from '../knowledge/integration.js';
+import { routeThinking, type ThinkRoutingResult } from './think-router.js';
 
 /** Part 8 central decision engine — the only component that can produce a trade decision. */
 export type DecisionState = 'APPROVED_FOR_MONITORING' | 'WAIT_FOR_CONFIRMATION' | 'PAPER_TRADE' | 'APPROVED_FOR_USER_CONFIRMATION' | 'APPROVED_FOR_BOUNDED_EXECUTION' | 'REJECTED' | 'INSUFFICIENT_DATA';
@@ -30,6 +31,7 @@ export interface DecisionReport {
   steps: PipelineStep[]; indicators: ReturnType<typeof readIndicators>;
   /** Explanatory knowledge references (Academy). Never read by the risk gate or OMS. */
   knowledge?: { refs: KnowledgeRef[]; authority: string };
+  thinking?: ThinkRoutingResult;
   disclaimer: string;
 }
 
@@ -91,6 +93,19 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
     dataFreshness: { quoteAgeMs: q.quoteAgeMs, candleAgeMs: q.candleAgeMs, bookAgeMs: q.bookAgeMs, status: q.status },
     opportunity: opp, consensus: { id: qci.consensus_id, state: expired ? 'EXPIRED' : qci.state, support: qci.weighted_support, opposition: qci.weighted_opposition, expiresAt: qci.expires_at },
     risk, decision, finalDecision: final, steps, indicators: readIndicators(ctx.f), knowledge: strategyKnowledge(cand.strategyId),
+    thinking: routeThinking({
+      preference: 'AUTO',
+      marketDataValid: q.status !== 'FAIL',
+      mandatoryCoverageComplete: qci.state !== 'NO_QUORUM',
+      hardVetoPresent: qci.state === 'VETOED' || risk?.decision === 'DENY',
+      consensusExpired: expired,
+      conflictingEvidence: qci.state === 'MIXED_CONSENSUS',
+      unusualRegime: cand.regime === 'HIGH_VOLATILITY' || cand.regime === 'UNKNOWN',
+      executionUncertain: !ctx.impact?.filledFully,
+      portfolioExposureElevated: correlatedOpen > 0,
+      // This is an advisory route label. It schedules no work in the entry pipeline.
+      deepReviewBudgetAvailable: true,
+    }),
     disclaimer: 'Opportunity score and consensus are evidence summaries, not probabilities of profit. Paper trading only.',
   };
   record('decision.engine', performance.now() - t0);

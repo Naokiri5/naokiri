@@ -1,5 +1,9 @@
 import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBooks } from '../market/fabric.js';
 import { scanOnce } from '../market/scanner.js';
+import { evaluateShadowChoices, freezeChoiceEvidence, MAX_SHADOW_CANDIDATES } from '../choice/arbitration.js';
+import { runDualResearchPass } from '../choice/dualRuntime.js';
+import { recordShadowChoice } from '../ditas/memory.js';
+import { uid } from '../core/util.js';
 import { monitorPositions, expireApprovals, submitEntry, queueForApproval } from '../exec/oms.js';
 import { refreshNews } from '../news/news.js';
 import { scanPrints } from '../whales/prints.js';
@@ -19,6 +23,7 @@ import { maybeScheduledBackup } from '../ops/backup.js';
 import { record } from '../core/latency.js';
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 
 /** Part 26 funded (paper) bot runtime + Part 33 hot/background lanes. */
 export const botStatus = {
@@ -103,6 +108,7 @@ const lanes = {
   ticker: laneStatus('entry'),
   scan: laneStatus('entry'),
   background: laneStatus('background'),
+  research: { ...laneStatus('background'), deferredAt: 0, deferReason: null as string | null },
 };
 let timers: NodeJS.Timeout[] = [];
 
@@ -175,11 +181,54 @@ function scanLane() {
   return runLane('scan', async (lease) => {
     await refreshDeep();
     if (!stillLeader(lease)) return;
-    await scanOnce((report) => onDecision(report, lease), () => stillLeader(lease));
+    const shadowEnabled = process.env.MIA_CHOICE_SHADOW !== '0';
+    const startedAt = Date.now(), control = getControl(), policy = currentPolicy()?.version;
+    const observed: ReturnType<typeof freezeChoiceEvidence>[] = [];
+    let totalReportsObserved = 0;
+    await scanOnce((report, snapshotId) => {
+      totalReportsObserved++;
+      if (shadowEnabled && observed.length < MAX_SHADOW_CANDIDATES) observed.push(freezeChoiceEvidence(report, snapshotId));
+      onDecision(report, lease);
+    }, () => stillLeader(lease));
     if (!stillLeader(lease)) return;
+    if (shadowEnabled) {
+      const completedAt = Date.now();
+      const currentControl = getControl();
+      const roundId = totalReportsObserved ? uid('choice') :
+        `choice-empty-${control.mode}-${Math.floor(completedAt / (15 * 60_000))}`;
+      try {
+        recordShadowChoice(evaluateShadowChoices(observed, {
+          roundId, startedAt, completedAt, mode: control.mode, totalReportsObserved,
+          modeChanged: currentControl.mode !== control.mode || currentControl.updatedAt !== control.updatedAt,
+          policyChanged: currentPolicy()?.version !== policy,
+        }), lease);
+      } catch (error) {
+        if (error instanceof LeaseLostError) throw error;
+        botStatus.lastError = `choice: ${errorText(error)}`;
+      }
+    }
     botStatus.lastScanAt = Date.now();
     botStatus.cycles++;
     bus.publish('bot', botStatusView());
+  });
+}
+
+let lastResearchSample = performance.eventLoopUtilization();
+function researchLane() {
+  const sample = performance.eventLoopUtilization();
+  const busy = performance.eventLoopUtilization(sample, lastResearchSample).utilization;
+  lastResearchSample = sample;
+  const protectionOverdue = botStatus.monitorFailing || Date.now() - botStatus.lastMonitorAt > staleAfter().monitorMs;
+  if (protectionOverdue || busy > 0.8) {
+    if (botStatus.running && botStatus.role === 'LEADER') {
+      lanes.research.deferredAt = Date.now();
+      lanes.research.deferReason = protectionOverdue ? 'Protection needs attention' : 'Event loop is busy';
+    }
+    return;
+  }
+  return runLane('research', async () => {
+    lanes.research.deferReason = null;
+    await runDualResearchPass();
   });
 }
 
@@ -217,6 +266,7 @@ export function startBot() {
     setInterval(hotLane, config.tickerIntervalMs),
     setInterval(scanLane, config.scanIntervalMs),
     setInterval(backgroundLane, 60_000),
+    setInterval(researchLane, 60_000),
   ];
   void protectionLane();
   void booksLane();
