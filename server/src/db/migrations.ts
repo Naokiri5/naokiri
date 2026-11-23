@@ -113,7 +113,35 @@ const MIGRATIONS: string[] = [
   CREATE TABLE runtime_leases (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at INTEGER NOT NULL,
     renewed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   `,
-];
+  /* 6 — BrainOS 6.1: durable session checkpoints and advisory research; no second OMS, risk engine or ledger. */ `
+  CREATE TABLE brainos_sessions (
+    session_id TEXT PRIMARY KEY, version INTEGER NOT NULL, state TEXT NOT NULL,
+    environment TEXT NOT NULL, mind TEXT NOT NULL, lease_holder TEXT,
+    lease_acquired_at INTEGER, fence_epoch INTEGER NOT NULL,
+    suspend_reason TEXT NOT NULL, started_at INTEGER, closed_at INTEGER, updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE brainos_session_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES brainos_sessions(session_id),
+    version INTEGER NOT NULL, from_state TEXT NOT NULL, to_state TEXT NOT NULL,
+    kind TEXT NOT NULL, fence_epoch INTEGER NOT NULL, ts INTEGER NOT NULL,
+    UNIQUE(session_id,version)
+  );
+  CREATE INDEX brainos_session_events_lookup ON brainos_session_events(session_id,seq);
+  CREATE TABLE flin_launch_candidates (
+    candidate_id TEXT PRIMARY KEY, mint_address TEXT NOT NULL, pair_address TEXT NOT NULL,
+    first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, source_as_of INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('QUARANTINED','REJECTED')),
+    reason TEXT NOT NULL, evidence_json TEXT NOT NULL
+  );
+  CREATE INDEX flin_launch_recent ON flin_launch_candidates(last_seen_at);
+  CREATE TABLE deep_postclose_decisions (
+    decision_id TEXT PRIMARY KEY, bundle_id TEXT NOT NULL, thesis_lineage_id TEXT NOT NULL,
+    close_reason TEXT NOT NULL, decision TEXT NOT NULL, next_state TEXT NOT NULL,
+    evaluated_at INTEGER NOT NULL, ledger_reconciled INTEGER NOT NULL CHECK(ledger_reconciled IN (0,1)),
+    reason TEXT NOT NULL, UNIQUE(bundle_id,decision_id)
+  );
+  `,
+]; 
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
 export function migrate(db: DatabaseSync, target = MIGRATIONS.length) {
