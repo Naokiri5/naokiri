@@ -10,6 +10,7 @@ import { currentPolicy } from '../risk/policy.js';
 import { notify } from '../notify/notify.js';
 import { journal } from '../journal/journal.js';
 import { refreshBrainSnapshot } from '../knowledge/brain.js';
+import { refreshSettingsCapabilitySnapshot } from '../knowledge/settingsCapabilities.js';
 import { bus } from '../core/bus.js';
 import { config } from '../config.js';
 import type { DecisionReport } from '../decision/engine.js';
@@ -116,6 +117,9 @@ async function backgroundPass() {
   try { await scanPrints(); botStatus.lastPrintsAt = Date.now(); } catch { /* tracked */ }
   // Refresh an internal read-only view of canonical capabilities; this is not another scanner/OMS.
   try { refreshBrainSnapshot(); } catch (e: unknown) { botStatus.lastError = 'brain: ' + String(e instanceof Error ? e.message : e).slice(0, 200); }
+  // Observe Settings safety, strategies, connection health, notification, security and release gates internally.
+  // Never auto-accept a policy, promote a strategy, mutate credentials, or unlock live trading.
+  try { refreshSettingsCapabilitySnapshot(); } catch (e: unknown) { botStatus.lastError = 'settings-brain: ' + String(e instanceof Error ? e.message : e).slice(0, 200); }
   if (Date.now() - botStatus.lastNewsAt > 5 * 60_000) { try { await refreshNews(); botStatus.lastNewsAt = Date.now(); } catch { /* tracked */ } }
   if (!stillLeader()) return; // backups and strategy suspension write: only the current leader, re-checked after the awaits
   backupPass();
