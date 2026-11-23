@@ -1,7 +1,7 @@
 /* Obsidian Palazzo: intentionally scoped; never changes the authenticated terminal. */
 .palazzo {
-  --p-bg: #0c0d10; --p-bg-soft: #121316; --p-paper: #f1eae0;
-  --p-gold: #b58c57; --p-ox: #722d38; --p-blue: #607cff; --p-line: rgba(241,234,224,.14);
+  --p-bg: var(--op-obsidian); --p-bg-soft: var(--op-midnight); --p-paper: var(--op-ivory);
+  --p-gold: var(--op-gold); --p-ox: var(--op-oxblood); --p-blue: var(--op-royal-blue); --p-line: rgba(241,234,224,.14);
   color: var(--p-paper); background: var(--p-bg); min-height: 100%; overflow: clip;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 16px; line-height: 1.5; color-scheme: dark;
