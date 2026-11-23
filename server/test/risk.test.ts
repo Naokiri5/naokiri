@@ -6,6 +6,7 @@ import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState } from '../src/portfolio/ledger.js';
 import { setSetting } from '../src/core/settings.js';
+import { run } from '../src/db/db.js';
 
 const prop = (id: string, last: number, extra: any = {}) => ({ instrumentId: id, strategyId: 'trend_pullback', side: 'buy' as const, entryPrice: last, stopPrice: last * 0.97, idempotencyKey: `k${Math.random()}`, traceId: 't', ...extra });
 describe('Risk gate (Part 17)', () => {
