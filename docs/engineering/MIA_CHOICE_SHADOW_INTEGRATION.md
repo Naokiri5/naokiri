@@ -86,3 +86,44 @@ Before any ACTIVE paper cutover:
 6. Request owner permission before any ACTIVE mode change. Keep live execution locked until its separate global release gates and authorization are verified.
 
 **Merge rule:** leave this pull request DRAFT until exact-head CI, independent review, regressions, architecture checks and operator approval are complete. No live venue adapter, signer or automatic authorization is added.
+
+
+## Dual-intelligence research extension — FAST memecoins / DEEP futures (2026-11-23)
+
+This reviewable increment follows the owner-supplied Dual Intelligence Plan and Architecture Protection Prompt. It **does not** implement complete automatic memecoin or futures trading.
+
+### Real integrated behavior
+
+- `server/src/providers/binanceFuturesResearch.ts`: a separate, public-data-only USD-M futures candle source using the already owned provider transport, telemetry, timeout, and rate limiting. Allows BTCUSDT, ETHUSDT, SOLUSDT and 15m/1h/4h, rejects malformed, replayed, stale or forming bars. Never imports signing, account or order modules.
+- `server/src/choice/dualResearch.ts`: FAST assesses actual cached DEX pairs using existing `assessDexPair`; DEEP reconstructs a *non-authorizing* versioned long/short multi-timeframe structure hypothesis using the existing `analyzeChart`. A plan hash and invalidation level allow deterministic replay, but are not an executable futures strategy.
+- `GET /api/choice/dual/fast`: owner-authenticated, read-only, source-staleness-aware, always reports NO_TRADE while contract permissions and executable sell routes are unverified.
+- `GET /api/choice/dual/deep?symbol=BTCUSDT`: owner-authenticated and read-only, fetches public futures closed candles and returns research hypothesis / wait / no-trade. Provider failures or unusable candles fail to NO_TRADE, not synthetic chart output.
+- `server/test/dual-intelligence-research.test.ts`: source validation, FAST safety exclusion, DEEP hypothesis consistency, missing data, spoofed source, and authenticated read-only access.
+
+### Integration matrix and ownership
+
+| Concern | Classification | Owner / next action |
+| --- | --- | --- |
+| DEX profile discovery and heuristics | REUSED, operational read-only | `market/fabric.ts`, `providers/dexscreener.ts`, `safety/safety.ts` |
+| New mint/pool event stream and verifiable sell path | MISSING | Extend canonical DEX provider + safety; independent trusted on-chain RPC and route simulation are required |
+| Closed-candle multi-timeframe analysis | REUSED | `chart/analysis.ts`, `chart/replay.ts` |
+| Public futures chart research | ADDED | Dedicated read-only provider + `choice/dualResearch.ts`; authenticated API |
+| Futures strategy hypothesis | RESEARCH ONLY | A deterministic non-executable hypothesis, not approved strategy or profitability claim |
+| Adaptive FAST/DEEP router | EXISTING IN DRAFT PR #89 | Reconcile contract there, do not copy its router or bypass its abstention rules |
+| Candidate ordering and DITAS shadow event | REUSED FROM THIS PR | `choice/arbitration.ts`, `ditas/memory.ts` unchanged |
+| Futures mark/index/funding, liquidation and margin account | MISSING | Add validated financial model and exchange-specific data before tradable strategies |
+| DEX and futures execution | NOT INSTALLED | Never activate signing or live accounts from this research increment |
+| Risk, OMS, ledger, position monitor | UNCHANGED | Preserve canonical authority, tests and existing LIVE lock |
+
+### Release blockers
+
+1. This feature is **read-only**. It does not schedule new-token mint events or new futures analysis on a background lane; the authenticated owner API initiates the analysis. It is not an autonomous trader.
+2. FAST candidates are intentionally never automation-eligible until on-chain identity, token permissions, sell simulation, and size-specific executable quote verification exist. DEX Screener profiles alone are not event-time mint evidence.
+3. DEEP is chart-only: funding, open interest, margin, mark price, liquidation, order-book execution, robust futures backtesting and independent risk are missing. The reconstructed plan's entry trigger is observational, not permission.
+4. No active cross-market Choice Management cutover, capital reservations or order-routing changes. Keep the original paper scanner and OMS untouched.
+5. Compare with stacked THINK #89/#91, FAST/DEEP exit work #111 and atomic OMS #118/#119/#121 before any promotion.
+6. Verify exact-head typecheck, tests, build, browser checks, security scan, full paper regression, independent risk/security review and owner approval. Do not merge with mandatory gates incomplete.
+
+**Failure behavior:** Any absent/stale DEX snapshot or unavailable/invalid futures feed yields NO_TRADE. No order, fill, position, wallet, or policy state can be changed by these read endpoints.
+
+**Rollback:** Revert only the research provider, projection and endpoints; historical Choice/Ditas records remain unchanged. No database migration is introduced.
