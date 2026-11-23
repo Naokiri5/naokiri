@@ -1,6 +1,7 @@
 import { ditasRoutes } from '../ditas/routes.js';
 import { recentChoiceShadows } from '../ditas/memory.js';
 import { assessFastMemecoinResearch, reconstructDeepFuturesResearch } from '../choice/dualResearch.js';
+import { dualResearchStatus } from '../choice/dualRuntime.js';
 import { FUTURES_RESEARCH_SYMBOLS, fetchFuturesResearchSnapshot } from '../providers/binanceFuturesResearch.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { analyzeChart } from '../chart/analysis.js';
@@ -273,6 +274,8 @@ export async function routes(app: FastifyInstance) {
   // Read-only, authenticated observations; there is deliberately no ACTIVE
   // cutover or live-order endpoint while calibration/release evidence is absent.
   // Real provider-backed, read-only dual-intelligence research. Neither lane grants execution permission.
+  // Live background-lane observations, clearly separated from unverified trade authority.
+  app.get('/api/choice/dual/status', async () => dualResearchStatus());
   app.get('/api/choice/dual/fast', async () =>
     assessFastMemecoinResearch(market.dex, market.dexFetchedAt));
   app.get('/api/choice/dual/deep', async (req) => {
