@@ -39,3 +39,44 @@ This bridge makes existing intelligence **discoverable and automatically observa
 - Do not merge until independent architecture/safety review and owner approval.
 
 **Deployment claim:** Not automatically deployed, not live-tradable, and not a completed autonomous FAST/DEEP engine.
+
+## Phase 1B — Seven Settings capabilities (added to this same draft PR)
+
+The user-facing Settings tools are now represented as seven internal, read-only,
+source-backed capability states in `server/src/knowledge/settingsCapabilities.ts`.
+The existing leader-owned background pass automatically refreshes them; the
+existing Academy memory view includes `internalIntelligence.settings`.
+
+| Tool | Internal operating behavior | Nondelegable control |
+| --- | --- | --- |
+| Risk Center | Canonical policy observation; existing fail-closed veto remains in risk/gate.ts | Owner accepts and versions the risk policy |
+| Strategy Lab | Strategy registry observation; existing strategy health loop can auto-suspend deteriorating PAPER strategies | Owner promotes/re-enables strategies |
+| QHEF Performance | Reads existing latency sample coverage; actual budgets continue in QHEF | No trading authority from speed telemetry |
+| Connections Hub | Reads canonical provider status and outages | Owner configures provider credentials |
+| Notifications | Reads existing notification records; existing alerting is automatic | Delivery and preferences remain separate |
+| Security Center | Summarizes canonical security checks; shows failures and warnings | Owner retains authentication, recovery and account control |
+| Release Gates | Reads authoritative G01–G14 eligibility, never changes it | Live execution remains locked until independent gates and owner approval |
+
+Trader Joe's existing `get_status` (read-only) tool now includes the BrainOS status
+snapshot; local deterministic command mode supports `brain` and `settings status`.
+No new Trader Joe trading authority or new assistant control tools are introduced.
+
+**Current acceptance blocker visible in the supplied screenshot:** If no risk
+policy is accepted, the internal Risk Center capability reports
+`NEEDS_OWNER_ACTION` and canonical PAPER execution stays blocked. The AI does
+not auto-accept or silently weaken the policy.
+
+This is not full autonomous orchestration or self-modifying memory: the actual
+services stay in their canonical backend modules. Latest capability health is
+a transient read model, with an observation timestamp; durable decision,
+research, portfolio and audit memory are still owned by existing DB tables.
+
+### Additional tests
+
+`server/test/brain-settings-capabilities.test.ts` asserts seven unique settings
+capabilities, automatic read-only status, missing risk policy, blocked LIVE,
+degraded provider/security evidence, and unavailable-source behavior.
+
+The navigation tabs remain accessible until all necessary maintenance, owner
+approval, support, and emergency paths can be surfaced cleanly in the simplified
+Autopilot / Portfolio / Trader Joe / Settings UX.
