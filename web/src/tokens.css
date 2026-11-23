@@ -1,22 +1,77 @@
-/* MIA Obsidian Palazzo: shared by the landing and authenticated cockpit.
-   Semantic risk colors are intentionally separate from decorative accents. */
-@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+@font-face {
+  font-family: Manrope;
+  src: url('./assets/fonts/manrope-latin.woff2') format('woff2');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Instrument Serif';
+  src: url('./assets/fonts/instrument-serif-latin-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
 
 :root {
-  --op-obsidian: #0c0d10;
-  --op-midnight: #121316;
-  --op-panel: #17191e;
-  --op-elevated: #202228;
-  --op-ivory: #f1eae0;
-  --op-muted: #b5adaa;
-  --op-gold: #b58c57;
-  --op-oxblood: #722d38;
-  --op-royal-blue: #607cff;
-  --op-border: rgba(241, 234, 224, .14);
-  --op-editorial-font: 'Cormorant Garamond', Georgia, serif;
-  --op-ui-font: 'Inter', system-ui, sans-serif;
-  --op-mono-font: 'Geist Mono', ui-monospace, monospace;
-  --op-gain: #38b882;
-  --op-loss: #e05a5a;
-  --op-warning: #d89b3c;
+  --mia-ui: Manrope, system-ui, sans-serif;
+  --mia-display: 'Instrument Serif', Georgia, serif;
+  --mia-mono: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  --mia-ink: #100e1b;
+  --mia-navy: #161326;
+  --mia-panel: #1d1930;
+  --mia-elevated: #29243d;
+  --mia-text: #f6f3fc;
+  --mia-muted: #b9b3cc;
+  --mia-faint: #a29ab6;
+  --mia-line: #36304a;
+  --mia-edge: #4b4165;
+  --mia-lavender: #c4a9ff;
+  --mia-azure: #7cd9ff;
+  --mia-lime: #d2fa7b;
+  --mia-gold: #e0bd83;
+  --mia-gain: #75e3b9;
+  --mia-loss: #ff949e;
+  --mia-warning: #f0c375;
+  --mia-on-action: #1b2412;
+  --mia-action: #d2fa7b;
+  --mia-action-hover: #e4ffa7;
 }
+
+:root[data-theme='light'] {
+  --mia-ink: #f8f7fc;
+  --mia-navy: #f0edf7;
+  --mia-panel: #fff;
+  --mia-elevated: #ece7f7;
+  --mia-text: #211a34;
+  --mia-muted: #534963;
+  --mia-faint: #645873;
+  --mia-line: #dfd7ea;
+  --mia-edge: #cfc2de;
+  --mia-lavender: #6239a0;
+  --mia-azure: #10627d;
+  --mia-lime: #426514;
+  --mia-gold: #79551f;
+  --mia-gain: #096a4c;
+  --mia-loss: #a72442;
+  --mia-warning: #805212;
+  --mia-on-action: #f7ffeb;
+  --mia-action: #355b1e;
+  --mia-action-hover: #244412;
+}
+
+.mia-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mia-text);
+  font-family: var(--mia-ui);
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.075em;
+  white-space: nowrap;
+}
+
+.mia-mark, .mia-wordmark-point { color: var(--mia-lime); }

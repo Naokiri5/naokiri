@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ALL_PAGES, NAV_GROUPS, groupForPath, type NavGroup } from './nav';
+import { Icon, type IconName } from './brand';
+
+const sectionIcons: Record<string, IconName> = { autopilot: 'compass', 'trader-joe': 'message', 'smart-portfolio': 'pie', settings: 'settings' };
 
 /** Four primary operator destinations; legacy views remain accessible by URL and command search. */
 const store = { get<T>(k: string, d: T): T { try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : d; } catch { return d; } },
@@ -14,7 +17,7 @@ export function SideNav({ collapsed }: { collapsed: boolean }) {
   useEffect(() => store.set('mia-nav-open', open), [open]);
   return <nav className="nav" aria-label="Main">
     {NAV_GROUPS.map((g) => g.pages.length === 1
-      ? <NavLink key={g.id} to={g.pages[0].to} end className={({ isActive }) => `navgroup-link${isActive || current?.id === g.id ? ' active' : ''}`} title={g.desc}><span className="ic" aria-hidden>{g.icon}</span><span className="lbl">{g.label}</span></NavLink>
+      ? <NavLink key={g.id} to={g.pages[0].to} end className={({ isActive }) => `navgroup-link${isActive || current?.id === g.id ? ' active' : ''}`} title={g.desc} aria-label={g.label}><span className="ic"><Icon name={sectionIcons[g.id] ?? 'compass'} size={18} /></span><span className="lbl">{g.label}</span></NavLink>
       : <Group key={g.id} g={g} active={current?.id === g.id} expanded={!collapsed && !!open[g.id]} collapsed={collapsed} onToggle={() => setOpen((o) => ({ ...o, [g.id]: !o[g.id] }))} />)}
   </nav>;
 }
@@ -60,7 +63,7 @@ export function MobileNav({ onMore, moreOpen }: { onMore: () => void; moreOpen: 
   const loc = useLocation(); const cur = groupForPath(loc.pathname)?.id;
   const items = NAV_GROUPS;
   return <nav className="mobnav" aria-label="Mobile">
-    {items.map((g) => <NavLink key={g.id} to={g.pages[0].to} end className={cur === g.id ? 'active' : undefined} aria-current={cur === g.id ? 'page' : undefined}><span aria-hidden>{g.icon}</span>{g.label}</NavLink>)}
-    <button type="button" className={moreOpen ? 'active' : undefined} onClick={onMore} aria-expanded={moreOpen} aria-label="More pages"><span aria-hidden>☰</span>More</button>
+    {items.map((g) => <NavLink key={g.id} to={g.pages[0].to} end className={cur === g.id ? 'active' : undefined} aria-current={cur === g.id ? 'page' : undefined}><Icon name={sectionIcons[g.id] ?? 'compass'} size={18} />{g.label}</NavLink>)}
+    <button type="button" className={moreOpen ? 'active' : undefined} onClick={onMore} aria-expanded={moreOpen} aria-label="More pages"><Icon name="menu" size={18} />More</button>
   </nav>;
 }

@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, ApiError, authInfo, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter } from '../ui';
+import { Icon } from '../brand';
+import { AutopilotChart, ResearchPanel } from './ResearchPanel';
 
 export const StepUp = ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
   authInfo.mode === 'privy'
@@ -12,8 +14,12 @@ const MODES = [
   ['OBSERVE', 'Observe', 'Scan and explain only. No orders.'],
   ['PAPER', 'Paper', 'Automatic paper entries/exits with live-book fills and real fees.'],
   ['APPROVAL', 'Approval', 'Bot prepares paper orders; you approve each one.'],
-  ['BOUNDED_LIVE', 'Bounded live', 'LOCKED — requires every release gate, an isolated signer and your explicit authorization.'],
-];
+  ['BOUNDED_LIVE', 'Bounded live', 'Locked. Requires every release gate, an isolated signer, and explicit authorization.'],
+] as const;
+
+function pnlColor(value: number | null | undefined) {
+  return value == null || value === 0 ? undefined : value < 0 ? 'down' : 'up';
+}
 
 type CommandLane = {
   inFlight: boolean;
@@ -114,20 +120,56 @@ function CentralCommand({ command, lanes, mode }: { command?: CommandStatus; lan
 export function Bot() {
   const { data, error, reload } = useApi('/api/bot', { topics: ['bot', 'order', 'position', 'mode', 'risk', 'health'], every: 20_000 });
   const [pw, setPw] = useState(''); const [amt, setAmt] = useState('10000');
-  const s = data?.status; const a = data?.account;
-  return <Page title="Bot Account" sub="Dedicated paper strategy allocation (Part 26). The bot can never withdraw, transfer, change destinations, raise its allocation or its own permissions.">
+  const s = data?.status; const a = error ? undefined : data?.account;
+  const command: CommandStatus | undefined = error ? undefined : data?.command;
+  return <Page title="Autopilot" sub="Monitor market research, paper execution, and position protection." right={
+    <Link className="mia-panel-link" to="/app">Account overview <Icon name="arrow-up-right" size={15} /></Link>
+  }>
     <ErrorLine e={error} />
-    <div style={{ marginBottom: 14 }}><CentralCommand command={data?.command} lanes={s?.lanes} mode={s?.display} /></div>
-    <div className="grid g4" style={{ marginBottom: 14 }}>
-      <Stat k="Bot state" v={<Badge v={s?.state ?? '…'} tone={s?.state === 'EMERGENCY' ? 'b-bad' : s?.state === 'PAPER_TRADING' ? 'b-violet' : s?.state === 'PAUSED' ? 'b-warn' : 'b-neutral'} />} s={s ? `${s.cycles} scan cycles · last ${fmt.ago(s.lastScanAt)}` : ''} />
-      <Stat k="Allocation equity (paper)" v={fmt.usd(a?.equity)} s={`deposits ${fmt.usd(a?.deposits)} · cash ${fmt.usd(a?.cash)}`} />
-      <Stat k="Unrealized / today" v={fmt.usd(a?.unrealizedPnl)} tone={a && a.unrealizedPnl < 0 ? 'down' : 'up'} s={`day ${fmt.pct(a?.dailyPnlPct)} · open risk ${fmt.num(a?.openRiskPct, 2)}%`} />
-      <Stat k="Decisions / entries" v={`${s?.decisionsTotal ?? 0} / ${s?.entriesToday ?? 0}`} s={s?.lastError ? <span className="err">{s.lastError}</span> : 'no engine errors'} />
+    <div className="grid g4 mia-dashboard-section">
+      <Stat k="Paper equity" v={fmt.usd(a?.equity)} s={a ? 'Net allocation ' + fmt.usd(a.deposits) : undefined} />
+      <Stat k="Available cash" v={fmt.usd(a?.cash)} s={a ? 'Open positions ' + a.openCount : undefined} />
+      <Stat k="Unrealized P&L" v={fmt.usd(a?.unrealizedPnl)} tone={pnlColor(a?.unrealizedPnl)}
+        s={a?.marksMissing.length ? <span className="warn">Marks missing for {a.marksMissing.length} position(s)</span> : a ? 'Today ' + fmt.pct(a.dailyPnlPct) : undefined} />
+      <Stat k="Scan cycles" v={s?.cycles ?? '—'} s={s?.lastError ? <span className="warn">{s.lastError}</span> : s?.lastScanAt ? 'Last scan ' + fmt.ago(s.lastScanAt) : 'Awaiting scan'} />
     </div>
-    <div className="grid g2">
-      <Card title="Automation mode (Part 26.2)"><div className="col">
-        {MODES.map(([m, l, d]) => <label key={m} className="row" style={{ alignItems: 'flex-start', opacity: m === 'BOUNDED_LIVE' ? 0.6 : 1 }}><input type="radio" name="mode" checked={s?.mode === m} readOnly style={{ marginTop: 3 }} /><div style={{ flex: 1 }}><b>{l}</b> <span className="muted">— {d}</span></div>
-          {s?.mode !== m && <Action className="sm" label="Switch" run={async () => { try { await api('/api/control', { body: { mode: m, password: pw || undefined } }); reload(); } finally { setPw(''); } }} />}</label>)}
+    <div className="mia-cockpit-grid mia-dashboard-section">
+      <Card title="Session controls" className="mia-paper-control">
+        <div className="mia-paper-stack">
+          <div className="mia-field-label">Execution environment</div>
+          <div className="mia-segment mia-execution" role="group" aria-label="Execution environment">
+            <span className="mia-paper-selected"><Icon name="flask" size={15} /> Paper</span>
+            <Link to="/qa"><Icon name="lock" size={14} /> Live locked</Link>
+          </div>
+          <div className="mia-field-label">Operating state</div>
+          <Badge v={!error ? s?.state ?? 'Awaiting status' : 'Status unavailable'} tone={s?.emergency ? 'b-bad' : s?.paused ? 'b-warn' : 'b-neutral'} />
+          <a className="mia-configure-link" href="#paper-controls">Manage paper settings <Icon name="arrow" size={15} /></a>
+          <div className="mia-protection-short">
+            <Icon name="shield" size={19} />
+            <div><strong>Position protection</strong><p>{command
+              ? command.recovery.positions ? command.recovery.verifiedPositions + ' of ' + command.recovery.positions + ' positions verified' : 'No positions to protect'
+              : !a ? 'Awaiting status' : a.openCount ? 'Review open positions in Risk Center' : 'No positions to protect'}</p></div>
+          </div>
+          <Link className="mia-panel-link" to="/risk">Risk Center <Icon name="arrow-up-right" size={15} /></Link>
+        </div>
+      </Card>
+      <AutopilotChart />
+      <ResearchPanel source={!data || error ? undefined : command ? 'command' : 'market'} />
+    </div>
+    {command && <div className="mia-dashboard-section"><CentralCommand command={command} lanes={s?.lanes} mode={s?.display} /></div>}
+    <div className="grid g2" id="paper-controls" tabIndex={-1} aria-label="Paper settings">
+      <Card title="Automation mode"><div className="col">
+        {MODES.map(([mode, label, description]) => <div key={mode} className="mia-mode-option">
+          <div><strong>{label}</strong><p>{description}</p></div>
+          {mode === 'BOUNDED_LIVE'
+            ? <Link to="/qa">Release gates</Link>
+            : s?.mode === mode
+              ? <Badge v="Selected" tone="b-violet" />
+              : <Action className="sm" label={'Switch to ' + label} disabled={!s || !!error} run={async () => {
+                try { await api('/api/control', { body: { mode, password: pw || undefined } }); reload(); }
+                finally { setPw(''); }
+              }} />}
+        </div>)}
         <StepUp value={pw} onChange={setPw} />
         {!s?.policyAccepted && <div className="hint warn">Accept a risk policy in the <Link to="/risk">Risk Center</Link> before paper execution.</div>}
         <div className="row"><Action className="danger" label="Pause new orders" run={async () => { await api('/api/emergency/pause', { body: {} }); reload(); }} />
@@ -232,20 +274,61 @@ export function Risk() {
 export function Portfolio() {
   const { data, error, reload } = useApi('/api/portfolio', { topics: ['position'], every: 20_000 });
   const a = data?.account;
-  return <Page title="Portfolio" sub="Paper bot account (ledger is the source of truth). External wallets and exchange balances appear once read-only connections are configured.">
+  return <Page title="Smart Portfolio" sub="Track paper equity, exposure, and reconciled positions." right={<span className="mia-context-badge"><Icon name="flask" size={15} /> Paper account</span>}>
     <ErrorLine e={error} />
-    <div className="grid g4" style={{ marginBottom: 14 }}>
-      <Stat k="Equity" v={fmt.usd(a?.equity)} s={`deposits ${fmt.usd(a?.deposits)}`} /><Stat k="Total return" v={a?.deposits ? fmt.pct(((a.equity - a.deposits) / a.deposits) * 100) : '—'} tone={a && a.equity < a.deposits ? 'down' : 'up'} />
-      <Stat k="Positions value" v={fmt.usd(a?.positionsValue)} s={`${a?.openCount ?? 0} open · cash ${fmt.usd(a?.cash)}`} /><Stat k="Reconciliation" v={<Badge v={data?.reconciliation.ok ? 'PASS' : 'FAIL'} />} s={data?.reconciliation.detail} />
+    {!!a?.marksMissing?.length && <div className="banner info" role="status">Missing market marks for {a.marksMissing.length} position(s). Equity includes estimated position values.</div>}
+    <div className="grid g4 mia-dashboard-section">
+      <Stat k="Total equity" v={fmt.usd(a?.equity)} s={a ? 'Net allocation ' + fmt.usd(a.deposits) : undefined} />
+      <Stat k="Available cash" v={fmt.usd(a?.cash)} s={a ? 'Positions ' + fmt.usd(a.positionsValue) : undefined} />
+      <Stat k="Realized P&L" v={fmt.usd(data?.reconciliation.positionsRealized)} tone={pnlColor(data?.reconciliation.positionsRealized)}
+        s={data ? data.reconciliation.closedPositions + ' positions closed' : undefined} />
+      <Stat k="Unrealized P&L" v={fmt.usd(a?.unrealizedPnl)} tone={pnlColor(a?.unrealizedPnl)} s={a ? 'Today ' + fmt.pct(a.dailyPnlPct) : undefined} />
     </div>
-    <Card title="Realized equity curve">{data?.equityCurve.length > 1 ? <Sparkline values={data.equityCurve.map((x: any) => x.equity)} height={120} /> : <Empty>Curve appears after closed paper trades.</Empty>}</Card>
-    <div style={{ height: 14 }} />
+    <div className="grid mia-portfolio-grid mia-dashboard-section">
+      <Card title="Realized equity curve" right={<Link to="/history">Trading history</Link>}>
+        {data?.equityCurve.length > 1
+          ? <Sparkline values={data.equityCurve.map((point: { equity: number }) => point.equity)} height={152} color="var(--mia-lavender)" />
+          : <div className="mia-chart-empty mia-portfolio-empty"><Icon name="chart" size={24} /><strong>No equity series yet</strong><span>The curve appears after two or more closed positions.</span></div>}
+      </Card>
+      <Card title="Asset exposure">
+        <AssetExposure positions={data?.open} equity={a?.equity} marksMissing={!!a?.marksMissing?.length} />
+      </Card>
+    </div>
+    <div className="grid g4 mia-dashboard-section">
+      <Stat k="Total return" v={a?.deposits ? fmt.pct((a.equity - a.deposits) / a.deposits * 100) : '—'} tone={pnlColor(a?.deposits ? a.equity - a.deposits : null)} />
+      <Stat k="Drawdown" v={a ? fmt.num(a.drawdownPct) + '%' : '—'} />
+      <Stat k="Open risk" v={a ? fmt.num(a.openRiskPct) + '%' : '—'} s={a ? fmt.usd(a.openRiskUsd) + ' at risk' : undefined} />
+      <Stat k="Reconciliation" v={<Badge v={data ? data.reconciliation.ok ? 'PASS' : 'FAIL' : 'Awaiting ledger'} />} s={data?.reconciliation.detail} />
+    </div>
     <PositionsTable rows={data?.open ?? []} onChange={reload} />
     <div style={{ height: 14 }} />
     <Card title="Closed positions" flush><div className="tablewrap"><table><thead><tr><th>Closed</th><th>Instrument</th><th>Strategy</th><th className="num">Entry</th><th className="num">Exit</th><th>Exit reason</th><th className="num">Fees</th><th className="num">Net PnL</th><th className="num">R</th></tr></thead>
       <tbody>{(data?.closed ?? []).map((p: any) => <tr key={p.id}><td className="faint">{fmt.time(p.closed_at)}</td><td>{p.instrument.split(':')[2]}</td><td>{p.strategy}</td><td className="num">{fmt.px(p.entry_price)}</td><td className="num">{fmt.px(p.exit_price)}</td><td><Badge v={p.exit_reason} /></td><td className="num">{fmt.usd(p.fees)}</td><td className={`num ${p.realized_pnl < 0 ? 'down' : 'up'}`}>{fmt.usd(p.realized_pnl)}</td><td className="num">{(p.realized_pnl / p.planned_risk).toFixed(2)}</td></tr>)}</tbody></table>{!data?.closed.length && <Empty>No closed positions.</Empty>}</div></Card>
     <div className="grid g2" style={{ marginTop: 14 }}><Card title="External wallets"><Badge v="PENDING_CREDENTIALS" /> <span className="muted">{data?.external.wallets}</span></Card><Card title="Exchange accounts"><Badge v="PENDING_CREDENTIALS" /> <span className="muted">{data?.external.exchanges}</span></Card></div>
   </Page>;
+}
+
+type MarkedPosition = { instrument: string; mark: number | null; qty: number };
+
+function AssetExposure({ positions, equity, marksMissing }: { positions?: MarkedPosition[]; equity?: number; marksMissing: boolean }) {
+  if (!positions) return <Empty>Awaiting portfolio data.</Empty>;
+  if (!positions.length) return <Empty>No open positions.</Empty>;
+  if (marksMissing || positions.some(({ mark }) => mark === null)) return <Empty>Exposure is unavailable until each position has a market mark.</Empty>;
+  if (equity == null || equity <= 0) return <Empty>Exposure needs a positive account equity.</Empty>;
+  const byInstrument = new Map<string, number>();
+  for (const { instrument, mark, qty } of positions) {
+    byInstrument.set(instrument, (byInstrument.get(instrument) ?? 0) + qty * (mark ?? 0));
+  }
+  const exposure = [...byInstrument].sort((a, b) => b[1] - a[1]);
+  return <ul className="mia-exposure-list">
+    {exposure.map(([instrument, value]) => {
+      const percent = value / equity * 100;
+      return <li key={instrument}>
+        <div className="row between"><strong>{instrument.split(':').at(-1)}</strong><span className="mono">{fmt.usd(value)} · {fmt.num(percent, 1)}%</span></div>
+        <div className="bar" aria-hidden="true"><i style={{ width: Math.min(100, Math.max(0, percent)) + '%' }} /></div>
+      </li>;
+    })}
+  </ul>;
 }
 
 export function Journal() {

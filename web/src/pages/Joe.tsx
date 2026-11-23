@@ -1,36 +1,112 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, useApi } from '../api';
-import { Badge, Card, Page } from '../ui';
+import { Link } from 'react-router-dom';
+import { api, fmt, useApi } from '../api';
+import { Icon } from '../brand';
+import { Badge, Card, ErrorLine, Page } from '../ui';
+import joeImage from '../assets/trader-joe.webp';
 
-function Chat({ context, compact }: { context?: string; compact?: boolean }) {
-  const { data, reload } = useApi('/api/joe'); const [msg, setMsg] = useState(''); const [busy, setBusy] = useState(false); const [local, setLocal] = useState<any[]>([]);
-  const end = useRef<HTMLDivElement>(null);
-  const hist = [...(data?.history ?? []), ...local];
-  useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [hist.length]);
-  const send = async (text: string) => {
-    if (!text.trim()) return; setBusy(true); setMsg(''); setLocal([{ role: 'user', content: text, id: 'u' }]);
-    try { await api('/api/joe', { body: { message: context && context !== '/' ? `[viewing ${context}] ${text}` : text } }); } catch (e: any) { setLocal((l) => [...l, { role: 'assistant', content: `Error: ${e.message}`, id: 'e' }]); }
-    setBusy(false); setLocal([]); reload();
-  };
-  return <div className="col" style={{ height: '100%', gap: 10 }}>
-    <div className="chat" style={{ flex: 1, overflowY: 'auto', padding: compact ? 10 : 0, minHeight: 0 }}>
-      {!hist.length && <div className="muted">Ask about markets, a symbol, your paper portfolio, or risk. Try “brief”, “analyze SOL”, “why was ETH rejected?”.</div>}
-      {hist.map((m: any, i: number) => <div key={m.id ?? i} className={`msg ${m.role}`}>{m.content}</div>)}
-      {busy && <div className="msg assistant muted">Trader Joe is checking live data…</div>}<div ref={end} />
+type Message = { id: number; ts: number; role: 'user' | 'assistant'; content: string };
+type JoeState = { history: Message[]; llm: boolean; model: string };
+type JoeReply = { reply: string; mode: 'LLM' | 'COMMAND'; toolsUsed: string[] };
+
+const prompts = [
+  { label: 'Market briefing', command: 'brief' },
+  { label: 'Paper portfolio', command: 'portfolio' },
+  { label: 'Current risks', command: 'risk' },
+  { label: 'Analyze BTC', command: 'analyze BTC' },
+];
+
+function JoeAvatar({ thinking = false }: { thinking?: boolean }) {
+  return <span className="mia-joe-avatar" data-thinking={thinking} aria-hidden="true"><img src={joeImage} alt="" width="800" height="800" /></span>;
+}
+
+function Chat({ context, compact = false }: { context?: string; compact?: boolean }) {
+  const { data, error, reload } = useApi<JoeState>('/api/joe');
+  const [message, setMessage] = useState('');
+  const [pending, setPending] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [tools, setTools] = useState<string[]>([]);
+  const transcript = useRef<HTMLDivElement>(null);
+  const history = data?.history ?? [];
+  const latest = history.at(-1)?.id;
+  const contextPrefix = data?.llm && context ? '[viewing ' + context.slice(0, 160) + '] ' : '';
+  useEffect(() => {
+    if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
+  }, [latest, pending]);
+
+  async function send(text: string) {
+    const question = text.trim();
+    if (!question || pending || !data) return;
+    setPending(question);
+    setSendError(null);
+    try {
+      const response = await api<JoeReply>('/api/joe', { body: { message: contextPrefix + question } });
+      setMessage('');
+      setTools([...new Set(response.toolsUsed)]);
+      await reload();
+    } catch (cause) {
+      setMessage(question);
+      setSendError(cause instanceof Error ? cause.message : 'Message could not be sent.');
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return <div className={'mia-chat' + (compact ? ' mia-chat-compact' : '')}>
+    <div className="mia-chat-header">
+      <JoeAvatar thinking={!!pending} />
+      <div><strong>Trader Joe</strong><div className="hint">{data ? data.llm ? 'Conversation mode' : 'Command mode' : 'Connecting…'}</div></div>
+      {context && <span className="hint mia-chat-context">{context}</span>}
     </div>
-    <form className="row" style={{ padding: compact ? 10 : 0 }} onSubmit={(e) => { e.preventDefault(); send(msg); }}>
-      <input value={msg} onChange={(e) => setMsg(e.target.value)} placeholder="Message Trader Joe…" style={{ flex: 1 }} disabled={busy} aria-label="Message" />
-      <button className="primary" disabled={busy || !msg.trim()}>Send</button>
+    <div className="chat mia-chat-transcript" role="log" aria-label="Trader Joe conversation" ref={transcript}>
+      {!history.length && !pending && <div className="mia-chat-empty">
+        <Icon name="message" size={25} /><strong>What would you like to understand?</strong>
+        <p>Check a market, review a decision, or ask about your paper account.</p>
+      </div>}
+      {history.map((item) => <div key={item.id} className={'msg ' + item.role}>
+        <span className="mia-chat-author">{item.role === 'assistant' ? 'Joe' : 'You'} <time title={fmt.time(item.ts)}>{new Date(item.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></span>
+        {item.content}
+      </div>)}
+      {pending && <><div className="msg user">{pending}</div><div className="msg assistant muted" role="status">Joe is checking the available evidence…</div></>}
+    </div>
+    {!!tools.length && !pending && <details className="mia-chat-sources"><summary>Tools used in the latest reply</summary><ul>{tools.map((tool) => <li key={tool}>{tool.replaceAll('_', ' ')}</li>)}</ul></details>}
+    <ErrorLine e={sendError ?? error} />
+    {error && <button type="button" className="sm" onClick={() => void reload()}>Refresh conversation</button>}
+    {!compact && <div className="mia-chat-prompts" role="group" aria-label="Suggested questions">
+      {prompts.map(({ label, command }) => <button key={label} type="button" className="sm" onClick={() => void send(command)} disabled={!data || !!pending}>{label}</button>)}
+    </div>}
+    <form className="mia-chat-form" onSubmit={(event) => { event.preventDefault(); void send(message); }}>
+      <input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Message Trader Joe…" disabled={!data || !!pending}
+        maxLength={4000 - contextPrefix.length} aria-label="Message" />
+      <button type="submit" className="primary" disabled={!data || !!pending || !message.trim()}>Send <Icon name="arrow" size={15} /></button>
     </form>
-    {!compact && <div className="row">{['brief', 'opportunities', 'portfolio', 'risk', 'news', 'analyze BTC', 'pause'].map((c) => <button key={c} className="sm" onClick={() => send(c)} disabled={busy}>{c}</button>)}</div>}
   </div>;
 }
+
 export function JoePage() {
-  const { data } = useApi('/api/joe');
-  return <Page title="Trader Joe" sub="MIA's assistant. Reads live state through permission-safe tools; can analyze and pause new orders, but cannot trade, change limits or modes, or move funds." right={<Badge v={data?.llm ? `Claude · ${data.model}` : 'COMMAND MODE'} tone={data?.llm ? 'b-good' : 'b-neutral'} />}>
-    <Card><div style={{ height: 'calc(100vh - 300px)', minHeight: 360 }}><Chat /></div></Card>
+  return <Page title="Trader Joe" sub="Ask about the evidence behind decisions, market conditions, and paper-account risk.">
+    <div className="mia-joe-layout">
+      <Card className="mia-joe-conversation"><Chat /></Card>
+      <aside className="card mia-joe-profile" aria-label="Trader Joe workspace context">
+        <img src={joeImage} alt="Trader Joe with an amber visor and a holographic notebook" width="800" height="800" />
+        <div>
+          <Badge v="Evidence assistant" tone="b-warn" />
+          <h2>Review the source</h2>
+          <Link to="/ditas">Decision records <Icon name="arrow-up-right" size={14} /></Link>
+          <Link to="/risk">Risk Center <Icon name="arrow-up-right" size={14} /></Link>
+        </div>
+      </aside>
+    </div>
   </Page>;
 }
+
 export function JoeDrawer({ context, onClose }: { context: string; onClose: () => void }) {
-  return <div className="drawer" role="dialog" aria-label="Trader Joe"><div className="row between" style={{ padding: '10px 12px', borderBottom: '1px solid var(--line)' }}><b>☺ Trader Joe</b><span className="hint">context: {context}</span><button className="ghost sm" onClick={onClose} aria-label="Close">✕</button></div><div style={{ flex: 1, minHeight: 0 }}><Chat context={context} compact /></div></div>;
+  const close = useRef<HTMLButtonElement>(null);
+  useEffect(() => { close.current?.focus(); }, []);
+  return <div className="drawer mia-joe-drawer" role="dialog" aria-label="Trader Joe" onKeyDown={(event) => {
+    if (event.key === 'Escape') onClose();
+  }}>
+    <button ref={close} type="button" className="ghost mia-top-icon mia-drawer-close" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
+    <Chat context={context} compact />
+  </div>;
 }

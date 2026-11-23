@@ -64,25 +64,51 @@ test('Central Command renders offline, paper reconciliation and research states 
   await expect(command.getByRole('link', { name: 'Release gates' })).toHaveAttribute('href', '/qa');
 });
 
+test('FAST and DEEP inspect existing research without changing execution mode', async () => {
+  await page.goto('/autopilot');
+  const lanes = page.getByRole('group', { name: 'Intelligence view' });
+  await expect(page.getByText('Awaiting a DEX research snapshot.')).toBeVisible();
+  const mode = page.locator('.mode');
+  await expect(mode).toHaveText('READ-ONLY');
+  await lanes.getByRole('button', { name: 'DEEP' }).click();
+  await expect(lanes.getByRole('button', { name: 'DEEP' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('region', { name: 'Strategy architect' })).toContainText('Awaiting a futures research snapshot.');
+  await expect(mode).toHaveText('READ-ONLY');
+  const timeframe = page.getByRole('group', { name: 'Chart timeframe' });
+  const candles = page.waitForResponse((response) => response.url().includes('/api/instrument/BTCUSDT?interval=4h'));
+  await timeframe.getByRole('button', { name: '4h' }).click();
+  expect((await candles).ok()).toBe(true);
+  await expect(page.getByText('Market candles unavailable')).toBeVisible();
+});
+
 test('accept risk policy (step-up) → fund → PAPER mode', async () => {
   await page.goto('/risk'); await page.getByPlaceholder('Owner passphrase (step-up)').last().fill(PW);
   await page.getByRole('button', { name: 'Accept policy' }).click(); await expect(page.getByText(/Risk policy v1/)).toBeVisible();
   await page.goto('/bot'); await page.getByRole('button', { name: 'Allocate' }).click();
   await expect(page.getByText('$10,000.00').first()).toBeVisible();
   await page.getByPlaceholder('Owner passphrase (step-up)').fill(PW);
-  await page.locator('label:has-text("Paper —")').getByRole('button', { name: 'Switch' }).click();
+  await page.getByRole('button', { name: 'Switch to Paper', exact: true }).click();
   await expect(page.locator('.mode')).toHaveText('PAPER');
   await expect(page.getByText('PAPER TRADING — all balances')).toBeVisible();
 });
 
 test('BOUNDED LIVE cannot be enabled', async () => {
-  const before = errors.length;
-  await page.goto('/bot'); await page.getByPlaceholder('Owner passphrase (step-up)').fill(PW);
-  await page.locator('label:has-text("Bounded live")').getByRole('button', { name: 'Switch' }).click();
-  await expect(page.getByText(/BOUNDED_LIVE blocked/)).toBeVisible();
+  await page.goto('/bot');
+  const environment = page.getByRole('group', { name: 'Execution environment' });
+  await expect(environment.getByRole('link', { name: 'Live locked' })).toHaveAttribute('href', '/qa');
+  const response = await page.request.post('/api/control', { headers: { 'x-mia-csrf': '1' }, data: { mode: 'BOUNDED_LIVE', password: PW } });
+  expect(response.status()).toBe(400);
+  expect(await response.json()).toMatchObject({ error: expect.stringContaining('BOUNDED_LIVE blocked') });
   await expect(page.locator('.mode')).toHaveText('PAPER');
-  // the server's refusal (HTTP 400) is the expected outcome; the browser logs it as a failed resource
-  const extra = errors.splice(before); expect(extra.every((e) => /status of 400/.test(e)), extra.join('\n')).toBe(true);
+});
+
+test('Trader Joe and the portfolio use the recorded paper balance', async () => {
+  await page.goto('/trader-joe');
+  await page.getByRole('button', { name: 'Paper portfolio' }).click();
+  await expect(page.getByRole('log', { name: 'Trader Joe conversation' })).toContainText('Paper equity $10000.00');
+  await page.goto('/smart-portfolio');
+  await expect(page.getByText('$10,000.00', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('PASS', { exact: true })).toBeVisible();
 });
 
 test('status ribbon goes STALE (never green) when the server stops answering, then recovers', async ({ browser }) => {
@@ -169,7 +195,6 @@ test('Lab batch retries rate limits and reports partial results', async ({ brows
     const lab = await context.newPage();
     const now = Date.now();
     await lab.clock.install({ time: now });
-    await lab.clock.pauseAt(now + 60_000);
     const attempted: string[] = [];
     await lab.route('**/api/lab', async route => {
       const response = await route.fetch();
@@ -184,7 +209,10 @@ test('Lab batch retries rate limits and reports partial results', async ({ brows
     });
 
     await lab.goto('/lab');
-    await lab.getByRole('button', { name: 'Run first 3 symbols' }).click();
+    const batch = lab.getByRole('button', { name: 'Run first 3 symbols' });
+    await expect(batch).toBeEnabled();
+    await lab.clock.pauseAt(now + 60_000);
+    await batch.click();
     await expect(lab.getByRole('status').filter({ hasText: 'Waiting for the rate limit' })).toBeVisible();
     await expect(lab.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
     await lab.clock.runFor(999);
