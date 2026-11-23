@@ -14,6 +14,7 @@ import { stepExit, newExitState, type ExitState } from '../lab/exits.js';
 import { record } from '../core/latency.js';
 import type { DecisionReport } from '../decision/engine.js';
 import { recordClosedPaperOutcome } from '../ditas/memory.js';
+import { verifyPaperClosure } from '../ditas/execution.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { crashpoint } from './crashpoint.js';
 
@@ -316,6 +317,16 @@ export function executeExit(positionId: string, qty: number, reason: string, fr 
 /** Part 20.4 deterministic trade autopsy. */
 export function autopsy(positionId: string) {
   const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId)!;
+  // The account/position CLOSED flag is not sufficient proof for a learning event
+  // or a user-facing "closed" notification. Check matching simulated fills first.
+  const closure = verifyPaperClosure(positionId);
+  if (!closure.verified) {
+    journal('SYSTEM', `Paper trade closure needs reconciliation: ${p.instrument}`, positionId,
+      { status: closure.status, reasons: closure.reasonCodes });
+    notify('WARNING', `Paper closure not verified: ${p.instrument.split(':')[2]}`,
+      `The position record needs reconciliation: ${closure.reasonCodes.join(', ')}. No completed trade outcome was learned.`, 'oms');
+    return;
+  }
   const dec = p.decision_id ? P<DecisionReport>(get<any>('SELECT report FROM decisions WHERE id=?', p.decision_id)?.report) : null;
   const r = p.planned_risk > 0 ? p.realized_pnl / p.planned_risk : 0;
   const findings = [
