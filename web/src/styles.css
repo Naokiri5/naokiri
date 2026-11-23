@@ -183,3 +183,11 @@ pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; margin: 
   .shell .mobnav a { min-width: 0; flex: 1 1 0; text-align: center; font-size: 10px; }
   .shell .mobnav button { min-width: 45px; flex: 0 0 50px; }
 }
+
+/* Progressive disclosure of existing capabilities beneath each primary section. */
+.section-tools { margin: 0 0 14px; padding: 9px 13px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); }
+.section-tools > summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--op-gold); }
+.section-tools > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.section-tool-links { display: flex; flex-wrap: wrap; gap: 7px; padding-top: 12px; }
+.section-tool-links a { padding: 6px 10px; border: 1px solid var(--line2); border-radius: 7px; color: var(--muted); font-size: 12px; }
+.section-tool-links a.active, .section-tool-links a:hover { color: var(--text); background: var(--panel2); border-color: var(--op-gold); text-decoration: none; }
