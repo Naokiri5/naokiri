@@ -20,12 +20,12 @@ export interface BrainBookCoverage {
 }
 export function brainBookCoverage(): BrainBookCoverage {
   const d = get<{
-    uploaded: number; indexed: number; partial: number; review: number; failed: number;
+    uploaded: number; indexed_count: number; partial_count: number; review_count: number; failed_count: number;
   }>(`SELECT COUNT(*) uploaded,
-     SUM(CASE WHEN status='INDEXED' THEN 1 ELSE 0 END) indexed,
-     SUM(CASE WHEN status='PARTIALLY_INDEXED' THEN 1 ELSE 0 END) partial,
-     SUM(CASE WHEN status='NEEDS_REVIEW' THEN 1 ELSE 0 END) review,
-     SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) failed
+     SUM(CASE WHEN status='INDEXED' THEN 1 ELSE 0 END) indexed_count,
+     SUM(CASE WHEN status='PARTIALLY_INDEXED' THEN 1 ELSE 0 END) partial_count,
+     SUM(CASE WHEN status='NEEDS_REVIEW' THEN 1 ELSE 0 END) review_count,
+     SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) failed_count
      FROM kb_documents`)!;
   const catalog = get<{ n: number }>('SELECT COUNT(*) n FROM kb_catalog')!.n;
   const citations = get<{ n: number }>('SELECT COUNT(*) n FROM kb_chunks')!.n;
@@ -33,8 +33,8 @@ export function brainBookCoverage(): BrainBookCoverage {
     JOIN kb_documents d ON d.id=c.document_id
     WHERE d.status IN ('INDEXED','PARTIALLY_INDEXED')`)!.n;
   return { targetBooks: 100, catalogTitles:catalog, uploadedDocuments:d.uploaded,
-    indexedDocuments:d.indexed??0,partiallyIndexedDocuments:d.partial??0,
-    needsReviewDocuments:d.review??0,failedDocuments:d.failed??0,
+    indexedDocuments:d.indexed_count??0,partiallyIndexedDocuments:d.partial_count??0,
+    needsReviewDocuments:d.review_count??0,failedDocuments:d.failed_count??0,
     citedPassages:citations,readyCatalogBooks:linked,memorySource:'EXISTING_KB_TABLES' };
 }
 const EVIDENCE: CognitiveEvidenceClass[] = [
