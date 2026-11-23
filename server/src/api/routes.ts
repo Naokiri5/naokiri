@@ -1,5 +1,7 @@
 import { ditasRoutes } from '../ditas/routes.js';
 import { recentChoiceShadows } from '../ditas/memory.js';
+import { assessFastMemecoinResearch, reconstructDeepFuturesResearch } from '../choice/dualResearch.js';
+import { FUTURES_RESEARCH_SYMBOLS, fetchFuturesResearchSnapshot } from '../providers/binanceFuturesResearch.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
@@ -270,6 +272,28 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
   // Read-only, authenticated observations; there is deliberately no ACTIVE
   // cutover or live-order endpoint while calibration/release evidence is absent.
+  // Real provider-backed, read-only dual-intelligence research. Neither lane grants execution permission.
+  app.get('/api/choice/dual/fast', async () =>
+    assessFastMemecoinResearch(market.dex, market.dexFetchedAt));
+  app.get('/api/choice/dual/deep', async (req) => {
+    const { symbol } = z.object({
+      symbol: z.enum(FUTURES_RESEARCH_SYMBOLS).default('BTCUSDT'),
+    }).parse(req.query ?? {});
+    try {
+      const snapshot = await fetchFuturesResearchSnapshot(symbol);
+      return reconstructDeepFuturesResearch(snapshot);
+    } catch (error: unknown) {
+      return {
+        version: 'mia-dual-research-v1' as const, lane: 'DEEP_FUTURES' as const,
+        rolloutMode: 'RESEARCH_ONLY' as const, tradingAuthority: false as const,
+        market: 'CRYPTO_PERPETUAL_FUTURES' as const, symbol,
+        state: 'NO_TRADE' as const, reason: 'FUTURES_SOURCE_UNAVAILABLE_OR_INVALID',
+        errorClass: error instanceof Error && error.message.startsWith('UNUSABLE_FUTURES_CANDLES')
+          ? 'INVALID_CANDLES' : 'PROVIDER_UNAVAILABLE',
+        plan: null,
+      };
+    }
+  });
   app.get('/api/choice/shadow', async (req) => {
     const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }).parse(req.query ?? {});
     const rounds = recentChoiceShadows(limit);
