@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -166,6 +166,79 @@ describe('Order-book freshness and fill accounting', () => {
     market.deep.get(id)!.book!.ts = Date.now() - 180_001;
     expect(executeExit(pos.id, pos.qty, 'STALE_BOOK')).toBeNull();
     expect(openPositions()).toHaveLength(1);
+  });
+  it.each([
+    ['monitor.preTx', 'EXIT_STOP'],
+    ['exit.preTx', 'EXIT_MANUAL_CLOSE'],
+  ] as const)('rejects a book that expires at %s and exits once refreshed', (checkpoint, purpose) => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const position = openPositions()[0];
+    const cash = accountState().cash;
+    const exit = () => purpose === 'EXIT_STOP'
+      ? monitorPositions()
+      : executeExit(position.id, position.qty, 'MANUAL_CLOSE');
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const observedAt = Date.now();
+      setBook(id, last * 0.96, observedAt - QUALITY_LIMITS.maxExecBookAgeMs + 10);
+      setTicker(last * 0.96, observedAt);
+      setCrashHook((point) => {
+        if (point === checkpoint) vi.setSystemTime(observedAt + 20);
+      });
+
+      exit();
+
+      expect(sells()).toHaveLength(0);
+      expect(openPositions()).toEqual([position]);
+      expect(accountState().cash).toBe(cash);
+      expect(get('SELECT status FROM protection_incidents WHERE position_id=?', position.id)).toMatchObject({ status: 'OPEN' });
+
+      setCrashHook(null);
+      setBook(id, last * 0.96);
+      exit();
+
+      expect(openPositions()).toHaveLength(0);
+      expect(sells()).toMatchObject([{ purpose, qty: position.qty }]);
+      expect(reconcile().ok).toBe(true);
+    } finally {
+      setCrashHook(null);
+      vi.useRealTimers();
+    }
+  });
+  it('commits a target that sells the whole position after a venue minimum change', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const position = openPositions()[0];
+    // The minimum rises after entry. A half-size exit would leave an unsellable remainder.
+    market.instruments.get(id)!.minQty = position.qty * 0.6;
+    setBook(id, last * 1.11);
+
+    monitorPositions();
+
+    expect(openPositions()).toHaveLength(0);
+    expect(sells()).toMatchObject([{ purpose: 'EXIT_TARGET', qty: position.qty }]);
+    const saved = get<{ targets: string }>('SELECT targets FROM positions WHERE id=?', position.id)!;
+    expect(JSON.parse(saved.targets).targets.map((target: { done: boolean }) => target.done)).toEqual([true, false]);
+    expect(reconcile().ok).toBe(true);
+  });
+  it('time exit sells the exact holding after rounding a preceding target to whole lots', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const position = openPositions()[0];
+    const instrument = market.instruments.get(id)!;
+    instrument.stepSize = instrument.minQty = position.qty / 3;
+    run('UPDATE positions SET max_hold_ms=1000, opened_at=? WHERE id=?', Date.now() - 1000, position.id);
+    setBook(id, last * 1.05);
+
+    monitorPositions();
+
+    expect(openPositions()).toHaveLength(0);
+    const exits = sells();
+    expect(exits).toHaveLength(2);
+    const target = exits.find((fill) => fill.purpose === 'EXIT_TARGET');
+    const timeExit = exits.find((fill) => fill.purpose === 'EXIT_TIME');
+    expect(target?.qty).toBeCloseTo(instrument.stepSize, 10);
+    expect(timeExit?.qty).toBeCloseTo(position.qty - target!.qty, 10);
+    expect(reconcile().ok).toBe(true);
   });
   it('refuses to enter against a stale order book even when the ticker is fresh', () => {
     market.deep.get(id)!.book!.ts = Date.now() - QUALITY_LIMITS.maxExecBookAgeMs - 5_000;
