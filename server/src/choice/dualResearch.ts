@@ -27,7 +27,7 @@ export interface FastResearchResult {
 export function assessFastMemecoinResearch(pairs: readonly DexPair[], sourceAsOf: number, nowTs = Date.now()): FastResearchResult {
   if (!Number.isSafeInteger(nowTs) || nowTs < 0) throw new Error('INVALID_RESEARCH_TIME');
   const stale = !Number.isSafeInteger(sourceAsOf) || sourceAsOf <= 0
-    || sourceAsOf > nowTs || nowTs - sourceAsOf > 120_000;
+    || sourceAsOf > nowTs || nowTs - sourceAsOf > 4 * 60_000; // upstream DEX refresh is every 3 minutes
   const candidates = stale ? [] : [...pairs]
     .filter((p) => p.pairCreatedAt !== null && Number.isSafeInteger(p.pairCreatedAt)
       && p.pairCreatedAt <= nowTs && nowTs - p.pairCreatedAt <= 24 * 60 * 60_000)
