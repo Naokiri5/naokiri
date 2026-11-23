@@ -1,5 +1,8 @@
 import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBooks } from '../market/fabric.js';
 import { scanOnce } from '../market/scanner.js';
+import { evaluateShadowChoices, MAX_SHADOW_CANDIDATES } from '../choice/arbitration.js';
+import { recordShadowChoice } from '../ditas/memory.js';
+import { uid } from '../core/util.js';
 import { monitorPositions, expireApprovals, submitEntry, queueForApproval } from '../exec/oms.js';
 import { refreshNews } from '../news/news.js';
 import { scanPrints } from '../whales/prints.js';
@@ -101,7 +104,31 @@ async function scanLane() {
   try {
     if (!holdEngine()) return;
     if (!botStatus.lastTickerAt) await hotLane();
-    await refreshDeep(); await scanOnce(onDecision); botStatus.lastScanAt = Date.now(); botStatus.cycles++;
+    await refreshDeep();
+    // Preserve original sequential PAPER OMS behavior. Compare only after
+    // observations are collected; shadow ranking has no order authority.
+    const choiceStartedAt = Date.now(), modeAtStart = getControl().mode;
+    const observed: DecisionReport[] = []; let observedCount = 0;
+    await scanOnce((report) => {
+      observedCount++;
+      if (observed.length < MAX_SHADOW_CANDIDATES) observed.push(report);
+      onDecision(report);
+    });
+    // A lease loss must not allow this copy to append another round.
+    if (!stillLeader()) return;
+    try {
+      const round = evaluateShadowChoices(observed, {
+        roundId: uid('choice'), startedAt: choiceStartedAt, completedAt: Date.now(),
+        mode: modeAtStart, modeChanged: getControl().mode !== modeAtStart,
+        totalReportsObserved: observedCount,
+      });
+      recordShadowChoice(round);
+    } catch (e: any) {
+      // Observability failure is explicit but never blocks protective exits or
+      // changes the canonical entry/approval decisions of this scan.
+      botStatus.lastError = 'choice-shadow: ' + String(e?.message ?? e).slice(0, 200);
+    }
+    botStatus.lastScanAt = Date.now(); botStatus.cycles++;
     bus.publish('bot', { ...botStatusView() });
   } catch (e: any) { botStatus.lastError = `scan: ${e.message}`; }
   finally { scanning = false; }
