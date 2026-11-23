@@ -10,6 +10,7 @@ import { classifyRegime } from '../regime/regime.js';
 import { STRATEGIES, strategyById } from '../lab/strategies.js';
 import { fingerprint } from './fingerprint.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
+import { verifyPaperClosure } from './execution.js';
 
 export type MemoryKind = 'NO_SIGNAL' | 'REJECTED' | 'PROPOSAL' | 'DECISION' | 'TRADE_OUTCOME' | 'CORRECTION';
 export interface MemoryEvent {
@@ -81,11 +82,9 @@ export function recordClosedPaperOutcome(positionId: string): MemoryEvent | null
     if (!(p.closed_at != null && p.closed_at >= p.opened_at && Number.isFinite(p.realized_pnl) &&
       Number.isFinite(p.fees) && Number.isFinite(p.entry_price) && p.entry_price > 0 &&
       p.exit_price != null && Number.isFinite(p.exit_price) && p.exit_price > 0)) return null;
-    const entry = get<{ n: number }>(`SELECT COUNT(*) n FROM orders o JOIN fills f ON f.order_id=o.id
-      WHERE o.position_id=? AND o.account=? AND o.purpose='ENTRY' AND o.status='FILLED' AND f.qty>0`, p.id, PAPER_ACCOUNT);
-    const exit = get<{ n: number }>(`SELECT COUNT(*) n FROM orders o JOIN fills f ON f.order_id=o.id
-      WHERE o.position_id=? AND o.account=? AND o.purpose LIKE 'EXIT_%' AND o.status='FILLED' AND f.qty>0`, p.id, PAPER_ACCOUNT);
-    if (!entry?.n || !exit?.n) return null; // never learn from a manually fabricated CLOSED row
+    // A CLOSED status and a pair of nonzero fills are not sufficient evidence:
+    // all executed entry/exit quantities and each order's fill state must reconcile.
+    if (!verifyPaperClosure(p.id).verified) return null;
     const dedupeKey = `paper:closed:${p.id}`;
     const existing = get<any>('SELECT * FROM ditas_events WHERE dedupe_key=?', dedupeKey);
     if (existing) return eventRow(existing);
