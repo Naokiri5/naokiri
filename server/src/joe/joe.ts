@@ -135,17 +135,17 @@ export async function commandMode(text: string): Promise<string> {
     const lines = [
       'MIA internal intelligence · read-only capability health',
       tools.length ? `Autopilot capabilities: ${tools.length} tracked` : 'Autopilot evidence has not refreshed yet.',
-      settings.length ? 'Settings capabilities:\\n' + settings.map((x) => `• ${x.id}: ${x.state} — ${x.reason}`).join('\\n') : 'Settings capability evidence has not refreshed yet.',
+      settings.length ? 'Settings capabilities:\n' + settings.map((x) => `• ${x.id}: ${x.state} — ${x.reason}`).join('\n') : 'Settings capability evidence has not refreshed yet.',
       'Automatic monitoring is not authorization to change risk policy, credentials, or LIVE trading.',
     ];
-    return lines.join('\\n');
+    return lines.join('\n');
   }
   if (/^(risk)/.test(lower)) { const r: any = await call('get_risk_status'); return `Policy ${r.policy ? `v${r.policy.version} accepted` : 'NOT accepted'} · mode ${displayMode()} · open risk ${r.account.openRiskPct.toFixed(2)}% · day ${r.account.dailyPnlPct.toFixed(2)}% · loss streak ${r.account.consecutiveLosses}`; }
   if (/^(news)/.test(lower)) { const n: any[] = await call('get_news', { limit: 8 }) as any; return n.map((x) => `• [${x.impact}] ${x.title} — ${x.source}`).join('\n') || 'No recent headlines.'; }
   if (/^(opportunit|signals|scan)/.test(lower)) { const o: any[] = await call('get_opportunities', { limit: 10 }) as any; return o.map((x) => `• ${x.asset} ${x.strategy}: ${x.decision} (score ${x.score}, ${x.consensus})`).join('\n') || 'No candidates yet this session — the scanner evaluates strategies on each closed 1h candle.'; }
   if (/^(pause|stop trading|halt)/.test(lower)) { await call('pause_new_orders', { reason: 'user command' }); return 'New orders paused. Existing positions remain monitored. Only the owner can resume in the Risk Center.'; }
   if (/(buy|sell|enable live|withdraw|increase|raise|change (the )?limit|go live)/.test(lower)) return 'I can’t place orders, change limits or modes, or move funds — those require the owner in the app (Risk Center, Bot Account, Wallet). I can analyze an asset or pause new orders.';
-  return `Command mode (set ANTHROPIC_API_KEY for conversational answers). Commands:\n• brief — daily market briefing\n• price BTC — quote, regime, indicators\n• analyze ETH — run full QCI/decision pipeline (no order)\n• opportunities · portfolio · risk · news · pause`;
+  return `Command mode (set ANTHROPIC_API_KEY for conversational answers). Commands:\n• brief — daily market briefing\n• price BTC — quote, regime, indicators\n• analyze ETH — run full QCI/decision pipeline (no order)\n• opportunities · portfolio · risk · news · brain · pause`;
 }
 
 /** Part 5.5 daily briefing — deterministic, sourced from live state. */
