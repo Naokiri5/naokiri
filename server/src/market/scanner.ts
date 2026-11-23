@@ -1,3 +1,4 @@
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { recordOpportunity } from '../ditas/memory.js';
 import { marketBreadth } from './bubbles.js';
 import { market } from './store.js';
@@ -73,6 +74,11 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
   const ctl = getControl();
   let candidates = 0;
   for (const id of market.universe) {
+    // Scheduled scans give due protection timers a turn between instruments.
+    if (continueScan) {
+      await nextTurn();
+      if (!continueScan()) return { candidates, universe: market.universe.length };
+    }
     const inst = market.instruments.get(id); const d = market.deep.get(id); const t = market.tickers.get(id);
     if (!inst || !d || !t) continue;
     const f1 = d.engines['1h'].last;

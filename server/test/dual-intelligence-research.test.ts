@@ -6,7 +6,7 @@ import { buildApp } from '../src/index.js';
 import { all, closeDb } from '../src/db/db.js';
 import { freshDb } from './helpers.js';
 import { INTERVAL_MS } from '../src/market/types.js';
-import { parseFuturesResearchCandles, type fetchFuturesResearchSnapshot } from '../src/providers/binanceFuturesResearch.js';
+import { parseFuturesMarketContext, parseFuturesResearchCandles, type fetchFuturesResearchSnapshot } from '../src/providers/binanceFuturesResearch.js';
 import { assessFastMemecoinResearch, reconstructDeepFuturesResearch } from '../src/choice/dualResearch.js';
 
 // Tests never call a real exchange. The live adapter is checked separately for pure parsing.
@@ -58,10 +58,36 @@ describe('Dual-intelligence market-specific research', () => {
     expect(result.plan?.direction).toBe('LONG');
     expect(result.plan?.entryTrigger).toBe('15M_BREAKOUT_UP');
     expect(result.plan?.requiredMissing).toContain('LIQUIDATION_STRESS');
+    expect(result.plan?.requiredMissing).toContain('FUTURES_FUNDING');
+    expect(result.plan?.volatilityScenarios).toHaveLength(2);
     expect(result.tradingAuthority).toBe(false);
     expect(reconstructDeepFuturesResearch(snapshot).plan?.planId).toBe(result.plan?.planId);
+    const context = parseFuturesMarketContext('BTCUSDT',
+      { symbol: 'BTCUSDT', time: NOW - 1_000, markPrice: '115', lastFundingRate: '0.0001' },
+      { symbol: 'BTCUSDT', time: NOW - 100, openInterest: '321.5' }, NOW);
+    const enriched = reconstructDeepFuturesResearch({ ...snapshot, context });
+    expect(enriched.marketContext).toEqual(context);
+    expect(enriched.plan?.requiredMissing).not.toContain('FUTURES_FUNDING');
+    expect(enriched.plan?.requiredMissing).not.toContain('OPEN_INTEREST');
+    expect(enriched.plan?.planId).not.toBe(result.plan?.planId);
     expect(reconstructDeepFuturesResearch({ ...snapshot, candles: { ...snapshot.candles, '4h': [] } }).state).toBe('NO_TRADE');
     expect(() => reconstructDeepFuturesResearch({ ...snapshot, market: 'crypto' as any })).toThrow(/IDENTITY/);
+  });
+
+  it('rejects stale, future-dated, wrong-symbol and missing futures observations', () => {
+    const mark = { symbol: 'BTCUSDT', time: NOW - 100, markPrice: '115', lastFundingRate: '0' };
+    const interest = { symbol: 'BTCUSDT', time: NOW - 100, openInterest: '321.5' };
+    expect(parseFuturesMarketContext('BTCUSDT', mark, interest, NOW)).toMatchObject({
+      funding: { rate: 0, markPrice: 115 }, openInterest: { quantity: 321.5 },
+    });
+    expect(parseFuturesMarketContext('BTCUSDT', { ...mark, time: NOW + 10 }, { ...interest, symbol: 'ETHUSDT' }, NOW)).toEqual({
+      funding: null, openInterest: null,
+    });
+    expect(parseFuturesMarketContext('BTCUSDT', { ...mark, lastFundingRate: null }, { ...interest, time: NOW - 360_000 }, NOW)).toEqual({
+      funding: null, openInterest: null,
+    });
+    expect(parseFuturesMarketContext('BTCUSDT', { ...mark, time: NOW + 5_400 }, null, NOW, NOW + 5_500).funding)
+      .toMatchObject({ at: NOW + 5_400, localAt: NOW - 100 });
   });
 
   it('refuses malformed, replayed, stale, or forming futures candle history', () => {

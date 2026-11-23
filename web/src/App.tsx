@@ -100,7 +100,7 @@ function Shell({ onLogout }: { onLogout: () => void | Promise<void> }) {
     : loc;
   return <div className={`shell ${collapsed ? 'collapsed' : ''}`}>
     <aside className={`side ${mobOpen ? 'open' : ''}`} aria-label="Primary">
-      <div className="brand"><div className="logo">M</div><div className="bname"><div style={{ fontWeight: 600 }}>MIA 4.1</div><div className="hint">paper · read-only data</div></div></div>
+      <div className="brand"><div className="logo">M</div><div className="bname"><div style={{ fontWeight: 600 }}>MIA</div><div className="hint">paper · protected cockpit</div></div></div>
       <SideNav collapsed={collapsed && !mobOpen} />
       <div style={{ marginTop: 'auto', padding: 10 }}><button className="ghost sm desk-only" onClick={() => setCollapsed(!collapsed)} aria-pressed={collapsed} aria-label={collapsed ? 'Expand menu' : 'Collapse menu'}>{collapsed ? '»' : '« collapse'}</button></div>
     </aside>
@@ -127,6 +127,9 @@ function Shell({ onLogout }: { onLogout: () => void | Promise<void> }) {
         <Route path="/academy" element={<P.Academy />} />
         <Route path="/terminal" element={<P.Terminal />} /><Route path="/terminal/:symbol" element={<P.Terminal />} />
         <Route path="/scanner" element={<P.Scanner />} /><Route path="/intelligence" element={<P.Intelligence />} />
+        <Route path="/autopilot" element={<P.Bot />} />
+        <Route path="/trader-joe" element={<P.JoePage />} />
+        <Route path="/smart-portfolio" element={<P.Portfolio />} />
         <Route path="/joe" element={<P.JoePage />} /><Route path="/bubbles" element={<P.Bubbles />} /><Route path="/whales" element={<P.Whales />} />
         <Route path="/holders" element={<P.Holders />} /><Route path="/news" element={<P.News />} /><Route path="/bot" element={<P.Bot />} />
         <Route path="/risk" element={<P.Risk />} /><Route path="/portfolio" element={<P.Portfolio />} /><Route path="/journal" element={<P.Journal />} />

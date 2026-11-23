@@ -15,13 +15,18 @@ import { setCrashHook } from '../src/exec/crashpoint.js';
 import type { DecisionReport } from '../src/decision/engine.js';
 
 // Network lanes are replaced; everything that writes (OMS, ledger, lease, journal) is the real code.
-const hooks = vi.hoisted(() => ({ duringAwait: (): void => {}, tickers: async (): Promise<void> => {}, books: async (): Promise<void> => {} }));
+const hooks = vi.hoisted(() => ({
+  duringAwait: (): void => {},
+  tickers: async (): Promise<void> => {},
+  books: async (): Promise<void> => {},
+  deep: async (): Promise<void> => {},
+}));
 vi.mock('../src/market/fabric.js', async (orig) => ({
   ...(await orig<object>()),
   ensureRules: async () => {},
   refreshTickers: async () => { hooks.duringAwait(); await hooks.tickers(); },
   refreshBooks: () => hooks.books(),
-  refreshDeep: async () => {},
+  refreshDeep: () => hooks.deep(),
   refreshBackground: async () => { hooks.duringAwait(); },
 }));
 vi.mock('../src/ops/backup.js', async (orig) => ({ ...(await orig<object>()), maybeScheduledBackup: () => null }));
@@ -50,6 +55,7 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     hooks.duringAwait = () => {};
     hooks.tickers = async () => {};
     hooks.books = async () => {};
+    hooks.deep = async () => {};
     vi.mocked(oms.monitorPositions).mockClear(); vi.mocked(oms.submitEntry).mockClear(); vi.mocked(lab.checkStrategyHealth).mockClear(); _resetWatchdog();
   });
   afterEach(() => { stopBot(); setCrashHook(null); vi.useRealTimers(); _test.resetTakeoverRefusal(); (config as any).offline = wasOffline; });
@@ -122,6 +128,39 @@ describe('engine lease hardening (additive to holdEngine)', () => {
       releaseRefreshes();
       await vi.advanceTimersByTimeAsync(0);
     }
+  });
+
+  it('keeps checking positions while the scanner waits on deep market data', async () => {
+    vi.useFakeTimers();
+    (config as any).offline = false;
+    stopBot();
+    expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+    let releaseScan!: () => void;
+    const pending = new Promise<void>((resolve) => { releaseScan = resolve; });
+    hooks.deep = () => pending;
+    try {
+      startBot();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(botStatusView().lanes.scan.inFlight).toBe(true);
+      setBook(id, last * 0.96);
+      await vi.advanceTimersByTimeAsync(protectionIntervalMs());
+      expect(openPositions()).toHaveLength(0);
+      expect(botStatusView().lanes.scan.inFlight).toBe(true);
+    } finally {
+      stopBot();
+      releaseScan();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+  });
+
+  it('freezes automated exposure while the monitor fails and resumes after a successful pass', async () => {
+    vi.mocked(oms.monitorPositions).mockImplementationOnce(() => { throw new Error('protection failure'); });
+    await _test.protectionLane();
+    _test.onDecision(report(id, last));
+    expect(count('fills')).toBe(0);
+    await _test.protectionLane();
+    _test.onDecision(report(id, last));
+    expect(count('fills')).toBe(1);
   });
 
   it('lastMonitorAt advances only after an error-free monitor pass; readiness fails while the monitor errors or is stale', async () => {

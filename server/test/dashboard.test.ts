@@ -7,6 +7,8 @@ import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js';
 import { submitEntry } from '../src/exec/oms.js';
 import { overviewSnapshot, activityFeed, riskMonitor } from '../src/dashboard/overview.js';
+import { commandStatus } from '../src/ops/commandStatus.js';
+import { botStatus } from '../src/bot/bot.js';
 import type { DecisionReport } from '../src/decision/engine.js';
 
 /** Overview dashboard contract: figures come from authoritative state; unknowns stay null; noisy repeats collapse. */
@@ -40,6 +42,11 @@ describe('overview dashboard snapshot', () => {
     expect(r.limits.openRiskPct.limit).toBe(DEFAULT_POLICY.maxOpenRiskPct); expect(r.limits.openRiskPct.used).toBeGreaterThan(0);
     const feed = activityFeed(); expect(feed.find((x) => x.kind === 'FILL')?.title).toMatch(/Paper BUY ETHUSDT · ENTRY/);
     expect(openPositions()).toHaveLength(1);
+    const command = commandStatus(botStatus);
+    expect(command.recovery).toEqual({ unresolvedOrders: 0, positions: 1, verifiedPositions: 1 });
+    expect(command.ledger).toMatchObject({ reconciled: true, closedPositions: 0 });
+    expect(command.execution).toMatchObject({ fills: 1, lastFillAt: T });
+    expect(command.execution.fees).toBeGreaterThan(0);
   });
   it('the feed keeps a long-running OPEN incident even after many newer incidents', async () => {
     const { run } = await import('../src/db/db.js');

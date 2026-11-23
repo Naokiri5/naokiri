@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { analyzeChart, type ChartReport } from '../chart/analysis.js';
+import { FeatureEngine } from '../features/indicators.js';
 import { INTERVAL_MS } from '../market/types.js';
 import type { DexPair } from '../providers/dexscreener.js';
-import type { fetchFuturesResearchSnapshot } from '../providers/binanceFuturesResearch.js';
+import type { FuturesMarketContext, FuturesResearchSnapshot } from '../providers/binanceFuturesResearch.js';
 import { assessDexPair } from '../safety/safety.js';
 
-type FuturesSnapshot = Awaited<ReturnType<typeof fetchFuturesResearchSnapshot>>;
 export const DUAL_RESEARCH_VERSION = 'mia-dual-research-v1';
+type MissingFuturesEvidence = 'FUTURES_FUNDING' | 'OPEN_INTEREST' | 'MARGIN' | 'LIQUIDATION_STRESS' | 'EXECUTABLE_BOOK' | 'VALIDATED_STRATEGY_EDGE';
 
 export interface FastResearchResult {
   version: typeof DUAL_RESEARCH_VERSION;
@@ -62,11 +63,12 @@ export interface DeepFuturesResearchResult {
   asOf: number;
   state: 'NO_TRADE' | 'WAIT_FOR_TRIGGER' | 'RESEARCH_HYPOTHESIS';
   reason: string;
+  marketContext: FuturesMarketContext;
   chartEvidence: Record<'15m' | '1h' | '4h', ChartReport>;
   plan: null | {
     planId: string;
     strategyId: 'multi_timeframe_structure_research';
-    strategyVersion: 'research-v1';
+    strategyVersion: 'research-v2';
     direction: 'LONG' | 'SHORT';
     state: 'WAIT_FOR_TRIGGER' | 'RESEARCH_HYPOTHESIS';
     entryTrigger: '15M_BREAKOUT_UP' | '15M_BREAKOUT_DOWN';
@@ -74,16 +76,17 @@ export interface DeepFuturesResearchResult {
     evidenceAsOf: number;
     expiresAt: number;
     stopAuthority: false;
-    requiredMissing: readonly ['FUTURES_FUNDING', 'MARK_PRICE_AND_MARGIN', 'LIQUIDATION_STRESS', 'EXECUTABLE_BOOK', 'VALIDATED_STRATEGY_EDGE'];
+    requiredMissing: readonly MissingFuturesEvidence[];
+    volatilityScenarios: readonly { scenario: 'ONE_ATR_UP' | 'ONE_ATR_DOWN'; price: number; breachesInvalidation: boolean }[];
   };
 }
 
 /**
- * Reconstructs a frozen research hypothesis using verified futures OHLCV only.
+ * Reconstructs a frozen hypothesis from closed futures candles and timestamped market conditions.
  * Chart pattern evidence is NOT a profitable futures strategy or order authorization.
  * Never imports Risk, OMS, credentials or the financial ledger.
  */
-export function reconstructDeepFuturesResearch(snapshot: FuturesSnapshot): DeepFuturesResearchResult {
+export function reconstructDeepFuturesResearch(snapshot: FuturesResearchSnapshot): DeepFuturesResearchResult {
   if (snapshot.market !== 'CRYPTO_PERPETUAL_FUTURES' || snapshot.source !== 'binance-usdm-public-klines'
       || !Number.isSafeInteger(snapshot.asOf)) throw new Error('INVALID_FUTURES_SNAPSHOT_IDENTITY');
   const id = 'futures:binance-usdm:' + snapshot.symbol;
@@ -92,11 +95,12 @@ export function reconstructDeepFuturesResearch(snapshot: FuturesSnapshot): DeepF
     '1h': analyzeChart(id, '1h', snapshot.candles['1h'], snapshot.asOf),
     '4h': analyzeChart(id, '4h', snapshot.candles['4h'], snapshot.asOf),
   };
+  const marketContext = snapshot.context ?? { funding: null, openInterest: null };
   const common = {
     version: DUAL_RESEARCH_VERSION as typeof DUAL_RESEARCH_VERSION, lane: 'DEEP_FUTURES' as const,
     rolloutMode: 'RESEARCH_ONLY' as const, tradingAuthority: false as const,
     market: 'CRYPTO_PERPETUAL_FUTURES' as const, symbol: snapshot.symbol,
-    source: snapshot.source, asOf: snapshot.asOf, chartEvidence,
+    source: snapshot.source, asOf: snapshot.asOf, chartEvidence, marketContext,
   };
   if (Object.values(chartEvidence).some((x) => x.status !== 'VALID'))
     return { ...common, state: 'NO_TRADE', reason: 'INVALID_OR_INSUFFICIENT_CLOSED_CANDLES', plan: null };
@@ -112,18 +116,29 @@ export function reconstructDeepFuturesResearch(snapshot: FuturesSnapshot): DeepF
   const entryTrigger = direction === 'LONG' ? '15M_BREAKOUT_UP' : '15M_BREAKOUT_DOWN';
   const triggered = m15.detections.some((d) => d.kind === (direction === 'LONG' ? 'BREAKOUT_UP' : 'BREAKOUT_DOWN'));
   const state = triggered ? 'RESEARCH_HYPOTHESIS' as const : 'WAIT_FOR_TRIGGER' as const;
+  const volatility = new FeatureEngine();
+  volatility.ingest(snapshot.candles['15m']);
+  const atr = volatility.last?.atr14;
+  const volatilityScenarios: NonNullable<DeepFuturesResearchResult['plan']>['volatilityScenarios'] =
+    atr && Number.isFinite(atr) && atr > 0 && atr < last ? [
+      { scenario: 'ONE_ATR_UP', price: last + atr, breachesInvalidation: direction === 'SHORT' && last + atr >= invalidationLevel },
+      { scenario: 'ONE_ATR_DOWN', price: last - atr, breachesInvalidation: direction === 'LONG' && last - atr <= invalidationLevel },
+    ] : [];
+  const requiredMissing: MissingFuturesEvidence[] = ['MARGIN', 'LIQUIDATION_STRESS', 'EXECUTABLE_BOOK', 'VALIDATED_STRATEGY_EDGE'];
+  if (!marketContext.funding) requiredMissing.push('FUTURES_FUNDING');
+  if (!marketContext.openInterest) requiredMissing.push('OPEN_INTEREST');
   const planId = createHash('sha256').update(JSON.stringify([
-    DUAL_RESEARCH_VERSION, snapshot.symbol, snapshot.asOf, h4.trend, h1.trend,
-    entryTrigger, invalidationLevel, last,
+    'research-v2', snapshot.symbol, snapshot.asOf, h4.trend, h1.trend,
+    entryTrigger, invalidationLevel, last, marketContext, volatilityScenarios,
   ])).digest('hex');
   return {
     ...common, state, reason: triggered ? 'PATTERN_OBSERVED_BUT_FUTURES_RISK_UNVERIFIED' : 'AWAITING_15M_CONFIRMATION',
     plan: {
       planId, strategyId: 'multi_timeframe_structure_research',
-      strategyVersion: 'research-v1', direction, state, entryTrigger,
+      strategyVersion: 'research-v2', direction, state, entryTrigger,
       invalidationLevel, evidenceAsOf: snapshot.asOf, expiresAt: snapshot.asOf + INTERVAL_MS['15m'],
       stopAuthority: false,
-      requiredMissing: ['FUTURES_FUNDING', 'MARK_PRICE_AND_MARGIN', 'LIQUIDATION_STRESS', 'EXECUTABLE_BOOK', 'VALIDATED_STRATEGY_EDGE'],
+      requiredMissing, volatilityScenarios,
     },
   };
 }

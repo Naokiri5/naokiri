@@ -1,0 +1,22 @@
+/* MIA Obsidian Palazzo: shared by the landing and authenticated cockpit.
+   Semantic risk colors are intentionally separate from decorative accents. */
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --op-obsidian: #0c0d10;
+  --op-midnight: #121316;
+  --op-panel: #17191e;
+  --op-elevated: #202228;
+  --op-ivory: #f1eae0;
+  --op-muted: #b5adaa;
+  --op-gold: #b58c57;
+  --op-oxblood: #722d38;
+  --op-royal-blue: #607cff;
+  --op-border: rgba(241, 234, 224, .14);
+  --op-editorial-font: 'Cormorant Garamond', Georgia, serif;
+  --op-ui-font: 'Inter', system-ui, sans-serif;
+  --op-mono-font: 'Geist Mono', ui-monospace, monospace;
+  --op-gain: #38b882;
+  --op-loss: #e05a5a;
+  --op-warning: #d89b3c;
+}

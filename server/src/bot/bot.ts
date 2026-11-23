@@ -296,8 +296,8 @@ export async function drainBot(timeoutMs = 20_000): Promise<boolean> {
   if (drained && lease) { try { releaseLease(lease.name, lease.holder, lease.acquired_at); } catch { /* lease expires */ } }
   return drained;
 }
-export function botStatusView() {
-  const ctl = getControl(); const acct = accountState();
+export function botStatusView(acct = accountState()) {
+  const ctl = getControl();
   return {
     ...botStatus, lanes, display: displayMode(ctl), mode: ctl.mode, paused: ctl.pausedNewOrders, emergency: ctl.emergency,
     policyAccepted: !!currentPolicy(), funded: acct.deposits > 0, equity: acct.equity,
