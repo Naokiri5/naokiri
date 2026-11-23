@@ -9,10 +9,16 @@ export function openDb(file?: string) {
   if (db) return db;
   let path = file;
   if (!path) { ensureDataDir(); path = join(config.dataDir, 'mia.db'); }
-  db = new DatabaseSync(path);
-  db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
-  migrate(db);
-  return db;
+  const connection = new DatabaseSync(path);
+  try {
+    connection.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
+    migrate(connection);
+    db = connection;
+    return connection;
+  } catch (error) {
+    connection.close();
+    throw error;
+  }
 }
 export function getDb() { return db ?? openDb(); }
 export function closeDb() { db?.close(); db = null; }

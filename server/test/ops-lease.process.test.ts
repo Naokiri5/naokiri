@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { SCHEMA_VERSION } from '../src/db/migrations.js';
 
 const serverDir = resolve(import.meta.dirname, '..');
 const TTL = 1_500;
@@ -11,11 +12,11 @@ const TTL = 1_500;
 const canSpawn = (() => { try { return spawnSync(process.execPath, ['-e', '0'], { timeout: 10_000 }).status === 0; } catch { return false; } })();
 type Line = { id: string; leader: boolean; role: string; at: number };
 
-function engine(dataDir: string) {
+function engine(dataDir: string, startFile?: string) {
   const s = { lines: [] as Line[], alive: true };
   const child = spawn(process.execPath, ['--import', 'tsx', 'test/fixtures/engine-lease-process.ts'], {
     cwd: serverDir, stdio: ['ignore', 'pipe', 'inherit'],
-    env: { ...process.env, MIA_DATA_DIR: dataDir, MIA_OFFLINE: '1', MIA_ENGINE_LEASE_TTL_MS: String(TTL), NODE_OPTIONS: '--disable-warning=ExperimentalWarning' },
+    env: { ...process.env, MIA_DATA_DIR: dataDir, MIA_OFFLINE: '1', MIA_ENGINE_LEASE_TTL_MS: String(TTL), MIA_TEST_LEASE_START_FILE: startFile, NODE_OPTIONS: '--disable-warning=ExperimentalWarning' },
   });
   let buf = '';
   child.stdout!.on('data', (d) => { buf += d; const parts = buf.split('\n'); buf = parts.pop()!; for (const l of parts) if (l) s.lines.push(JSON.parse(l)); });
@@ -28,6 +29,24 @@ async function until(fn: () => boolean, ms: number) { const end = Date.now() + m
 describe.skipIf(!canSpawn)('engine lease across two real processes', () => {
   const kids: ChildProcess[] = []; const dirs: string[] = [];
   afterEach(async () => { for (const k of kids) k.kill('SIGKILL'); await sleep(100); for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
+
+  it('allows simultaneous starters to migrate the shared database only once', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mia-engine-lease-')); dirs.push(dir);
+    const go = join(dir, 'go');
+    const a = engine(dir, go);
+    const b = engine(dir, go);
+    kids.push(a.child, b.child);
+    expect(await until(() => readdirSync(dir).filter((name) => name.startsWith('go-ready-')).length === 2, 15_000)).toBe(true);
+    writeFileSync(go, '');
+    expect(await until(() => !a.s.alive && !b.s.alive, 8_000)).toBe(true);
+    expect([a.child.exitCode, b.child.exitCode]).toEqual([0, 0]);
+    const db = new DatabaseSync(join(dir, 'mia.db'), { readOnly: true });
+    try {
+      expect(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual(
+        Array.from({ length: SCHEMA_VERSION }, (_, i) => ({ version: i + 1 })),
+      );
+    } finally { db.close(); }
+  });
 
   it('one leader at a time; after SIGKILL the standby takes over once the TTL expires, with no overlapping writes', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mia-engine-lease-')); dirs.push(dir);

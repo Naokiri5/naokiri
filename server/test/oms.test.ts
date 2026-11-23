@@ -3,8 +3,10 @@ import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl, getControl } from '../src/core/mode.js';
+import { setSetting } from '../src/core/settings.js';
 import { ledger, PAPER_ACCOUNT, accountState, openPositions } from '../src/portfolio/ledger.js';
-import { submitEntry, monitorPositions, emergencyStop, closeAllPositions, closePosition, executeExit, queueForApproval, decideApproval, listOrders } from '../src/exec/oms.js';
+import { submitEntry, monitorPositions, emergencyStop, cancelPendingEntries, closeAllPositions, closePosition, executeExit, queueForApproval, decideApproval, expireApprovals, listOrders } from '../src/exec/oms.js';
+import { setCrashHook } from '../src/exec/crashpoint.js';
 import { reconcile, calendar } from '../src/portfolio/calendar.js';
 import { verifyAuditChain } from '../src/core/audit.js';
 import { run, all, get, J } from '../src/db/db.js';
@@ -58,6 +60,74 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     const oid = queueForApproval(rep)!; expect(oid).toBeTruthy();
     const res = decideApproval(oid, true); expect(res, JSON.stringify(res)).toMatchObject({ ok: true });
   });
+  it('does not let automation consume an owner approval after a mode change', () => {
+    const pending = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    const orderId = queueForApproval(pending)!;
+    expect(submitEntry({ ...pending, decision: 'PAPER_TRADE' }, 'bot')).toMatchObject({ ok: false });
+    expect(get('SELECT status FROM orders WHERE id=?', orderId)).toEqual({ status: 'PENDING_APPROVAL' });
+    expect(openPositions()).toHaveLength(0);
+  });
+  it('locks owner approval when a legacy LIVE mode is persisted', () => {
+    const pending = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', pending.id, pending.candidateId, id, 'crypto', 'LONG', pending.strategy.id, pending.decision, 70, Date.now(), J(pending));
+    const orderId = queueForApproval(pending)!;
+    setSetting('control', { ...getControl(), mode: 'BOUNDED_LIVE' });
+    expect(decideApproval(orderId, true)).toMatchObject({ ok: false, reason: expect.stringContaining('MODE_NOT_PAPER') });
+    expect(openPositions()).toHaveLength(0);
+  });
+  it('expires an approval with missing evidence and preserves a different unknown execution', () => {
+    const missing = queueForApproval(report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' }))!;
+    const unknown = queueForApproval(report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' }))!;
+    run("UPDATE orders SET status='NEW' WHERE id=?", unknown);
+    expireApprovals();
+    cancelPendingEntries('owner');
+    expect(get('SELECT status FROM orders WHERE id=?', missing)).toEqual({ status: 'EXPIRED' });
+    const other = seedInstrument('SOLUSDT', { seed: 5 });
+    expect(submitEntry(report(other.inst.id, other.last), 'bot')).toMatchObject({
+      ok: false, reason: expect.stringContaining('UNRECONCILED_PAPER_ORDERS'),
+    });
+    expect(get('SELECT status FROM orders WHERE id=?', unknown)).toEqual({ status: 'NEW' });
+    expect(accountState().cash).toBe(10_000);
+  });
+  it.each(['approve', 'cancel'] as const)('preserves the winning %s transition if it lands before the fill transaction', (winner) => {
+    updateControl('owner', { mode: 'APPROVAL' });
+    const rep = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', rep.id, rep.candidateId, id, 'crypto', 'LONG', rep.strategy.id, rep.decision, 70, Date.now(), J(rep));
+    const oid = queueForApproval(rep)!;
+    setCrashHook((point) => {
+      if (point !== 'entry.preTx') return;
+      setCrashHook(null);
+      expect(decideApproval(oid, winner === 'approve').ok).toBe(true);
+    });
+    try {
+      expect(decideApproval(oid, true).ok).toBe(false);
+    } finally {
+      setCrashHook(null);
+    }
+    const fills = winner === 'approve' ? 1 : 0;
+    expect(all('SELECT id FROM fills WHERE order_id=?', oid)).toHaveLength(fills);
+    expect(openPositions()).toHaveLength(fills);
+    expect(get('SELECT status FROM orders WHERE id=?', oid)).toEqual({ status: fills ? 'FILLED' : 'CANCELLED' });
+    expect(reconcile().ok).toBe(true);
+  });
+  it('honors a pause committed after risk evaluation and before the fill transaction', () => {
+    setCrashHook((point) => {
+      if (point !== 'entry.preTx') return;
+      setCrashHook(null);
+      updateControl('owner', { pausedNewOrders: true });
+    });
+    try {
+      expect(submitEntry(report(id, last), 'bot')).toMatchObject({
+        ok: false,
+        reason: expect.stringContaining('NEW_ORDERS_PAUSED'),
+      });
+    } finally {
+      setCrashHook(null);
+    }
+    expect(openPositions()).toHaveLength(0);
+    expect(all('SELECT id FROM fills')).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
+  });
   it('emergency stop: blocks, cancels, verifies protection, does not auto-close', () => {
     submitEntry(report(id, last), 'bot');
     const e = emergencyStop('owner');
@@ -103,6 +173,42 @@ describe('Order-book freshness and fill accounting', () => {
     expect(r.ok).toBe(false); expect(r.reason).toMatch(/ORDER_BOOK_STALE/);
     expect(openPositions()).toHaveLength(0);
     expect(accountState().cash).toBe(10_000);
+  });
+  it('limits the real depth-walk loss including the entry and buffered exit fees', () => {
+    const book = market.deep.get(id)!.book!;
+    const ask = market.price(id)!.ask!;
+    // A fill near the allowable slippage boundary must remain within the trade budget.
+    book.asks = [[ask, 0.01], [ask * 1.0016, 50]];
+    const result = submitEntry(report(id, last), 'bot');
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const pos = openPositions()[0];
+    const bufferedStop = pos.stop_price * (1 - DEFAULT_POLICY.stopFillBufferPct / 100);
+    const executedRisk = pos.qty * (pos.entry_price - bufferedStop +
+      DEFAULT_POLICY.feeRate * (pos.entry_price + bufferedStop));
+    expect(pos.planned_risk).toBeCloseTo(executedRisk, 8);
+    expect(executedRisk).toBeLessThanOrEqual(10_000 * DEFAULT_POLICY.riskPerTradePct / 100 + 1e-8);
+    expect(all('SELECT id FROM fills')).toHaveLength(1);
+  });
+
+  it('rejects a fill whose depth-walk notional exceeds the policy cap', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 1 });
+    const book = market.deep.get(id)!.book!;
+    const ask = market.price(id)!.ask!;
+    book.asks = [[ask, 0.05], [ask * 1.0008, 50]];
+    expect(submitEntry(report(id, last), 'bot')).toMatchObject({
+      ok: false,
+      reason: expect.stringContaining('POSITION_NOTIONAL_LIMIT'),
+    });
+    expect(openPositions()).toHaveLength(0);
+    expect(all('SELECT id FROM fills')).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
+  });
+  it('accepts the capped size when the executable depth fits within the policy cap', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 1 });
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const pos = openPositions()[0];
+    expect(pos.qty * pos.entry_price).toBeLessThanOrEqual(100);
+    expect(reconcile().ok).toBe(true);
   });
   it('never prices a stop-out from a stale book or a ticker fallback: keeps it open and raises the alert', () => {
     // CLAUDE.md invariant #4 (PR #4): no synthetic fills. Originally (PR #3) this exit filled at a quote-based price.

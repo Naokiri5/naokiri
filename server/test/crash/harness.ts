@@ -26,7 +26,7 @@ export const DEPOSIT = 10_000;
 /** Child exit code when a barrier is never released; exits directly so the OMS cannot catch it and carry on. */
 export const BARRIER_TIMEOUT = 75;
 
-export interface ChildRequest { db: string; op: 'enter' | 'approve' | 'monitor' | 'close'; mid?: number; crashAt?: CrashPoint; occurrence?: number; barrier?: CrashPoint; go?: string; barrierMs?: number }
+export interface ChildRequest { db: string; op: 'enter' | 'approve' | 'monitor' | 'close'; reportFile?: string; mid?: number; crashAt?: CrashPoint; occurrence?: number; barrier?: CrashPoint; go?: string; barrierMs?: number }
 export interface ChildOutcome { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string; result: unknown; marker: { at: CrashPoint; occurrence: number } | null }
 
 /** Deterministic ETHUSDT last price; children seed the same synthetic market. */
@@ -47,7 +47,7 @@ export function newCaseDir(template?: string) {
   return { dir, db: join(dir, 'mia.db') };
 }
 
-function report(instrumentId: string, last: number, decision: DecisionReport['decision']): DecisionReport {
+export function report(instrumentId: string, last: number, decision: DecisionReport['decision']): DecisionReport {
   return { id: `dec_${CANDIDATE}`, candidateId: CANDIDATE, traceId: 'tr_crash', asset: 'ETHUSDT', instrumentId, market: 'crypto', venue: 'binance', strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',
     entryRef: last, stopLoss: last * 0.97, takeProfit: [{ price: last * 1.045, fraction: 0.5, r: 1.5 }, { price: last * 1.09, fraction: 0.5, r: 3 }],
     consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 0.7, opposition: 0.1, expiresAt: new Date(Date.now() + 3600_000).toISOString() },

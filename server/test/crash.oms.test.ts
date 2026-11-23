@@ -7,10 +7,14 @@
  * once. Race cases park two children at a file barrier just before BEGIN IMMEDIATE.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { all, get } from '../src/db/db.js';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { all, get, J } from '../src/db/db.js';
 import type { CrashPoint } from '../src/exec/crashpoint.js';
-import { awaitParked, BARRIER_TIMEOUT, buildStage, newCaseDir, rawState, removeCaseDirs, releaseBarrier, runChild, shape, sqliteHealth, withDb, type ChildOutcome, type ChildRequest, type Stage } from './crash/harness.js';
+import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
+import { awaitParked, BARRIER_TIMEOUT, buildStage, newCaseDir, rawState, removeCaseDirs, releaseBarrier, report, runChild, shape, sqliteHealth, withDb, type ChildOutcome, type ChildRequest, type Stage } from './crash/harness.js';
 import { checkInvariants } from './crash/invariants.js';
+import { seedInstrument } from './helpers.js';
 
 type Shape = ReturnType<typeof shape>;
 interface Scenario {
@@ -181,5 +185,31 @@ describe.concurrent('concurrent processes apply an operation once', () => {
     const results = (await both).map((o) => { expect(o.code, describeChild(o)).toBe(0); return o.result as { ok: boolean; reason?: string }; });
     expect(results.filter((r) => r.ok)).toHaveLength(1); expect(results.find((r) => !r.ok)?.reason).toMatch(/^DUPLICATE:/);
     expect(restart(db, () => get<{ n: number }>("SELECT COUNT(*) n FROM orders WHERE purpose='ENTRY'")!.n)).toBe(1);
+  });
+
+  it('two strategies share one aggregate paper risk budget across processes', async () => {
+    const { dir, db } = caseDir('fresh');
+    withDb(db, () => acceptPolicy('owner', { ...DEFAULT_POLICY, maxOpenRiskPct: 0.7 }));
+    const { inst, last } = seedInstrument('BTCUSDT');
+    const second = {
+      ...report(inst.id, last, 'PAPER_TRADE'),
+      id: 'dec_second', candidateId: 'cand_second', asset: inst.symbol,
+      strategy: { id: 'donchian_breakout', version: '1.0.0' },
+    };
+    writeFileSync(join(dir, 'report-btc.json'), J(second));
+
+    const req: ChildRequest = { db, op: 'enter', barrier: 'entry.preTx' };
+    const both = Promise.all([runChild(req), runChild({ ...req, reportFile: 'report-btc.json' })]);
+    await releaseBarrier(dir, 2);
+    const results = (await both).map((o) => {
+      expect(o.code, describeChild(o)).toBe(0);
+      return o.result as { ok: boolean; reason?: string };
+    });
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.find((r) => !r.ok)?.reason).toContain('AGGREGATE_OPEN_RISK');
+    const final = restart(db, shape);
+    expect(final.fills).toHaveLength(1);
+    expect(final.positions).toHaveLength(1);
+    expect(final.ledger.filter((entry) => entry.kind === 'BUY')).toHaveLength(1);
   });
 });
