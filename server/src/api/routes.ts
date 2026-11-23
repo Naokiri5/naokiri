@@ -24,7 +24,8 @@ import { workerEffectiveness } from '../workers/effectiveness.js';
 import { overviewSnapshot } from '../dashboard/overview.js';
 import { QCI_POLICY, DOMAIN_WEIGHTS } from '../qci/coordinator.js';
 import { providers } from '../providers/http.js';
-import { latencyReport } from '../core/latency.js';
+import { latencyReport, resetLatency } from '../core/latency.js';
+import { latencyTelemetrySnapshot, resetLoopDelay } from '../qhef/qhef.js';
 import { getControl, updateControl, displayMode } from '../core/mode.js';
 import { acceptPolicy, currentPolicy, DEFAULT_POLICY, policyHistory } from '../risk/policy.js';
 import { accountState, ledger, PAPER_ACCOUNT, openPositions } from '../portfolio/ledger.js';
@@ -401,6 +402,14 @@ export async function routes(app: FastifyInstance) {
       note: 'No wallet data is simulated. Copy trading activates only after an on-chain provider is connected and the feature is tested.' };
   });
   app.get('/api/latency', async () => latencyReport());
+  // Owner-session + CSRF are enforced by the existing route-aware onRequest hook.
+  // Deliberately NOT a bearer-token endpoint: MIA uses secure owner session cookies.
+  app.get('/api/telemetry/latency', async () => latencyTelemetrySnapshot());
+  app.post('/api/telemetry/latency/reset', async () => {
+    resetLatency(); resetLoopDelay();
+    audit('owner', 'telemetry.latency.reset');
+    return { reset: true };
+  });
   app.get('/api/notifications', async () => listNotifications(300));
   app.post('/api/notifications/read', async (req) => { const { id } = z.object({ id: z.string().min(1).max(64).optional() }).parse(req.body ?? {}); markRead(id); return { ok: true }; });
   app.post('/api/notifications/test', async () => ({ id: notify('INFO', 'Test notification', 'Delivery check from Settings', 'settings') }));

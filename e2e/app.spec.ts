@@ -93,6 +93,25 @@ test('status ribbon goes STALE (never green) when the server stops answering, th
   await ctx.close();
 });
 
+test('QHEF latency cockpit shows truthful venue state, polling controls and owner reset', async () => {
+  await page.goto('/qhef');
+  const cockpit = page.getByRole('region', { name: 'Latency and Reliability Cockpit' });
+  await expect(cockpit).toBeVisible();
+  await expect(cockpit.getByText('REST_POLLING')).toBeVisible();
+  await expect(cockpit.getByText('Not instrumented').first()).toBeVisible();
+  const polling = cockpit.getByRole('combobox', { name: 'Latency polling interval' });
+  await polling.selectOption('0');
+  await expect(cockpit.getByText('Updates paused')).toBeVisible();
+  const [reset] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith('/api/telemetry/latency/reset') && r.request().method() === 'POST'),
+    cockpit.getByRole('button', { name: 'Reset latency telemetry' }).click(),
+  ]);
+  expect(reset.status()).toBe(200);
+  await polling.selectOption('1000');
+  await expect(cockpit.getByText('Polling every 1000 ms')).toBeVisible();
+  await expect(cockpit.getByRole('alert')).toHaveCount(0);
+});
+
 for (const r of ROUTES) {
   test(`renders ${r}`, async () => {
     await page.goto(r); await expect(page.locator('h1')).toBeVisible(); await page.waitForTimeout(400);
