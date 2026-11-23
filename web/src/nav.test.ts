@@ -4,17 +4,17 @@ import { ALL_PAGES, NAV_GROUPS, groupForPath, pageForPath } from './nav';
 describe('MIA 6.0 four-section navigation compatibility', () => {
   it('has exactly the four required operator surfaces, with no duplicate destinations', () => {
     expect(NAV_GROUPS.map((group) => group.label)).toEqual([
-      'Autopilot', 'Trader Joe', 'Smart Portfolio', 'Settings',
+      'Autopilot', 'Portfolio', 'Trader Joe', 'Settings',
     ]);
     expect(NAV_GROUPS.map((group) => group.pages[0].to)).toEqual([
-      '/autopilot', '/trader-joe', '/smart-portfolio', '/settings',
+      '/autopilot', '/smart-portfolio', '/trader-joe', '/settings',
     ]);
     expect(NAV_GROUPS.every((group) => group.pages.length === 1)).toBe(true);
     expect(new Set(NAV_GROUPS.flatMap((group) => group.pages.map((page) => page.to))).size).toBe(4);
   });
 
   it.each([
-    ['/app', 'autopilot'], ['/app/terminal/BTCUSDT', 'autopilot'],
+    ['/app', 'autopilot'], ['/app/terminal/BTCUSDT', 'autopilot'], ['/overview', 'autopilot'],
     ['/bot', 'autopilot'], ['/scanner', 'autopilot'], ['/terminal/BTCUSDT', 'autopilot'],
     ['/intelligence', 'autopilot'], ['/autopilot', 'autopilot'],
     ['/joe', 'trader-joe'], ['/trader-joe', 'trader-joe'],

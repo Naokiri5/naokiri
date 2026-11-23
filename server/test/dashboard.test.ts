@@ -44,9 +44,12 @@ describe('overview dashboard snapshot', () => {
     expect(openPositions()).toHaveLength(1);
     const command = commandStatus(botStatus);
     expect(command.recovery).toEqual({ unresolvedOrders: 0, positions: 1, verifiedPositions: 1 });
+    expect(command.protection).toMatchObject([{ positionId: openPositions()[0].id, protected: true, issue: null }]);
     expect(command.ledger).toMatchObject({ reconciled: true, closedPositions: 0 });
     expect(command.execution).toMatchObject({ fills: 1, lastFillAt: T });
     expect(command.execution.fees).toBeGreaterThan(0);
+    setBook(inst.id, last, T - 3600_000);
+    expect(commandStatus(botStatus).protection).toMatchObject([{ positionId: openPositions()[0].id, protected: false }]);
   });
   it('the feed keeps a long-running OPEN incident even after many newer incidents', async () => {
     const { run } = await import('../src/db/db.js');

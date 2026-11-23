@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChartApi, type UTCTimestamp } from 'lightweight-charts';
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts';
 import { hierarchy, pack } from 'd3-hierarchy';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Modal, Page, Tabs, useSort } from '../ui';
@@ -59,8 +59,9 @@ export function Terminal() {
   </Page>;
 }
 export type MarketCandle = { t: number; o: number; h: number; l: number; c: number; v: number };
+export type MarketPriceLevel = { price: number; title: string; color: string };
 
-export function CandleChart({ candles }: { candles: MarketCandle[] }) {
+export function CandleChart({ candles, priceLevels }: { candles: MarketCandle[]; priceLevels?: MarketPriceLevel[] }) {
   const [theme] = useMiaTheme();
   const ref = useRef<HTMLDivElement>(null); const chart = useRef<IChartApi | null>(null); const series = useRef<any>({});
   useEffect(() => {
@@ -82,6 +83,18 @@ export function CandleChart({ candles }: { candles: MarketCandle[] }) {
     const ema = (p: number) => { const k = 2 / (p + 1); let e: number | null = null; return candles.map((x, i) => { e = e == null ? x.c : x.c * k + e * (1 - k); return { time: t(x), value: e, i }; }).filter((x) => x.i >= p).map(({ time, value }) => ({ time, value })); };
     s.e20.setData(ema(20)); s.e50.setData(ema(50));
   }, [candles, theme]);
+  useEffect(() => {
+    const seriesWithCandles = series.current.c as ISeriesApi<'Candlestick'> | undefined;
+    const currentChart = chart.current;
+    if (!seriesWithCandles || !priceLevels?.length) return;
+    const lines = priceLevels.filter((level) => Number.isFinite(level.price) && level.price > 0)
+      .map((level) => seriesWithCandles.createPriceLine({ ...level, lineStyle: LineStyle.Dashed, lineWidth: 1 }));
+    return () => {
+      if (chart.current === currentChart) {
+        for (const line of lines) seriesWithCandles.removePriceLine(line);
+      }
+    };
+  }, [priceLevels, theme]);
   return <div ref={ref} className="chart" role="img" aria-label="Candlestick price chart" />;
 }
 function Book({ book }: { book: any }) {

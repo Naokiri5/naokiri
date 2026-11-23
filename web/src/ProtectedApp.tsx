@@ -10,8 +10,8 @@ import * as P from './pages';
 import { CommandPalette } from './palette';
 import { StaleBanner, StatusRibbon } from './StatusRibbon';
 import type { ShellDto } from './status';
-import { ALL_PAGES } from './nav';
-import { SideNav, GroupTabs, MobileNav } from './Navigation';
+import { ALL_PAGES, pageForPath } from './nav';
+import { GroupTabs, PrimaryNav } from './Navigation';
 import { Icon, MiaWordmark } from './brand';
 import { AccessScreen } from './AccessScreen';
 import { useMiaTheme } from './theme';
@@ -98,34 +98,34 @@ function Shell({ onLogout }: { onLogout: () => void | Promise<void> }) {
   const shell = useApi<ShellDto>('/api/shell', { topics: ['mode', 'bot', 'notification', 'position', 'health'], every: 15_000 });
   const [palette, setPalette] = useState(false);
   useEffect(() => { const h = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); } }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, []);
-  const [collapsed, setCollapsed] = useState(false); const [mobOpen, setMobOpen] = useState(false); const [joe, setJoe] = useState(false);
+  const [joe, setJoe] = useState(false);
   const [theme, toggleTheme] = useMiaTheme();
-  const loc = useLocation(); useEffect(() => setMobOpen(false), [loc.pathname]);
-  useEffect(() => { if (!mobOpen) return; const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobOpen(false); }; window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h); }, [mobOpen]);
+  const loc = useLocation();
   const s = shell.data; const nav = useNavigate();
   // /app is the protected entry, while original deep links stay valid for backwards compatibility.
   const routeLocation = loc.pathname === '/app' || loc.pathname.startsWith('/app/')
     ? { ...loc, pathname: loc.pathname.slice(4) || '/' }
     : loc;
-  return <div className={`shell ${collapsed ? 'collapsed' : ''}`}>
-    <aside className={`side ${mobOpen ? 'open' : ''}`} aria-label="Primary">
-      <Link className="brand" to="/app" aria-label="MIA overview"><MiaWordmark /></Link>
-      <SideNav collapsed={collapsed && !mobOpen} />
-      <div className="mia-sidebar-footer"><button className="ghost sm desk-only" onClick={() => setCollapsed(!collapsed)} aria-pressed={collapsed} aria-label={collapsed ? 'Expand menu' : 'Collapse menu'}>{collapsed ? '»' : '« Collapse'}</button></div>
-    </aside>
+  const cockpit = routeLocation.pathname === '/' || routeLocation.pathname === '/autopilot';
+  return <div className="shell mia-operator-shell">
+    <a className="mia-skip-link" href="#mia-main-content">Skip to main content</a>
     <header className="top">
       <div className="mia-top-row">
-        <button className="ghost mia-top-icon mob-only" onClick={() => setMobOpen(!mobOpen)} aria-label="Menu" aria-expanded={mobOpen}><Icon name="menu" size={19} /></button>
-        <Search />
+        <div className="mia-header-brand">
+          <Link className="brand" to="/app" aria-label="MIA Autopilot"><MiaWordmark /></Link>
+          <span className="mia-header-page">{pageForPath(loc.pathname)?.label}</span>
+        </div>
+        <PrimaryNav />
         <div className="mia-top-actions">
+          <button className="ghost mia-top-icon" onClick={() => setPalette(true)} aria-label="Open command palette"><Icon name="compass" size={17} /></button>
           <button className="pill mia-top-icon" onClick={() => nav('/notifications')} aria-label="Notifications"><Icon name="bell" size={16} />{s?.unread ? <span>{s.unread}</span> : null}</button>
           <button className="ghost mia-top-icon" onClick={toggleTheme} aria-label="Toggle theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} /></button>
           <button className="ghost mia-sign-out" onClick={async () => { setSignOutError(null); try { await api('/api/auth/logout', { body: {} }); await onLogout(); } catch (e) { setSignOutError(e instanceof Error ? e.message : 'Sign out failed'); } }}>Sign out</button>
         </div>
       </div>
-      <StatusRibbon shell={shell} />
+      <div className="mia-top-status"><StatusRibbon shell={shell} /><Search /></div>
     </header>
-    <main>
+    <main id="mia-main-content" tabIndex={-1}>
       <StaleBanner shell={shell} />
       {signOutError && <div className="banner stale" role="alert">Sign-out was not fully completed: {signOutError}</div>}
       {s?.control.emergency && <div className="banner stale">⛔ EMERGENCY STOP active — new orders blocked. Existing positions are still monitored. Resolve in the Risk Center.</div>}
@@ -133,18 +133,19 @@ function Shell({ onLogout }: { onLogout: () => void | Promise<void> }) {
       {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}
       {s && !s.policyAccepted && loc.pathname !== '/risk' && <div className="banner info">Risk policy not yet accepted — paper execution stays disabled until you review it in the <a href="/risk" onClick={(e) => { e.preventDefault(); nav('/risk'); }}>Risk Center</a>.</div>}
       <ErrorLine e={shell.error} />
-      <GroupTabs />
+      {!cockpit && <GroupTabs />}
       <Routes location={routeLocation}>
-        <Route path="/" element={<P.Overview />} />
+        <Route path="/" element={<P.Bot shell={shell} />} />
+        <Route path="/overview" element={<P.Overview />} />
         <Route path="/ditas" element={<P.Ditas />} />
         <Route path="/academy" element={<P.Academy />} />
         <Route path="/terminal" element={<P.Terminal />} /><Route path="/terminal/:symbol" element={<P.Terminal />} />
         <Route path="/scanner" element={<P.Scanner />} /><Route path="/intelligence" element={<P.Intelligence />} />
-        <Route path="/autopilot" element={<P.Bot />} />
+        <Route path="/autopilot" element={<P.Bot shell={shell} />} />
         <Route path="/trader-joe" element={<P.JoePage />} />
         <Route path="/smart-portfolio" element={<P.Portfolio />} />
         <Route path="/joe" element={<P.JoePage />} /><Route path="/bubbles" element={<P.Bubbles />} /><Route path="/whales" element={<P.Whales />} />
-        <Route path="/holders" element={<P.Holders />} /><Route path="/news" element={<P.News />} /><Route path="/bot" element={<P.Bot />} />
+        <Route path="/holders" element={<P.Holders />} /><Route path="/news" element={<P.News />} /><Route path="/bot" element={<P.Bot shell={shell} legacy />} />
         <Route path="/risk" element={<P.Risk />} /><Route path="/portfolio" element={<P.Portfolio />} /><Route path="/journal" element={<P.Journal />} />
         <Route path="/calendar" element={<P.Calendar />} /><Route path="/lab" element={<P.Lab />} /><Route path="/wallet" element={<P.Wallet />} />
         <Route path="/connections" element={<P.Connections />} /><Route path="/notifications" element={<P.Notifications />} /><Route path="/qa" element={<P.QA />} />
@@ -154,7 +155,6 @@ function Shell({ onLogout }: { onLogout: () => void | Promise<void> }) {
         <Route path="*" element={<div className="empty">Not found</div>} />
       </Routes>
     </main>
-    <MobileNav moreOpen={mobOpen} onMore={() => setMobOpen(!mobOpen)} />
     {palette && <CommandPalette pages={ALL_PAGES} onClose={() => setPalette(false)} extra={[
       { id: 'act:pause', label: 'Pause new orders', hint: 'risk-reducing', group: 'Action', run: async () => { await api('/api/emergency/pause', { body: {} }); shell.reload(); } },
       { id: 'act:protect', label: 'Verify position protection', hint: 'Risk Center', group: 'Action', run: async () => { await api('/api/emergency/protect', { body: {} }); nav('/risk'); } },

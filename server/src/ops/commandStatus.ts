@@ -37,6 +37,7 @@ export function commandStatus(engine: EngineView, at = Date.now()) {
       positions: protection.length,
       verifiedPositions: protection.filter((position) => position.protected).length,
     },
+    protection,
     ledger: { reconciled: ledger.ok, closedPositions: ledger.closedPositions, netPnl: ledger.positionsRealized },
     activity,
     execution,

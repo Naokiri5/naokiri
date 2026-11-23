@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom';
 import { api, ApiError, authInfo, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Modal, Page, Sparkline, Stat, Tabs, Meter } from '../ui';
 import { Icon } from '../brand';
-import { AutopilotChart, ResearchPanel } from './ResearchPanel';
+import { GroupTabs } from '../Navigation';
+import { useRibbon, type ShellState } from '../StatusRibbon';
+import { AutopilotActivity, AutopilotSession, type Mind } from './AutopilotSession';
+import { ResearchWorkspace } from './ResearchPanel';
 
 export const StepUp = ({ value, onChange }: { value: string; onChange: (v: string) => void }) =>
   authInfo.mode === 'privy'
@@ -31,6 +34,7 @@ type CommandStatus = {
   readiness: { ready: boolean; role: string; checks: { name: string; status: string; detail: string }[] };
   ledger: { reconciled: boolean; closedPositions: number; netPnl: number };
   recovery: { unresolvedOrders: number; positions: number; verifiedPositions: number };
+  protection?: PositionProtection[];
   activity: { count: number; denials: number };
   execution: { fills: number; fees: number; lastFillAt: number | null };
   providers: { live: number; total: number };
@@ -117,45 +121,96 @@ function CentralCommand({ command, lanes, mode }: { command?: CommandStatus; lan
   </section>;
 }
 
-export function Bot() {
+type ManagedPaperPosition = {
+  id: string;
+  account: string;
+  instrument: string;
+  qty: number;
+  entry_price: number;
+  mark: number | null;
+  stop_price: number;
+  targets: { targets: { price: number; done: boolean }[] };
+  opened_at: number;
+};
+
+type PositionProtection = { positionId: string; protected: boolean; issue: string | null };
+
+function ManagedPositions({ rows, protection }: { rows?: ManagedPaperPosition[]; protection?: PositionProtection[] }) {
+  return <Card title="Open positions" className="mia-managed-positions" right={<Link to="/smart-portfolio">Portfolio</Link>}>
+    {!rows ? <Empty>Waiting for paper positions.</Empty>
+      : rows.length ? <ul className="mia-position-list">
+        {rows.map((position) => {
+          const symbol = position.instrument.split(':').at(-1) ?? position.instrument;
+          const stop = protection?.find((item) => item.positionId === position.id);
+          const pnl = position.mark === null ? null : (position.mark - position.entry_price) * position.qty;
+          return <li key={position.id}>
+            <div className="row between">
+              <strong>{symbol}</strong>
+              <Badge v="Paper" tone="b-violet" />
+            </div>
+            <dl className="mia-facts">
+              <dt>Entry</dt><dd>{fmt.px(position.entry_price)}</dd>
+              <dt>Last available mark</dt><dd>{fmt.px(position.mark)}</dd>
+              <dt>Size</dt><dd>{fmt.num(position.qty, 6)}</dd>
+              <dt>Unrealized P&L</dt><dd className={pnlColor(pnl)}>{fmt.usd(pnl)}</dd>
+              <dt>Stop-loss</dt><dd>{fmt.px(position.stop_price)}</dd>
+              <dt>Profit targets</dt><dd>{position.targets.targets.map((target) => fmt.px(target.price) + (target.done ? ' reached' : '')).join(' · ') || '—'}</dd>
+              <dt>Opened</dt><dd>{fmt.ago(position.opened_at)}</dd>
+            </dl>
+            <div className="row">
+              <Badge v={stop?.protected ? 'Protective stop verified' : stop ? 'Protection needs attention' : 'Protection unverified'}
+                tone={stop?.protected ? 'b-good' : 'b-warn'} />
+              <Link to="/risk">Review protection</Link>
+            </div>
+            {stop?.issue && <p className="hint">{stop.issue}</p>}
+          </li>;
+        })}
+      </ul> : <Empty>No open paper positions.</Empty>}
+  </Card>;
+}
+
+function RiskSummary({ shell, command }: { shell: ShellState; command?: CommandStatus }) {
+  const ribbon = useRibbon(shell);
+  const risk = ribbon.segments.find((segment) => segment.id === 'risk');
+  const protectionUnverified = command && command.recovery.verifiedPositions < command.recovery.positions;
+  const riskStatus = risk?.tone === 'bad' ? (shell.data?.control.emergency ? 'Emergency stop' : 'New entries blocked')
+    : protectionUnverified && !ribbon.stale ? 'Protection needs attention'
+    : risk?.tone === 'warn' ? (shell.data?.control.pausedNewOrders ? 'New entries paused'
+      : !shell.data?.policyAccepted ? 'Risk policy needed' : 'Risk limits restricted')
+    : risk?.tone === 'ok' ? 'Within account limits' : 'Unverified';
+  const riskTone = risk?.tone === 'bad' ? 'b-bad' : riskStatus === 'Within account limits' ? 'b-neutral' : 'b-warn';
+  return <Stat k="Risk Status" v={<Badge v={riskStatus} tone={riskTone} title={risk?.detail} />}
+    s={<Link to="/risk">Review risk and protection</Link>} />;
+}
+
+export function Bot({ legacy = false, shell }: { legacy?: boolean; shell: ShellState }) {
   const { data, error, reload } = useApi('/api/bot', { topics: ['bot', 'order', 'position', 'mode', 'risk', 'health'], every: 20_000 });
   const [pw, setPw] = useState(''); const [amt, setAmt] = useState('10000');
-  const s = data?.status; const a = error ? undefined : data?.account;
+  const [mind, setMind] = useState<Mind>('FAST');
+  const s = error ? undefined : data?.status; const a = error ? undefined : data?.account;
   const command: CommandStatus | undefined = error ? undefined : data?.command;
-  return <Page title="Autopilot" sub="Monitor market research, paper execution, and position protection." right={
-    <Link className="mia-panel-link" to="/app">Account overview <Icon name="arrow-up-right" size={15} /></Link>
+  const marksMissing = a?.marksMissing.length ?? 0;
+  const unrealized = marksMissing ? null : a?.unrealizedPnl;
+  const rows = error ? undefined : (data?.positions as ManagedPaperPosition[] | undefined)?.filter((position) => position.account === 'paper-bot');
+
+  return <Page title={legacy ? 'Bot Account' : 'Autopilot'} right={
+    <Link className="mia-panel-link" to="/overview">Account overview <Icon name="arrow-up-right" size={15} /></Link>
   }>
     <ErrorLine e={error} />
-    <div className="grid g4 mia-dashboard-section">
-      <Stat k="Paper equity" v={fmt.usd(a?.equity)} s={a ? 'Net allocation ' + fmt.usd(a.deposits) : undefined} />
-      <Stat k="Available cash" v={fmt.usd(a?.cash)} s={a ? 'Open positions ' + a.openCount : undefined} />
-      <Stat k="Unrealized P&L" v={fmt.usd(a?.unrealizedPnl)} tone={pnlColor(a?.unrealizedPnl)}
-        s={a?.marksMissing.length ? <span className="warn">Marks missing for {a.marksMissing.length} position(s)</span> : a ? 'Today ' + fmt.pct(a.dailyPnlPct) : undefined} />
-      <Stat k="Scan cycles" v={s?.cycles ?? '—'} s={s?.lastError ? <span className="warn">{s.lastError}</span> : s?.lastScanAt ? 'Last scan ' + fmt.ago(s.lastScanAt) : 'Awaiting scan'} />
+    <AutopilotSession mind={mind} onMindChange={setMind} />
+    <div className="grid g4 mia-dashboard-section mia-account-summary" aria-label="Paper account summary">
+      <Stat k="Account Equity" v={fmt.usd(marksMissing ? null : a?.equity)}
+        s={marksMissing ? 'Waiting for position prices' : a ? 'Available paper cash ' + fmt.usd(a.cash) : 'Paper account value'} />
+      <Stat k="Active Positions" v={a?.openCount ?? '—'} s="Open paper holdings" />
+      <Stat k="Today's P&L" v={fmt.usd(a?.realizedToday)} tone={pnlColor(a?.realizedToday)}
+        s={a ? <>Realized today (UTC) · Unrealized {fmt.usd(unrealized)}</> : 'Closed trades and open holdings'} />
+      <RiskSummary shell={shell} command={command} />
     </div>
-    <div className="mia-cockpit-grid mia-dashboard-section">
-      <Card title="Session controls" className="mia-paper-control">
-        <div className="mia-paper-stack">
-          <div className="mia-field-label">Execution environment</div>
-          <div className="mia-segment mia-execution" role="group" aria-label="Execution environment">
-            <span className="mia-paper-selected"><Icon name="flask" size={15} /> Paper</span>
-            <Link to="/qa"><Icon name="lock" size={14} /> Live locked</Link>
-          </div>
-          <div className="mia-field-label">Operating state</div>
-          <Badge v={!error ? s?.state ?? 'Awaiting status' : 'Status unavailable'} tone={s?.emergency ? 'b-bad' : s?.paused ? 'b-warn' : 'b-neutral'} />
-          <a className="mia-configure-link" href="#paper-controls">Manage paper settings <Icon name="arrow" size={15} /></a>
-          <div className="mia-protection-short">
-            <Icon name="shield" size={19} />
-            <div><strong>Position protection</strong><p>{command
-              ? command.recovery.positions ? command.recovery.verifiedPositions + ' of ' + command.recovery.positions + ' positions verified' : 'No positions to protect'
-              : !a ? 'Awaiting status' : a.openCount ? 'Review open positions in Risk Center' : 'No positions to protect'}</p></div>
-          </div>
-          <Link className="mia-panel-link" to="/risk">Risk Center <Icon name="arrow-up-right" size={15} /></Link>
-        </div>
-      </Card>
-      <AutopilotChart />
-      <ResearchPanel source={!data || error ? undefined : command ? 'command' : 'market'} />
-    </div>
+    <ResearchWorkspace mind={mind} source={!data || error ? undefined : command ? 'command' : 'market'} paperPositions={rows}
+      positions={<ManagedPositions rows={rows} protection={error ? undefined : data?.command?.protection} />} activity={<AutopilotActivity />} />
+    <details className="mia-advanced" open={legacy ? true : undefined}>
+      <summary>Advanced Details</summary>
+      {!legacy && <GroupTabs />}
     {command && <div className="mia-dashboard-section"><CentralCommand command={command} lanes={s?.lanes} mode={s?.display} /></div>}
     <div className="grid g2" id="paper-controls" tabIndex={-1} aria-label="Paper settings">
       <Card title="Automation mode"><div className="col">
@@ -191,6 +246,7 @@ export function Bot() {
     <div style={{ height: 14 }} />
     <Card title="Strategies" right={<Link to="/lab">Strategy Lab →</Link>} flush><table><thead><tr><th>Strategy</th><th>Status</th><th className="num">OOS trades</th><th className="num">OOS expectancy</th><th className="num">Paper trades</th><th className="num">Paper expectancy</th><th>Bot permission</th></tr></thead>
       <tbody>{(data?.strategies ?? []).map((st: any) => { const disabled = data?.status && (data as any).status && false; void disabled; return <tr key={st.id}><td><b>{st.name}</b> <span className="faint">v{st.version}</span></td><td><Badge v={st.status} /></td><td className="num">{st.stats?.trades ?? '—'}</td><td className="num">{st.stats ? `${st.stats.expectancyR.toFixed(3)}R` : '—'}</td><td className="num">{st.live?.trades ?? 0}</td><td className="num">{st.live ? `${st.live.expectancyR.toFixed(2)}R` : '—'}</td><td><StrategyToggle id={st.id} pw={pw} clearPassphrase={() => setPw('')} onChange={reload} /></td></tr>; })}</tbody></table></Card>
+    </details>
   </Page>;
 }
 /** Revoking reduces risk and needs no passphrase; re-enabling increases it and uses the step-up passphrase entered above. */
