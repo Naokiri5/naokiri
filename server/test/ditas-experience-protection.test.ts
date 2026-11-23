@@ -29,9 +29,9 @@ function closedFixture(id: string, opts: { version?: string; account?: string; r
   const order = (type: 'ENTRY' | 'EXIT_STOP', side: 'BUY' | 'SELL') => {
     const oid = `ord-${type}-${id}`;
     run(`INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,status,purpose,
-      position_id,decision_id,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      position_id,decision_id,filled_qty,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       oid, `client-${type}-${id}`, account, 'binance-paper', instrumentId, side, 'MARKET', 1,
-      'FILLED', type, id, decisionId, at - 3600_000, at);
+      'FILLED', type, id, decisionId, 1, at - 3600_000, at);
     run('INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES (?,?,?,?,?,?,?)',
       `fill-${type}-${id}`, oid, 1, type === 'ENTRY' ? 100 : 90, 0, 'TAKER', at);
   };
@@ -107,6 +107,23 @@ describe('DITAS paper learning + no-trade guard (single canonical OMS)', () => {
     expect(denied.sizing?.riskBudget).toBeLessThanOrEqual(50);
     vi.stubEnv('MIA_PAPER_EXPERIENCE_GUARD', 'unknown');
     expect(experienceGuard(STRATEGY).mode).toBe('SHADOW');
+  });
+
+  it('refuses to learn a nominally CLOSED paper trade when total exits are smaller than its entry', () => {
+    closedFixture('mismatch-quantities');
+    // One valid entry and exit fill still exist; the quantities no longer reconcile.
+    run('UPDATE fills SET qty=? WHERE id=?', 0.75, 'fill-EXIT_STOP-mismatch-quantities');
+    const p = paperExperience(STRATEGY);
+    expect(p).toMatchObject({ verified: { samples: 0 }, excludedUnverifiedFills: 1 });
+    expect(recordClosedPaperOutcome('mismatch-quantities')).toBeNull();
+    expect(memoryEvents().filter(e => e.kind === 'TRADE_OUTCOME')).toHaveLength(0);
+  });
+
+  it('refuses false closure when a recorded order fill quantity disagrees with its fills', () => {
+    closedFixture('order-fill-disagreement');
+    run('UPDATE orders SET filled_qty=? WHERE id=?', 0.5, 'ord-ENTRY-order-fill-disagreement');
+    expect(paperExperience(STRATEGY).verified.samples).toBe(0);
+    expect(recordClosedPaperOutcome('order-fill-disagreement')).toBeNull();
   });
 
   it('records a real closed paper OMS trade once, linked to its original immutable decision snapshot', () => {
