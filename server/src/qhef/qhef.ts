@@ -71,7 +71,8 @@ export function latencyTelemetrySnapshot() {
   const now = Date.now();
   const q = qhefReport();
   const observed = q.budgets.filter((b) => b.status !== 'NO_DATA');
-  const slaOverallPass = observed.length === 0 ? null : observed.every((b) => b.status === 'WITHIN_BUDGET');
+  const slaOverallPass = observed.some((s) => s.status === 'OVER_BUDGET') ? false
+    : observed.length === q.budgets.length ? true : null;
   const stages = q.budgets.map((b) => ({
     stage: b.stage, lane: b.lane, description: b.description,
     metric: b.metric, budgetMs: b.budgetMs, count: b.samples,

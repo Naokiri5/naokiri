@@ -99,8 +99,8 @@ export function LatencyReliabilityCockpit() {
   };
 
   const loop = snapshot?.eventLoop;
-  const label = !snapshot || snapshot.slaOverallPass === null ? 'NO DATA'
-    : snapshot?.slaOverallPass && !error ? 'OBSERVED SLA PASS' : 'OBSERVED SLA DEGRADED';
+  const label = !snapshot ? 'NO DATA' : snapshot.slaOverallPass === null ? 'INCOMPLETE SLA DATA'
+    : snapshot.slaOverallPass && !error ? 'OBSERVED SLA PASS' : 'OBSERVED SLA DEGRADED';
   return <section aria-label="Latency and Reliability Cockpit">
     <Card title="Latency & Reliability Cockpit" right={<>
       <label className="row" style={{ gap: 6 }}>Polling

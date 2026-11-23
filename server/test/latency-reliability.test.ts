@@ -30,6 +30,7 @@ describe('owner latency and reliability cockpit contract', () => {
     expect(response.headers['cache-control']).toBe('no-store');
     const value = response.json();
     expect(value.schemaVersion).toBe(1);
+    expect(value.slaOverallPass).toBeNull(); // one sampled stage cannot certify all QHEF budgets
     expect(value.stages.find((s: { stage: string }) => s.stage === 'oms.submit')).toMatchObject({
       metric: 'p95', budgetMs: 50, p95Ms: 12, status: 'WITHIN_BUDGET',
     });
