@@ -127,3 +127,40 @@ This reviewable increment follows the owner-supplied Dual Intelligence Plan and 
 **Failure behavior:** Any absent/stale DEX snapshot or unavailable/invalid futures feed yields NO_TRADE. No order, fill, position, wallet, or policy state can be changed by these read endpoints.
 
 **Rollback:** Revert only the research provider, projection and endpoints; historical Choice/Ditas records remain unchanged. No database migration is introduced.
+
+## Increment: running FAST/DEEP background research (November 23, 2026)
+
+This branch now has a bounded **operational** market-research pass, rather than only
+owner-triggered research endpoints:
+
+- `server/src/choice/dualRuntime.ts` uses the existing refreshed `market.dex`
+  state and `assessFastMemecoinResearch`; no second DEX polling client is created.
+- The existing `bot/bot.ts` background lane invokes `runDualResearchPass` after
+  provider refresh, subject to the canonical engine lease. The hot exit-monitor
+  and scanner loops remain separate and unchanged.
+- Public Binance USD-M candle research rotates BTCUSDT / ETHUSDT / SOLUSDT,
+  fetching **at most one symbol every five minutes**. It uses the existing
+  public-futures provider, the existing chart analyzer, and the same closed
+  snapshot cutoff for all three intervals. This is NOT a low-latency futures feed.
+- Missing/stale DEX observations yield a no-trade FAST result. Failed futures
+  fetch/analysis immediately invalidates the cached DEEP result; prior hypotheses
+  cannot be silently carried forward as current.
+- `GET /api/choice/dual/status` exposes recent research results, timestamps,
+  staleness, and failures behind the existing authenticated API. It does not
+  create trade intents or grant execution authority.
+- `MIA_DUAL_RESEARCH=0` turns off new background evaluations without affecting
+  the canonical scanner, risk gate, paper OMS or exit monitoring.
+- `server/test/dual-runtime.test.ts` tests bounded polling, concurrency,
+  stale-data rejection, provider failure and order/ledger isolation.
+
+**Environment parity:** All research inputs and safety checks are independent
+of paper versus future certified live venue accounts. This **does not** imply
+that live execution, DEX sells, futures margin, signing, or recovery is enabled.
+MIA remains paper-only while real-money authorization and venue certification
+are incomplete. The existing `PR #117` mode hard lock and `PRs #118/#119/#121`
+OMS safety work must be reconciled before any active live-trading rollout.
+
+**Acceptance:** Run `npm run typecheck`, `npm test`, `npm run build`,
+`npm run scan:secrets`, and relevant authentication tests. Treat CI or
+deployment failures as blockers; this draft must not merge on documentation
+or compile checks alone.
