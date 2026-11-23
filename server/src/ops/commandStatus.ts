@@ -1,4 +1,5 @@
 import { dualResearchStatus } from '../choice/dualRuntime.js';
+import { durableSessionStatus } from './durableSession.js';
 import { latencyReport } from '../core/latency.js';
 import { get } from '../db/db.js';
 import { paperChoiceOutcomes } from '../ditas/execution.js';
@@ -32,6 +33,7 @@ export function commandStatus(engine: EngineView, at = Date.now()) {
   `, PAPER_ACCOUNT)!;
   return {
     readiness: readiness(engine, at),
+    durableSession: durableSessionStatus(),
     recovery: {
       unresolvedOrders: unreconciledPaperOrders(),
       positions: protection.length,
@@ -43,7 +45,8 @@ export function commandStatus(engine: EngineView, at = Date.now()) {
     execution,
     providers: { live: sourceHealth.filter((provider) => provider.status === 'LIVE').length, total: sourceHealth.length },
     research: {
-      fast: { checkedAt: research.fast.checkedAt, stale: research.fast.stale, count: research.fast.result?.candidates.length ?? null },
+      fast: { checkedAt: research.fast.checkedAt, stale: research.fast.stale,
+        count: research.fast.result?.candidates.length ?? null, launchIntake: research.fast.launchIntake },
       deep: { checkedAt: research.deep.attemptAt, stale: research.deep.stale, symbol: research.deep.symbol,
         error: research.deep.error !== null, state: research.deep.result?.state ?? null,
         fundingRate: context?.funding && fresh(context.funding.localAt) ? context.funding.rate : null,
