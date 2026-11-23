@@ -1,12 +1,8 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { NAV_GROUPS, JOE_PAGE, groupForPath, type NavGroup } from './nav';
+import { NAV_GROUPS, groupForPath, type NavGroup } from './nav';
 
-/**
- * Six-destination navigation (Home · Markets · Autopilot · Portfolio · AI Intelligence · Settings & Security) with one
- * level of submenu, a collapsible icon rail, sibling-page tabs and a short mobile bar with "More". Presentation only:
- * every route and component is unchanged, and no control here can change trading mode, limits or funding.
- */
+/** Four primary operator destinations; legacy views remain accessible by URL and command search. */
 const store = { get<T>(k: string, d: T): T { try { const v = localStorage.getItem(k); return v ? (JSON.parse(v) as T) : d; } catch { return d; } },
   set(k: string, v: unknown) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable: preference not kept */ } } };
 
@@ -18,9 +14,8 @@ export function SideNav({ collapsed }: { collapsed: boolean }) {
   useEffect(() => store.set('mia-nav-open', open), [open]);
   return <nav className="nav" aria-label="Main">
     {NAV_GROUPS.map((g) => g.pages.length === 1
-      ? <NavLink key={g.id} to={g.pages[0].to} end className="navgroup-link" title={g.desc}><span className="ic" aria-hidden>{g.icon}</span><span className="lbl">{g.label}</span></NavLink>
+      ? <NavLink key={g.id} to={g.pages[0].to} end className={({ isActive }) => `navgroup-link${isActive || current?.id === g.id ? ' active' : ''}`} title={g.desc}><span className="ic" aria-hidden>{g.icon}</span><span className="lbl">{g.label}</span></NavLink>
       : <Group key={g.id} g={g} active={current?.id === g.id} expanded={!collapsed && !!open[g.id]} collapsed={collapsed} onToggle={() => setOpen((o) => ({ ...o, [g.id]: !o[g.id] }))} />)}
-    <NavLink to={JOE_PAGE.to} className="navgroup-link" title={JOE_PAGE.desc}><span className="ic" aria-hidden>{JOE_PAGE.icon}</span><span className="lbl">{JOE_PAGE.label}</span></NavLink>
   </nav>;
 }
 
@@ -51,9 +46,9 @@ export function GroupTabs() {
 /** Mobile: four destinations plus "More" (opens the full menu). The operating-mode badge stays in the top bar. */
 export function MobileNav({ onMore, moreOpen }: { onMore: () => void; moreOpen: boolean }) {
   const loc = useLocation(); const cur = groupForPath(loc.pathname)?.id;
-  const items = NAV_GROUPS.filter((g) => ['home', 'markets', 'autopilot', 'portfolio'].includes(g.id));
+  const items = NAV_GROUPS;
   return <nav className="mobnav" aria-label="Mobile">
-    {items.map((g) => <NavLink key={g.id} to={g.pages[0].to} end={g.id === 'home'} className={cur === g.id ? 'active' : undefined} aria-current={cur === g.id ? 'page' : undefined}><span aria-hidden>{g.icon}</span>{g.label}</NavLink>)}
+    {items.map((g) => <NavLink key={g.id} to={g.pages[0].to} end className={cur === g.id ? 'active' : undefined} aria-current={cur === g.id ? 'page' : undefined}><span aria-hidden>{g.icon}</span>{g.label}</NavLink>)}
     <button type="button" className={moreOpen ? 'active' : undefined} onClick={onMore} aria-expanded={moreOpen} aria-label="More pages"><span aria-hidden>☰</span>More</button>
   </nav>;
 }
