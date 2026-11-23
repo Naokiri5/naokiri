@@ -38,6 +38,8 @@ export function openDb(file?: string) {
   }
 }
 export function getDb() { return db ?? openDb(); }
+/** Non-opening probe for optional background research; keeps isolated tests and offline tasks file-free. */
+export function isDbOpen() { return db !== null; }
 export function closeDb() { db?.close(); db = null; }
 
 export function all<T = any>(sql: string, ...p: any[]): T[] { return getDb().prepare(sql).all(...p) as T[]; }
