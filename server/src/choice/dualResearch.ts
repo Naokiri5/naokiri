@@ -93,7 +93,7 @@ export function reconstructDeepFuturesResearch(snapshot: FuturesSnapshot): DeepF
     '4h': analyzeChart(id, '4h', snapshot.candles['4h'], snapshot.asOf),
   };
   const common = {
-    version: DUAL_RESEARCH_VERSION, lane: 'DEEP_FUTURES' as const,
+    version: DUAL_RESEARCH_VERSION as typeof DUAL_RESEARCH_VERSION, lane: 'DEEP_FUTURES' as const,
     rolloutMode: 'RESEARCH_ONLY' as const, tradingAuthority: false as const,
     market: 'CRYPTO_PERPETUAL_FUTURES' as const, symbol: snapshot.symbol,
     source: snapshot.source, asOf: snapshot.asOf, chartEvidence,
