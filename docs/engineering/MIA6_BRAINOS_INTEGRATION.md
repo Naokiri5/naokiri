@@ -240,3 +240,16 @@ The existing production health probe is a process/supervisor signal, distinct fr
 The strict acceptance scenarios remain open. FAST still needs a genuine launch event, verifiable on-chain evidence and a sell route before a qualifying paper entry can reach the existing authority. DEEP still needs eligible strategy selection and market-specific risk, depth and paper execution. Neither can complete the requested chain from owner session through execution, protected exit, reconciliation and Joe explanation today. Future validation must exercise the failing as well as successful paths, including invalid evidence and strategy version, loss of lease, late or duplicate callback, partial and unknown fill state, provider and AI timeouts, restart, emergency stop, and closure with remaining positions.
 
 The integration added no database migration and relies on existing risk, paper OMS, ledger, lease, event, provider and memory owners. Exact-head GitHub checks and external hosting checks are separate from local results. Prospective paper soak, release-level risk and security review, market-specific execution adapters, verified signer and venue integration, and explicit owner authorization remain release requirements.
+
+
+## BrainOS Phase 2: dependency-aware evidence readiness (2026-11-23)
+
+This branch adds **server/src/knowledge/capabilityGraph.ts** and **server/test/brain-capability-graph.test.ts**. The graph uses the existing 11 Autopilot and seven Settings service descriptors, never duplicates their providers, schedulers, databases, financial authorities or execution handlers.
+
+The typed **mia.brain.network.v1** contract exposes source-backed owner, supported mind, dependencies, timestamp, readiness and explicit **tradingAuthority: false** for every capability. All source snapshots expire after three current background refresh intervals (180 seconds); missing and future-dated evidence fails closed. Internal dependency chains include terminal -> scanner -> intelligence, terminal -> bubble map, holder map -> copy trading, and risk policy/security/connections -> release gates.
+
+Statuses are **EVIDENCE_READY, PARTIAL, PAPER_ONLY, OWNER_ACTION, DEGRADED, BLOCKED, UNAVAILABLE**. An otherwise-ready downstream service is blocked when an upstream dependency is not ready. Source evidence is never permission to trade, never proof of profitability, and cannot grant LIVE access. Existing Academy memory carries the evaluated graph, and Trader Joe includes graph readiness counts in its read-only status explanation.
+
+This completes a bounded internal-readiness slice of the supplied BrainOS implementation prompt, **not** the durable session FSM or the FAST/DEEP trading execution pipelines. Both Run Session and Close Session remain deliberately disabled pending true execution wiring, safe position supervision and restart reconciliation. New evidence is intentionally advisory; the existing owner-approved risk gate, OMS, ledger, DITAS and release gates retain authority.
+
+**Exact-head verification still required:** npm run typecheck; npm test -w server; npm run build; npm run test:e2e; npm run scan:secrets; npm audit --audit-level=high; independent safety review; and deployment checks. Do not merge while any required checks or release prerequisites remain unresolved.
