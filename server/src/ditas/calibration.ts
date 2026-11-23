@@ -72,3 +72,103 @@ export function calibrationReport(rows: readonly CalibrationRow[], options: Cali
     note: 'EVALUATED means metrics were computed on a sample-qualified cohort, not proof of calibration or future profit. Forecast provenance and target definitions must be checked separately; evidence scores are never converted to probabilities.',
   };
 }
+
+/**
+ * BrainOS 6.1: genuine settled three-way forecast evaluation.
+ * Unlike chart-pattern confidence these values MUST be probabilities from a
+ * separately calibrated model. This extension does not promote any strategy.
+ */
+export type ScenarioOutcomeClass = 'BULLISH' | 'SIDEWAYS' | 'BEARISH';
+export type ScenarioProbabilities = Record<ScenarioOutcomeClass, number>;
+export interface MulticlassScenarioScore {
+  brierScore: number;
+  logLoss: number;
+  realizedClassProbability: number;
+  signedCalibrationResidual: number;
+  calibrationStatus: 'MEASURED_NOT_CERTIFIED';
+}
+const SCENARIO_CLASSES: ScenarioOutcomeClass[] = ['BULLISH','SIDEWAYS','BEARISH'];
+export function scoreMulticlassForecast(
+  probabilities: ScenarioProbabilities,
+  realized: ScenarioOutcomeClass,
+): MulticlassScenarioScore {
+  if (!SCENARIO_CLASSES.includes(realized)) throw new Error('INVALID_SCENARIO_OUTCOME');
+  const values = SCENARIO_CLASSES.map(key => probabilities?.[key]);
+  if (values.some(p => !Number.isFinite(p) || p < 0 || p > 1)
+      || Math.abs(values.reduce((a, b) => a + b, 0) - 1) > 1e-7)
+    throw new Error('INVALID_SCENARIO_DISTRIBUTION');
+  const brierScore = SCENARIO_CLASSES.reduce(
+    (score, key) => score + (probabilities[key] - (key === realized ? 1 : 0)) ** 2, 0,
+  );
+  const realizedClassProbability = probabilities[realized];
+  const epsilon = 1e-12;
+  return {
+    brierScore, logLoss: -Math.log(Math.max(epsilon, Math.min(1 - epsilon, realizedClassProbability))),
+    realizedClassProbability, signedCalibrationResidual: realizedClassProbability - 1,
+    calibrationStatus: 'MEASURED_NOT_CERTIFIED',
+  };
+}
+
+export interface ScenarioRegimeObservation {
+  regime: 'TRENDING_BULL' | 'TRENDING_BEAR' | 'RANGING' | 'HIGH_VOLATILITY' | 'ILLIQUID' | 'TRANSITIONAL';
+  probabilities: ScenarioProbabilities;
+  realized: ScenarioOutcomeClass;
+  /** Only actual executed positions may contribute verified trading expectancy. */
+  wasExecuted: boolean;
+  realizedNetReturnBps: number | null;
+}
+export function scoreScenariosByRegime(
+  observations: readonly ScenarioRegimeObservation[],
+  minSamples = 25,
+) {
+  if (!Number.isInteger(minSamples) || minSamples <= 0) throw new Error('INVALID_REGIME_MIN_SAMPLES');
+  const grouped = new Map<ScenarioRegimeObservation['regime'], ScenarioRegimeObservation[]>();
+  for (const row of observations) {
+    if (row.wasExecuted && (row.realizedNetReturnBps == null || !Number.isFinite(row.realizedNetReturnBps)))
+      throw new Error('EXECUTED_SCENARIO_REQUIRES_SETTLED_NET_RETURN');
+    if (!row.wasExecuted && row.realizedNetReturnBps != null)
+      throw new Error('SHADOW_SCENARIO_CANNOT_CLAIM_EXECUTED_PNL');
+    scoreMulticlassForecast(row.probabilities, row.realized);
+    const g = grouped.get(row.regime) ?? [];
+    g.push(row); grouped.set(row.regime, g);
+  }
+  return [...grouped.entries()].map(([regime, samples]) => {
+    const scores = samples.map(x => scoreMulticlassForecast(x.probabilities, x.realized));
+    const executed = samples.filter(x => x.wasExecuted);
+    return {
+      regime, sampleCount: samples.length, executedCount: executed.length,
+      sampleQualified: samples.length >= minSamples,
+      meanBrierScore: scores.reduce((n,x)=>n+x.brierScore,0)/scores.length,
+      meanLogLoss: scores.reduce((n,x)=>n+x.logLoss,0)/scores.length,
+      actualExecutedNetExpectancyBps: executed.length
+        ? executed.reduce((n,x)=>n+x.realizedNetReturnBps!,0)/executed.length : null,
+      tradingAuthority: false as const,
+      note: 'Historical cohort statistics are not model certification or entry authority.',
+    };
+  });
+}
+
+export interface ScenarioPromotionEvidence {
+  walkForward: { windowCount: number; sampleCount: number; meanBrier: number; netExpectancyBps: number; passed: boolean };
+  untouchedHoldout: { datasetHash: string; sampleCount: number; meanBrier: number; netExpectancyBps: number; passed: boolean };
+  shadow: { durationHours: number; sampleCount: number; slippageDriftBps: number; passed: boolean };
+  driftQuarantined: boolean;
+}
+/** A release-review recommendation, NEVER automatic model deployment or a LIVE gate. */
+export function reviewScenarioModelPromotion(e: ScenarioPromotionEvidence) {
+  const reasons: string[] = [];
+  if (!e.walkForward.passed || e.walkForward.windowCount < 4 || e.walkForward.sampleCount < 120
+      || !Number.isFinite(e.walkForward.meanBrier) || !Number.isFinite(e.walkForward.netExpectancyBps)
+      || e.walkForward.netExpectancyBps <= 0) reasons.push('WALK_FORWARD_UNVERIFIED');
+  if (!e.untouchedHoldout.passed || !e.untouchedHoldout.datasetHash
+      || e.untouchedHoldout.sampleCount < 50 || !Number.isFinite(e.untouchedHoldout.meanBrier)
+      || !Number.isFinite(e.untouchedHoldout.netExpectancyBps)
+      || e.untouchedHoldout.netExpectancyBps <= 0) reasons.push('HOLDOUT_UNVERIFIED');
+  if (!e.shadow.passed || e.shadow.durationHours <= 0 || e.shadow.sampleCount < 30
+      || !Number.isFinite(e.shadow.slippageDriftBps) || Math.abs(e.shadow.slippageDriftBps) > 6)
+    reasons.push('SHADOW_EXECUTION_UNVERIFIED');
+  if (e.driftQuarantined) reasons.push('LIVE_CALIBRATION_DRIFT');
+  return { stage: e.driftQuarantined ? 'DRIFT_QUARANTINED' as const
+      : reasons.length ? 'SHADOW_ONLY' as const : 'MODEL_REVIEW_REQUIRED' as const,
+    reasons, tradingAuthority: false as const, automaticPromotion: false as const };
+}
