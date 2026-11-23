@@ -253,3 +253,36 @@ Statuses are **EVIDENCE_READY, PARTIAL, PAPER_ONLY, OWNER_ACTION, DEGRADED, BLOC
 This completes a bounded internal-readiness slice of the supplied BrainOS implementation prompt, **not** the durable session FSM or the FAST/DEEP trading execution pipelines. Both Run Session and Close Session remain deliberately disabled pending true execution wiring, safe position supervision and restart reconciliation. New evidence is intentionally advisory; the existing owner-approved risk gate, OMS, ledger, DITAS and release gates retain authority.
 
 **Exact-head verification still required:** npm run typecheck; npm test -w server; npm run build; npm run test:e2e; npm run scan:secrets; npm audit --audit-level=high; independent safety review; and deployment checks. Do not merge while any required checks or release prerequisites remain unresolved.
+
+## BrainOS 6.1 FAST / DEEP incremental implementation (2026-11-23)
+
+This increment is **real repository code**, integrated into the existing BrainOS draft. It does **not** add an alternate broker, risk engine, OMS, ledger, blockchain signer, or an autonomous LIVE authorization path.
+
+### What is implemented
+
+- Schema v6: append-only SQLite migration with durable brainos session checkpoints/audits, FLIN research candidates, and DEEP post-close decisions.
+- `ops/durableSession.ts`: atomic `tx()`-based state transitions, versioned audit events, canonical leader lease checks, crash recovery that always suspends new entries, owner-close drain checks, and permanent exit/reconciliation obligations. `buildApp()` invokes recovery on boot. Actual RUN remains unavailable because `sessionPreflight().canRun` is not certified; LIVE remains blocked.
+- `market/flinQueue.ts`: bounded ingestion (250 records per pass) of already-fetched **DEX profile observations**, stable candidate IDs, persisted replay-safe deduplication and newer-evidence protection. This does **not** detect all on-chain deployments; true Solana program event subscriptions, RPC mint checks and Jupiter execution are still missing.
+- `choice/dualRuntime.ts`: FLIN intake piggybacks on the existing background research owner only when a DB is already open. Failures do not affect protective exits. The research status includes intake statistics; `dualResearch.ts` can compare up to 200 fresh observed candidates in a pass instead of 20.
+- `market/flinQueue.ts`: adversarial permission/extension/sell-route gate for **caller-supplied verified evidence**; no RPC verification is implied by the interface, no fabricated buy/sell quote, and even `RESEARCH_QUALIFIED` has `tradingAuthority: false`.
+- `choice/dpbm.ts`: staged legs with aggregate risk cap validation, non-martingale close transitions, no entry after unresolved fills or unreconciled ledger, optional reentry **candidate only**, and idempotent persisted decision evidence. Real futures position-bundle placement remains blocked.
+- `chart/scenarios.ts` + existing `choice/dualResearch.ts`: multi-timeframe deterministic structural scenario weights, explicit `UNCALIBRATED` metadata, and no invented win probability. Existing future-mark and liquidation requirements remain.
+- `ditas/calibration.ts`: proper three-class Brier/log-loss scoring, regime-sliced realized executed expectancy (shadow projections never count as realized profit), and review-only walk-forward/holdout/shadow/drift gating. No automated model self-promotion.
+- The existing command-status payload includes durable-session and FAST intake visibility.
+
+### Verification tests added
+
+- `test/flin-queue.test.ts`: 150 token observations, deduplication, rate bounds, source replay ordering, incomplete permissions, Token-2022 flags, unsellable routes and nonpositive all-in expected edge.
+- `test/dpbm-postclose.test.ts`: staged weights, aggregate exposure, unreconciled exits, adverse close recovery, idempotency and zero OMS/ledger mutations.
+- `test/durable-session.test.ts`: WAL reopen/crash suspension, stale lease rejection, draining pending orders, risk/emergency shutdown and versioned audit trail.
+- `test/deep-scenarios.test.ts`: valid and mismatched candle snapshots, three-way proper scores, regime separation and independent promotion review.
+
+### Hard release blockers (do not merge or enable LIVE)
+
+1. FAST is **not yet** a true high-throughput Solana launch-event subscription service. The DEX provider currently returns only an approximate sample of listings per refresh. No trusted RPC authority proofs, Jupiter sell route, Jito submission/landing, transaction recovery or LIVE signer has been implemented.
+2. DEEP has no derivative OMS adapter, margin/mark-price/liquidation model, verified depth or approved profitable strategy. Closed-trade lineage is **not** automatically bound to actual OMS fills until the position-linkage integration is completed.
+3. Durable RUN / CLOSE operator API cannot authorize trading: session preflight deliberately returns `canRun:false`; the state machine is persistent and tested but has no bypass to trade. ExitSupervisor continues to run via the existing bot owner; this increment does not replace its scheduler.
+4. Calibrated predictions require actual settled forecasts, walk-forward and untouched holdout. The scenario weights are explicitly uncalibrated. Realized PnL and true live trading performance are not certified.
+5. Exact-head CI, an independent risk/security review, stacked dependency reconciliation, paper soak, deployment and owner approval are required before merge.
+
+**Promotion policy:** retain PR #135 as an OPEN DRAFT and make no automatic financial authorization changes. PAPER and LIVE must use the same canonical safety decision system after verified venue integrations are added.
