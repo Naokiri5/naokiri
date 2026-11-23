@@ -72,6 +72,20 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
     const until = (last?.closed_at ?? 0) + pol.cooldownMinutesAfterLossStreak * 60_000;
     if (nowTs < until) deny.push(`LOSS_STREAK_COOLDOWN until ${iso(until)}`); else review.push(`LOSS_STREAK_REVIEW (${acct.consecutiveLosses} consecutive losses)`);
   }
+  // A stopped-out instrument must cool down before an automated or owner-approved re-entry.
+  // Reuse authoritative CLOSED paper positions: no separate memory store or timer process.
+  // Only completed STOP / TRAIL_STOP exits count; partial exits, other accounts and future
+  // timestamps cannot activate the guard. This check is shared by decision and OMS risk paths.
+  const stopReentryCooldownMs = 30 * 60_000;
+  const lastStop = get<{ closed_at: number }>(
+    "SELECT closed_at FROM positions WHERE account=? AND instrument=? AND status='CLOSED' AND exit_reason IN ('STOP','TRAIL_STOP') AND closed_at>? AND closed_at<=? ORDER BY closed_at DESC,id DESC LIMIT 1",
+    account, p.instrumentId, nowTs - stopReentryCooldownMs, nowTs,
+  );
+  if (lastStop) {
+    const until = lastStop.closed_at + stopReentryCooldownMs;
+    ev.stopReentryCooldownUntil = iso(until);
+    deny.push(`STOP_REENTRY_COOLDOWN until ${iso(until)}`);
+  }
   const open = openPositions(account);
   if (open.length >= pol.maxConcurrentPositions) deny.push(`MAX_CONCURRENT_POSITIONS ${open.length}`);
   if (open.some((o) => o.instrument === p.instrumentId)) deny.push('DUPLICATE_INSTRUMENT_POSITION');

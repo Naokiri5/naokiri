@@ -6,6 +6,7 @@ import { market } from '../market/store.js';
 import { assessQuality } from '../market/quality.js';
 import { memoryDetail, memoryEvents } from './memory.js';
 import { strategyPassports } from './passports.js';
+import { paperExperienceOverview } from './experience.js';
 import { compareFingerprints } from './fingerprint.js';
 import { calibrationReport } from './calibration.js';
 import { simulateTwin, type TwinAssumptions } from './twin.js';
@@ -15,7 +16,8 @@ export const DITAS_COVERAGE = [
   { foundation: 'Market data truth', status: 'PARTIAL', detail: 'Strict timestamps, identities, quotes, books and closed-candle validation; polling crypto only. No WebSocket/session certification.' },
   { foundation: 'Decision memory', status: 'PARTIAL', detail: 'Immutable snapshots and events for new evaluated scans/proposals/decisions; existing actual fills remain in authoritative OMS tables. Legacy evidence is not backfilled.' },
   { foundation: 'Market DNA', status: 'PARTIAL', detail: 'Normalized captured features and time-filtered similarity; unavailable macro/fundamental dimensions remain missing.' },
-  { foundation: 'Strategy passports', status: 'PARTIAL', detail: 'Current rules, version-aware OOS and recent paper health; lifecycle remains existing owner-controlled registry.' },
+  { foundation: 'Strategy passports', status: 'PARTIAL', detail: 'Current rules, version-aware OOS and paper-account-only recent health; lifecycle remains existing owner-controlled registry.' },
+  { foundation: 'Outcome-based no-trade review', status: 'PARTIAL', detail: 'Canonical closed paper position cohort, bounded historical cutoff and shadow advisory. Optional paper-only abstention on degraded evidence; requires prospective validation.' },
   { foundation: 'Decision Twin', status: 'PARTIAL', detail: 'Frozen proposal, shadow/delayed/WAIT alternatives with costs/depth limits. Hypothetical, uploaded history provenance unverified; exit-depth/queue impact not modeled.' },
   { foundation: 'Confidence calibration', status: 'PARTIAL', detail: 'Explicit probability forecast/outcome records and cohort metrics. No conversion of agent votes; no calibrated production model.' },
   { foundation: 'Portfolio and execution', status: 'PARTIAL', detail: 'Reuses risk, OMS and ledger. Extended sector/event budgets and acknowledgement/partial-fill telemetry pending.' },
@@ -37,7 +39,7 @@ export function ditasOverview(cohort?: string) {
   const positions = get<any>("SELECT COUNT(*) n,COALESCE(SUM(realized_pnl),0) pnl FROM positions WHERE status='CLOSED' AND account=?", PAPER_ACCOUNT)!;
   const fingerprints = all<any>(`SELECT e.id event_id,json_extract(s.payload,'$.fingerprint') fingerprint FROM ditas_events e JOIN ditas_snapshots s ON s.id=e.snapshot_id WHERE json_extract(s.payload,'$.fingerprint') IS NOT NULL ORDER BY e.seq DESC LIMIT 100`).map(r => ({ ...P(r.fingerprint), eventId: r.event_id }));
   return { counts: { snapshots: count('ditas_snapshots'), events: count('ditas_events'), twins: count('ditas_twin_runs'), forecasts: count('ditas_forecasts'), outcomes: count('ditas_outcomes') },
-    dataHealth: market.universe.slice(0, 100).map(instrumentId => ({ instrumentId, ...assessQuality(instrumentId) })), passports: strategyPassports(), events, twins, calibration: calibrationFor(cohort), fingerprints,
+    dataHealth: market.universe.slice(0, 100).map(instrumentId => ({ instrumentId, ...assessQuality(instrumentId) })), passports: strategyPassports(), experience: paperExperienceOverview(), events, twins, calibration: calibrationFor(cohort), fingerprints,
     actual: { label: 'PAPER', orders: get<any>('SELECT COUNT(*) n FROM orders WHERE account=?', PAPER_ACCOUNT)!.n, fills: get<any>('SELECT COUNT(*) n FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.account=?', PAPER_ACCOUNT)!.n, closedPositions: positions.n, realizedPnl: positions.pnl, fees: get<any>('SELECT COALESCE(SUM(f.fee),0) n FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.account=?', PAPER_ACCOUNT)!.n },
     coverage: DITAS_COVERAGE, controls: getControl(), memoryIntegrity: { status: 'NOT_CHECKED', verificationEndpoint: '/api/ditas/verify' }, note: 'Research evidence only. Simulations are separate from the paper OMS; no live certification or automatic strategy changes.' };
 }

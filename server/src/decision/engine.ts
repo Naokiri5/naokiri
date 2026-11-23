@@ -6,6 +6,7 @@ import { evaluateRisk, type RiskDecision } from '../risk/gate.js';
 import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
 import { getControl } from '../core/mode.js';
 import { recordOpportunity } from '../ditas/memory.js';
+import { paperExperience } from '../ditas/experience.js';
 import { run, J, tx } from '../db/db.js';
 import { uid, iso } from '../core/util.js';
 import { record } from '../core/latency.js';
@@ -28,6 +29,8 @@ export interface DecisionReport {
   opportunity: OpportunityScore; consensus: { id: string; state: string; support: number; opposition: number; expiresAt: string };
   risk: RiskDecision | null; decision: DecisionState; finalDecision: 'ENTER' | 'WAIT' | 'REJECT' | 'MONITOR';
   steps: PipelineStep[]; indicators: ReturnType<typeof readIndicators>;
+  /** Historical paper cohort; SHADOW by default and never an order authorization. */
+  experience?: ReturnType<typeof paperExperience>;
   /** Explanatory knowledge references (Academy). Never read by the risk gate or OMS. */
   knowledge?: { refs: KnowledgeRef[]; authority: string };
   disclaimer: string;
@@ -49,6 +52,10 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
   const expired = isExpired(qci);
   step('QCI consensus record', qci.state === 'STRONG_CONSENSUS' && !expired ? 'PASS' : qci.state === 'VETOED' ? 'FAIL' : 'WARN', `${expired ? 'EXPIRED' : qci.state}: ${qci.reason_codes.slice(0, 3).join('; ')}`);
   step('Strategy performance & regime suitability', stratStats && stratStats.trades >= 20 ? (stratStats.expectancyR > 0 ? 'PASS' : 'FAIL') : 'WARN', stratStats ? `OOS ${stratStats.trades} trades, ${stratStats.expectancyR.toFixed(3)}R expectancy; regime ${cand.regime}` : `no out-of-sample record; regime ${cand.regime}`);
+  const experience = paperExperience(cand.strategyId, cand.strategyVersion, cand.regime);
+  const avoidPaperEntry = experience.mode === 'PAPER_ENFORCE' && experience.signal === 'DEGRADED_REVIEW';
+  step('Observed paper cohort / no-trade review', avoidPaperEntry ? 'FAIL' : experience.signal === 'INSUFFICIENT_SAMPLE' ? 'WARN' : experience.signal === 'DEGRADED_REVIEW' ? 'WARN' : 'PASS',
+    experience.signal + ': ' + experience.health.samples + ' matching closed paper positions; mode ' + experience.mode);
   const opp = scoreOpportunity(qci, stratStats, correlatedOpen);
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
 
@@ -57,6 +64,7 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
   if (q.status === 'FAIL' || !ctx.ticker) decision = 'INSUFFICIENT_DATA';
   else if (!ctx.safety.eligibleForAutomation || qci.state === 'VETOED') decision = 'REJECTED';
   else if (expired) decision = 'WAIT_FOR_CONFIRMATION';
+  else if (avoidPaperEntry) decision = 'WAIT_FOR_CONFIRMATION';
   else if (qci.state === 'NO_QUORUM' || qci.state === 'MIXED_CONSENSUS') decision = 'WAIT_FOR_CONFIRMATION';
   else if (opp.score < pol.minOpportunityScore) decision = 'APPROVED_FOR_MONITORING';
   else if (mode === 'OBSERVE') decision = 'APPROVED_FOR_MONITORING';
@@ -87,7 +95,7 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
     missingInformation: [...qci.missing_inputs, ...opp.missing.map((m) => `score factor missing: ${m}`)],
     dataFreshness: { quoteAgeMs: q.quoteAgeMs, candleAgeMs: q.candleAgeMs, bookAgeMs: q.bookAgeMs, status: q.status },
     opportunity: opp, consensus: { id: qci.consensus_id, state: expired ? 'EXPIRED' : qci.state, support: qci.weighted_support, opposition: qci.weighted_opposition, expiresAt: qci.expires_at },
-    risk, decision, finalDecision: final, steps, indicators: readIndicators(ctx.f), knowledge: strategyKnowledge(cand.strategyId),
+    risk, decision, finalDecision: final, steps, indicators: readIndicators(ctx.f), experience, knowledge: strategyKnowledge(cand.strategyId),
     disclaimer: 'Opportunity score and consensus are evidence summaries, not probabilities of profit. Paper trading only.',
   };
   record('decision.engine', performance.now() - t0);
