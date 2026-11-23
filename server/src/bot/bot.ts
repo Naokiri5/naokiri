@@ -116,7 +116,7 @@ async function scanLane() {
     });
     // A lease loss must not allow this copy to append another round.
     if (!stillLeader()) return;
-    try {
+    if (process.env.MIA_CHOICE_SHADOW !== '0') try {
       const round = evaluateShadowChoices(observed, {
         roundId: uid('choice'), startedAt: choiceStartedAt, completedAt: Date.now(),
         mode: modeAtStart, modeChanged: getControl().mode !== modeAtStart,
