@@ -8,6 +8,7 @@ import { reconcile } from '../portfolio/calendar.js';
 import { provider } from '../providers/http.js';
 import { recentReleaseGateEvidence } from '../qa/gates.js';
 import { currentPolicy } from '../risk/policy.js';
+import { brainOverview } from '../knowledge/brain.js';
 import { stepUpMethod } from '../security/stepUp.js';
 import { staleAfter, type EngineView } from './readiness.js';
 
@@ -88,6 +89,30 @@ function liveChecks(at: number): PreflightCheck[] {
   ];
 }
 
+/**
+ * The existing BrainOS bridge is refreshed on the leader lane. Treat the graph as
+ * advisory evidence ONLY: the execution lane and release gates still fail closed.
+ */
+function capabilityEvidenceChecks(mind: SessionMind, at: number): PreflightCheck[] {
+  const network = brainOverview(at).network;
+  const required = mind === 'FAST'
+    ? ['autopilot.asset_discovery', 'settings.risk_center', 'settings.connections_hub']
+    : ['autopilot.market_terminal', 'autopilot.ai_scanner', 'settings.strategy_lab',
+       'settings.risk_center', 'settings.connections_hub'];
+  const missing = network.capabilities.filter(c => required.includes(c.id) && c.readiness !== 'EVIDENCE_READY');
+  const status = missing.length === 0 ? 'PASS'
+    : missing.every(c => c.readiness === 'UNAVAILABLE') ? 'UNVERIFIED' : 'BLOCKED';
+  return [{
+    id: 'brainos-dependencies',
+    label: 'Internal capability evidence',
+    status,
+    detail: missing.length
+      ? 'Unverified or blocked source evidence: ' + missing.map(c => `${c.id} (${c.readiness})`).join(', ')
+      : 'Selected intelligence sources have fresh supporting evidence. Trading eligibility is evaluated separately.',
+    observedAt: network.evaluatedAt,
+  }];
+}
+
 /** Read-only assessment of a selection. The legacy spot scheduler follows its own canonical controls. */
 export function sessionPreflight(engine: EngineView, mind: SessionMind, environment: SessionEnvironment, at = Date.now()): SessionPreflight {
   const control = getControl();
@@ -103,6 +128,7 @@ export function sessionPreflight(engine: EngineView, mind: SessionMind, environm
     { id: 'owner-verification', label: 'Owner verification', status: stepUp === 'unavailable' ? 'BLOCKED' : 'PASS',
       detail: stepUp === 'unavailable' ? 'Set up an authenticator in Security Center to authorize sensitive actions.' : 'Owner verification is available for sensitive actions.' },
     ...researchChecks(mind, at),
+    ...capabilityEvidenceChecks(mind, at),
     ...(environment === 'PAPER' ? paperChecks(engine, at) : liveChecks(at)),
     { id: 'execution-lane', label: `${mind} execution`, status: 'BLOCKED',
       detail: mind === 'FAST'
