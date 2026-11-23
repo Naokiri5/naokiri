@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { brainRegistryOverview } from './cognitive/registry.js';
 import { market } from '../market/store.js';
 import { recentNews } from '../news/news.js';
 import { recentPrints } from '../whales/prints.js';
@@ -196,6 +197,7 @@ export function brainOverview(at = Date.now()) {
     }),
     latest: current,
     memoryAuthority: 'Existing knowledge A-F, DITAS append-only events, and canonical portfolio ledger',
+    cognitiveFoundation: brainRegistryOverview(),
   };
 }
 
