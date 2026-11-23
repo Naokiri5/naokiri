@@ -43,7 +43,7 @@ describe('Dual-intelligence market-specific research', () => {
     expect(result.candidates).toHaveLength(1);
     expect(result.candidates[0].eligibleForAutomation).toBe(false);
     expect(result.candidates[0].reasons).toContain('UNVERIFIED_SELL_EXECUTION_AND_CONTRACT_PERMISSIONS');
-    expect(assessFastMemecoinResearch([dexPair], NOW - 130000, NOW).reason).toBe('DEX_SOURCE_STALE_OR_MISSING');
+    expect(assessFastMemecoinResearch([dexPair], NOW - 250000, NOW).reason).toBe('DEX_SOURCE_STALE_OR_MISSING');
   });
 
   it('DEEP produces an immutable-identity research hypothesis from only three valid futures candle horizons', () => {
