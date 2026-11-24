@@ -1,5 +1,5 @@
 import { all, get } from '../../db/db.js';
-import { search } from '../search.js';
+import { search } from '../retrieval.js';
 import type { BrainKnowledgeClaim, CognitiveEvidenceClass } from './contracts.js';
 
 /**
