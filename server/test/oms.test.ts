@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -14,14 +14,22 @@ import { verifyAuditChain } from '../src/core/audit.js';
 import { run, all, get, J } from '../src/db/db.js';
 import { walkBook, QUALITY_LIMITS } from '../src/market/quality.js';
 import type { DecisionReport } from '../src/decision/engine.js';
+import { acquireOrRenewLease, type LeaseFence } from '../src/ops/lease.js';
 
 function report(id: string, last: number, over: Partial<DecisionReport> = {}): DecisionReport {
   const cid = `cand_${Math.random().toString(36).slice(2)}`;
-  return { id: `dec_${cid}`, candidateId: cid, traceId: 'tr', asset: id.split(':')[2], instrumentId: id, market: 'crypto', venue: 'binance', strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',
+  return { id: `dec_${cid}`, createdAt: new Date().toISOString(), candidateId: cid, traceId: 'tr', asset: id.split(':')[2], instrumentId: id, market: 'crypto', venue: 'binance', strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',
     entryRef: last, stopLoss: last * 0.97, takeProfit: [{ price: last * 1.045, fraction: 0.5, r: 1.5 }, { price: last * 1.09, fraction: 0.5, r: 3 }],
     consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 0.7, opposition: 0.1, expiresAt: new Date(Date.now() + 60_000).toISOString() },
     decision: 'PAPER_TRADE', opportunity: { score: 70, version: 'v', factors: [], missing: [] } as any, ...over } as DecisionReport;
 }
+
+function seedSpotCheckpoint(fence: LeaseFence, startedAt: number, state: 'RUNNING' | 'CLOSING_DRAINING_ENTRIES') {
+  run(`INSERT INTO brainos_sessions (session_id, version, state, environment, mind, lease_holder, lease_acquired_at,
+    fence_epoch, suspend_reason, started_at, updated_at) VALUES ('brainos-autopilot', 1, ?, 'PAPER', 'SPOT_PAPER', ?, ?, 1, ?, ?, ?)`,
+    state, fence.holder, fence.acquired_at, state === 'RUNNING' ? 'NONE' : 'OWNER_CLOSE_REQUESTED', startedAt, startedAt);
+}
+
 describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
   let id = ''; let last = 0;
   beforeEach(() => {
@@ -80,6 +88,51 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', rep.id, rep.candidateId, id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
     const oid = queueForApproval(rep)!; expect(oid).toBeTruthy();
     const res = decideApproval(oid, true); expect(res, JSON.stringify(res)).toMatchObject({ ok: true });
+  });
+  it('honors session close at the OMS write boundary and continues paper protection', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const original = openPositions()[0];
+    const cash = accountState().cash;
+    const engine = acquireOrRenewLease('engine', 'worker', 10_000)!;
+    setCrashHook((point) => {
+      if (point === 'entry.preTx') seedSpotCheckpoint(engine, Date.now(), 'CLOSING_DRAINING_ENTRIES');
+    });
+    try {
+      expect(submitEntry(report(id, last), 'bot', undefined, engine)).toEqual({ ok: false, reason: 'SESSION_NOT_RUNNING' });
+    } finally {
+      setCrashHook(null);
+    }
+    expect(queueForApproval(report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' }), engine)).toBeNull();
+    expect(listOrders()).toHaveLength(2);
+    expect(accountState().cash).toBe(cash);
+    expect(openPositions()).toMatchObject([{ id: original.id }]);
+    setBook(id, last * 0.96);
+    monitorPositions(undefined, engine);
+    expect(openPositions()).toHaveLength(0);
+    expect(reconcile().ok).toBe(true);
+  });
+  it.each(['decision', 'order'] as const)('blocks approval if its %s predates the current spot session', (stale) => {
+    const startedAt = Date.now();
+    const decisionAt = startedAt - (stale === 'decision' ? 1 : 0);
+    const pending = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION', createdAt: new Date(decisionAt).toISOString() });
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      pending.id, pending.candidateId, id, 'crypto', 'LONG', pending.strategy.id, pending.decision, 70, decisionAt, J(pending));
+    const orderId = queueForApproval(pending)!;
+    if (stale === 'order') run('UPDATE orders SET created_at=? WHERE id=?', startedAt - 1, orderId);
+    const engine = acquireOrRenewLease('engine', 'worker', 10_000)!;
+    seedSpotCheckpoint(engine, startedAt, 'RUNNING');
+    expect(decideApproval(orderId, true)).toEqual({ ok: false, reason: 'STALE_OR_LOST_ENGINE_FENCE' });
+    expect(decideApproval(orderId, true, engine)).toEqual({ ok: false, reason: 'ENTRY_EVIDENCE_OUTSIDE_SESSION' });
+    expect(get('SELECT status FROM orders WHERE id=?', orderId)).toEqual({ status: 'PENDING_APPROVAL' });
+    expect(accountState().cash).toBe(10_000);
+  });
+  it('rejects non-spot order evidence in a spot session', () => {
+    const engine = acquireOrRenewLease('engine', 'worker', 10_000)!;
+    seedSpotCheckpoint(engine, Date.now(), 'RUNNING');
+    const candidate = report(id, last, { market: 'crypto-dex' });
+    expect(submitEntry(candidate, 'bot', undefined, engine)).toEqual({ ok: false, reason: 'PAPER_SPOT_MARKET_OUTSIDE_SESSION_SCOPE' });
+    expect(queueForApproval({ ...candidate, decision: 'APPROVED_FOR_USER_CONFIRMATION' }, engine)).toBeNull();
+    expect(listOrders()).toHaveLength(0);
   });
   it('does not let automation consume an owner approval after a mode change', () => {
     const pending = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
@@ -187,6 +240,79 @@ describe('Order-book freshness and fill accounting', () => {
     market.deep.get(id)!.book!.ts = Date.now() - 180_001;
     expect(executeExit(pos.id, pos.qty, 'STALE_BOOK')).toBeNull();
     expect(openPositions()).toHaveLength(1);
+  });
+  it.each([
+    ['monitor.preTx', 'EXIT_STOP'],
+    ['exit.preTx', 'EXIT_MANUAL_CLOSE'],
+  ] as const)('rejects a book that expires at %s and exits once refreshed', (checkpoint, purpose) => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const position = openPositions()[0];
+    const cash = accountState().cash;
+    const exit = () => purpose === 'EXIT_STOP'
+      ? monitorPositions()
+      : executeExit(position.id, position.qty, 'MANUAL_CLOSE');
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const observedAt = Date.now();
+      setBook(id, last * 0.96, observedAt - QUALITY_LIMITS.maxExecBookAgeMs + 10);
+      setTicker(last * 0.96, observedAt);
+      setCrashHook((point) => {
+        if (point === checkpoint) vi.setSystemTime(observedAt + 20);
+      });
+
+      exit();
+
+      expect(sells()).toHaveLength(0);
+      expect(openPositions()).toEqual([position]);
+      expect(accountState().cash).toBe(cash);
+      expect(get('SELECT status FROM protection_incidents WHERE position_id=?', position.id)).toMatchObject({ status: 'OPEN' });
+
+      setCrashHook(null);
+      setBook(id, last * 0.96);
+      exit();
+
+      expect(openPositions()).toHaveLength(0);
+      expect(sells()).toMatchObject([{ purpose, qty: position.qty }]);
+      expect(reconcile().ok).toBe(true);
+    } finally {
+      setCrashHook(null);
+      vi.useRealTimers();
+    }
+  });
+  it('commits a target that sells the whole position after a venue minimum change', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const position = openPositions()[0];
+    // The minimum rises after entry. A half-size exit would leave an unsellable remainder.
+    market.instruments.get(id)!.minQty = position.qty * 0.6;
+    setBook(id, last * 1.11);
+
+    monitorPositions();
+
+    expect(openPositions()).toHaveLength(0);
+    expect(sells()).toMatchObject([{ purpose: 'EXIT_TARGET', qty: position.qty }]);
+    const saved = get<{ targets: string }>('SELECT targets FROM positions WHERE id=?', position.id)!;
+    expect(JSON.parse(saved.targets).targets.map((target: { done: boolean }) => target.done)).toEqual([true, false]);
+    expect(reconcile().ok).toBe(true);
+  });
+  it('time exit sells the exact holding after rounding a preceding target to whole lots', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const position = openPositions()[0];
+    const instrument = market.instruments.get(id)!;
+    instrument.stepSize = instrument.minQty = position.qty / 3;
+    run('UPDATE positions SET max_hold_ms=1000, opened_at=? WHERE id=?', Date.now() - 1000, position.id);
+    setBook(id, last * 1.05);
+
+    monitorPositions();
+
+    expect(openPositions()).toHaveLength(0);
+    const exits = sells();
+    expect(exits).toHaveLength(2);
+    const target = exits.find((fill) => fill.purpose === 'EXIT_TARGET');
+    const timeExit = exits.find((fill) => fill.purpose === 'EXIT_TIME');
+    expect(target?.qty).toBeCloseTo(instrument.stepSize, 10);
+    expect(timeExit?.qty).toBeCloseTo(position.qty - target!.qty, 10);
+    expect(reconcile().ok).toBe(true);
   });
   it('refuses to enter against a stale order book even when the ticker is fresh', () => {
     market.deep.get(id)!.book!.ts = Date.now() - QUALITY_LIMITS.maxExecBookAgeMs - 5_000;

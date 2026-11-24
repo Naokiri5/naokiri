@@ -1,29 +1,20 @@
 import { get, run, tx } from '../db/db.js';
 import { getControl } from '../core/mode.js';
 import { LeaseLostError, ownsLease, type LeaseFence } from './lease.js';
-import { sessionPreflight, type SessionMind } from './sessionPreflight.js';
+import { paperSpotSessionPreflight, sessionPreflight, type SessionMind } from './sessionPreflight.js';
 import type { EngineView } from './readiness.js';
+import { VENUE } from '../exec/oms.js';
 import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { reconcile } from '../portfolio/calendar.js';
+import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
+import {
+  BRAINOS_SESSION_ID, durableSessionStatus,
+  type BrainosSessionState, type DurableBrainosSession,
+} from './paperSpotEntry.js';
 
-export type BrainosSessionState = 'CLOSED' | 'RECOVERING_ON_BOOT' | 'RUNNING'
-  | 'ENTRY_SUSPENDED_RISK_HALT' | 'CLOSING_DRAINING_ENTRIES' | 'EMERGENCY_KILL_SWITCH';
-export type BrainosSuspendReason = 'NONE' | 'OWNER_CLOSE_REQUESTED' | 'RISK_HALT'
-  | 'LEASE_FENCING_LOST' | 'RECONCILIATION_MISMATCH' | 'EMERGENCY_HALT';
-export interface DurableBrainosSession {
-  session_id: string;
-  version: number;
-  state: BrainosSessionState;
-  environment: 'PAPER' | 'LIVE';
-  mind: SessionMind;
-  lease_holder: string | null;
-  lease_acquired_at: number | null;
-  fence_epoch: number;
-  suspend_reason: BrainosSuspendReason;
-  started_at: number | null;
-  closed_at: number | null;
-  updated_at: number;
-}
+export { durableSessionStatus, paperSpotEntryDenial } from './paperSpotEntry.js';
+export type { BrainosSessionState, BrainosSuspendReason, DurableBrainosSession } from './paperSpotEntry.js';
+
 export interface EntryPermissionVerdict {
   allowFastNewEntries: boolean;
   allowDeepNewEntries: boolean;
@@ -32,15 +23,9 @@ export interface EntryPermissionVerdict {
   ledgerReconciliationMustContinue: true;
   reason: string;
 }
-const SESSION_ID = 'brainos-autopilot';
-
-/** A read never creates an authorizing session or mutates the financial ledger. */
-export function durableSessionStatus(): DurableBrainosSession | null {
-  return get<DurableBrainosSession>('SELECT * FROM brainos_sessions WHERE session_id=?', SESSION_ID) ?? null;
-}
 function baseline(at: number): DurableBrainosSession {
   return {
-    session_id: SESSION_ID, version: 0, state: 'CLOSED', environment: 'PAPER',
+    session_id: BRAINOS_SESSION_ID, version: 0, state: 'CLOSED', environment: 'PAPER',
     mind: 'FAST', lease_holder: null, lease_acquired_at: null,
     fence_epoch: 0, suspend_reason: 'NONE', started_at: null, closed_at: null, updated_at: at,
   };
@@ -63,15 +48,49 @@ function persist(
     suspend_reason=excluded.suspend_reason,started_at=excluded.started_at,
     closed_at=excluded.closed_at,updated_at=excluded.updated_at
   WHERE brainos_sessions.version=?`,
-  SESSION_ID, next.version, next.state, next.environment, next.mind, next.lease_holder,
+  BRAINOS_SESSION_ID, next.version, next.state, next.environment, next.mind, next.lease_holder,
   next.lease_acquired_at, next.fence_epoch, next.suspend_reason,
   next.started_at, next.closed_at, next.updated_at, old.version);
   if (Number(outcome.changes) !== 1) throw new Error('SESSION_CHECKPOINT_CONFLICT');
   run(`INSERT INTO brainos_session_events(
     session_id,version,from_state,to_state,kind,fence_epoch,ts
   ) VALUES (?,?,?,?,?,?,?)`,
-  SESSION_ID, next.version, old.state, next.state, kind, next.fence_epoch, at);
+  BRAINOS_SESSION_ID, next.version, old.state, next.state, kind, next.fence_epoch, at);
   return next;
+}
+
+function cancelPaperPendingApprovals(reason: string, at: number) {
+  run(`UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=?
+    WHERE account=? AND venue=? AND side='BUY' AND purpose='ENTRY' AND status='PENDING_APPROVAL'`,
+  reason, at, PAPER_ACCOUNT, VENUE);
+}
+
+/** Enabling paper mode requires a separate owner-authorized session before new entries. */
+export function requirePaperSpotSession(at?: number) {
+  return tx(() => {
+    const now = at ?? Date.now();
+    return durableSessionStatus() ?? persist(baseline(now), 'CLOSED', 'PAPER_SPOT_SESSION_REQUIRED', now, { mind: 'SPOT_PAPER' });
+  });
+}
+
+/** Start the existing spot simulator after the authenticated owner has verified step-up. */
+export function openPaperSpotSession(engine: EngineView & { instanceId?: string }, fence: LeaseFence, at?: number) {
+  return tx(() => {
+    const now = at ?? Date.now();
+    const old = durableSessionStatus() ?? baseline(now);
+    if (old.state !== 'CLOSED') throw new Error('SESSION_NOT_CLOSED');
+    if (fence.name !== 'engine' || !ownsLease(fence, now) ||
+        (engine.instanceId !== undefined && fence.holder !== engine.instanceId)) {
+      throw new Error('SESSION_LEADER_FENCE_REQUIRED');
+    }
+    if (!paperSpotSessionPreflight(engine, now).canRun) throw new Error('PAPER_SPOT_SESSION_PREFLIGHT_BLOCKED');
+    cancelPaperPendingApprovals('approval predates the new spot paper session', now);
+    return persist(old, 'RUNNING', 'OWNER_OPEN_SPOT_PAPER_SESSION', now, {
+      environment: 'PAPER', mind: 'SPOT_PAPER', lease_holder: fence.holder,
+      lease_acquired_at: fence.acquired_at, fence_epoch: old.fence_epoch + 1,
+      suspend_reason: 'NONE', started_at: now, closed_at: null,
+    });
+  });
 }
 
 /**
@@ -106,6 +125,11 @@ export function recoverDurableSessionAfterTakeover(fence: LeaseFence, clock?: nu
       return old;
     if (old.state !== 'RECOVERING_ON_BOOT' && old.lease_holder === fence.holder && old.lease_acquired_at === fence.acquired_at)
       return old;
+    if (old.state === 'CLOSING_DRAINING_ENTRIES') {
+      return persist(old, old.state, 'DRAIN_RECOVERY_FENCED', at, {
+        lease_holder: fence.holder, lease_acquired_at: fence.acquired_at,
+      });
+    }
     const recovering = old.state === 'RECOVERING_ON_BOOT' ? old
       : persist(old, 'RECOVERING_ON_BOOT', 'BOOT_RECOVERY_STARTED', at, {
         suspend_reason: 'LEASE_FENCING_LOST', lease_holder: null, lease_acquired_at: null,
@@ -129,6 +153,7 @@ export function suspendDurableEntries(
         : persist(old, 'EMERGENCY_KILL_SWITCH', 'EMERGENCY_STOP_TRIGGERED', at,
           { suspend_reason: kind });
     if (old.state === 'EMERGENCY_KILL_SWITCH' || old.state === 'CLOSED') return old;
+    if (old.state === 'CLOSING_DRAINING_ENTRIES') return old;
     const state = kind === 'OWNER_CLOSE_REQUESTED'
       ? 'CLOSING_DRAINING_ENTRIES' : 'ENTRY_SUSPENDED_RISK_HALT';
     if (old.state === state) return old;
@@ -136,19 +161,38 @@ export function suspendDurableEntries(
   });
 }
 
-/** Closing requires all paper exposure and pending execution to be reconciled. */
-export function finishDurableClose(at = Date.now()) {
+/** Revoke entries and cancel pending paper approvals together, leaving protective exits running. */
+export function requestPaperSpotClose(at?: number) {
   return tx(() => {
+    const now = at ?? Date.now();
+    const old = durableSessionStatus();
+    if (!old || old.state === 'CLOSED') return old;
+    cancelPaperPendingApprovals('paper session closing', now);
+    if (getControl().emergency) return suspendDurableEntries('EMERGENCY_HALT', now);
+    if (old.state === 'CLOSING_DRAINING_ENTRIES') return old;
+    return persist(old, 'CLOSING_DRAINING_ENTRIES', 'OWNER_CLOSE_REQUESTED', now, {
+      suspend_reason: 'OWNER_CLOSE_REQUESTED',
+    });
+  });
+}
+
+/** Closing requires all paper exposure and pending execution to be reconciled. */
+export function finishDurableClose(at?: number, fence?: LeaseFence) {
+  return tx(() => {
+    const now = at ?? Date.now();
+    if (fence && (fence.name !== 'engine' || !ownsLease(fence, now))) throw new LeaseLostError();
     const old = durableSessionStatus();
     if (!old || old.state !== 'CLOSING_DRAINING_ENTRIES')
       throw new Error('SESSION_NOT_DRAINING');
     const positions = get<{ count: number }>(
-      `SELECT COUNT(*) count FROM positions WHERE account='paper-bot' AND status='OPEN'`,
+      `SELECT COUNT(*) count FROM positions WHERE account=? AND status='OPEN'`, PAPER_ACCOUNT,
     )?.count ?? 0;
-    if (positions || unreconciledPaperOrders() || !reconcile().ok)
+    const pending = get(`SELECT 1 FROM orders WHERE account=? AND venue=? AND side='BUY' AND purpose='ENTRY'
+      AND status='PENDING_APPROVAL' LIMIT 1`, PAPER_ACCOUNT, VENUE);
+    if (positions || pending || unreconciledPaperOrders() || !reconcile().ok)
       throw new Error('SESSION_DRAIN_RECONCILIATION_INCOMPLETE');
-    return persist(old, 'CLOSED', 'DRAIN_COMPLETE', at,
-      { suspend_reason: 'NONE', closed_at: at, lease_holder: null, lease_acquired_at: null });
+    return persist(old, 'CLOSED', 'DRAIN_COMPLETE', now,
+      { suspend_reason: 'NONE', closed_at: now, lease_holder: null, lease_acquired_at: null });
   });
 }
 
@@ -168,6 +212,7 @@ export function durableEntryPermission(engine: EngineView, fence: LeaseFence | n
     || fence.acquired_at !== state.lease_acquired_at || !ownsLease(fence, at))
     return no('STALE_OR_LOST_ENGINE_FENCE');
   if (state.environment !== 'PAPER') return no('LIVE_EXECUTION_NOT_CERTIFIED');
+  if (state.mind === 'SPOT_PAPER') return no('PAPER_SPOT_SESSION_ONLY');
   if (getControl().emergency || getControl().pausedNewOrders) return no('OWNER_ENTRY_HALT');
   if (!reconcile().ok || unreconciledPaperOrders()) return no('EXECUTION_NOT_RECONCILED');
   if (!sessionPreflight(engine, state.mind, 'PAPER', at).canRun) return no('LANE_PREFLIGHT_NOT_CERTIFIED');

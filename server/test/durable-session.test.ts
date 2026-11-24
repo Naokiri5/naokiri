@@ -3,15 +3,22 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { all, closeDb, get, openDb, run } from '../src/db/db.js';
+import { setupOwner } from '../src/api/auth.js';
 import { _test as scheduler, botStatus, stopBot } from '../src/bot/bot.js';
+import { config } from '../src/config.js';
+import { updateControl } from '../src/core/mode.js';
 import { buildApp } from '../src/index.js';
 import { acquireOrRenewLease, currentLease } from '../src/ops/lease.js';
 import {
   durableEntryPermission, durableSessionStatus, finishDurableClose,
-  openDurablePaperSession, recoverDurableSessionAfterTakeover, suspendDurableEntries,
+  openDurablePaperSession, openPaperSpotSession, paperSpotEntryDenial,
+  recoverDurableSessionAfterTakeover, requestPaperSpotClose, suspendDurableEntries,
   type BrainosSessionState,
 } from '../src/ops/durableSession.js';
 import type { EngineView } from '../src/ops/readiness.js';
+import { paperSpotSessionPreflight, sessionPreflight } from '../src/ops/sessionPreflight.js';
+import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
+import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 
 const NOW = Date.UTC(2026, 10, 23, 13, 0, 0);
 const engine: EngineView = {
@@ -19,6 +26,7 @@ const engine: EngineView = {
   lastTickerAt: NOW, lastScanAt: NOW, lastMonitorAt: NOW, monitorFailing: false,
 };
 let dir: string, file: string;
+const offline = config.offline;
 const seed = (state: BrainosSessionState) => {
   run(`INSERT INTO brainos_sessions(
     session_id,version,state,environment,mind,lease_holder,lease_acquired_at,
@@ -33,7 +41,24 @@ beforeEach(() => {
   file = join(dir, 'brainos.sqlite');
   openDb(file);
 });
-afterEach(() => { closeDb(); rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { config.offline = offline; vi.useRealTimers(); closeDb(); rmSync(dir, { recursive: true, force: true }); });
+
+function prepareSpotSession() {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW - 1);
+  config.offline = false;
+  setupOwner('offline test owner');
+  acceptPolicy('owner', DEFAULT_POLICY);
+  ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+  updateControl('owner', { mode: 'PAPER' });
+  return acquireOrRenewLease('engine', 'leader-a', 1_000, NOW - 1)!;
+}
+
+function pendingApproval(id: string, at: number, venue = 'binance-paper') {
+  run(`INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,status,purpose,created_at,updated_at)
+    VALUES (?,?,?,?,?,'BUY','MARKET',1,'PENDING_APPROVAL','ENTRY',?,?)`,
+  id, `${id}-client`, PAPER_ACCOUNT, venue, 'crypto:binance:BTCUSDT', at, at);
+}
 
 describe('BrainOS 6.1 operational durable session protection', () => {
   it('never creates a session when prerequisites or actual paper execution are uncertified', () => {
@@ -158,5 +183,85 @@ describe('BrainOS 6.1 operational durable session protection', () => {
     expect(get<{ n: number }>('SELECT COUNT(*) n FROM brainos_session_events')?.n).toBe(2);
     for(const table of ['orders','fills','positions','ledger_entries'])
       expect(all('SELECT * FROM ' + table)).toHaveLength(0);
+  });
+});
+
+describe('durable Binance spot paper authorization', () => {
+  it('starts only the selected spot lane after owner, risk, funds and protection checks', () => {
+    expect(paperSpotEntryDenial(null, NOW)).toBeNull();
+    const fence = acquireOrRenewLease('engine', 'leader-a', 1_000, NOW - 1)!;
+    expect(() => openPaperSpotSession(engine, fence, NOW)).toThrow('PAPER_SPOT_SESSION_PREFLIGHT_BLOCKED');
+    expect(durableSessionStatus()).toBeNull();
+
+    prepareSpotSession();
+    expect(paperSpotSessionPreflight({ ...engine, instanceId: 'standby' }, NOW).canRun).toBe(false);
+    expect(paperSpotSessionPreflight({ ...engine, monitorFailing: true }, NOW).canRun).toBe(false);
+    expect(paperSpotSessionPreflight(engine, NOW)).toMatchObject({ state: 'CLOSED', canRun: true, canClose: false });
+    expect(sessionPreflight(engine, 'FAST', 'PAPER', NOW).canRun).toBe(false);
+    expect(sessionPreflight(engine, 'DEEP', 'LIVE', NOW).canRun).toBe(false);
+
+    pendingApproval('legacy-order', NOW);
+    expect(openPaperSpotSession(engine, fence, NOW)).toMatchObject({ mind: 'SPOT_PAPER', state: 'RUNNING', fence_epoch: 1 });
+    expect(get<{ status: string }>("SELECT status FROM orders WHERE id='legacy-order'")?.status).toBe('CANCELLED');
+    expect(paperSpotSessionPreflight(engine, NOW)).toMatchObject({ state: 'RUNNING', canRun: false, canClose: true });
+    expect(paperSpotEntryDenial(fence, NOW, NOW)).toBeNull();
+    expect(paperSpotEntryDenial(null, NOW)).toBe('STALE_OR_LOST_ENGINE_FENCE');
+    expect(paperSpotEntryDenial(fence, NOW, NOW, false)).toBe('PAPER_SPOT_MARKET_OUTSIDE_SESSION_SCOPE');
+    expect(paperSpotEntryDenial(fence, NOW, NOW - 1)).toBe('ENTRY_EVIDENCE_OUTSIDE_SESSION');
+    expect(paperSpotEntryDenial(fence, NOW, NOW + 1)).toBe('ENTRY_EVIDENCE_OUTSIDE_SESSION');
+    expect(durableEntryPermission(engine, fence, NOW)).toMatchObject({ allowFastNewEntries: false, allowDeepNewEntries: false });
+  });
+
+  it('keeps a stale session blocked after an owner control change is reversed', () => {
+    const fence = prepareSpotSession();
+    openPaperSpotSession(engine, fence, NOW);
+    vi.setSystemTime(NOW + 1);
+    updateControl('owner', { pausedNewOrders: true });
+    expect(paperSpotEntryDenial(fence, NOW + 1)).toBe('SESSION_OWNER_ENTRY_HALT');
+    vi.setSystemTime(NOW + 2);
+    updateControl('owner', { pausedNewOrders: false });
+    expect(paperSpotEntryDenial(fence, NOW + 2)).toBe('SESSION_OWNER_CONTROL_CHANGED');
+    expect(paperSpotSessionPreflight(engine, NOW + 2).checks).toContainEqual(expect.objectContaining({
+      id: 'execution-lane', status: 'BLOCKED', detail: expect.stringContaining('controls changed after authorization'),
+    }));
+  });
+
+  it('atomically cancels pending approvals on close and preserves draining across takeover', () => {
+    const fence = prepareSpotSession();
+    openPaperSpotSession(engine, fence, NOW);
+    pendingApproval('session-order', NOW + 1);
+    pendingApproval('other-venue-order', NOW + 1, 'other-venue');
+    const draining = requestPaperSpotClose(NOW + 2);
+    expect(draining?.state).toBe('CLOSING_DRAINING_ENTRIES');
+    expect(requestPaperSpotClose(NOW + 3)?.version).toBe(draining?.version);
+    expect(all<{ id: string; status: string }>('SELECT id,status FROM orders ORDER BY id'))
+      .toEqual([{ id: 'other-venue-order', status: 'PENDING_APPROVAL' }, { id: 'session-order', status: 'CANCELLED' }]);
+    expect(paperSpotEntryDenial(fence, NOW + 3)).toBe('SESSION_NOT_RUNNING');
+
+    const takeoverAt = fence.expires_at + 1;
+    const successor = acquireOrRenewLease('engine', 'leader-b', 60_000, takeoverAt)!;
+    expect(recoverDurableSessionAfterTakeover(successor, takeoverAt)).toMatchObject({
+      state: 'CLOSING_DRAINING_ENTRIES', lease_holder: 'leader-b',
+    });
+    expect(() => finishDurableClose(takeoverAt, fence)).toThrow('engine lease lost');
+    vi.setSystemTime(takeoverAt);
+    expect(finishDurableClose(undefined, successor)).toMatchObject({ state: 'CLOSED', closed_at: takeoverAt });
+    expect(paperSpotEntryDenial(successor, takeoverAt)).toBe('SESSION_NOT_RUNNING');
+  });
+
+  it('requires explicit close after the owner clears the emergency stop', () => {
+    const fence = prepareSpotSession();
+    openPaperSpotSession(engine, fence, NOW);
+    vi.setSystemTime(NOW + 1);
+    updateControl('owner', { emergency: true, pausedNewOrders: true });
+    expect(requestPaperSpotClose(NOW + 1)?.state).toBe('EMERGENCY_KILL_SWITCH');
+    expect(paperSpotSessionPreflight(engine, NOW + 1).canClose).toBe(false);
+    vi.setSystemTime(NOW + 2);
+    updateControl('owner', { emergency: false, pausedNewOrders: false });
+    expect(paperSpotSessionPreflight(engine, NOW + 2)).toMatchObject({ canRun: false, canClose: true });
+    expect(() => openPaperSpotSession(engine, fence, NOW + 2)).toThrow('SESSION_NOT_CLOSED');
+    expect(requestPaperSpotClose(NOW + 2)?.state).toBe('CLOSING_DRAINING_ENTRIES');
+    expect(finishDurableClose(NOW + 3, fence).state).toBe('CLOSED');
+    expect(openPaperSpotSession(engine, fence, NOW + 4).fence_epoch).toBe(2);
   });
 });

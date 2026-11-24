@@ -1,6 +1,6 @@
 import { seedInstrument, seedBacktestFixture } from './helpers.js';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { all, closeDb, openDb } from '../src/db/db.js';
+import { all, closeDb, openDb, run } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { DEFAULT_POLICY } from '../src/risk/policy.js';
 import { commandMode, JOE_TOOL_NAMES } from '../src/joe/joe.js';
@@ -31,12 +31,29 @@ describe('HTTP API (auth, permissions, release gate)', () => {
   it('rejects state changes without CSRF header', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/emergency/pause', headers: { cookie } })).statusCode).toBe(403);
   });
+  it('requires owner step-up to run spot paper, keeps offline operation locked, and allows an authenticated close', async () => {
+    const url = '/api/session/paper-spot';
+    const post = (path: string, payload = {}, headers = H()) =>
+      app.inject({ method: 'POST', url: `${url}/${path}`, headers, payload });
+    expect((await app.inject({ url })).statusCode).toBe(401);
+    const preflight = await app.inject({ url, headers: { cookie } });
+    expect(preflight.statusCode).toBe(200);
+    expect(preflight.headers['cache-control']).toBe('no-store');
+    expect(preflight.json()).toMatchObject({ canRun: false, canClose: false });
+    expect((await post('run', {}, { cookie, 'x-mia-csrf': '0' })).statusCode).toBe(403);
+    expect((await post('run')).statusCode).toBe(403);
+    expect((await post('run', { password: 'correct horse battery' })).statusCode).toBe(409);
+    expect((await post('close')).json()).toEqual({ state: 'CLOSED' });
+    expect(all('SELECT * FROM brainos_sessions')).toEqual([]);
+    failureGate.reset();
+  });
   it('policy acceptance and mode changes require step-up; PAPER requires policy; BOUNDED_LIVE is locked', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER', password: 'correct horse battery' } })).json().error).toMatch(/risk policy/);
     expect((await app.inject({ method: 'POST', url: '/api/risk/policy', headers: H(), payload: { policy: DEFAULT_POLICY } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/risk/policy', headers: H(), payload: { policy: DEFAULT_POLICY, password: 'correct horse battery' } })).json().version).toBe(1);
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER' } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER', password: 'correct horse battery' } })).json().mode).toBe('PAPER');
+    expect(all('SELECT state, mind FROM brainos_sessions')).toEqual([{ state: 'CLOSED', mind: 'SPOT_PAPER' }]);
     const live = await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'BOUNDED_LIVE', password: 'correct horse battery' } });
     expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/BOUNDED_LIVE blocked/);
     expect((await app.inject({ url: '/api/qa', headers: { cookie } })).json().liveAllowed).toBe(false);
@@ -191,6 +208,16 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     await commandMode('pause'); expect(getControl().pausedNewOrders).toBe(true);
     const r = await app.inject({ method: 'POST', url: '/api/joe', headers: H(), payload: { message: 'help' } });
     expect(r.json().mode).toBe('COMMAND');
+  });
+  it('clearing a paper entry pause does not restore a prior BrainOS session grant', async () => {
+    run("UPDATE brainos_sessions SET state='RUNNING', started_at=?", Date.now());
+    const resume = await app.inject({ method: 'POST', url: '/api/control', headers: H(),
+      payload: { pausedNewOrders: false, password: 'correct horse battery' } });
+    expect(resume.statusCode).toBe(200);
+    expect(resume.json().pausedNewOrders).toBe(false);
+    expect(all('SELECT state, suspend_reason FROM brainos_sessions')).toEqual([
+      { state: 'ENTRY_SUSPENDED_RISK_HALT', suspend_reason: 'RISK_HALT' },
+    ]);
   });
 });
 

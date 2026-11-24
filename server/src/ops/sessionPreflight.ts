@@ -11,6 +11,8 @@ import { currentPolicy } from '../risk/policy.js';
 import { brainOverview } from '../knowledge/brain.js';
 import { stepUpMethod } from '../security/stepUp.js';
 import { staleAfter, type EngineView } from './readiness.js';
+import { currentLease } from './lease.js';
+import { durableSessionStatus, paperSpotEntryDenial, type BrainosSessionState } from './paperSpotEntry.js';
 
 export const SESSION_MINDS = ['FAST', 'DEEP'] as const;
 export const SESSION_ENVIRONMENTS = ['PAPER', 'LIVE'] as const;
@@ -33,6 +35,13 @@ export interface SessionPreflight {
   state: 'PREFLIGHT' | 'EMERGENCY';
   canRun: boolean;
   canClose: boolean;
+  checks: PreflightCheck[];
+}
+
+export interface PaperSpotSessionPreflight {
+  canRun: boolean;
+  canClose: boolean;
+  state: BrainosSessionState;
   checks: PreflightCheck[];
 }
 
@@ -140,5 +149,47 @@ export function sessionPreflight(engine: EngineView, mind: SessionMind, environm
   return {
     schemaVersion: 'mia.session.preflight.v1', checkedAt: at, mind, environment,
     state: control.emergency ? 'EMERGENCY' : 'PREFLIGHT', canRun: false, canClose: false, checks,
+  };
+}
+
+/** Readiness for the existing Binance spot simulator and its independent protection lane. */
+export function paperSpotSessionPreflight(engine: EngineView & { instanceId?: string }, at = Date.now()): PaperSpotSessionPreflight {
+  const state = durableSessionStatus()?.state ?? 'CLOSED';
+  const control = getControl();
+  const policy = currentPolicy();
+  const stepUp = stepUpMethod();
+  const lease = currentLease('engine');
+  const leader = engine.running && engine.role === 'LEADER' && lease !== null && lease.acquired_at <= at && lease.expires_at >= at &&
+    (engine.instanceId === undefined || lease.holder === engine.instanceId);
+  const paperMode = control.mode === 'PAPER' || control.mode === 'APPROVAL';
+  const controlsReady = paperMode && !control.emergency && !control.pausedNewOrders;
+  const activeDenial = state === 'RUNNING' ? paperSpotEntryDenial(lease, at) : null;
+  const leaseDetail = activeDenial === 'SESSION_OWNER_CONTROL_CHANGED'
+    ? 'Paper controls changed after authorization. Close the session and authorize a new one.'
+    : activeDenial === 'STALE_OR_LOST_ENGINE_FENCE'
+      ? 'The current engine lease does not authorize entries for this session.'
+      : activeDenial ? 'New entries are blocked by the current paper session checks.'
+        : leader ? 'The current leader holds the paper execution lease.' : 'The active paper engine must hold a current execution lease.';
+  const checks: PreflightCheck[] = [
+    { id: 'environment', label: 'Trading environment', status: 'INFO', detail: 'Binance spot simulation uses the paper account.' },
+    { id: 'risk-policy', label: 'Risk policy', status: policy ? 'PASS' : 'BLOCKED',
+      detail: policy ? `You have accepted risk policy version ${policy.version}.` : 'Review and accept a risk policy in Risk Center.' },
+    { id: 'owner-control', label: 'Owner controls', status: controlsReady ? 'PASS' : 'BLOCKED',
+      detail: control.emergency ? 'Emergency stop is active.' : control.pausedNewOrders ? 'New orders are paused.'
+        : !paperMode ? 'Select Paper or User approval in Paper Account.' : 'Paper entry controls permit a session.' },
+    { id: 'owner-verification', label: 'Owner verification', status: stepUp === 'unavailable' ? 'BLOCKED' : 'PASS',
+      detail: stepUp === 'unavailable' ? 'Set up an authenticator in Security Center to authorize sensitive actions.' : 'Owner verification is available for sensitive actions.' },
+    ...paperChecks(engine, at),
+    { id: 'execution-lane', label: 'Spot paper execution', status: leader && !activeDenial ? 'PASS' : 'BLOCKED', detail: leaseDetail },
+    { id: 'session-lifecycle', label: 'Session controls', status: state === 'CLOSED' ? 'PASS' : 'BLOCKED',
+      detail: state === 'CLOSED' ? 'A new spot paper session requires explicit owner authorization.'
+        : state === 'CLOSING_DRAINING_ENTRIES' ? 'Entry authority is revoked while positions and orders are reconciled.'
+          : 'Close the existing session before starting a new one.' },
+  ];
+  return {
+    canRun: checks.every(check => check.status === 'PASS' || check.status === 'INFO'),
+    canClose: state !== 'CLOSED' && !(state === 'EMERGENCY_KILL_SWITCH' && control.emergency),
+    state,
+    checks,
   };
 }

@@ -48,12 +48,13 @@ import * as wallet from '../wallet/wallet.js';
 import { listNotifications, markRead, notify } from '../notify/notify.js';
 import { releaseGates } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
-import { botStatus, botStatusView } from '../bot/bot.js';
-import { readiness } from '../ops/readiness.js';
+import { activeEngineFence, botStatus, botStatusView } from '../bot/bot.js';
+import { readiness, staleAfter } from '../ops/readiness.js';
 import { commandStatus } from '../ops/commandStatus.js';
-import { SESSION_ENVIRONMENTS, SESSION_MINDS, sessionPreflight } from '../ops/sessionPreflight.js';
+import { SESSION_ENVIRONMENTS, SESSION_MINDS, paperSpotSessionPreflight, sessionPreflight } from '../ops/sessionPreflight.js';
+import { durableSessionStatus, openPaperSpotSession, requestPaperSpotClose, requirePaperSpotSession, suspendDurableEntries } from '../ops/durableSession.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
-import { all, get, P } from '../db/db.js';
+import { all, get, P, tx } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { config, inContainer } from '../config.js';
@@ -81,6 +82,7 @@ const passphraseOnly = () => {
   if (!passphraseSignInAllowed()) throw httpError(403, 'passphrase authentication is disabled; connect a wallet with Privy');
 };
 const PW = z.string().min(1).max(1024);
+const SESSION_STEP_UP = z.object({ password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional() }).strict();
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
 const ID = z.string().min(1).max(150);
@@ -151,6 +153,24 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/session/preflight', async (req) => {
     const { mind, environment } = z.object({ mind: z.enum(SESSION_MINDS), environment: z.enum(SESSION_ENVIRONMENTS) }).strict().parse(req.query);
     return sessionPreflight(botStatus, mind, environment);
+  });
+  app.get('/api/session/paper-spot', async (_req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return paperSpotSessionPreflight(botStatus);
+  });
+  app.post('/api/session/paper-spot/run', async (req) => {
+    stepUp(req, SESSION_STEP_UP.parse(req.body ?? {}));
+    const fence = activeEngineFence();
+    if (!fence) throw httpError(409, 'The active engine must authorize a paper session.');
+    const session = openPaperSpotSession(botStatus, fence);
+    bus.publish('bot', botStatusView());
+    return { state: session.state };
+  });
+  app.post('/api/session/paper-spot/close', async (req) => {
+    z.object({}).strict().parse(req.body ?? {});
+    const session = requestPaperSpotClose();
+    bus.publish('bot', botStatusView());
+    return { state: session?.state ?? 'CLOSED' };
   });
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
@@ -363,18 +383,40 @@ export async function routes(app: FastifyInstance) {
     const cur = getControl();
     const reEnables = !!patch.disabledStrategies && cur.disabledStrategies.some((s) => !patch.disabledStrategies!.includes(s));
     if (patch.mode || patch.emergency === false || patch.pausedNewOrders === false || reEnables) stepUp(req, b);
-    return updateControl('owner', patch, (m) => {
-      if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
-      if ((m === 'PAPER' || m === 'APPROVAL') && !currentPolicy()) return { ok: false, reason: 'accept a risk policy before enabling paper execution' };
-      return { ok: true };
+    return tx(() => {
+      const paperRequested = patch.mode === 'PAPER' || patch.mode === 'APPROVAL';
+      if (paperRequested) requirePaperSpotSession();
+      const current = getControl();
+      const changed = (patch.mode !== undefined && patch.mode !== current.mode)
+        || (patch.pausedNewOrders !== undefined && patch.pausedNewOrders !== current.pausedNewOrders)
+        || (patch.emergency !== undefined && patch.emergency !== current.emergency)
+        || (patch.disabledStrategies !== undefined && JSON.stringify(patch.disabledStrategies) !== JSON.stringify(current.disabledStrategies));
+      if (!changed) return current;
+      if (durableSessionStatus()?.state === 'RUNNING') {
+        suspendDurableEntries(patch.emergency ? 'EMERGENCY_HALT' : 'RISK_HALT');
+      }
+      return updateControl('owner', patch, (m) => {
+        if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
+        if ((m === 'PAPER' || m === 'APPROVAL') && !currentPolicy()) return { ok: false, reason: 'accept a risk policy before enabling paper execution' };
+        return { ok: true };
+      });
     });
   });
   app.post('/api/emergency/:action', async (req) => {
     const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), password: PW.optional() }).strict().parse(req.body ?? {});
-    if (a === 'pause') return oms.pauseNewOrders('owner');
+    if (a === 'pause') {
+      const result = oms.pauseNewOrders('owner');
+      suspendDurableEntries('RISK_HALT');
+      return result;
+    }
     if (a === 'cancel-pending') return oms.cancelPendingEntries('owner');
     if (a === 'protect') return oms.protectPositions(true);
-    if (a === 'stop') return oms.emergencyStop('owner');
+    if (a === 'stop') {
+      const result = oms.emergencyStop('owner');
+      const session = durableSessionStatus();
+      if (session && session.state !== 'CLOSED') suspendDurableEntries('EMERGENCY_HALT');
+      return result;
+    }
     if (a === 'close-all') { stepUp(req, b); return oms.closeAllPositions('owner', b.confirm ?? ''); }
     throw httpError(404, 'unknown emergency action');
   });
@@ -403,7 +445,15 @@ export async function routes(app: FastifyInstance) {
     return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
   });
   app.get('/api/orders', async () => oms.listOrders(300));
-  app.post('/api/orders/:id/approve', async (req) => oms.decideApproval(idOf(req), true));
+  app.post('/api/orders/:id/approve', async (req) => {
+    if (!durableSessionStatus()) return oms.decideApproval(idOf(req), true);
+    const fence = activeEngineFence();
+    const monitorAge = Date.now() - botStatus.lastMonitorAt;
+    if (!fence || botStatus.monitorFailing || monitorAge < 0 || monitorAge > staleAfter().monitorMs) {
+      throw httpError(409, 'Paper approval requires the active engine and a current protection check.');
+    }
+    return oms.decideApproval(idOf(req), true, fence);
+  });
   app.post('/api/orders/:id/reject', async (req) => oms.decideApproval(idOf(req), false));
   app.post('/api/positions/:id/close', async (req) => oms.closePosition('owner', idOf(req)));
 

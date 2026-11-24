@@ -1,9 +1,9 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fmt, useApi } from '../api';
+import { api, authInfo, fmt, useApi } from '../api';
 import miaImage from '../assets/mia-companion.webp';
 import { Icon } from '../brand';
-import { Badge, Card, Empty, Freshness } from '../ui';
+import { Badge, Card, Empty, ErrorLine, Freshness, Modal } from '../ui';
 
 export type Mind = 'FAST' | 'DEEP';
 type Environment = 'PAPER' | 'LIVE';
@@ -24,6 +24,16 @@ type Preflight = {
   canClose: boolean;
   checks: Check[];
 };
+type PaperSpotPreflight = Pick<Preflight, 'canRun' | 'canClose' | 'checks'> & { state: string };
+
+const paperSessionLabels: Record<string, string> = {
+  RUNNING: 'Paper session running',
+  RECOVERING_ON_BOOT: 'Paper session recovering',
+  ENTRY_SUSPENDED_RISK_HALT: 'Paper entries suspended',
+  CLOSING_DRAINING_ENTRIES: 'Paper session closing',
+  EMERGENCY_KILL_SWITCH: 'Emergency stop active',
+};
+const sessionTopics = ['mode', 'risk', 'health', 'bot', 'position', 'order'];
 
 const mindDescriptions: Record<Mind, string> = {
   FAST: 'Explore newly listed tokens and review their liquidity and risk evidence.',
@@ -62,25 +72,62 @@ export function AutopilotSession({ mind, onMindChange }: { mind: Mind; onMindCha
         </p>
       </div>
     </div>
-    <SessionPreflight mind={mind} environment={environment} />
+    <SessionPreflight key={environment} mind={mind} environment={environment} />
   </>;
 }
 
 function SessionPreflight({ mind, environment }: { mind: Mind; environment: Environment }) {
   const headingId = useId();
   const reasonId = useId();
+  const [showStepUp, setShowStepUp] = useState(false);
+  const [credential, setCredential] = useState('');
+  const [pending, setPending] = useState(false);
+  const [actionError, setActionError] = useState('');
   const { data, error, reload } = useApi<Preflight>(`/api/session/preflight?mind=${mind}&environment=${environment}`,
-    { topics: ['mode', 'risk', 'health', 'bot', 'position', 'order'], every: 30_000, isolatePath: true });
+    { topics: sessionTopics, every: 30_000, isolatePath: true });
+  const paper = useApi<PaperSpotPreflight>(environment === 'PAPER' ? '/api/session/paper-spot' : null,
+    { topics: sessionTopics, every: 30_000, isolatePath: true });
   const preflight = !error && data?.schemaVersion === 'mia.session.preflight.v1'
     && data.mind === mind && data.environment === environment ? data : null;
-  const emergency = preflight?.state === 'EMERGENCY';
-  const lane = preflight?.checks.find((check) => check.id === 'execution-lane');
-  const policy = preflight?.checks.find((check) => check.id === 'risk-policy');
-  const title = emergency ? 'Emergency stop active' : error ? 'Readiness unavailable' : preflight ? 'Preflight checked' : 'Checking readiness';
+  const paperState = !paper.error && Array.isArray(paper.data?.checks) ? paper.data : null;
+  const emergency = preflight?.state === 'EMERGENCY' || paperState?.state === 'EMERGENCY_KILL_SWITCH';
+  const paperSessionLabel = paperState && paperSessionLabels[paperState.state];
+  const title = emergency ? 'Emergency stop active' : paperSessionLabel || (error ? 'Readiness unavailable' : preflight ? 'Preflight checked' : 'Checking readiness');
+  const paperBlocker = paperState?.checks.find((check) =>
+    (check.status === 'BLOCKED' || check.status === 'UNVERIFIED') &&
+    !(paperState.state === 'RUNNING' && check.id === 'session-lifecycle'));
   const details = emergency ? 'New entries are blocked. Review position protection in the Risk Center.'
-    : error ? 'MIA could not verify this environment. Refresh its checks before relying on this status.'
-    : preflight ? policy?.status === 'BLOCKED' && environment === 'PAPER' ? policy.detail : lane?.detail ?? 'Session controls are unavailable for this trading mode.'
-    : 'MIA is checking your selected mode and environment.';
+    : environment === 'LIVE' ? 'Real-money execution is locked.'
+    : paper.error ? 'Paper session readiness is unavailable. Refresh checks to try again.'
+    : paperState?.state === 'CLOSING_DRAINING_ENTRIES' ? 'New entries are blocked while MIA protects and reconciles open positions.'
+    : paperBlocker?.detail ?? (paperState?.state === 'RUNNING'
+      ? 'MIA is monitoring Binance spot markets and existing paper positions.'
+      : 'Binance spot paper sessions use simulated funds.');
+  const canRun = paperState?.canRun === true;
+  const canClose = paperState?.canClose === true;
+  const usesAuthenticator = authInfo.mode === 'privy';
+
+  async function changeSession(action: 'run' | 'close') {
+    if (pending || (action === 'run' ? !canRun || !credential : !canClose)) return;
+    const body = action === 'run' ? { password: credential } : {};
+    setCredential('');
+    setShowStepUp(false);
+    setActionError('');
+    setPending(true);
+    try {
+      await api(`/api/session/paper-spot/${action}`, { body });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Could not update the paper session.');
+    } finally {
+      await paper.reload();
+      setPending(false);
+    }
+  }
+
+  function dismissStepUp() {
+    setShowStepUp(false);
+    setCredential('');
+  }
 
   return <section className="card mia-session-hero" aria-labelledby={headingId} data-mind={mind.toLowerCase()}>
     <div className="mia-session-main">
@@ -92,17 +139,29 @@ function SessionPreflight({ mind, environment }: { mind: Mind; environment: Envi
           <Freshness at={preflight?.checkedAt} label="Checked" />
         </div>
         <p id={reasonId}>{details}</p>
+        {environment === 'PAPER' && <p className="hint">FAST and DEEP provide research. Session controls apply to Binance spot paper trading.</p>}
+        <ErrorLine e={actionError} />
       </div>
-      <div className="mia-session-actions">
-          <button type="button" className="primary" disabled aria-describedby={reasonId}>
+      <div className="mia-session-actions" aria-busy={pending}>
+        <button type="button" className="primary" disabled={!canRun || pending} aria-describedby={reasonId} onClick={() => setShowStepUp(true)}>
           <Icon name="play" size={17} /> Run Session
         </button>
-        <button type="button" disabled aria-describedby={reasonId}>Close Session</button>
+        <button type="button" disabled={!canClose || pending} aria-describedby={reasonId} onClick={() => void changeSession('close')}>Close Session</button>
         <Link to="/risk" className="mia-panel-link"><Icon name="shield" size={17} /> Emergency controls</Link>
       </div>
     </div>
     <details className="mia-session-checklist" open={error ? true : undefined}>
       <summary>Session readiness checklist</summary>
+      {paperState && <>
+        <h3>Binance spot paper checks</h3>
+        <ul className="mia-preflight-list">
+          {paperState.checks.map((check) => <li key={check.id}>
+            <div className="row between"><strong>{check.label}</strong><Badge v={check.status} /></div>
+            <p className="hint">{check.detail}</p>
+          </li>)}
+        </ul>
+        <h3>{mind} research checks</h3>
+      </>}
       {preflight ? <ul className="mia-preflight-list">
         {preflight.checks.map((check) => <li key={check.id}>
           <div className="row between"><strong>{check.label}</strong><Badge v={check.status} /></div>
@@ -115,9 +174,31 @@ function SessionPreflight({ mind, environment }: { mind: Mind; environment: Envi
         <Link to="/risk">Review Risk Policy</Link>
         <Link to="/connections">Connection Status</Link>
         {environment === 'PAPER' && <Link to="/qa">Live Readiness</Link>}
-        <button type="button" className="sm" onClick={() => void reload()}>Refresh checks</button>
+        <button type="button" className="sm" onClick={() => void Promise.all([reload(), paper.reload()])}>Refresh checks</button>
       </div>
     </details>
+    {showStepUp && <Modal title="Authorize Binance spot paper session" onClose={dismissStepUp}>
+      <form onSubmit={(event) => { event.preventDefault(); void changeSession('run'); }}>
+        <p>This session uses simulated funds and the current risk policy.</p>
+        <div className="row">
+          <input
+            type={usesAuthenticator ? 'text' : 'password'}
+            inputMode={usesAuthenticator ? 'numeric' : undefined}
+            maxLength={usesAuthenticator ? 6 : 1024}
+            pattern={usesAuthenticator ? '[0-9]{6}' : undefined}
+            autoComplete={usesAuthenticator ? 'one-time-code' : 'current-password'}
+            aria-label={usesAuthenticator ? 'Authenticator step-up code' : 'Owner passphrase for step-up authentication'}
+            placeholder={usesAuthenticator ? 'Six-digit authenticator code' : 'Owner passphrase (step-up)'}
+            value={credential}
+            onChange={(event) => setCredential(event.target.value)}
+            required
+            autoFocus
+          />
+          <button type="submit" className="primary" disabled={!credential || !canRun || pending}>Authorize and run</button>
+          <button type="button" onClick={dismissStepUp}>Cancel</button>
+        </div>
+      </form>
+    </Modal>}
   </section>;
 }
 

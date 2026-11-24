@@ -24,7 +24,7 @@ import type { DecisionReport } from '../decision/engine.js';
 import { acquireOrRenewLease, ownsLease, releaseLease, LeaseLostError, type LeaseFence } from '../ops/lease.js';
 import { checkScanStall, protectionIntervalMs, staleAfter } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
-import { recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
+import { durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
 import { record } from '../core/latency.js';
 import { hostname } from 'node:os';
@@ -111,6 +111,10 @@ function stillLeader(lease: LeaseFence): boolean {
   return false;
 }
 
+export function activeEngineFence(): LeaseFence | null {
+  return activeLease && stillLeader(activeLease) ? activeLease : null;
+}
+
 function laneStatus(priority: 'protective' | 'entry' | 'background') {
   return { priority, inFlight: false, startedAt: 0, completedAt: 0, failedAt: 0, error: null as string | null };
 }
@@ -169,6 +173,14 @@ const protectionLane = () => runLane('protection', (lease) => {
   } catch (error) {
     if (!(error instanceof LeaseLostError)) botStatus.monitorFailing = true;
     throw error;
+  }
+  if (durableSessionStatus()?.state === 'CLOSING_DRAINING_ENTRIES') {
+    try {
+      finishDurableClose(undefined, lease);
+      bus.publish('bot', botStatusView());
+    } catch (error) {
+      if (!(error instanceof Error) || !['SESSION_DRAIN_RECONCILIATION_INCOMPLETE', 'SESSION_NOT_DRAINING'].includes(error.message)) throw error;
+    }
   }
   try { checkScanStall(botStatus); } catch (error) { botStatus.lastError = `watchdog: ${errorText(error)}`; }
 });

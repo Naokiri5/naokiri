@@ -286,3 +286,11 @@ This increment is **real repository code**, integrated into the existing BrainOS
 5. Exact-head CI, an independent risk/security review, stacked dependency reconciliation, paper soak, deployment and owner approval are required before merge.
 
 **Promotion policy:** retain PR #135 as an OPEN DRAFT and make no automatic financial authorization changes. PAPER and LIVE must use the same canonical safety decision system after verified venue integrations are added.
+
+## BrainOS 8.0 paper session integration
+
+The Autopilot Run Session control authorizes the existing Binance spot paper lane after owner step-up. It requires a current leader, fresh position protection, an accepted risk policy, the Paper or Approval account mode, and a funded, reconciled paper account. FAST and DEEP continue to provide independent research evidence. Their market-specific execution and live trading remain locked.
+
+The authenticated `/api/session/paper-spot` preflight reports eligibility. POST requests to `/api/session/paper-spot/run` open the selected paper lane and requests to `/api/session/paper-spot/close` revoke entry permission and cancel pending paper approvals. Closing drains protected positions through the existing monitor and completes after the paper ledger reconciles. To close exposure immediately, use the existing Risk Center controls.
+
+Existing paper installations without a durable checkpoint use their current owner-configured controls until the owner selects Paper or Approval in account controls or starts a BrainOS session. From that point every paper entry and approval must pass the durable checkpoint and lease checks within the OMS transaction. An owner control change invalidates the prior authorization. A leader takeover suspends the prior session, and the owner must close it and authorize a new one before entries resume. Entry fill events link the existing trace and position to the authorizing session version and fencing epoch.

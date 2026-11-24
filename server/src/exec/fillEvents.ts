@@ -2,6 +2,7 @@ import { audit } from '../core/audit.js';
 import { iso } from '../core/util.js';
 import { all, get, inTransaction, P } from '../db/db.js';
 import { buildEvent, validateEvent } from '../fabric/contracts.js';
+import { durableSessionStatus } from '../ops/paperSpotEntry.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import type { DecisionReport } from '../decision/engine.js';
 
@@ -27,6 +28,12 @@ export function recordPaperFill(input: {
   const snapshotId = stored && /^snap_[0-9a-f]{64}$/.test(stored) ? stored : undefined;
   const version = typeof report?.strategy?.version === 'string' ? report.strategy.version : undefined;
   const expiry = Date.parse(report?.consensus?.expiresAt ?? '');
+  // The entry event identifies the authorizing session version. Later exits refer to the same
+  // position and trace even if the session has closed or its leader generation has changed.
+  const session = input.side === 'BUY' ? durableSessionStatus() : null;
+  const sessionEvidence = session?.state === 'RUNNING' && session.mind === 'SPOT_PAPER' ? {
+    sessionId: session.session_id, sessionVersion: session.version, fencingEpoch: session.fence_epoch,
+  } : null;
   const event = buildEvent({
     eventId: input.fillId, eventType: TOPIC, source: 'exec:oms', sourceClass: 'OMS',
     instrumentId: eventId.test(input.instrumentId) ? input.instrumentId : undefined,
@@ -40,6 +47,7 @@ export function recordPaperFill(input: {
       orderId: input.orderId, positionId: input.positionId, decisionId: input.decisionId, strategy: input.strategy,
       side: input.side, qty: input.qty, price: input.price, fee: input.fee, impactBps: input.impactBps,
       closed: input.closed, netPnlAfterFill: input.netPnlAfterFill,
+      ...(sessionEvidence ? { sessionEvidence } : {}),
     },
   }, input.at);
   audit('oms', TOPIC, event);
