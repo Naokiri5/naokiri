@@ -71,7 +71,9 @@ export function ingestFlinDexSnapshot(
         ? 'DEX_HEURISTIC_RISK:' + safety.status
         : 'ONCHAIN_PERMISSIONS_AND_EXECUTABLE_SELL_ROUTE_UNVERIFIED';
       const existing = get<{ source_as_of: number }>('SELECT source_as_of FROM flin_launch_candidates WHERE candidate_id=?', id);
-      if (existing && existing.source_as_of > sourceAsOf) continue; // reject out-of-order evidence
+      // A replay with the same source time is not fresh evidence and must not
+      // overwrite a quarantine decision or refresh its apparent observation age.
+      if (existing && existing.source_as_of >= sourceAsOf) continue;
       run(`INSERT INTO flin_launch_candidates(
         candidate_id,mint_address,pair_address,first_seen_at,last_seen_at,source_as_of,state,reason,evidence_json
       ) VALUES (?,?,?,?,?,?,?,?,?)
