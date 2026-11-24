@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { freshDb } from './helpers.js';
 import { get } from '../src/db/db.js';
-import { getControl, updateControl } from '../src/core/mode.js';
+import { controlAuthority, getControl, updateControl } from '../src/core/mode.js';
 import { getSetting, setSetting } from '../src/core/settings.js';
 
 const auditCount = () => get<{ total: number }>('SELECT COUNT(*) AS total FROM audit_log')!.total;
@@ -40,12 +40,14 @@ describe('canonical mode authority: LIVE remains fail-closed', () => {
     setSetting('control', legacy);
     const auditsBefore = auditCount();
     expect(getControl()).toEqual({ ...legacy, mode: 'OBSERVE' });
+    expect(controlAuthority()).toEqual({ control: { ...legacy, mode: 'OBSERVE' }, unavailableMode: true });
     expect(getSetting('control', null)).toEqual(legacy);
     expect(auditCount()).toBe(auditsBefore);
     expect(updateControl('trader-joe', { pausedNewOrders: true })).toMatchObject({
       mode: 'OBSERVE', pausedNewOrders: true, disabledStrategies: ['range_reversion'],
     });
     expect(getSetting('control', null)).toMatchObject({ mode: 'OBSERVE', pausedNewOrders: true });
+    expect(controlAuthority().unavailableMode).toBe(false);
     const detail = get<{ detail: string }>("SELECT detail FROM audit_log WHERE action='control.update' ORDER BY id DESC LIMIT 1")!.detail;
     expect(JSON.parse(detail)).toMatchObject({ from: { mode: 'BOUNDED_LIVE' }, to: { mode: 'OBSERVE' } });
     expect(() => updateControl('owner', { mode: 'BOUNDED_LIVE' }, () => ({ ok: true }))).toThrow(/BOUNDED_LIVE blocked/);

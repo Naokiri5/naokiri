@@ -4,7 +4,7 @@ import { isExpired } from '../qci/coordinator.js';
 import { scoreOpportunity, type OpportunityScore } from './scoring.js';
 import { evaluateRisk, type RiskDecision } from '../risk/gate.js';
 import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
-import { getControl } from '../core/mode.js';
+import { controlAuthority } from '../core/mode.js';
 import { recordOpportunity } from '../ditas/memory.js';
 import { run, J, tx } from '../db/db.js';
 import { uid, iso } from '../core/util.js';
@@ -55,8 +55,9 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
 
   let decision: DecisionState; let risk: RiskDecision | null = null;
-  const mode = getControl().mode;
-  if (q.status === 'FAIL' || !ctx.ticker) decision = 'INSUFFICIENT_DATA';
+  const authority = controlAuthority(), mode = authority.control.mode;
+  if (authority.unavailableMode) decision = 'REJECTED';
+  else if (q.status === 'FAIL' || !ctx.ticker) decision = 'INSUFFICIENT_DATA';
   else if (!ctx.safety.eligibleForAutomation || qci.state === 'VETOED') decision = 'REJECTED';
   else if (expired) decision = 'WAIT_FOR_CONFIRMATION';
   else if (qci.state === 'NO_QUORUM' || qci.state === 'MIXED_CONSENSUS') decision = 'WAIT_FOR_CONFIRMATION';

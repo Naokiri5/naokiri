@@ -1,5 +1,5 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
-import type { Candle } from '../market/types.js';
+import { INTERVAL_MS, type Candle, type Interval } from '../market/types.js';
 
 /** Binance public market-data mirror (data-api.binance.vision). Read-only, no key. */
 const BASE = 'https://data-api.binance.vision/api/v3';
@@ -48,4 +48,24 @@ export interface AggTrade { id: number; price: number; qty: number; ts: number; 
 export async function aggTrades(symbol: string, limit = 500): Promise<AggTrade[]> {
   const raw: any[] = await fetchProvider('binance', `${BASE}/aggTrades?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
   return raw.map((a) => ({ id: a.a, price: +a.p, qty: +a.q, ts: a.T, buyerIsMaker: a.m }));
+}
+
+/** Exact historical bar from the same public provider; never substitute a latest quote. */
+export async function closedKlineAt(symbol: string, interval: Interval, targetAt: number): Promise<Candle | null> {
+  const width = INTERVAL_MS[interval];
+  if (!/^[A-Z0-9]{2,30}$/.test(symbol) || !Number.isSafeInteger(width) ||
+      !Number.isSafeInteger(targetAt) || targetAt < width || targetAt % width !== 0 ||
+      targetAt > Date.now() - 2_000) return null;
+  const start = targetAt - width;
+  const raw: unknown = await fetchProvider('binance',
+    `${BASE}/klines?symbol=${encodeURIComponent(symbol)}&interval=${interval}&startTime=${start}&endTime=${targetAt-1}&limit=1`,
+    { timeoutMs: 5_000 });
+  if (!Array.isArray(raw) || raw.length !== 1 || !Array.isArray(raw[0])) return null;
+  const k = raw[0];
+  if (k[0] !== start || k[6] !== targetAt - 1 ||
+      ![1,2,3,4,5].every(i => typeof k[i] === 'string' && k[i].trim() !== '')) return null;
+  const [o,h,l,c,v] = [1,2,3,4,5].map(i => Number(k[i]));
+  if (![o,h,l,c,v].every(Number.isFinite) || Math.min(o,h,l,c) <= 0 || v < 0 ||
+      h < Math.max(o,c,l) || l > Math.min(o,c,h)) return null;
+  return { t:start, closeTime:targetAt-1, o,h,l,c,v };
 }

@@ -16,7 +16,13 @@ function effectiveControl(control: ControlState): ControlState {
   return isAvailableMode(control.mode) ? control : { ...control, mode: 'OBSERVE' };
 }
 
-export const getControl = (): ControlState => effectiveControl(storedControl());
+// One persisted authority, two views: safe effective state for UI/monitoring,
+// and explicit denial provenance for financial decisions. Read atomically once.
+export function controlAuthority() {
+  const stored = storedControl();
+  return { control: effectiveControl(stored), unavailableMode: !isAvailableMode(stored.mode) };
+}
+export const getControl = (): ControlState => controlAuthority().control;
 export function displayMode(c = getControl()) {
   if (c.emergency) return 'EMERGENCY';
   if (c.pausedNewOrders) return 'PAUSED';

@@ -16,6 +16,7 @@ import { journal } from '../journal/journal.js';
 import { refreshBrainSnapshot } from '../knowledge/brain.js';
 import { recordAutonomicObservation, recordLearningEvidence, resetInternalProcesses } from '../knowledge/cognitive/internalProcesses.js';
 import { recentInternalLearningEvidence } from '../ditas/service.js';
+import { verifyDueForecasts } from '../ditas/forecastVerifier.js';
 import { refreshSettingsCapabilitySnapshot } from '../knowledge/settingsCapabilities.js';
 import { CAPABILITY_REFRESH_INTERVAL_MS } from '../knowledge/capabilitySnapshot.js';
 import { bus } from '../core/bus.js';
@@ -271,7 +272,11 @@ const backgroundLane = () => runLane('background', async (lease) => {
   const suspended = checkStrategyHealth(lease);
   // Reuse the background lane and canonical memory; never delay protective exits.
   if (stillLeader(lease)) {
-    try { recordLearningEvidence(recentInternalLearningEvidence()); }
+    try {
+      await verifyDueForecasts(lease);
+      if (!stillLeader(lease)) return;
+      recordLearningEvidence(recentInternalLearningEvidence());
+    }
     catch (error) { botStatus.lastError = `learning-evidence: ${errorText(error).slice(0, 200)}`; }
   }
   if (suspended.length) notify('WARNING', 'Strategy auto-suspended', suspended.join(', '), 'strategy-health');

@@ -1,6 +1,6 @@
 import { currentPolicy, type RiskPolicy } from './policy.js';
 import { accountState, openPositions, PAPER_ACCOUNT, type AccountState } from '../portfolio/ledger.js';
-import { getControl } from '../core/mode.js';
+import { controlAuthority } from '../core/mode.js';
 import { market } from '../market/store.js';
 import { assessQuality, bookImpact, bookAge, QUALITY_LIMITS } from '../market/quality.js';
 import { assessCexAsset } from '../safety/safety.js';
@@ -33,11 +33,12 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const pv = currentPolicy();
   if (!pv) return { decision: 'DENY', reasonCodes: ['POLICY_NOT_ACCEPTED: owner must review and accept a risk policy'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
   const pol: RiskPolicy = pv.policy; const account = PAPER_ACCOUNT;
-  const ctl = getControl();
+  const authority = controlAuthority(), ctl = authority.control;
   ev.mode = ctl.mode;
   if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');
   if (ctl.pausedNewOrders) deny.push('NEW_ORDERS_PAUSED');
-  if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
+  if (authority.unavailableMode) deny.push('MODE_NOT_PAPER');
+  else if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
   else if (ctl.mode !== 'PAPER' && ctl.mode !== 'APPROVAL') deny.push('MODE_NOT_PAPER');
   if (unreconciledPaperOrders()) deny.push('UNRECONCILED_PAPER_ORDERS');
   if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
