@@ -9,6 +9,7 @@ import { provider } from '../providers/http.js';
 import { recentReleaseGateEvidence } from '../qa/gates.js';
 import { currentPolicy } from '../risk/policy.js';
 import { brainOverview } from '../knowledge/brain.js';
+import { requiredReadEvidenceGaps, type CapabilityGraphId } from '../knowledge/capabilityGraph.js';
 import { stepUpMethod } from '../security/stepUp.js';
 import { staleAfter, type EngineView } from './readiness.js';
 import { currentLease } from './lease.js';
@@ -104,19 +105,19 @@ function liveChecks(at: number): PreflightCheck[] {
  */
 function capabilityEvidenceChecks(mind: SessionMind, at: number): PreflightCheck[] {
   const network = brainOverview(at).network;
-  const required = mind === 'FAST'
+  const required: readonly CapabilityGraphId[] = mind === 'FAST'
     ? ['autopilot.asset_discovery', 'settings.risk_center', 'settings.connections_hub']
     : ['autopilot.market_terminal', 'autopilot.ai_scanner', 'settings.strategy_lab',
        'settings.risk_center', 'settings.connections_hub'];
-  const missing = network.capabilities.filter(c => required.includes(c.id) && c.readiness !== 'EVIDENCE_READY');
+  const missing = requiredReadEvidenceGaps(network, required, mind);
   const status = missing.length === 0 ? 'PASS'
-    : missing.every(c => c.readiness === 'UNAVAILABLE') ? 'UNVERIFIED' : 'BLOCKED';
+    : missing.every(c => c.reason === 'UNAVAILABLE' || c.reason === 'UNVERIFIED') ? 'UNVERIFIED' : 'BLOCKED';
   return [{
     id: 'brainos-dependencies',
     label: 'Internal capability evidence',
     status,
     detail: missing.length
-      ? 'Unverified or blocked source evidence: ' + missing.map(c => `${c.id} (${c.readiness})`).join(', ')
+      ? 'Unverified or blocked source evidence: ' + missing.map(c => `${c.id} (${c.reason})`).join(', ')
       : 'Selected intelligence sources have fresh supporting evidence. Trading eligibility is evaluated separately.',
     observedAt: network.evaluatedAt,
   }];

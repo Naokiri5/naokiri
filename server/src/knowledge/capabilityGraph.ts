@@ -102,11 +102,21 @@ export function buildCapabilityNetwork(input: {
   const source = new Map<CapabilityGraphId, {
     state: string; reason: string; observedAt: number;
   }>();
+  // Ambiguous source observations must not become ready by last-write-wins.
+  const duplicateSources = new Set<CapabilityGraphId>();
+  const recordSource = (id: CapabilityGraphId, observation: { state: string; reason: string; observedAt: number }) => {
+    if (source.has(id) || duplicateSources.has(id)) {
+      duplicateSources.add(id);
+      source.delete(id);
+      return;
+    }
+    source.set(id, observation);
+  };
   if (autoFresh && input.autopilot) for (const c of input.autopilot.capabilities) {
-    source.set(`autopilot.${c.id}`, { state: c.state, reason: c.reason, observedAt: input.autopilot.capturedAt });
+    recordSource(`autopilot.${c.id}`, { state: c.state, reason: c.reason, observedAt: input.autopilot.capturedAt });
   }
   if (settingsFresh && input.settings) for (const c of input.settings.capabilities) {
-    source.set(`settings.${c.id}`, { state: c.state, reason: c.reason, observedAt: input.settings.capturedAt });
+    recordSource(`settings.${c.id}`, { state: c.state, reason: c.reason, observedAt: input.settings.capturedAt });
   }
 
   const entryById = new Map(registry.map(c => [c.id, c]));
@@ -123,7 +133,8 @@ export function buildCapabilityNetwork(input: {
     const failed = dependencies.map(resolve).filter(c => c.readiness !== 'EVIDENCE_READY');
     const s = source.get(id);
     let readiness = asReadiness(s?.state ?? null);
-    let reason = s?.reason ?? 'Authoritative capability evidence is missing or expired';
+    let reason = duplicateSources.has(id) ? 'Duplicate authoritative capability evidence' :
+      s?.reason ?? 'Authoritative capability evidence is missing or expired';
     if (readiness === 'EVIDENCE_READY' && failed.length) {
       readiness = 'BLOCKED';
       reason = `Dependency evidence not ready: ${failed.map(c => `${c.id} (${c.readiness})`).join(', ')}`;
@@ -153,7 +164,24 @@ export function buildCapabilityNetwork(input: {
 
 /** For autonomous readers only. Never use this as an execution authorization check. */
 export function isReadEvidenceReady(network: CapabilityNetwork, id: CapabilityGraphId, mind: Mind): boolean {
-  const node = network.capabilities.find(c => c.id === id);
-  return !!node && node.modes.includes(mind) && node.readiness === 'EVIDENCE_READY' &&
-    !node.tradingAuthority && !network.tradingAuthority;
+  const nodes = network.capabilities.filter(c => c.id === id);
+  const node = nodes[0];
+  return nodes.length === 1 && !!node && node.modes.includes(mind) &&
+    node.readiness === 'EVIDENCE_READY' && Number.isSafeInteger(network.evaluatedAt) &&
+    network.evaluatedAt > 0 && fresh(node.observedAt ?? undefined, network.evaluatedAt) &&
+    node.tradingAuthority === false && network.tradingAuthority === false;
+}
+
+/** Enumerate required evidence, not only the nodes that happen to be present.
+ * This is a read-only diagnostic, never an execution or session authorization.
+ */
+export function requiredReadEvidenceGaps(network: CapabilityNetwork, required: readonly CapabilityGraphId[], mind: Mind) {
+  return required.flatMap(id => {
+    if (isReadEvidenceReady(network, id, mind)) return [];
+    const nodes = network.capabilities.filter(c => c.id === id);
+    const node = nodes[0];
+    const reason = nodes.length !== 1 || !node ? 'UNAVAILABLE' as const
+      : node.readiness === 'EVIDENCE_READY' ? 'UNVERIFIED' as const : node.readiness;
+    return [{ id, reason }];
+  });
 }

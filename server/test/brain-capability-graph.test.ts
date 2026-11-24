@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { BRAIN_CAPABILITIES, buildBrainSnapshot, type BrainSignals } from '../src/knowledge/brain.js';
 import { SETTINGS_CAPABILITIES, buildSettingsCapabilitySnapshot, type SettingsEvidence } from '../src/knowledge/settingsCapabilities.js';
-import { buildCapabilityNetwork, CAPABILITY_DEPENDENCIES, isReadEvidenceReady } from '../src/knowledge/capabilityGraph.js';
+import { buildCapabilityNetwork, CAPABILITY_DEPENDENCIES, isReadEvidenceReady, requiredReadEvidenceGaps } from '../src/knowledge/capabilityGraph.js';
 
 const NOW = 1_800_000_000_000;
 const signals: BrainSignals = {
@@ -97,6 +97,36 @@ describe('BrainOS canonical capability dependency graph', () => {
     expect(isReadEvidenceReady(network, 'autopilot.market_terminal', 'FAST')).toBe(true);
     expect(isReadEvidenceReady(network, 'autopilot.market_bubble_map', 'FAST')).toBe(false);
     expect(isReadEvidenceReady(network, 'autopilot.market_bubble_map', 'DEEP')).toBe(true);
+  });
+
+  it('quarantines duplicate source evidence and propagates the failure to dependent capabilities', () => {
+    const node = autopilot.capabilities.find(c => c.id === 'market_terminal')!;
+    const conflicting = { ...node, state: 'WAITING_FOR_DATA' as const };
+    for (const capabilities of [[...autopilot.capabilities, conflicting], [conflicting, ...autopilot.capabilities]]) {
+      const network = run({ autopilot: { ...autopilot, capabilities } });
+      expect(byId(network, 'autopilot.market_terminal')).toMatchObject({
+        readiness: 'UNAVAILABLE', reason: 'Duplicate authoritative capability evidence',
+      });
+      expect(byId(network, 'autopilot.ai_scanner').readiness).toBe('BLOCKED');
+      expect(isReadEvidenceReady(network, 'autopilot.market_terminal', 'FAST')).toBe(false);
+    }
+  });
+
+  it('reports absent, ambiguous, unsupported and invalid-time evidence instead of a false pass', () => {
+    const network = run();
+    const id = 'autopilot.market_terminal' as const;
+    const node = network.capabilities.find(c => c.id === id)!;
+    expect(requiredReadEvidenceGaps(network, [id], 'FAST')).toEqual([]);
+    expect(requiredReadEvidenceGaps({ ...network, capabilities: network.capabilities.filter(c => c.id !== id) }, [id], 'FAST'))
+      .toEqual([{ id, reason: 'UNAVAILABLE' }]);
+    expect(requiredReadEvidenceGaps({ ...network, capabilities: [...network.capabilities, node] }, [id], 'FAST'))
+      .toEqual([{ id, reason: 'UNAVAILABLE' }]);
+    expect(requiredReadEvidenceGaps(network, ['autopilot.market_bubble_map'], 'FAST'))
+      .toEqual([{ id: 'autopilot.market_bubble_map', reason: 'UNVERIFIED' }]);
+    for (const observedAt of [null, NOW + 1, NOW - 180_001]) {
+      const altered = { ...network, capabilities: network.capabilities.map(c => c.id === id ? { ...c, observedAt } : c) };
+      expect(requiredReadEvidenceGaps(altered, [id], 'FAST')).toEqual([{ id, reason: 'UNVERIFIED' }]);
+    }
   });
 
   it('rejects missing, duplicate, and unexpected registry entries', () => {
