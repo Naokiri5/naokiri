@@ -1,5 +1,7 @@
 import { config } from '../config.js';
 import { brainRegistryOverview } from './cognitive/registry.js';
+import { internalProcessOverview, resetInternalProcesses } from './cognitive/internalProcesses.js';
+import { CAPABILITY_REFRESH_INTERVAL_MS } from './capabilitySnapshot.js';
 import { market } from '../market/store.js';
 import { recentNews } from '../news/news.js';
 import { recentPrints } from '../whales/prints.js';
@@ -198,8 +200,9 @@ export function brainOverview(at = Date.now()) {
     latest: current,
     memoryAuthority: 'Existing knowledge A-F, DITAS append-only events, and canonical portfolio ledger',
     cognitiveFoundation: brainRegistryOverview(),
+    internalProcesses: internalProcessOverview(at, Math.max(180_000, CAPABILITY_REFRESH_INTERVAL_MS * 3)),
   };
 }
 
 /** Test isolation; not a user-facing reset or permission action. */
-export function _resetBrainSnapshotForTests() { latest = null; }
+export function _resetBrainSnapshotForTests() { latest = null; resetInternalProcesses(); }
