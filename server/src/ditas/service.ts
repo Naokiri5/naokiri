@@ -98,3 +98,17 @@ export function addOutcome(forecastId: string, observedPrice: number, observedAt
   run('INSERT INTO ditas_outcomes(id,forecast_id,created_at,outcome,payload) VALUES (?,?,?,?,?)', id, forecastId, now, outcome, J(payload));
   return { id, forecastId, createdAt: now, outcome, ...payload };
 }
+
+// BrainOS internal learning observes canonical records on the existing background lane.
+// These records are NOT an independently verified calibration cohort. No writes or model promotion.
+export function recentInternalLearningEvidence(now = Date.now()) {
+  if (!Number.isSafeInteger(now) || now <= 0) throw new Error('INVALID_LEARNING_OBSERVATION_TIME');
+  const closed = all<{ closed_at: number }>(
+    "SELECT closed_at FROM positions WHERE account=? AND status='CLOSED' AND closed_at>0 AND closed_at<=? ORDER BY closed_at DESC LIMIT 100",
+    PAPER_ACCOUNT, now);
+  const outcomes = all<{ id: string }>(
+    "SELECT o.id FROM ditas_outcomes o JOIN ditas_forecasts f ON f.id=o.forecast_id WHERE f.created_at<f.target_at AND f.target_at<=o.created_at AND o.created_at<=? ORDER BY o.created_at DESC LIMIT 100",
+    now);
+  return { observedAt: now, recentPaperClosedCount: closed.length,
+    latestPaperClosedAt: closed[0]?.closed_at ?? null, recentOwnerReportedOutcomes: outcomes.length };
+}
