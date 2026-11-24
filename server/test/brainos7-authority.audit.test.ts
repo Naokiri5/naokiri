@@ -30,7 +30,6 @@ const external = new Set(['node:crypto','node:events','@anthropic-ai/sdk']);
 // imports at exact paths are allowed. A new caller needs explicit review.
 const trusted: Record<string, Record<string, readonly string[]>> = {
   'db/db.ts': {
-    'knowledge/cognitive/books.ts': ['get','all'],
     'knowledge/retrieval.ts': ['get','all','getDb'],
   },
   'config.ts': {
@@ -103,8 +102,8 @@ function inspectAst(file: string, source: string, cognitive: boolean): Scan {
     if (cognitive && n.type==='AssignmentExpression' && n.left?.type==='MemberExpression' &&
         authorityFields.has(nameOf(n.left.property) ?? '') && !isFalse(n.right))
       bad(n,'authority mutation: '+nameOf(n.left.property));
-    if (cognitive && n.type==='Identifier' && n.name==='globalThis')
-      bad(n,'global authority access is not permitted');
+    if (cognitive && n.type==='Identifier' && ['globalThis','process','fetch','WebSocket'].includes(n.name))
+      bad(n,'direct global authority or network access is not permitted');
     if (!cognitive && n.type==='Identifier' && ['require','createRequire','eval'].includes(n.name))
       bad(n,'unreviewed module loading reference '+n.name);
   });
@@ -189,6 +188,7 @@ describe('BrainOS 7 research-only single-authority AST audit',()=>{
     for(const code of [
       "import { run as safe } from '../../db/db.js';",
       "import { getDb } from '../../db/db.js';",
+      "import { get } from '../../db/db.js';",
       "const x = { financialAuthority: true };",
       "const x = { tradingAuthority: enabled };",
       "ctx.executionAuthority = true;",

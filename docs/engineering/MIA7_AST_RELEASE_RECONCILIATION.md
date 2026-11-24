@@ -4,7 +4,7 @@ Scope: upgrade the existing BrainOS test in PR #137. No new financial controller
 
 The proposed cognitive directory is actually server/src/knowledge/cognitive. The previous source audit was regex-only and missed the transitive book retrieval dependency via search -> concepts -> risk/policy. Extract existing retrieval functions without changing algorithms or public search exports; the cognitive reader now imports the retrieval-only module.
 
-The audit recursively walks production roots and follows first-party runtime imports/re-exports, rejects unresolved edges, disallows dynamic/CommonJS loading, detects restricted identifier references and explicit authority escalation, and uses narrow named-import exceptions for canonical DB and config infrastructure. It is not an AST symbol resolver, data-flow/taint analyzer, SQL security sandbox or hostile-code containment. DB/config are trusted terminal owners; dependency packages are not recursively audited. Further hardening: enforce read-only query capabilities, isolated runtime permission and callback validation.
+The audit recursively walks production roots and follows first-party runtime imports/re-exports, rejects unresolved edges, disallows dynamic/CommonJS loading, detects restricted identifier references and explicit authority escalation, and uses narrow named-import exceptions for canonical DB and config infrastructure. It is not an AST symbol resolver, data-flow/taint analyzer, SQL security sandbox or hostile-code containment. Cognitive callers have no direct DB import; the existing retrieval module owns fixed knowledge queries. DB/config are trusted terminal owners; dependency packages are not recursively audited. Further hardening: enforce read-only query capabilities, isolated runtime permission and callback validation.
 
 ## Uploaded release proposal decisions
 - Reuse canonical SQLite WAL database, QA gate, owner control, lease fencing, readiness and OMS. Do not create a second database or an alternative mode authority.
@@ -12,3 +12,7 @@ The audit recursively walks production roots and follows first-party runtime imp
 - Do not install the proposed live adapter factory: the repo lacks a certified signer and venue adapters. Constructor-only checks do not authorize future dispatch; each action needs current lease, permission, risk and reconciliation checks.
 - Do not replace the actual npm/Railway deployment with the supplied pnpm/Docker assumptions, or expose a parallel health endpoint that claims certified LIVE.
 - Do not emit a release certificate, invent Brier scores, enable LIVE, or merge this stacked draft based on unit tests. Canonical G07/G08/G10/G12 blockers remain, including the 30-day paper evaluation.
+
+## Existing mode authority repair reconciled from PR #117
+
+The #137 stack lacked the direct fail-closed `BOUNDED_LIVE` guard already implemented and tested in #117. Reuse its exact canonical `core/mode.ts` and regression suite: reject omitted/permissive gate callbacks for LIVE, project invalid/legacy LIVE as OBSERVE, preserve the original audit state and retain owner-authorized paper controls. This is a reconciliation of existing work, not a second mode controller. No manifest can unlock LIVE in the current build.

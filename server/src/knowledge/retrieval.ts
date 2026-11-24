@@ -68,3 +68,24 @@ export function citation(chunkId: string) {
   const r = get<any>(`SELECT ${COLS}, k.seq FROM kb_chunks k JOIN kb_documents d ON d.id = k.document_id WHERE k.id = ?`, chunkId); if (!r) return null;
   const h = toHit(r, 0); return { ...h, text: r.text, seq: r.seq };
 }
+
+/** Fixed knowledge-only queries: cognitive callers cannot supply SQL. */
+export function readBookCoverage() {
+  const d = get<{
+    uploaded: number; indexed_count: number; partial_count: number; review_count: number; failed_count: number;
+  }>(`SELECT COUNT(*) uploaded,
+     SUM(CASE WHEN status='INDEXED' THEN 1 ELSE 0 END) indexed_count,
+     SUM(CASE WHEN status='PARTIALLY_INDEXED' THEN 1 ELSE 0 END) partial_count,
+     SUM(CASE WHEN status='NEEDS_REVIEW' THEN 1 ELSE 0 END) review_count,
+     SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) failed_count
+     FROM kb_documents`)!;
+  const catalog = get<{ n: number }>('SELECT COUNT(*) n FROM kb_catalog')!.n;
+  const citations = get<{ n: number }>('SELECT COUNT(*) n FROM kb_chunks')!.n;
+  const linked = get<{ n: number }>(`SELECT COUNT(DISTINCT c.id) n FROM kb_catalog c
+    JOIN kb_documents d ON d.id=c.document_id
+    WHERE d.status IN ('INDEXED','PARTIALLY_INDEXED')`)!.n;
+  return { d, catalog, citations, linked };
+}
+export function readBookChunkHash(chunkId: string, documentId: string) {
+  return get<{ hash:string }>('SELECT hash FROM kb_chunks WHERE id=? AND document_id=?', chunkId, documentId);
+}

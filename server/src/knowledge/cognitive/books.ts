@@ -1,5 +1,4 @@
-import { all, get } from '../../db/db.js';
-import { search } from '../retrieval.js';
+import { search, readBookCoverage, readBookChunkHash } from '../retrieval.js';
 import type { BrainKnowledgeClaim, CognitiveEvidenceClass } from './contracts.js';
 
 /**
@@ -19,19 +18,7 @@ export interface BrainBookCoverage {
   memorySource: 'EXISTING_KB_TABLES';
 }
 export function brainBookCoverage(): BrainBookCoverage {
-  const d = get<{
-    uploaded: number; indexed_count: number; partial_count: number; review_count: number; failed_count: number;
-  }>(`SELECT COUNT(*) uploaded,
-     SUM(CASE WHEN status='INDEXED' THEN 1 ELSE 0 END) indexed_count,
-     SUM(CASE WHEN status='PARTIALLY_INDEXED' THEN 1 ELSE 0 END) partial_count,
-     SUM(CASE WHEN status='NEEDS_REVIEW' THEN 1 ELSE 0 END) review_count,
-     SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) failed_count
-     FROM kb_documents`)!;
-  const catalog = get<{ n: number }>('SELECT COUNT(*) n FROM kb_catalog')!.n;
-  const citations = get<{ n: number }>('SELECT COUNT(*) n FROM kb_chunks')!.n;
-  const linked = get<{ n: number }>(`SELECT COUNT(DISTINCT c.id) n FROM kb_catalog c
-    JOIN kb_documents d ON d.id=c.document_id
-    WHERE d.status IN ('INDEXED','PARTIALLY_INDEXED')`)!.n;
+  const { d, catalog, citations, linked } = readBookCoverage();
   return { targetBooks: 100, catalogTitles:catalog, uploadedDocuments:d.uploaded,
     indexedDocuments:d.indexed_count??0,partiallyIndexedDocuments:d.partial_count??0,
     needsReviewDocuments:d.review_count??0,failedDocuments:d.failed_count??0,
@@ -56,8 +43,7 @@ export function retrieveBrainBookClaims(query: string, limit = 8): BrainKnowledg
     if (hit.documentStatus !== 'INDEXED' && hit.documentStatus !== 'PARTIALLY_INDEXED')
       continue;
     if (!Number.isSafeInteger(hit.pageStart) || (hit.pageStart ?? 0) < 1) continue;
-    const stored = get<{ hash:string }>('SELECT hash FROM kb_chunks WHERE id=? AND document_id=?',
-      hit.chunkId,hit.documentId);
+    const stored = readBookChunkHash(hit.chunkId,hit.documentId);
     if (!stored?.hash) continue;
     claims.push({
       claimId: 'passage:'+hit.chunkId,
