@@ -21,8 +21,12 @@ const forbidden = new Set([
   'recordFill','ledger','appendLedgerEntry','writeLedger','acceptPolicy','setStrategyStatus','updateControl',
   'setSetting','openDb','triggerSweep','mutateRisk','mutateRiskLimits','updateRiskCap','commitLedgerEntry',
   'executeTreasurySweep','unlockLiveMode','executeTrade','assertLiveModeUnlocked','evaluateRisk',
+  'Keypair','sendRawTransaction','sendTransaction','signAllTransactions','signTransaction',
+  'LiveOmsAdapter','unlockLiveExecution','Wallet','Worker','SharedWorker',
   'require','createRequire','eval','Function',
 ]);
+const signerOrWorker = new Set(['Keypair','sendRawTransaction','sendTransaction','signAllTransactions',
+  'signTransaction','LiveOmsAdapter','unlockLiveExecution','Worker','SharedWorker']);
 const authorityFields = new Set(['financialAuthority','executionAuthority','canRequestFinancialAction','tradingAuthority','allowLiveExecution']);
 const external = new Set(['node:crypto','node:events','@anthropic-ai/sdk']);
 // These two shared infrastructure owners are deliberately terminal boundaries,
@@ -104,6 +108,11 @@ function inspectAst(file: string, source: string, cognitive: boolean): Scan {
       bad(n,'authority mutation: '+nameOf(n.left.property));
     if (cognitive && n.type==='Identifier' && ['globalThis','process','fetch','WebSocket'].includes(n.name))
       bad(n,'direct global authority or network access is not permitted');
+    // Also enforce signer/worker isolation in transitively reachable helpers, not only cognitive roots.
+    if (!cognitive && n.type==='Identifier' && signerOrWorker.has(n.name))
+      bad(n,'restricted transitive authority identifier '+n.name);
+    if (!cognitive && n.type==='MemberExpression' && n.computed && signerOrWorker.has(nameOf(n.property) ?? ''))
+      bad(n,'restricted transitive computed member '+nameOf(n.property));
     if (!cognitive && n.type==='Identifier' && ['require','createRequire','eval'].includes(n.name))
       bad(n,'unreviewed module loading reference '+n.name);
   });
@@ -183,6 +192,18 @@ describe('BrainOS 7 research-only single-authority AST audit',()=>{
       "api['cancelOrder']();", "const { submitOrder: f } = api; f();",
       "globalThis['require']('./x.js');",
     ]) expect(fixture(code).length).toBeGreaterThan(0);
+  });
+  it('rejects signer, live unlock and worker primitives including transitive helper references',()=>{
+    for (const code of [
+      "const s = api.signTransaction; s();",
+      "api['sendRawTransaction']();",
+      "new Keypair();",
+      "unlockLiveExecution();",
+      "new Worker(new URL('./worker.js', import.meta.url));",
+    ]) expect(fixture(code).length).toBeGreaterThan(0);
+    expect(fixture("import { helper } from '../../shared/fixture.js';", {
+      'shared/fixture.ts': "export const helper = (api: any) => api['signAllTransactions']();",
+    }).join()).toContain('restricted transitive computed member signAllTransactions');
   });
   it('rejects unreviewed database access and authority escalation',()=>{
     for(const code of [
