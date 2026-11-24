@@ -5,7 +5,7 @@ This is an incremental integration of the supplied MIA-HP1–HP5 documents, not 
 | Source scope | Canonical owner | Integration / outstanding work |
 | --- | --- | --- |
 | HP1 latency | core/latency.ts, qhef/qhef.ts | O(1) ring writes, reject invalid measurements, preserve report fields and percentile convention. No latency target certified. |
-| HP1 depth / transport | market/quality.ts, market/fabric.ts, providers/binance.ts | Shared structural validator applied to exact quantity book walk; invalid clocks rejected. REST only; WS sequence synchronization, rotation, snapshot buffering, and weight-aware cooldown still require integration. |
+| HP1 depth / transport | market/quality.ts, market/fabric.ts, providers/binance.ts | Shared structural validator applied to exact quantity book walk; invalid clocks rejected. REST only; canonical provider-wide HTTP 429/Binance 418 Retry-After cooldown added with monotonic timing. WS sequence synchronization, rotation, snapshot buffering and weight accounting still require integration. |
 | HP1 cockpit | PR #127 | Reconcile existing cookie-auth/CSRF design, not browser bearer-token storage. No duplicate panel or routes. |
 | HP2 scheduling | bot/bot.ts, market/scanner.ts, workers/runtime.ts | Existing independent protection, cooperative scan yields and worker bounds; adaptive pressure / global bounded queue not complete. |
 | HP3 evidence / costs | market/quality.ts, scanner, features, decision, risk | Reuse book walk and impact. The two supplied HP3 documents contain wiring summaries rather than complete code. No new cache or evaluator asserted. |
