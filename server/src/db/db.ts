@@ -29,6 +29,9 @@ export function openDb(file?: string) {
   try {
     connection.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}; PRAGMA foreign_keys=ON;`);
     enableWal(connection);
+    // Financial commits must survive process loss: use the existing WAL, not a second ledger.
+    // Explicitly select FULL rather than relying on the SQLite build's default synchronous mode.
+    connection.exec('PRAGMA synchronous=FULL');
     migrate(connection);
     db = connection;
     return connection;
