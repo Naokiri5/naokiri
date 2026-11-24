@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setupOwner } from '../src/api/auth.js';
 import { config } from '../src/config.js';
 import { verifyAuditChain } from '../src/core/audit.js';
 import { updateControl } from '../src/core/mode.js';
-import { all, closeDb, get } from '../src/db/db.js';
+import { all, closeDb, get, openDb } from '../src/db/db.js';
 import { decide } from '../src/decision/engine.js';
 import { paperChoiceOutcomes } from '../src/ditas/execution.js';
 import { memoryEvents } from '../src/ditas/memory.js';
@@ -45,18 +48,23 @@ async function eligibleDecision(instrument: ReturnType<typeof seedInstrument>) {
   return report;
 }
 
+let dbDir: string | undefined;
 afterEach(() => {
   vi.useRealTimers();
   closeDb();
   market.reset();
+  if (dbDir) rmSync(dbDir, { recursive: true, force: true });
+  dbDir = undefined;
 });
 
 describe('BrainOS spot paper evidence flow', () => {
-  it('reconciles a fenced decision through its entry and protective exit while a close drains', async () => {
+  it.each(['memory', 'wal-reopen'])('reconciles a fenced decision through its entry and protective exit while a close drains (%s)', async storage => {
     const start = Date.UTC(2026, 10, 24, 1);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(start - 1_000);
-    freshDb();
+    if (storage === 'wal-reopen') dbDir = mkdtempSync(join(tmpdir(), 'mia-paper-flow-'));
+    const file = dbDir ? join(dbDir, 'mia.sqlite') : ':memory:';
+    freshDb(true, file);
     market.reset();
     seedInstrument('BTCUSDT');
     const asset = seedInstrument('ETHUSDT');
@@ -99,6 +107,16 @@ describe('BrainOS spot paper evidence flow', () => {
     expect(get('SELECT status, stop_price FROM orders WHERE position_id=? AND purpose=?', position.id, 'PROTECTIVE_STOP'))
       .toEqual({ status: 'ACTIVE', stop_price: decision.stopLoss });
 
+    if (storage === 'wal-reopen') {
+      const cashAfterEntry = cashBalance();
+      closeDb();
+      openDb(file);
+      expect(cashBalance()).toBe(cashAfterEntry);
+      expect(openPositions()).toMatchObject([{ id: position.id, stop_price: decision.stopLoss }]);
+      expect(get('SELECT status FROM orders WHERE position_id=? AND purpose=?', position.id, 'PROTECTIVE_STOP'))
+        .toEqual({ status: 'ACTIVE' });
+    }
+
     vi.setSystemTime(start + 2_000);
     expect(requestPaperSpotClose()).toMatchObject({ state: 'CLOSING_DRAINING_ENTRIES' });
     expect(submitEntry(nextDecision, 'bot', undefined, fence)).toMatchObject({ ok: false, reason: 'SESSION_NOT_RUNNING' });
@@ -139,5 +157,15 @@ describe('BrainOS spot paper evidence flow', () => {
       payload: { side: 'SELL', decisionId: decision.id, orderId: sell.order_id, closed: true } }]);
     expect(paperFillEvents(sellEvent.nextAfter, 1).events).toHaveLength(0);
     expect(verifyAuditChain().ok).toBe(true);
+    if (storage === 'wal-reopen') {
+      const finalCash = cashBalance();
+      closeDb();
+      openDb(file);
+      expect(openPositions()).toHaveLength(0);
+      monitorPositions(undefined, fence);
+      expect(cashBalance()).toBe(finalCash);
+      expect(all('SELECT f.id FROM fills f JOIN orders o ON o.id=f.order_id WHERE o.position_id=?', position.id)).toHaveLength(2);
+      expect(verifyAuditChain().ok).toBe(true);
+    }
   });
 });
