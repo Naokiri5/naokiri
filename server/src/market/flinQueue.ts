@@ -137,27 +137,27 @@ export function evaluateFlinEvidence(
   const no = (reason: string): FlinExecutionEvidenceDecision =>
     ({ tradingAuthority: false, disposition: 'NO_TRADE', reason, expectedNetEdgeSol: null });
   if (!validTs(now) || !validText(mint)) return no('INVALID_MINT_OR_CLOCK');
-  if (!safety || safety.mintAddress !== mint || !safety.verificationComplete
+  if (!safety || safety.mintAddress !== mint || safety.verificationComplete !== true
     || !validTs(safety.verifiedAt) || safety.verifiedAt > now || now - safety.verifiedAt > FLIN_PROOF_MAX_AGE_MS)
     return no('TOKEN_SAFETY_UNVERIFIED_OR_STALE');
-  if (!safety.mintAuthorityRevokedOrSafe || !safety.freezeAuthorityRevokedOrSafe ||
-      safety.extensions.hasPermanentDelegate || safety.extensions.hasTransferHook ||
-      safety.extensions.hasNonTransferable || safety.extensions.hasUnknownExtension)
+  if (safety.mintAuthorityRevokedOrSafe !== true || safety.freezeAuthorityRevokedOrSafe !== true ||
+      safety.extensions?.hasPermanentDelegate !== false || safety.extensions?.hasTransferHook !== false ||
+      safety.extensions?.hasNonTransferable !== false || safety.extensions?.hasUnknownExtension !== false)
     return no('TOKEN_AUTHORITY_OR_EXTENSION_RISK');
   if (safety.topHolderConcentrationPct == null || !Number.isFinite(safety.topHolderConcentrationPct)
     || safety.topHolderConcentrationPct < 0 || safety.topHolderConcentrationPct > 100
     || safety.topHolderConcentrationPct > 25)
     return no('CONCENTRATED_OR_UNVERIFIED_HOLDERS');
-  if (!safety.sellSimulationSucceeded) return no('SELL_SIMULATION_FAILED');
+  if (safety.sellSimulationSucceeded !== true) return no('SELL_SIMULATION_FAILED');
   if (!route || route.mintAddress !== mint || !validTs(route.verifiedAt)
     || route.verifiedAt > now || now - route.verifiedAt > FLIN_PROOF_MAX_AGE_MS
-    || !route.buySimulationSucceeded || !route.sellableAtPlannedSize
+    || route.buySimulationSucceeded !== true || route.sellableAtPlannedSize !== true
     || !Number.isFinite(route.plannedSizeSol) || route.plannedSizeSol <= 0)
     return no('ROUND_TRIP_ROUTE_UNVERIFIED_OR_STALE');
   if (![route.expectedGrossPnlSol, route.allInRoundTripCostSol].every(Number.isFinite)
     || route.allInRoundTripCostSol < 0) return no('INVALID_COST_EVIDENCE');
   const edge = route.expectedGrossPnlSol - route.allInRoundTripCostSol;
-  if (!(edge > 0)) return no('NONPOSITIVE_ROUND_TRIP_NET_EDGE');
+  if (!Number.isFinite(edge) || !(edge > 0)) return no('NONPOSITIVE_ROUND_TRIP_NET_EDGE');
   return { tradingAuthority: false, disposition: 'RESEARCH_QUALIFIED',
     reason: 'ADVISORY_ONLY_OMS_AND_RELEASE_GATES_REQUIRED', expectedNetEdgeSol: edge };
 }

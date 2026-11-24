@@ -41,7 +41,7 @@ export function validBook(book: Book | null): book is Book {
 }
 /** Age of a usable book in ms, or null (missing, structurally invalid, crossed, or timestamped in the future). */
 export function bookAge(book: Book | null | undefined, nowTs = Date.now()): number | null {
-  if (!book || !validBook(book)) return null;
+  if (!book || !validBook(book) || !timestamp(nowTs)) return null;
   const age = nowTs - book.ts;
   return age < 0 ? null : age; // locally stamped: a future timestamp is never usable
 }
@@ -138,20 +138,23 @@ export function bookImpact(book: Book | null, side: 'buy' | 'sell', notional: nu
  * fill to a fresher top-of-book quote. Returns null for an empty, crossed or malformed book.
  */
 export function walkBook(book: Book | null | undefined, side: 'buy' | 'sell', qty: number) {
-  if (!book || !book.bids.length || !book.asks.length || !(qty > 0)) return null;
+  // Use the same strict structural validator as the risk and impact paths.
+  // Never skip malformed depth and return a plausible execution estimate.
+  if (!validBook(book ?? null) || !book || !positive(qty) || (side !== 'buy' && side !== 'sell')) return null;
   const bid = book.bids[0][0], ask = book.asks[0][0];
-  if (!(bid > 0) || !(ask > 0) || bid > ask) return null;
-  const mid = (bid + ask) / 2; const levels = side === 'buy' ? book.asks : book.bids; const best = levels[0][0];
+  const mid = bid / 2 + ask / 2; const levels = side === 'buy' ? book.asks : book.bids; const best = levels[0][0];
   let remaining = qty, cost = 0, worst = best;
   for (const [p, q] of levels) {
-    if (!(p > 0) || !(q > 0)) continue;
     const take = Math.min(remaining, q);
     cost += take * p; remaining -= take; worst = p;
     if (remaining <= qty * 1e-12) break;
   }
   const filledQty = qty - Math.max(0, remaining);
-  if (!(filledQty > 0)) return null;
+  if (!positive(filledQty) || !positive(cost)) return null;
   const avgPrice = cost / filledQty;
-  return { bid, ask, mid, best, worst, avgPrice, filledQty, filledFully: remaining <= qty * 1e-12, slipFrac: Math.abs(avgPrice - best) / best,
-    spreadBps: ((ask - bid) / mid) * 1e4, impactBps: (Math.abs(avgPrice - mid) / mid) * 1e4 };
+  const slipFrac = Math.abs(avgPrice - best) / best;
+  const spreadBps = ((ask - bid) / mid) * 1e4;
+  const impactBps = (Math.abs(avgPrice - mid) / mid) * 1e4;
+  if (!positive(avgPrice) || ![slipFrac, spreadBps, impactBps].every(Number.isFinite)) return null;
+  return { bid, ask, mid, best, worst, avgPrice, filledQty, filledFully: remaining <= qty * 1e-12, slipFrac, spreadBps, impactBps };
 }

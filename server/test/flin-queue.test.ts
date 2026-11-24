@@ -102,3 +102,21 @@ describe('FLIN persisted continuous research, not order execution', () => {
     });
   });
 });
+
+describe('FLIN untrusted runtime proof validation', () => {
+  it('requires explicit negative extension evidence and affirmative proof flags', () => {
+    for (const value of [undefined, null, 'false', 0]) {
+      const malformed = { ...safety(), extensions: { ...safety().extensions, hasTransferHook: value } };
+      expect(evaluateFlinEvidence(mint, malformed as unknown as FlinSafetyProof, route(), NOW).disposition).toBe('NO_TRADE');
+    }
+    expect(evaluateFlinEvidence(mint, { ...safety(), extensions: undefined } as unknown as FlinSafetyProof, route(), NOW).disposition).toBe('NO_TRADE');
+    for (const field of ['verificationComplete', 'mintAuthorityRevokedOrSafe', 'freezeAuthorityRevokedOrSafe', 'sellSimulationSucceeded'] as const) {
+      const malformed = { ...safety(), [field]: 'true' } as unknown as FlinSafetyProof;
+      expect(evaluateFlinEvidence(mint, malformed, route(), NOW).disposition).toBe('NO_TRADE');
+    }
+    for (const field of ['buySimulationSucceeded', 'sellableAtPlannedSize'] as const) {
+      const malformed = { ...route(), [field]: 'true' } as unknown as FlinRoundTripProof;
+      expect(evaluateFlinEvidence(mint, safety(), malformed, NOW).disposition).toBe('NO_TRADE');
+    }
+  });
+});
