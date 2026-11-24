@@ -25,12 +25,16 @@ export function setStrategyStatus(actor: string, id: string, status: StrategySta
   if (!strategyById(id)) throw new Error('unknown strategy');
   if (status === 'LIVE_CANDIDATE') throw new Error('LIVE_CANDIDATE requires release-gate certification (Part 12.7) — not available in this build');
   if (actor !== 'owner' && status !== 'SUSPENDED' && status !== 'RETIRED') throw new Error('only the owner may promote or re-enable a strategy');
-  if (status === 'PAPER' && !(strategyStats(id)?.trades)) throw new Error('promotion to PAPER requires at least one stored backtest');
-  run('UPDATE strategies SET status=?, updated_at=?, note=COALESCE(?, note) WHERE id=?', status, Date.now(), note ?? null, id);
-  const susp = new Set(getSetting<string[]>('suspendedStrategies', []));
-  status === 'SUSPENDED' || status === 'RETIRED' ? susp.add(id) : susp.delete(id);
-  setSetting('suspendedStrategies', [...susp]);
-  audit(actor, 'strategy.status', { id, status, note });
+  // Lifecycle row, suspension index and audit record must commit together. The
+  // existing OMS checks both status and suspension inside its entry transaction.
+  tx(() => {
+    if (status === 'PAPER' && !(strategyStats(id)?.trades)) throw new Error('promotion to PAPER requires at least one stored backtest');
+    run('UPDATE strategies SET status=?, updated_at=?, note=COALESCE(?, note) WHERE id=?', status, Date.now(), note ?? null, id);
+    const susp = new Set(getSetting<string[]>('suspendedStrategies', []));
+    status === 'SUSPENDED' || status === 'RETIRED' ? susp.add(id) : susp.delete(id);
+    setSetting('suspendedStrategies', [...susp]);
+    audit(actor, 'strategy.status', { id, status, note });
+  });
 }
 export async function fetchHistory(symbol: string, interval: Interval, bars = 3000, cutoff = Date.now()): Promise<Candle[]> {
   const duration = INTERVAL_MS[interval];
