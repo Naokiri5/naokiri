@@ -42,7 +42,7 @@ describe('FLIN persisted continuous research, not order execution', () => {
     expect(first).toMatchObject({ scanned: 150, newCandidates: 150, updated: 0, tradingAuthority: false });
     expect(flinQueueStatus(2)).toMatchObject({ totalObserved: 150, tradingAuthority: false });
     const second = ingestFlinDexSnapshot([...batch, ...batch.slice(0, 12)], NOW, NOW + 1_000);
-    expect(second).toMatchObject({ scanned: 150, newCandidates: 0, updated: 150 });
+    expect(second).toMatchObject({ scanned: 150, newCandidates: 0, updated: 0 });
     expect(flinQueueStatus(5).totalObserved).toBe(150);
     for (const table of ['orders','fills','positions','ledger_entries'])
       expect(all('SELECT * FROM ' + table)).toHaveLength(0);
@@ -57,6 +57,16 @@ describe('FLIN persisted continuous research, not order execution', () => {
     expect(ingestFlinDexSnapshot(batch, NOW + 1, NOW).status).toBe('STALE_SOURCE');
     expect(ingestFlinDexSnapshot([{ ...pair(999), chainId: 'ethereum' }], NOW, NOW).scanned).toBe(0);
     expect(ingestFlinDexSnapshot([{ ...pair(999), pairCreatedAt: NOW + 1 }], NOW, NOW).scanned).toBe(0);
+  });
+
+  it('does not replace safety evidence or refresh last-seen time on equal-timestamp replay', () => {
+    ingestFlinDexSnapshot([pair(1)], NOW, NOW);
+    const before = all('SELECT * FROM flin_launch_candidates');
+    const replay = ingestFlinDexSnapshot([{ ...pair(1), liquidityUsd: 1 }], NOW, NOW + 1_000);
+    expect(replay.updated).toBe(0);
+    expect(all('SELECT * FROM flin_launch_candidates')).toEqual(before);
+    expect(ingestFlinDexSnapshot([pair(1)], NOW + 2_000, NOW + 2_000).updated).toBe(1);
+    expect(flinQueueStatus(1).recent[0].lastSeenAt).toBe(NOW + 2_000);
   });
 
   it('cannot overwrite newer evidence from an older source snapshot', () => {
