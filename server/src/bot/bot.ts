@@ -13,6 +13,11 @@ import { accountState, openPositions } from '../portfolio/ledger.js';
 import { currentPolicy } from '../risk/policy.js';
 import { notify } from '../notify/notify.js';
 import { journal } from '../journal/journal.js';
+import { refreshBrainSnapshot } from '../knowledge/brain.js';
+import { recordAutonomicObservation, recordLearningEvidence, resetInternalProcesses } from '../knowledge/cognitive/internalProcesses.js';
+import { recentInternalLearningEvidence } from '../ditas/service.js';
+import { refreshSettingsCapabilitySnapshot } from '../knowledge/settingsCapabilities.js';
+import { CAPABILITY_REFRESH_INTERVAL_MS } from '../knowledge/capabilitySnapshot.js';
 import { bus } from '../core/bus.js';
 import { config } from '../config.js';
 import type { DecisionReport } from '../decision/engine.js';
@@ -44,6 +49,7 @@ let takeoverRefused = false;
 function setEngineRole(role: 'LEADER' | 'STANDBY') {
   if (!botStatus.running || botStatus.role === role) return;
   const previous = botStatus.role;
+  resetInternalProcesses();
   botStatus.role = role;
   try {
     journal('SYSTEM', role === 'LEADER' ? `Engine lease acquired by ${botStatus.instanceId}` : `Engine on standby: ${botStatus.instanceId}`);
@@ -218,12 +224,15 @@ function researchLane() {
   const sample = performance.eventLoopUtilization();
   const busy = performance.eventLoopUtilization(sample, lastResearchSample).utilization;
   lastResearchSample = sample;
-  const protectionOverdue = botStatus.monitorFailing || Date.now() - botStatus.lastMonitorAt > staleAfter().monitorMs;
-  if (protectionOverdue || busy > 0.8) {
-    if (botStatus.running && botStatus.role === 'LEADER') {
-      lanes.research.deferredAt = Date.now();
-      lanes.research.deferReason = protectionOverdue ? 'Protection needs attention' : 'Event loop is busy';
-    }
+  if (!botStatus.running || botStatus.role !== 'LEADER') return;
+  const autonomic = recordAutonomicObservation({
+    now: Date.now(), monitorAt: botStatus.lastMonitorAt,
+    monitorMaxAgeMs: staleAfter().monitorMs, monitorFailing: botStatus.monitorFailing,
+    eventLoopUtilization: busy,
+  });
+  if (!autonomic.researchAllowed) {
+    lanes.research.deferredAt = Date.now();
+    lanes.research.deferReason = autonomic.reason;
     return;
   }
   return runLane('research', async () => {
@@ -237,9 +246,16 @@ const backgroundLane = () => runLane('background', async (lease) => {
   try { await scanPrints(); botStatus.lastPrintsAt = Date.now(); } catch { /* tracked */ }
   if (Date.now() - botStatus.lastNewsAt > 5 * 60_000) { try { await refreshNews(); botStatus.lastNewsAt = Date.now(); } catch { /* tracked */ } }
   if (!stillLeader(lease)) return;
+  try { refreshBrainSnapshot(); } catch (error) { botStatus.lastError = `brain: ${errorText(error).slice(0, 200)}`; }
+  try { refreshSettingsCapabilitySnapshot(); } catch (error) { botStatus.lastError = `settings-brain: ${errorText(error).slice(0, 200)}`; }
   backupPass();
   if (!stillLeader(lease)) return;
   const suspended = checkStrategyHealth(lease);
+  // Reuse the background lane and canonical memory; never delay protective exits.
+  if (stillLeader(lease)) {
+    try { recordLearningEvidence(recentInternalLearningEvidence()); }
+    catch (error) { botStatus.lastError = `learning-evidence: ${errorText(error).slice(0, 200)}`; }
+  }
   if (suspended.length) notify('WARNING', 'Strategy auto-suspended', suspended.join(', '), 'strategy-health');
 });
 
@@ -265,7 +281,7 @@ export function startBot() {
     setInterval(booksLane, protectionIntervalMs()),
     setInterval(hotLane, config.tickerIntervalMs),
     setInterval(scanLane, config.scanIntervalMs),
-    setInterval(backgroundLane, 60_000),
+    setInterval(backgroundLane, CAPABILITY_REFRESH_INTERVAL_MS),
     setInterval(researchLane, 60_000),
   ];
   void protectionLane();
@@ -279,6 +295,7 @@ export function stopBot() {
   activeLease = null;
   botStatus.running = false;
   botStatus.role = 'STOPPED';
+  resetInternalProcesses();
 }
 /** Lanes currently executing (graceful drain waits for these before the lease is released and the DB closed). */
 export const lanesBusy = () => Object.values(lanes).some((lane) => lane.inFlight);

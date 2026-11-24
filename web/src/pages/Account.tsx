@@ -1,8 +1,11 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, authInfo, fmt, useApi } from '../api';
 import { ConnectedWallets } from '../privy/WalletLogin';
 import { Action, Badge, Card, Empty, ErrorLine, Page, Tabs } from '../ui';
 import { StepUp } from './Trading';
+import { Icon, type IconName } from '../brand';
+import { useMiaTheme } from '../theme';
 
 export function Wallet() {
   const { data, error, reload } = useApi('/api/wallet');
@@ -80,13 +83,48 @@ export function QA() {
   </Page>;
 }
 
+const settingsSections: { title: string; detail: string; to: string; icon: IconName }[] = [
+  { title: 'General', detail: 'Theme, timezone, and display', to: '#appearance', icon: 'sun' },
+  { title: 'Trading', detail: 'Paper capital and execution permissions', to: '/autopilot', icon: 'compass' },
+  { title: 'Risk', detail: 'Limits, incidents, and protection', to: '/risk', icon: 'shield' },
+  { title: 'Intelligence', detail: 'Assistant model and tools', to: '#assistant-settings', icon: 'spark' },
+  { title: 'Strategies', detail: 'Backtests and approved strategies', to: '/lab', icon: 'layers' },
+  { title: 'Connections', detail: 'Market feeds and provider health', to: '/connections', icon: 'network' },
+  { title: 'Memory and evidence', detail: 'Recorded decisions and outcomes', to: '/ditas', icon: 'chart' },
+  { title: 'System', detail: 'Diagnostics and release gates', to: '/qa', icon: 'settings' },
+];
+
 export function Settings() {
   const { data, error, reload } = useApi('/api/settings');
   const [pw, setPw] = useState({ current: '', next: '' }); const [tz, setTz] = useState<number | null>(null); const [prefs, setPrefs] = useState<any>(null);
+  const [search, setSearch] = useState('');
+  const [theme, toggleTheme] = useMiaTheme();
   const p = prefs ?? data?.notifyPrefs;
-  return <Page title="Settings" sub="Security, notifications, display and assistant configuration. Risk limits live in the Risk Center; execution mode in Bot Account.">
+  const filtered = settingsSections.filter(({ title, detail }) => (title + ' ' + detail).toLowerCase().includes(search.trim().toLowerCase()));
+  const settingsLink = ({ title, detail, icon }: (typeof settingsSections)[number]) => <>
+    <span className="mia-settings-icon"><Icon name={icon} size={20} /></span><span><strong>{title}</strong><small>{detail}</small></span><Icon name="chevron" size={16} />
+  </>;
+  return <Page title="Settings" sub="Manage workspace preferences, connections, and operating permissions.">
     <ErrorLine e={error} />
+    <Card className="mia-dashboard-section" title="Workspace settings">
+      <label className="mia-settings-search">Find settings<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search by name or capability" /></label>
+      <div className="mia-settings-grid">
+        {filtered.map((section) => section.to.startsWith('#')
+          ? <a key={section.to} href={section.to}>{settingsLink(section)}</a>
+          : <Link key={section.to} to={section.to}>{settingsLink(section)}</Link>)}
+      </div>
+      {!filtered.length && <p className="muted" role="status">No matching settings.</p>}
+    </Card>
     <div className="grid g2">
+      <div id="appearance" tabIndex={-1}><Card title="Appearance">
+        <div className="row between">
+          <span className="muted">Color theme</span>
+          <div className="mia-segment" role="group" aria-label="Color theme">
+            <button type="button" aria-pressed={theme === 'dark'} onClick={() => { if (theme !== 'dark') toggleTheme(); }}><Icon name="moon" size={15} /> Dark</button>
+            <button type="button" aria-pressed={theme === 'light'} onClick={() => { if (theme !== 'light') toggleTheme(); }}><Icon name="sun" size={15} /> Light</button>
+          </div>
+        </div>
+      </Card></div>
       <Card title="Security"><div className="col">
         {authInfo.mode === 'passphrase' ? <>
           <input type="password" placeholder="Current passphrase" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" />
@@ -100,7 +138,7 @@ export function Settings() {
         <div className="row"><Action className="primary" label="Save" run={async () => { await api('/api/settings/notify', { body: p }); reload(); }} /><Action label="Send test notification" run={() => api('/api/notifications/test', { body: {} })} /></div>
         <div className="hint">Telegram: {data?.telegram.configured ? 'configured' : 'not configured (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID on the server)'}</div></>}</div></Card>
       <Card title="Profit calendar timezone"><div className="row"><select value={tz ?? data?.calendarTzOffsetMin ?? 0} onChange={(e) => setTz(Number(e.target.value))} aria-label="Timezone offset">{Array.from({ length: 27 }, (_, i) => (i - 12) * 60).map((m) => <option key={m} value={m}>UTC{m >= 0 ? '+' : ''}{m / 60}</option>)}</select><Action label="Save" run={async () => { await api('/api/calendar/tz', { body: { offsetMin: tz ?? 0 } }); reload(); }} /></div><div className="hint">Defines the day boundary for daily PnL attribution.</div></Card>
-      <Card title="Trader Joe"><div className="kv"><span>Mode</span><span>{data?.joe.llm ? `Claude API (${data.joe.model})` : 'Command mode — set ANTHROPIC_API_KEY on the server for conversational answers'}</span><span>Tools</span><span className="hint">{data?.joe.tools.join(', ')}</span><span>Authority</span><span className="hint">read, analyze, and risk-reducing pause only</span></div></Card>
+      <div id="assistant-settings" tabIndex={-1}><Card title="Trader Joe"><div className="kv"><span>Mode</span><span>{data ? data.joe.llm ? `Claude API (${data.joe.model})` : 'Command mode' : 'Awaiting settings'}</span><span>Tools</span><span className="hint">{data?.joe.tools.join(', ')}</span><span>Authority</span><span className="hint">Read, analyze, and pause new orders</span></div></Card></div>
     </div>
   </Page>;
 }

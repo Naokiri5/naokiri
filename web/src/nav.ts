@@ -8,7 +8,7 @@ export interface NavGroup { id: string; label: string; icon: string; desc: strin
 
 const LEGACY_NAV_GROUPS: NavGroup[] = [
   { id: 'home', label: 'Home', icon: '⌂', desc: 'Account, risk and market overview', pages: [
-    { to: '/app', icon: '◎', label: 'Overview', desc: 'Paper account, risk monitor, opportunities and activity', keywords: ['dashboard', 'home', 'summary', 'start'] },
+    { to: '/overview', icon: '◎', label: 'Overview', desc: 'Paper account, risk monitor, opportunities and activity', keywords: ['dashboard', 'home', 'summary', 'start'] },
   ] },
   { id: 'markets', label: 'Markets', icon: '▥', desc: 'Prices, charts, scanners and market news', also: ['/terminal/'], pages: [
     { to: '/terminal', icon: '▤', label: 'Market Terminal', desc: 'Candlestick chart, indicators and order book', keywords: ['chart', 'candles', 'price', 'order book', 'indicators'] },
@@ -55,17 +55,17 @@ export const NAV_GROUPS: NavGroup[] = [
   { id: 'autopilot', label: 'Autopilot', icon: '◉',
     desc: 'Paper bot, market research, protection and operational status',
     pages: [{ to: '/autopilot', icon: '◉', label: 'Autopilot', desc: 'Existing paper bot and Central Command cockpit' }],
-    also: ['/app', '/bot', '/terminal', '/scanner', '/discover', '/bubbles', '/whales', '/holders', '/copy', '/news', '/intelligence'],
+    also: ['/overview', '/bot', '/terminal', '/scanner', '/discover', '/bubbles', '/whales', '/holders', '/copy', '/news', '/intelligence'],
+  },
+  { id: 'smart-portfolio', label: 'Portfolio', icon: '◔',
+    desc: 'Paper holdings, performance and historical records',
+    pages: [{ to: '/smart-portfolio', icon: '◔', label: 'Portfolio', desc: 'Canonical paper ledger and position view' }],
+    also: ['/portfolio', '/history', '/journal', '/calendar', '/wallet'],
   },
   { id: 'trader-joe', label: 'Trader Joe', icon: '☺',
     desc: 'Explanations, verifiable decisions and knowledge',
     pages: [{ to: '/trader-joe', icon: '☺', label: 'Trader Joe', desc: 'Existing permission-limited assistant' }],
     also: ['/joe', '/ditas', '/academy', '/decision'],
-  },
-  { id: 'smart-portfolio', label: 'Smart Portfolio', icon: '◔',
-    desc: 'Paper holdings, performance and historical records',
-    pages: [{ to: '/smart-portfolio', icon: '◔', label: 'Smart Portfolio', desc: 'Canonical paper ledger and position view' }],
-    also: ['/portfolio', '/history', '/journal', '/calendar', '/wallet'],
   },
   { id: 'settings', label: 'Settings', icon: '⚙',
     desc: 'Risk policies, strategies, connections, security and release gates',

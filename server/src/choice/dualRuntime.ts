@@ -1,7 +1,9 @@
 import { market } from '../market/store.js';
+import { isDbOpen } from '../db/db.js';
+import { ingestFlinDexSnapshot, type FlinIntakeResult } from '../market/flinQueue.js';
 import { fetchFuturesResearchSnapshot, FUTURES_RESEARCH_SYMBOLS, type FuturesResearchSymbol } from '../providers/binanceFuturesResearch.js';
 import {
-  assessFastMemecoinResearch, reconstructDeepFuturesResearch,
+  assessFastMemecoinResearch, FAST_RESEARCH_MAX_AGE_MS, reconstructDeepFuturesResearch,
   type FastResearchResult, type DeepFuturesResearchResult,
 } from './dualResearch.js';
 
@@ -11,11 +13,12 @@ import {
  * PAPER and a future certified LIVE environment can consume the same observations.
  */
 const DEEP_POLL_MS = 5 * 60_000;
-const DEEP_STALE_MS = 20 * 60_000;
+export const DEEP_RESEARCH_MAX_AGE_MS = 20 * 60_000;
 type FuturesReader = typeof fetchFuturesResearchSnapshot;
 
 let fast: FastResearchResult | null = null;
 let fastCheckedAt = 0;
+let fastIntake: FlinIntakeResult | null = null;
 let deep: DeepFuturesResearchResult | null = null;
 let deepAttemptAt = 0;
 let deepSuccessAt = 0;
@@ -29,7 +32,7 @@ export interface DualResearchRuntimeStatus {
   version: 'dual-runtime-v1';
   tradingAuthority: false;
   backgroundRunning: boolean;
-  fast: { checkedAt: number; stale: boolean; result: FastResearchResult | null };
+  fast: { checkedAt: number; stale: boolean; result: FastResearchResult | null; launchIntake: FlinIntakeResult | null };
   deep: {
     attemptAt: number; successAt: number; symbol: FuturesResearchSymbol | null;
     stale: boolean; error: string | null; consecutiveFailures: number;
@@ -40,13 +43,13 @@ export interface DualResearchRuntimeStatus {
 /** A snapshot is always explicitly labeled stale; old plans must never be treated as fresh. */
 export function dualResearchStatus(now = Date.now()): DualResearchRuntimeStatus {
   const fastStale = !fast || !Number.isSafeInteger(fast.sourceAsOf)
-    || fast.sourceAsOf <= 0 || now < fast.sourceAsOf || now - fast.sourceAsOf > 4 * 60_000;
+    || fast.sourceAsOf <= 0 || now < fast.sourceAsOf || now - fast.sourceAsOf > FAST_RESEARCH_MAX_AGE_MS;
   const deepStale = !deep || !deepSuccessAt || now < deep.asOf
-    || now - deep.asOf > DEEP_STALE_MS
+    || now - deep.asOf > DEEP_RESEARCH_MAX_AGE_MS
     || (deep.plan != null && now >= deep.plan.expiresAt);
   return {
     version: 'dual-runtime-v1', tradingAuthority: false, backgroundRunning: running,
-    fast: { checkedAt: fastCheckedAt, stale: fastStale, result: fast },
+    fast: { checkedAt: fastCheckedAt, stale: fastStale, result: fast, launchIntake: fastIntake },
     deep: { attemptAt: deepAttemptAt, successAt: deepSuccessAt,
       symbol: deepSymbol, stale: deepStale, error: deepError,
       consecutiveFailures: deepFailures, result: deep },
@@ -69,10 +72,14 @@ export async function runDualResearchPass(
     try {
       fast = assessFastMemecoinResearch(market.dex, market.dexFetchedAt, now);
       fastCheckedAt = now;
+      // Persist only research candidates; the existing risk gate / OMS are never called.
+      // Do not open a new DB implicitly in pure research runs or tests.
+      fastIntake = isDbOpen() ? ingestFlinDexSnapshot(market.dex, market.dexFetchedAt, now) : null;
     } catch {
       // A failed evaluation cannot keep a previously valid FAST result.
       fast = null;
       fastCheckedAt = now;
+      fastIntake = null;
     }
     if (!deepAttemptAt || now - deepAttemptAt >= DEEP_POLL_MS || now < deepAttemptAt) {
       const symbol = FUTURES_RESEARCH_SYMBOLS[nextSymbol % FUTURES_RESEARCH_SYMBOLS.length];
@@ -103,6 +110,6 @@ export async function runDualResearchPass(
 
 /** Test isolation only; not an API endpoint or a trading control. */
 export function _resetDualResearchForTests() {
-  fast = null; fastCheckedAt = 0; deep = null; deepAttemptAt = 0; deepSuccessAt = 0;
+  fast = null; fastCheckedAt = 0; fastIntake = null; deep = null; deepAttemptAt = 0; deepSuccessAt = 0;
   deepSymbol = null; deepError = null; deepFailures = 0; nextSymbol = 0; running = false;
 }

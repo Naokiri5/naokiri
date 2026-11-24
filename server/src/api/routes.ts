@@ -28,7 +28,7 @@ import { readIndicators, INDICATOR_SPECIALISTS } from '../workers/indicators.js'
 import { WORKERS, DOMAINS, REQUIRED_DOMAINS } from '../workers/registry.js';
 import { POOL, quarantined, releaseQuarantine } from '../workers/runtime.js';
 import { workerEffectiveness } from '../workers/effectiveness.js';
-import { overviewSnapshot } from '../dashboard/overview.js';
+import { activityFeed, overviewSnapshot } from '../dashboard/overview.js';
 import { QCI_POLICY, DOMAIN_WEIGHTS } from '../qci/coordinator.js';
 import { providers } from '../providers/http.js';
 import { latencyReport } from '../core/latency.js';
@@ -51,6 +51,7 @@ import { recentAudit, verifyAuditChain } from '../core/audit.js';
 import { botStatus, botStatusView } from '../bot/bot.js';
 import { readiness } from '../ops/readiness.js';
 import { commandStatus } from '../ops/commandStatus.js';
+import { SESSION_ENVIRONMENTS, SESSION_MINDS, sessionPreflight } from '../ops/sessionPreflight.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
 import { all, get, P } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
@@ -147,6 +148,10 @@ export async function routes(app: FastifyInstance) {
 
   await ditasRoutes(app);
   await knowledgeRoutes(app);
+  app.get('/api/session/preflight', async (req) => {
+    const { mind, environment } = z.object({ mind: z.enum(SESSION_MINDS), environment: z.enum(SESSION_ENVIRONMENTS) }).strict().parse(req.query);
+    return sessionPreflight(botStatus, mind, environment);
+  });
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
   app.post('/api/risk/incidents/:id/ack', async (req) => {
@@ -240,6 +245,7 @@ export async function routes(app: FastifyInstance) {
       unread: get<{ n: number }>('SELECT COUNT(*) n FROM notifications WHERE read=0')!.n, gates: gates.summary, liveAllowed: gates.liveAllowed, offline: config.offline, scanIntervalMs: config.scanIntervalMs, tickerIntervalMs: config.tickerIntervalMs, serverTime: Date.now() };
   });
   app.get('/api/overview', async () => overviewSnapshot());
+  app.get('/api/activity', async () => ({ activity: activityFeed() }));
 
   // ── markets ──
   app.get('/api/markets', async () => ({ tickers: [...market.tickers.values()].filter((t) => t.quoteVolume > 1e6 && isEligibleSpot(t.base, t.quote)).sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 300), universe: market.universe, asOf: market.tickersFetchedAt }));

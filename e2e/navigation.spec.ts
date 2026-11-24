@@ -4,8 +4,8 @@ import { test, expect, type Page } from '@playwright/test';
 const PW = 'e2e owner passphrase';
 const DESTINATIONS = [
   ['Autopilot', '/autopilot'],
+  ['Portfolio', '/smart-portfolio'],
   ['Trader Joe', '/trader-joe'],
-  ['Smart Portfolio', '/smart-portfolio'],
   ['Settings', '/settings'],
 ] as const;
 
@@ -53,10 +53,11 @@ test('legacy deep links stay functional and highlight the owning primary section
   const pairs = [
     ['/terminal/BTCUSDT', 'Autopilot'],
     ['/bot', 'Autopilot'],
+    ['/overview', 'Autopilot'],
     ['/joe', 'Trader Joe'],
     ['/ditas', 'Trader Joe'],
-    ['/portfolio', 'Smart Portfolio'],
-    ['/history', 'Smart Portfolio'],
+    ['/portfolio', 'Portfolio'],
+    ['/history', 'Portfolio'],
     ['/risk', 'Settings'],
     ['/lab', 'Settings'],
     ['/security', 'Settings'],
@@ -85,21 +86,22 @@ test('command palette still discovers old screens and the existing risk-reducing
   await page.keyboard.press('Escape');
 });
 
-test('mobile navigation exposes the same four destinations and More control without overflow', async ({ browser }) => {
+test('mobile navigation exposes the same four destinations and command search without overflow', async ({ browser }) => {
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await login(mobile);
-  const bar = mobile.getByRole('navigation', { name: 'Mobile' });
+  const bar = mobile.getByRole('navigation', { name: 'Main' });
+  await expect(bar.getByRole('link')).toHaveCount(4);
   for (const [name, path] of DESTINATIONS) {
     const link = bar.getByRole('link', { name, exact: true });
     await expect(link).toHaveAttribute('href', path);
   }
-  await bar.getByRole('link', { name: 'Smart Portfolio' }).click();
+  await bar.getByRole('link', { name: 'Portfolio' }).click();
   await expect(mobile).toHaveURL(/\/smart-portfolio$/);
-  await bar.getByRole('button', { name: 'More pages' }).click();
-  const sidebar = mobile.getByRole('navigation', { name: 'Main' });
-  await expect(sidebar).toBeVisible();
+  await mobile.getByRole('button', { name: 'Open command palette' }).click();
+  const palette = mobile.getByRole('dialog', { name: 'Command palette' });
+  await expect(palette).toBeVisible();
   await mobile.keyboard.press('Escape');
-  await expect(sidebar).toBeHidden();
+  await expect(palette).toBeHidden();
   expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await mobile.close();
 });

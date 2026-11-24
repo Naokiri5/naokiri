@@ -1,4 +1,6 @@
 import { get } from '../db/db.js';
+import { brainOverview } from './brain.js';
+import { brainBookCoverage } from './cognitive/books.js';
 
 /**
  * Memory architecture (Part 9). MIA does not keep a second memory store: each category A–F maps onto the table that
@@ -26,5 +28,7 @@ export function memoryOverview() {
   return {
     categories: MEMORY_CATEGORIES.map((c) => ({ ...c, records: Object.fromEntries(c.stores.map((s) => [s, count(s)])) })),
     authority: 'Memory is evidence. No memory category can authorize a trade; the deterministic decision engine and risk gate remain authoritative.',
+    internalIntelligence: brainOverview(),
+    cognitiveBookCoverage: brainBookCoverage(),
   };
 }
