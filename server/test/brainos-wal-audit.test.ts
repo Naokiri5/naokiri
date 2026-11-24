@@ -116,7 +116,9 @@ describe('BrainOS canonical WAL audit evidence (Q42/Q48 partial coverage)', () =
     else expect(child.status !== 0 || child.signal !== null).toBe(true);
     expect(existsSync(file + '-wal')).toBe(true);
 
-    openDb(file);
+    const recoveredDb = openDb(file);
+    expect(recoveredDb.prepare('PRAGMA journal_mode').get()).toMatchObject({ journal_mode: 'wal' });
+    expect(recoveredDb.prepare('PRAGMA synchronous').get()).toMatchObject({ synchronous: 2 });
     expect(cashBalance()).toBe(5000);
     expect(all('SELECT ref FROM ledger_entries WHERE account=? ORDER BY ref', PAPER_ACCOUNT))
       .toEqual([{ ref: 'committed-fixture' }]);
