@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { all, closeDb, openDb, run } from '../src/db/db.js';
 import { audit, verifyAuditChain } from '../src/core/audit.js';
-import { acquireOrRenewLease } from '../src/ops/lease.js';
+import { acquireOrRenewLease, currentLease, ownsLease } from '../src/ops/lease.js';
+import { cashBalance, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { requirePaperSpotSession } from '../src/ops/durableSession.js';
 import { inspectLeaseWitness } from '../src/ops/leaseWitness.js';
 
@@ -74,4 +77,66 @@ describe('BrainOS canonical WAL audit evidence (Q42/Q48 partial coverage)', () =
     expect(existsSync(missing)).toBe(false);
     expect(() => inspectLeaseWitness(file, Number.NaN)).toThrow('INVALID_LEASE_WITNESS_INPUT');
   });
+
+  it('recovers committed canonical WAL state and rolls back an interrupted financial transaction after process death', () => {
+    // Use an actual child process, not closeDb() as a substitute for a crash.
+    // The child uses the canonical DB, audit, lease and PAPER ledger only.
+    closeDb();
+    const script = `
+      import { writeSync } from 'node:fs';
+      import { openDb, tx } from './src/db/db.ts';
+      import { audit } from './src/core/audit.ts';
+      import { acquireOrRenewLease } from './src/ops/lease.ts';
+      import { ledger, PAPER_ACCOUNT } from './src/portfolio/ledger.ts';
+      const file = process.argv[1];
+      const now = Number(process.argv[2]);
+      const db = openDb(file);
+      db.exec('PRAGMA wal_autocheckpoint=0');
+      acquireOrRenewLease('engine', 'crashed-fixture', 1000, now);
+      tx(() => {
+        ledger(PAPER_ACCOUNT, 'DEPOSIT', 5000, 'committed-fixture');
+        audit('fixture', 'CRASH_COMMITTED');
+      });
+      tx(() => {
+        ledger(PAPER_ACCOUNT, 'BUY', -800, 'interrupted-fixture');
+        audit('fixture', 'CRASH_UNCOMMITTED');
+        writeSync(1, 'CRASH_BOUNDARY_REACHED');
+        process.kill(process.pid, 'SIGKILL');
+        throw new Error('process termination unexpectedly returned');
+      });
+    `;
+    const child = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, file, String(T)], {
+      cwd: fileURLToPath(new URL('../', import.meta.url)),
+      env: { ...process.env, MIA_OFFLINE: '1', MIA_AUTH_MODE: 'passphrase' },
+      encoding: 'utf8', timeout: 20_000,
+    });
+    expect(child.error).toBeUndefined();
+    expect(child.stdout).toContain('CRASH_BOUNDARY_REACHED');
+    if (process.platform !== 'win32') expect(child.signal).toBe('SIGKILL');
+    else expect(child.status !== 0 || child.signal !== null).toBe(true);
+    expect(existsSync(file + '-wal')).toBe(true);
+
+    openDb(file);
+    expect(cashBalance()).toBe(5000);
+    expect(all('SELECT ref FROM ledger_entries WHERE account=? ORDER BY ref', PAPER_ACCOUNT))
+      .toEqual([{ ref: 'committed-fixture' }]);
+    expect(all('SELECT action FROM audit_log WHERE actor=? ORDER BY id', 'fixture'))
+      .toEqual([{ action: 'CRASH_COMMITTED' }]);
+    expect(verifyAuditChain().ok).toBe(true);
+    const crashed = currentLease('engine')!;
+    expect(crashed).toMatchObject({ holder: 'crashed-fixture', acquired_at: T, expires_at: T + 1000 });
+    expect(acquireOrRenewLease('engine', 'successor-fixture', 1000, T + 1000)).toBeNull();
+    const successor = acquireOrRenewLease('engine', 'successor-fixture', 1000, T + 1001)!;
+    expect(successor.holder).toBe('successor-fixture');
+    expect(ownsLease(crashed, T + 1001)).toBe(false);
+    expect(ownsLease(successor, T + 1001)).toBe(true);
+    expect(inspectLeaseWitness(file, T + 1001)).toMatchObject({ lease: 'CURRENT', tradingAuthority: false });
+
+    closeDb();
+    openDb(file);
+    expect(cashBalance()).toBe(5000);
+    expect(currentLease('engine')).toEqual(successor);
+    expect(verifyAuditChain().ok).toBe(true);
+  });
+
 });
