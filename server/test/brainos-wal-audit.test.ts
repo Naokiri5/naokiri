@@ -61,6 +61,23 @@ describe('BrainOS canonical WAL audit evidence (Q42/Q48 partial coverage)', () =
     expect(inspectLeaseWitness(file, T).lease).toBe('INVALID');
   });
 
+  it('fails closed on clock regression and malformed persisted leases without rewriting authority', () => {
+    const fence = acquireOrRenewLease('engine', 'fixture-a', 1000, T)!;
+    const renewed = acquireOrRenewLease('engine', 'fixture-a', 1000, T + 100)!;
+    expect(ownsLease(fence, T + 99)).toBe(false);
+    expect(acquireOrRenewLease('engine', 'fixture-a', 1000, T + 99)).toBeNull();
+    expect(currentLease('engine')).toEqual(renewed);
+    expect(ownsLease(fence, T + 100)).toBe(true);
+    expect(() => acquireOrRenewLease('engine', 'fixture-a', Infinity, T + 101)).toThrow();
+    expect(() => acquireOrRenewLease('engine', 'fixture-a', 1000, NaN)).toThrow();
+    run('UPDATE runtime_leases SET expires_at=renewed_at WHERE name=?', 'engine');
+    const malformed = currentLease('engine');
+    expect(ownsLease(fence, T + 101)).toBe(false);
+    expect(acquireOrRenewLease('engine', 'fixture-b', 1000, T + 101)).toBeNull();
+    expect(currentLease('engine')).toEqual(malformed);
+    expect(inspectLeaseWitness(file, T + 101).lease).toBe('INVALID');
+  });
+
   it('reports an inconsistent running checkpoint as unbound without repairing or closing anything', () => {
     requirePaperSpotSession(T);
     acquireOrRenewLease('engine', 'fixture-a', 1000, T);
