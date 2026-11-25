@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { all, get, run, J, P } from '../db/db.js';
+import { all, get, run, J, P, tx } from '../db/db.js';
 import { audit } from '../core/audit.js';
 
 /**
@@ -61,9 +61,11 @@ export function acceptPolicy(actor: string, input: unknown): PolicyVersion {
   if ((policy.minUnallocatedReservePct ?? 0) + (policy.minSettlementReservePct ?? 0) > 100) throw new Error('combined cash reserve percentages must not exceed 100');
   if (policy.maxOpenRiskPct < policy.riskPerTradePct) throw new Error('maxOpenRiskPct must be ≥ riskPerTradePct');
   if ((policy.entryFrequencyWindowMs === undefined) !== (policy.maxEntriesPerWindow === undefined)) throw new Error('entry frequency window and cap must be configured together');
-  const cur = currentPolicy(); const version = (cur?.version ?? 0) + 1;
-  run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (?,?,?,?)', version, J(policy), Date.now(), actor);
-  audit(actor, 'risk.policy.accept', { version, policy, previous: cur?.version ?? null });
-  return currentPolicy()!;
+  return tx(() => {
+    const cur = currentPolicy(); const version = (cur?.version ?? 0) + 1;
+    run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (?,?,?,?)', version, J(policy), Date.now(), actor);
+    audit(actor, 'risk.policy.accept', { version, policy, previous: cur?.version ?? null });
+    return currentPolicy()!;
+  });
 }
 export const policyHistory = () => all<any>('SELECT version, created_at, accepted_by, policy FROM risk_policy_versions ORDER BY version DESC').map((r) => ({ ...r, policy: P(r.policy) }));
