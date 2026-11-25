@@ -152,6 +152,11 @@ const MIGRATIONS: string[] = [
   ALTER TABLE brainos_sessions ADD COLUMN strategy_config_version TEXT;
   ALTER TABLE brainos_session_events ADD COLUMN mandate_json TEXT;
   `,
+  /* 8 — Reconciliation indexes. portfolio/calendar.reconcile() runs inside the OMS entry transaction; without these its
+     per-position join rescanned every ledger entry of the account (quadratic in closed trades). Index-only: no data change. */ `
+  CREATE INDEX ledger_entries_ref ON ledger_entries(ref, account);
+  CREATE INDEX orders_position ON orders(position_id, account);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
