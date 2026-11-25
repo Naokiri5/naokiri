@@ -33,5 +33,25 @@ export function reconcile(account = PAPER_ACCOUNT) {
     WHERE l.account=? AND p.status='CLOSED' AND l.kind IN ('BUY','SELL','FEE')`, account)!;
   const diff = Math.abs(closed.s - flows.s);
   const cash = get<{ s: number }>('SELECT COALESCE(SUM(amount),0) s FROM ledger_entries WHERE account=?', account)!.s;
-  return { ok: diff < 1e-6, positionsRealized: closed.s, ledgerFlows: flows.s, difference: diff, closedPositions: closed.n, cash, detail: `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (Δ ${diff.toExponential(2)})` };
+  // Aggregate agreement is necessary but insufficient: opposite errors can cancel.
+  // Compare every closed position against its own linked cash flows, and detect
+  // unlinked principal movements rather than silently excluding them from the join.
+  const mismatched = get<{ n: number }>(`SELECT COUNT(*) n FROM (
+    SELECT p.id FROM positions p
+    LEFT JOIN orders o ON o.position_id=p.id AND o.account=p.account
+    LEFT JOIN ledger_entries l ON l.ref=o.id AND l.account=p.account AND l.kind IN ('BUY','SELL','FEE')
+    WHERE p.account=? AND p.status='CLOSED'
+    GROUP BY p.id,p.realized_pnl
+    HAVING ABS(p.realized_pnl-COALESCE(SUM(l.amount),0)) >= 0.000001
+      OR COUNT(CASE WHEN l.kind='BUY' THEN 1 END)=0
+      OR COUNT(CASE WHEN l.kind='SELL' THEN 1 END)=0
+  )`, account)!.n;
+  const orphanPrincipal = get<{ n: number }>(`SELECT COUNT(*) n FROM ledger_entries l
+    LEFT JOIN orders o ON o.id=l.ref AND o.account=l.account
+    LEFT JOIN positions p ON p.id=o.position_id AND p.account=l.account
+    WHERE l.account=? AND l.kind IN ('BUY','SELL') AND (o.id IS NULL OR p.id IS NULL)`, account)!.n;
+  const ok = Number.isFinite(cash) && Number.isFinite(diff) && diff < 1e-6 && mismatched === 0 && orphanPrincipal === 0;
+  return { ok, positionsRealized: closed.s, ledgerFlows: flows.s, difference: diff, closedPositions: closed.n, cash,
+    mismatchedClosedPositions: mismatched, orphanPrincipalEntries: orphanPrincipal,
+    detail: `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (Δ ${diff.toExponential(2)}); ${mismatched} mismatched positions, ${orphanPrincipal} unlinked principal entries` };
 }
