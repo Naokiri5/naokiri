@@ -14,7 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # For PR events github.sha is GitHub's tested merge commit, not just the source head.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact tested commit
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Tested commit: $EXPECTED_SHA"
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -43,7 +53,17 @@ jobs:
     needs: checks
     timeout-minutes: 20
     steps:
+      # For PR events github.sha is GitHub's tested merge commit, not just the source head.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact tested commit
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Tested commit: $EXPECTED_SHA"
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
