@@ -7,6 +7,7 @@ import { setSetting } from '../src/core/settings.js';
 import { ledger, PAPER_ACCOUNT, accountState, openPositions } from '../src/portfolio/ledger.js';
 import { submitEntry, monitorPositions, emergencyStop, cancelPendingEntries, closeAllPositions, closePosition, executeExit, queueForApproval, decideApproval, expireApprovals, listOrders } from '../src/exec/oms.js';
 import { setCrashHook } from '../src/exec/crashpoint.js';
+import * as lifecycle from '../src/ops/shutdown.js';
 import { paperFillEvents } from '../src/exec/fillEvents.js';
 import { paperChoiceOutcomes } from '../src/ditas/execution.js';
 import { reconcile, calendar } from '../src/portfolio/calendar.js';
@@ -155,6 +156,26 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
       expect(get('SELECT status FROM orders WHERE id=?','unresolved-fixture')).toEqual({ status });
     }
   );
+  it('freezes new entries at the shutdown boundary but permits existing protective exits', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const second = seedInstrument('SOLUSDT', { seed: 3 });
+    const candidate = report(second.inst.id, second.last);
+    const cash = accountState().cash;
+    const draining = vi.spyOn(lifecycle, 'isShuttingDown').mockReturnValue(false);
+    setCrashHook(point => { if (point === 'entry.preTx') draining.mockReturnValue(true); });
+    try {
+      expect(submitEntry(candidate, 'bot')).toEqual({ ok: false, reason: 'PROCESS_SHUTTING_DOWN' });
+      expect(submitEntry(report(second.inst.id, second.last), 'bot')).toEqual({ ok: false, reason: 'PROCESS_SHUTTING_DOWN' });
+      expect(queueForApproval(report(second.inst.id, second.last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' }))).toBeNull();
+      expect(accountState().cash).toBe(cash);
+      expect(openPositions()).toHaveLength(1);
+      expect(paperFillEvents(0, 10).events).toHaveLength(1);
+      setBook(id, last * 0.96); monitorPositions();
+      expect(openPositions()).toHaveLength(0);
+      expect(paperFillEvents(0, 10).events).toHaveLength(2);
+      expect(reconcile().ok).toBe(true);
+    } finally { setCrashHook(null); draining.mockRestore(); }
+  });
   it('rolls back a fill envelope with the failed OMS transaction', () => {
     const entry = report(id, last);
     setCrashHook((point) => { if (point === 'entry.precommit') throw new Error('fault before commit'); });
