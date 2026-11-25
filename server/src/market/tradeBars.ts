@@ -270,9 +270,15 @@ export class TradeBarBuilder {
       // Only empty ranges are skipped; bars holding trades are always finalized.
       const latestStart = Math.floor(watermark / interval) * interval - interval;
       const floor = latestStart - (this.config.maxFinalBars - 1) * interval;
+      // Finalize through the last bar that holds data before the floor, then jump over the empty remainder.
       const from = start;
-      const holdsTrades = (t: number) => t >= from && t < floor;
-      if (from < floor && ![...this.open.get(interval)!.keys()].some(holdsTrades) && ![...this.baseBars.keys()].some(holdsTrades)) start = floor;
+      let lastData = -Infinity;
+      for (const t of [...this.open.get(interval)!.keys(), ...this.baseBars.keys()]) if (t >= from && t < floor && t > lastData) lastData = t;
+      while (start < floor && start <= lastData && start + interval <= watermark) {
+        finalized.push(this.finalizeBar(interval, start));
+        start += interval;
+      }
+      if (start < floor) start = floor;
       while (start + interval <= watermark) {
         finalized.push(this.finalizeBar(interval, start));
         start += interval;
@@ -285,6 +291,9 @@ export class TradeBarBuilder {
   /** Reorg or bust: remove a trade. Final or unretained bars are invalidated instead of being silently rewritten. */
   retract(eventId: string, eventTimeMs: number): RetractStatus {
     if (!ID.test(eventId) || !Number.isSafeInteger(eventTimeMs) || eventTimeMs < 0) return 'UNKNOWN';
+    // The accepted trade's own time is authoritative over the caller's.
+    const known = this.seen.get(eventId);
+    if (known !== undefined) eventTimeMs = known;
     const start = this.baseStart(eventTimeMs);
     const bar = this.baseBars.get(start);
     if (bar?.trades) {
@@ -294,6 +303,8 @@ export class TradeBarBuilder {
       bar.agg = emptyAgg();
       const ordered = [...bar.trades.values()].sort((a, b) => before({ t: a.eventTimeMs, id: a.eventId }, { t: b.eventTimeMs, id: b.eventId }) ? -1 : 1);
       for (const trade of ordered) addTrade(bar.agg, trade, this.config.maxParticipantsPerBar);
+      // Forget the id so a reorg that re-includes the same transaction is accepted again, not dropped as a duplicate.
+      this.seen.delete(eventId);
       this.counts.rebuilt++;
       this.hash.update(encode({ event: 'RETRACT_REBUILT', eventId, startMs: start }) + '\n');
       return 'REBUILT';

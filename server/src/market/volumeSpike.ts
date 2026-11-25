@@ -29,6 +29,8 @@ export const VOLUME_SPIKE_POLICY_V1 = Object.freeze({
   youngLaunchMs: 30 * 60_000,
   /** Scale floor (quote units) that keeps a flat baseline from producing an infinite z-score. */
   minScaleQuote: 1,
+  /** A window's latest bar must have ended within its interval plus this allowance of `nowMs`, or it is stale. */
+  maxBarAgeMs: 5_000,
 });
 export type VolumeSpikePolicy = typeof VOLUME_SPIKE_POLICY_V1;
 
@@ -39,7 +41,10 @@ export type VolumeSpikeFlag =
 
 export interface VolumeSpikeInput {
   /** Final bars per window, oldest first (for example from `TradeBarBuilder.finalBars`). */
+  /** Distinct intervals; each window's bars must all be of that interval. */
   windows: ReadonlyArray<{ intervalMs: number; bars: readonly TradeBar[] }>;
+  /** Assessment clock. Windows whose latest bar is stale are unusable. */
+  nowMs: number;
   launchAgeMs: number | null;
   /** Pool or book liquidity in quote units, now versus a trailing baseline, when available. */
   liquidity?: { nowQuote: number; baselineQuote: number };
@@ -81,15 +86,20 @@ function median(sorted: readonly number[]) {
 }
 const usable = (bar: TradeBar) => bar.status === 'FINAL' && !bar.quality.invalidated && !bar.quality.feedGap;
 
-function assessWindow(intervalMs: number, bars: readonly TradeBar[], policy: VolumeSpikePolicy): WindowAssessment & { latest: TradeBar | null; flat: boolean } {
+function assessWindow(intervalMs: number, bars: readonly TradeBar[], nowMs: number, policy: VolumeSpikePolicy): WindowAssessment & { latest: TradeBar | null; flat: boolean } {
   const latest = bars.at(-1) ?? null;
   const none = { intervalMs, baselineBars: 0, latestQuote: null, baselineMedianQuote: null, robustZ: null, velocity: null,
     acceleration: null, imbalance: null, spike: false, latest, flat: false };
-  if (!latest || !usable(latest) || !Number.isSafeInteger(intervalMs) || intervalMs <= 0) return { ...none, status: 'UNUSABLE' };
-  // A gap or invalidated bar inside the baseline window makes the history untrustworthy; use only the clean suffix.
+  if (!latest || !usable(latest) || !Number.isSafeInteger(intervalMs) || intervalMs <= 0 || latest.intervalMs !== intervalMs ||
+      !Number.isFinite(nowMs) || latest.endMs > nowMs || nowMs - latest.endMs > intervalMs + policy.maxBarAgeMs) return { ...none, status: 'UNUSABLE' };
+  // A gap, wrong interval, discontinuity or invalidated bar in the baseline makes earlier history untrustworthy;
+  // use only the clean, contiguous suffix that ends at the latest bar.
   const history = bars.slice(Math.max(0, bars.length - 1 - policy.recommendedBaselineBars), -1);
   let cleanFrom = 0;
-  history.forEach((bar, i) => { if (!usable(bar)) cleanFrom = i + 1; });
+  history.forEach((bar, i) => {
+    const next = history[i + 1] ?? latest;
+    if (!usable(bar) || bar.intervalMs !== intervalMs || bar.endMs !== next.startMs) cleanFrom = i + 1;
+  });
   const baseline = history.slice(cleanFrom).map((bar) => quote(bar.quoteVolumeFp));
   if (baseline.length < policy.minBaselineBars) return { ...none, baselineBars: baseline.length, status: 'INSUFFICIENT' };
   const sorted = [...baseline].sort((a, b) => a - b);
@@ -112,7 +122,8 @@ function assessWindow(intervalMs: number, bars: readonly TradeBar[], policy: Vol
 
 /** Assesses whether recent volume acceleration is persistent and plausibly organic. Never authorizes a trade. */
 export function assessVolumeSpike(input: VolumeSpikeInput, policy: VolumeSpikePolicy = VOLUME_SPIKE_POLICY_V1): VolumeSpikeAssessment {
-  const assessed = input.windows.map((w) => assessWindow(w.intervalMs, w.bars, policy));
+  if (new Set(input.windows.map((w) => w.intervalMs)).size !== input.windows.length) throw new Error('DUPLICATE_VOLUME_WINDOW');
+  const assessed = input.windows.map((w) => assessWindow(w.intervalMs, w.bars, input.nowMs, policy));
   const windows: WindowAssessment[] = assessed.map(({ latest: _latest, flat: _flat, ...rest }) => rest);
   const base = { policyVersion: policy.version, windows, role: 'CANDIDATE_TRIGGER_ONLY' as const, tradingAuthority: false as const };
   const usableWindows = assessed.filter((w) => w.status === 'USABLE');
@@ -137,12 +148,14 @@ export function assessVolumeSpike(input: VolumeSpikeInput, policy: VolumeSpikePo
   if (liq && Number.isFinite(liq.nowQuote) && Number.isFinite(liq.baselineQuote) && liq.baselineQuote > 0 &&
       (liq.baselineQuote - liq.nowQuote) / liq.baselineQuote * 100 > policy.maxLiquidityDropPct) flags.add('LIQUIDITY_DETERIORATING');
   if (input.depthQuote !== undefined && Number.isFinite(input.depthQuote) && input.depthQuote >= 0 &&
-      quote(usableWindows[0].latest!.quoteVolumeFp) > policy.maxVolumeToDepth * input.depthQuote) flags.add('VOLUME_EXCEEDS_DEPTH');
+      quote(usableWindows.reduce((a, b) => (b.intervalMs < a.intervalMs ? b : a)).latest!.quoteVolumeFp) > policy.maxVolumeToDepth * input.depthQuote)
+    flags.add('VOLUME_EXCEEDS_DEPTH');
   if (spiking.some((w) => w.flat)) flags.add('FLAT_BASELINE');
 
   const persistent = spiking.length >= policy.minPersistentWindows;
   if (!persistent) flags.add('NOT_PERSISTENT');
-  const disqualifying = [...flags].filter((f) => f !== 'NOT_PERSISTENT' && f !== 'FLAT_BASELINE');
+  // A flat (often all-empty) baseline makes any small burst look extreme, so it can never confirm authenticity.
+  const disqualifying = [...flags].filter((f) => f !== 'NOT_PERSISTENT');
   const verdict: VolumeSpikeVerdict = !persistent ? 'NO_SPIKE' : disqualifying.length ? 'SUSPECT_SPIKE' : 'AUTHENTIC_SPIKE';
   const young = input.launchAgeMs !== null && (!Number.isFinite(input.launchAgeMs) || input.launchAgeMs < policy.youngLaunchMs);
   const shortHistory = spiking.some((w) => w.baselineBars < policy.recommendedBaselineBars);

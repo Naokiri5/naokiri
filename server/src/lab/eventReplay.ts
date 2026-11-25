@@ -111,8 +111,9 @@ export interface TradeEvidenceAssessment { atMs: number; barStartMs: number; ass
 
 /**
  * Deterministic replay of trade-built bars and FAST volume assessments through the SAME `TradeBarBuilder` and
- * `assessVolumeSpike` used for live evidence (live/replay parity). The tape clock is the receive clock, so lateness,
- * quarantine and finalization behave exactly as they would live. Evidence only: no orders, capital or promotion.
+ * `assessVolumeSpike` used for live evidence. The tape's event time is used as the receive clock, so finalization and
+ * duplicate handling match live, but feed delay is not modelled: late and future-dated quarantine paths are not
+ * exercised by replay. Evidence only: no orders, capital or promotion.
  */
 export async function replayTradeEvidence(
   events: AsyncIterable<HistoricalEvent> | Iterable<HistoricalEvent>,
@@ -121,6 +122,7 @@ export async function replayTradeEvidence(
 ) {
   const finest = options.detectorIntervalsMs[0];
   if (!/^[A-Za-z0-9._:/-]{1,128}$/.test(options.symbol) || options.detectorIntervalsMs.length === 0 ||
+      new Set(options.detectorIntervalsMs).size !== options.detectorIntervalsMs.length ||
       !options.detectorIntervalsMs.every((i) => options.bars.intervalsMs.includes(i)) ||
       (options.launchTsMs !== undefined && !safe(options.launchTsMs, 0, Number.MAX_SAFE_INTEGER)))
     throw new Error('INVALID_TRADE_REPLAY_OPTIONS');
@@ -130,18 +132,18 @@ export async function replayTradeEvidence(
   const verdicts: Record<VolumeSpikeVerdict, number> = { AUTHENTIC_SPIKE: 0, SUSPECT_SPIKE: 0, NO_SPIKE: 0, INSUFFICIENT_EVIDENCE: 0 };
   const statuses: Record<string, number> = {};
   let last = -1, eventsProcessed = 0, trades = 0;
+  // Assess once per clock advance, labelled with the newest finest bar: the rings hold the state after all finalizations.
   function assess(finalized: TradeBar[], atMs: number) {
-    for (const bar of finalized) {
-      if (bar.intervalMs !== finest) continue;
-      const assessment = assessVolumeSpike({
-        windows: options.detectorIntervalsMs.map((intervalMs) => ({ intervalMs, bars: builder.finalBars(intervalMs) })),
-        launchAgeMs: options.launchTsMs === undefined ? null : atMs - options.launchTsMs,
-      });
-      verdicts[assessment.verdict]++;
-      const row = Object.freeze({ atMs, barStartMs: bar.startMs, assessment });
-      digest.update(encode(row) + '\n');
-      onAssessment(row);
-    }
+    const bar = finalized.filter((b) => b.intervalMs === finest).at(-1);
+    if (!bar) return;
+    const assessment = assessVolumeSpike({
+      windows: options.detectorIntervalsMs.map((intervalMs) => ({ intervalMs, bars: builder.finalBars(intervalMs) })),
+      nowMs: atMs, launchAgeMs: options.launchTsMs === undefined ? null : atMs - options.launchTsMs,
+    });
+    verdicts[assessment.verdict]++;
+    const row = Object.freeze({ atMs, barStartMs: bar.startMs, assessment });
+    digest.update(encode(row) + '\n');
+    onAssessment(row);
   }
   for await (const event of events) {
     if (!safe(event.tsMs, 0, Number.MAX_SAFE_INTEGER) || event.tsMs < last) throw new Error('REPLAY_NON_MONOTONIC');

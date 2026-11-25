@@ -56,7 +56,7 @@ for (let s = 0; s < SECONDS; s++) {
       if (bar.intervalMs !== 1_000) continue;
       finalized++;
       const t = performance.now();
-      assessVolumeSpike({ windows: [1_000, 5_000, 15_000].map((intervalMs) => ({ intervalMs, bars: b.finalBars(intervalMs) })), launchAgeMs: null });
+      assessVolumeSpike({ windows: [1_000, 5_000, 15_000].map((intervalMs) => ({ intervalMs, bars: b.finalBars(intervalMs) })), nowMs: at, launchAgeMs: null });
       assess.push(performance.now() - t);
     }
   }

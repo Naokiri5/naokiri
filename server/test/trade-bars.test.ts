@@ -135,6 +135,23 @@ describe('trade-built bars: reorgs, gaps and bounds', () => {
     expect(b.retract('neverSeen:0', T0 + 100)).toBe('UNKNOWN');
   });
 
+  it('uses the accepted time for a retraction and re-accepts a re-included transaction', () => {
+    const b = build();
+    const t = trade(T0 + 100, 2n * FP, FP, { finality: 'provisional' });
+    b.ingest(t, T0 + 100);
+    expect(b.retract(t.eventId, T0 + 5_000)).toBe('REBUILT'); // caller's time is wrong; the accepted time wins
+    expect(b.provisionalBar(1_000)).toMatchObject({ trades: 0 });
+    expect(b.ingest({ ...t, finality: 'final' }, T0 + 200).status).toBe('ACCEPTED');
+  });
+
+  it('finalizes data bars after a long silence without walking every empty interval', () => {
+    const b = build({ maxFinalBars: 10 });
+    b.ingest(trade(T0 + 100, 2n * FP, FP), T0 + 100);
+    const finalized = b.advance(T0 + 7 * 86_400_000);
+    expect(finalized.length).toBeLessThanOrEqual(2 * (10 + 1));
+    expect(finalized.some((bar) => bar.startMs === T0 && bar.trades === 1)).toBe(true);
+  });
+
   it('invalidates instead of rewriting when a final bar is reorged, and the bar stops feeding models', () => {
     const b = build();
     const t = trade(T0 + 100, 2n * FP, FP);

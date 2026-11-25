@@ -53,9 +53,10 @@ function scenario({ spikeSeconds = 15, spikeTradesPerSecond = 20, spikeTrader, b
       push(start + s * 1_000 + i * 10, spiking ? 5n * FP : FP + FP / 2n, who);
     }
   }
-  b.advance(start + 15_000 + 1_000); // the final 1s, 5s and 15s bars all finalize together
+  const nowMs = start + 15_000 + 1_000;
+  b.advance(nowMs); // the final 1s, 5s and 15s bars all finalize together
   const input = (over: Partial<VolumeSpikeInput> = {}): VolumeSpikeInput => ({
-    windows: WINDOWS.map((intervalMs) => ({ intervalMs, bars: b.finalBars(intervalMs) })), launchAgeMs: 6 * 60 * MINUTE, ...over,
+    windows: WINDOWS.map((intervalMs) => ({ intervalMs, bars: b.finalBars(intervalMs) })), nowMs, launchAgeMs: 6 * 60 * MINUTE, ...over,
   });
   return { builder: b, input };
 }
@@ -131,6 +132,40 @@ describe('FAST volume-authenticity assessment', () => {
     const result = assessVolumeSpike(input());
     expect(result.windows.every((w) => w.status === 'UNUSABLE')).toBe(true);
     expect(result.verdict).toBe('INSUFFICIENT_EVIDENCE');
+  });
+
+  it('rejects duplicate windows instead of counting one window twice as persistence', () => {
+    const { input } = scenario();
+    const base = input();
+    expect(() => assessVolumeSpike({ ...base, windows: [base.windows[1], base.windows[1]] })).toThrow('DUPLICATE_VOLUME_WINDOW');
+    // Bars of the wrong interval make the window unusable.
+    const mislabeled = assessVolumeSpike({ ...base, windows: [{ intervalMs: 5_000, bars: base.windows[0].bars }, base.windows[2]] });
+    expect(mislabeled.windows[0].status).toBe('UNUSABLE');
+  });
+
+  it('treats stale rings as unusable', () => {
+    const { input } = scenario();
+    const stale = input();
+    expect(assessVolumeSpike({ ...stale, nowMs: stale.nowMs + 60_000 }).verdict).toBe('INSUFFICIENT_EVIDENCE');
+  });
+
+  it('never confirms a spike against a flat, empty baseline', () => {
+    const b = new TradeBarBuilder({
+      instrumentId: 'SOLANA_JUPITER:QUIET.SOL', baseIntervalMs: 1_000, intervalsMs: [...WINDOWS], allowedLatenessMs: 1_000,
+      maxFutureSkewMs: 1_000, maxFinalBars: 200, maxTradesPerBaseBar: 1_000, maxParticipantsPerBar: 1_000,
+      retractionWindowMs: 10_000, maxSeenIds: 100_000,
+    });
+    let id = 0;
+    const push = (at: number, who: string) => b.ingest({ instrumentId: b.config.instrumentId, eventId: `q${++id}:0`, eventTimeMs: at,
+      priceFp: FP, baseQtyFp: FP, aggressor: 'buy', participant: who, finality: 'final' }, at);
+    push(T0, 'seed'); // one trade opens the history; then 20 minutes of silence
+    const start = T0 + 1_200_000;
+    for (let s = 0; s < 15; s++) for (let i = 0; i < 6; i++) push(start + s * 1_000 + i * 10, `w${i}`);
+    b.advance(start + 16_000);
+    const result = assessVolumeSpike({ windows: WINDOWS.map((intervalMs) => ({ intervalMs, bars: b.finalBars(intervalMs) })),
+      nowMs: start + 16_000, launchAgeMs: null });
+    expect(result.verdict).not.toBe('AUTHENTIC_SPIKE');
+    expect(result.flags).toContain('FLAT_BASELINE');
   });
 
   it('is deterministic for identical inputs', () => {
