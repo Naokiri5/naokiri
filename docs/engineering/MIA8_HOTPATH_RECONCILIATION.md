@@ -44,3 +44,27 @@ Source: the four uploaded P2 allocator/coordinator specifications and correspond
 - Remaining P2 work: verified performance-driven taper, per-asset/engine caps on actual classified exposures, fresh QHEF/strategy evidence, multi-proposal shadow budget simulation, durable venue settlement/reservations, Strategy Arena and FAST/DEEP lane certification. Do not promote to LIVE or replace the canonical OMS. No profitability or latency claim.
 
 Release gate: exact-head CI and independent review required; existing live locks remain. This is an incremental PAPER risk improvement, not complete P2 implementation.
+
+## BrainOS P0–P2 hardening increment (2026-11-25)
+
+The 19-document proposal is a roadmap, not evidence that its proposed parallel modules exist or are production-ready. Baseline #137 dc86ac7 passed CI run 45532484407. Continue its canonical PAPER architecture rather than import a second ledger, runtime authority, scheduler or certification path.
+
+Implemented:
+- P0: acceptPolicy now commits the owner-approved policy version and its audit row under the canonical BEGIN IMMEDIATE transaction. A late audit failure rolls back the policy update.
+- P1: optional owner policy fields postExitCooldownMs, stopLossCooldownMs, entryFrequencyWindowMs, maxEntriesPerWindow and adaptiveDrawdownSizing. Existing accepted policies without these fields retain behavior. Frequency window and cap must be supplied together.
+- Risk gate reads actual persisted PAPER positions for the most recent same-instrument closed exit and account-wide rolling entry count. Stop or trailing-stop closure applies the longer configured cooldown. No second counter or migration. Frequency counts filled position entries, not proposals, approvals, or network dispatch attempts. Existing OMS rechecks risk before committing under its write lock.
+- Optional account-wide taper uses existing persisted deposit-invariant account high-water marks and closed loss streak: >=2.5% drawdown or >=3 losses => 0.65x; >=5% or >=5 losses => 0.35x; >=8% or >=7 losses => zero. Apply to per-trade risk budget and existing notional cap; other risk gates remain unchanged. No automatic policy mutation or leverage increase. Existing tighter breakers take precedence.
+- Extend server/test/risk.test.ts and server/test/oms.test.ts with risk validation, taper, atomic policy rollback and actual paper entry/stop/SQLite reopen regression. Tests are not prospective market evidence.
+
+Reconciliation and exclusions:
+| Package | Canonical owner / gap |
+| --- | --- |
+| P0 CI and static boundary | .github/workflows/ci.yml and test/brainos7-authority.audit.test.ts already run; reuse existing npm and Node version. No duplicate workflow or passWithNoTests. Three consecutive exact-head runs and independent release review remain open. |
+| P0 financial reservation and reconciliation | db/db.ts, portfolio/ledger.ts, portfolio/calendar.ts, exec/oms.ts, exec/recovery.ts, ops/lease.ts. PAPER fills, ledger writes and protective stop are atomic. External asynchronous reservations, integer money migration, partial/ambiguous venue execution and independent wallet reconciliation remain open. Do not create the proposed second balance ledger or second fencing epoch. NOT_FOUND alone must not release an uncertain venue order. |
+| P1 anti-churn and sizing | Implemented account/symbol subset above. Engine-level counters, directional flip-flop protection (no short execution in canonical PAPER), engine-specific drawdown and performance under genuine execution remain open. |
+| P1 exposure and unified shadow cycle | Keep canonical positions, risk, choice arbitration and OMS. Require authoritative engine attribution, durable unresolved order exposure, same-snapshot research sizing and concurrency tests before parity claims. No synthetic live dispatch. |
+| P2 verified strategy profiles and DITAS | Existing lab/lab.ts and ditas/calibration.ts own lifecycle and calibration. No generated outcomes or assumed probabilities may certify an edge. Require immutable real outcome provenance, independent holdout, correct multiple-testing statistics and health evidence. Health-gated adaptation remains open. |
+| P2 bridge | Existing cognitive modules live under knowledge/cognitive; retain read-only boundaries. Injected financial callbacks can violate isolation even with no imports. Do not provide cognitive memory an independent order-authority port. |
+| P2 session harness, CLI, HMAC, readiness and promotion | Existing qa/gates.ts and core/mode.ts remain authoritative; no signer, live adapter, live startup unlock, or production deployment change. The proposed CLI has a fallback development signing secret and seeds synthetic winning trades. A signed synthetic artifact does not prove prospective performance, venue reconciliation, or security. No eval-based deploy/rollback commands. Tests of simulated readiness are not production certification. |
+
+Gate: #137 remains draft until exact-head CI and integration review. All live controls stay locked; no live unlock, certification artifact, or deployment was performed.
