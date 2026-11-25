@@ -159,6 +159,14 @@ or required checks before that.
 | C1 | Affect layer inside memory (presentation only) | `knowledge/` | P2 | — | Missing | Invariance test (section 7) |
 | C2 | Trader Joe mandate awareness (scope, capital, expiry) | `joe/joe.ts` | P2 | M1 | Pending | Joe reads `/api/session/paper-spot` mandate |
 | H1 | Portfolio backtester (beyond execution-cost probes) | `lab/` | P2 | — | Missing | Walk-forward, out-of-sample |
+| V2-1.2 | Trade-built bars: exact fixed point, late/reorg/gap handling, bounded memory | `market/tradeBars.ts` | P1 | — | **Done** (V2 increment) | `test/trade-bars.test.ts`, benchmark and soak |
+| V2-1.3a | FAST volume-authenticity detector (candidate trigger only) | `market/volumeSpike.ts` | P1 | V2-1.2 | **Done** (V2 increment) | `test/volume-spike.test.ts` |
+| V2-0.2 | Lab replay of trades through the live builder and detector | `lab/tape-reader.ts`, `lab/eventReplay.ts` | P0 | V2-1.2 | **Done** (V2 increment) | `test/historical-replay.test.ts` (parity digest) |
+| V2-1.2b | Live Solana trade feed into `TradeBarBuilder` | `providers/`, `choice/dualRuntime.ts` | P1 | Feed entitlement (Helius, Vike or GMGN) | Blocked | Opt-in provider test; no feed, no wiring |
+| V2-1.3b | Wire volume verdicts into FLIN candidate evidence | `market/flinQueue.ts` | P1 | V2-1.2b | Pending | Spike never changes a candidate to executable |
+| V2-1.4 | DEEP futures contract, margin and liquidation model; reduce-only closes | `portfolio/`, `exec/` | P1 | — | Missing | Margin invariants, liquidation buffer tests |
+| V2-1.5 | Position Supervisor dynamic exits (liquidity collapse, momentum exhaustion) | `exec/oms.ts` exit capsule | P1 | V2-1.2b, V2-1.4 | Pending | Exit persistence across partial and rejected fills |
+| V2-0.3 | External write-ahead reservations and authenticated reconciliation | `exec/` | P0 for LIVE | A real venue adapter | Blocked | See section 14 |
 
 ## 11. Release blockers
 
@@ -186,3 +194,28 @@ requires them, and its upsert leaves them untouched. Never edit migration 7 in p
 
 Not run: live provider tests (opt-in, need external connectivity), Railway deployment, and prospective unattended PAPER
 soak. GitHub Actions results for this branch are not yet available.
+
+## 14. BrainOS V2 roadmap disposition (owner PDF, 26 Nov 2026)
+
+The roadmap was checked against the repository before any code was written. Each item is either adopted in its
+owning module, already present, rejected because it would weaken the architecture, or blocked on a real dependency.
+
+| Roadmap item | Disposition | Reason and evidence |
+|---|---|---|
+| §2 one intelligence, one risk authority, one OMS | **Kept** | Matches sections 1 and 6. No second engine was added. |
+| §3 trade-built charts, late events, reorgs, gaps, bounded queues | **Adopted** (V2-1.2) | `market/tradeBars.ts`: exact 1e9 fixed point; watermark finalization; late, duplicate, future and malformed trades quarantined; retraction rebuilds non-final bars exactly or invalidates final ones; empty bars are never fabricated; time-bounded dedupe. Final bars feed the canonical `FeatureEngine` through `tradeBarCandle`. |
+| §4 volume-spike detector | **Adopted** (V2-1.3a) | `market/volumeSpike.ts`: velocity, acceleration, median/MAD z-score, imbalance, persistence across 1s/5s/15s, participant concentration, two-sided churn, liquidity and depth flags. Returns `tradingAuthority: false` and `CANDIDATE_TRIGGER_ONLY`. Thresholds are a versioned research policy, not calibrated truth. |
+| §4 hard token-safety gates, ranking by net EV, bundles | **Blocked** | Needs authenticated Solana RPC, Jupiter route quotes and an execution adapter (F1, F2). |
+| §5 DEEP probabilistic futures intelligence, margin | **Not started** (V2-1.4) | No futures margin ledger exists; spot sizing must not be reused for futures. |
+| §6 illustrative PAPER risk envelope (0.25 %, 1 %, 3 %, 2x) | **Not imported** | Risk limits change only through the owner-accepted policy in `risk/policy.ts`. Hardcoding roadmap numbers would bypass owner approval. |
+| §7 CanonicalOMS drafts (S2/S3) | **Rejected as written** | Same conclusion as #137: a parallel OMS or ledger, BigInt→Number conversions and release on a missing order are unsafe. PAPER fills are synchronous and atomic in the canonical OMS; write-ahead reservations are needed only with an external venue adapter. |
+| §8 continuous learning and audit | **Partial** (existing DITAS) | Health-gated adaptation remains open; nothing self-promotes. |
+| §9 latency budgets | **Measured for the new stages** | `scripts/benchmark-trade-bars.mjs`: ingest including finalization p95 0.038 ms, p99 0.070 ms; volume assessment p95 0.026 ms (1,000 tokens, 10,000 events/s synthetic burst, 80k events/s single-process throughput). The budget is 7 ms p95. A 30-minute soak at 2,000 events/s (`--soak`) kept the post-GC heap between 132 and 265 MB. The slow rise matches
+the 15s, 1m and 5m rings filling toward their fixed cap of 120 bars, roughly 250 MB for 1,000 saturated tokens. These are synthetic, single-process figures, not venue or chain latency. |
+| §10 streaming replay, determinism gate | **Already present** for book probes; **extended** to trades | Tape reader already streamed with bounded buffers (the S4 "collect into array" caveat no longer applies). `TRADE_TICK` events and `replayTradeEvidence` add trade replay through the same live code, with a parity digest test. |
+| §10 profitability gates (≥100 trades, bootstrap CI, PF > 1.2) | **Pending** | Needs authentic trade histories; no dataset was supplied. Synthetic tapes never promote a strategy. |
+| §12 operational release checklist | **Unchanged** | LIVE stays locked; Railway soak and deployment remain unverified. |
+
+**Architecture impact:** additive and contained. Two new market-evidence modules in `market/`, one tape event type and
+one replay function in `lab/`, and one benchmark script. No change to risk, OMS, ledger, session authority, schema or
+API. Nothing in this increment can place, size or authorize an order.
