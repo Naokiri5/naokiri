@@ -14,7 +14,7 @@ import { stepUpMethod } from '../security/stepUp.js';
 import { staleAfter, type EngineView } from './readiness.js';
 import { currentLease } from './lease.js';
 import { durableSessionStatus, paperSpotEntryDenial, type BrainosSessionState } from './paperSpotEntry.js';
-import { MANDATE_LIMITS, openPaperExposure, sessionMandate, type TradingMandate } from './tradingMandate.js';
+import { MANDATE_LIMITS, mandateCapitalInUse, openPaperExposure, sessionMandate, type TradingMandate } from './tradingMandate.js';
 
 export const SESSION_MINDS = ['FAST', 'DEEP'] as const;
 export const SESSION_ENVIRONMENTS = ['PAPER', 'LIVE'] as const;
@@ -46,13 +46,14 @@ export interface PaperSpotSessionPreflight {
   state: BrainosSessionState;
   checks: PreflightCheck[];
   /** The persisted mandate of the current or most recent session; null before the first mandate. */
-  mandate: (TradingMandate & { openExposure: number; expired: boolean }) | null;
+  mandate: (TradingMandate & { openExposure: number; realizedLoss: number; capitalInUse: number; expired: boolean }) | null;
   /** Bounds for a new authorization, from the paper ledger at check time. */
   authorization: { maxCapital: number; minDurationHours: number; maxDurationHours: number };
 }
 
 const MANDATE_DENIAL_DETAIL: Record<string, string> = {
   SESSION_MANDATE_MISSING: 'This session has no trading mandate. Close it and authorize a new session with a capital limit.',
+  SESSION_MANDATE_NOT_BOUND: 'This mandate was granted to an earlier session. Close it and authorize a new session.',
   SESSION_MANDATE_EXPIRED: 'The session mandate has expired. New entries are blocked while MIA drains the session.',
   SESSION_RISK_POLICY_CHANGED: 'The risk policy changed after authorization. Close the session and authorize a new one.',
   SESSION_STRATEGY_CONFIG_CHANGED: 'The deployed strategy set changed after authorization. Close the session and authorize a new one.',
@@ -209,7 +210,7 @@ export function paperSpotSessionPreflight(engine: EngineView & { instanceId?: st
     canClose: state !== 'CLOSED' && !(state === 'EMERGENCY_KILL_SWITCH' && control.emergency),
     state,
     checks,
-    mandate: mandate ? { ...mandate, openExposure, expired: at >= mandate.expires_at } : null,
+    mandate: mandate ? { ...mandate, ...mandateCapitalInUse(mandate), expired: at >= mandate.expires_at } : null,
     authorization: {
       maxCapital: Number.isFinite(ledger.cash) ? Math.max(0, ledger.cash + openExposure) : 0,
       minDurationHours: MANDATE_LIMITS.minDurationHours,

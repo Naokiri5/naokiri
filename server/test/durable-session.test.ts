@@ -211,9 +211,9 @@ describe('durable Binance spot paper authorization', () => {
     expect(paperSpotEntryDenial(fence, NOW, NOW)).toBeNull();
     expect(paperSpotEntryDenial(null, NOW)).toBe('STALE_OR_LOST_ENGINE_FENCE');
     expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'BINANCE_SPOT', strategy: { id: 'trend_pullback', version: '1.0.0' } })).toBeNull();
-    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'FUTURES' })).toMatch(/^MARKET_OUTSIDE_SESSION_MANDATE/);
-    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'SOLANA_MEMECOIN' })).toMatch(/^MARKET_OUTSIDE_SESSION_MANDATE/);
-    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'UNSUPPORTED' })).toMatch(/^MARKET_OUTSIDE_SESSION_MANDATE/);
+    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'FUTURES', strategy: { id: 'trend_pullback', version: '1.0.0' } })).toMatch(/^MARKET_OUTSIDE_SESSION_MANDATE/);
+    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'SOLANA_MEMECOIN', strategy: { id: 'trend_pullback', version: '1.0.0' } })).toMatch(/^MARKET_OUTSIDE_SESSION_MANDATE/);
+    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'UNSUPPORTED', strategy: { id: 'trend_pullback', version: '1.0.0' } })).toMatch(/^MARKET_OUTSIDE_SESSION_MANDATE/);
     expect(paperSpotEntryDenial(fence, NOW, NOW - 1)).toBe('ENTRY_EVIDENCE_OUTSIDE_SESSION');
     expect(paperSpotEntryDenial(fence, NOW, NOW + 1)).toBe('ENTRY_EVIDENCE_OUTSIDE_SESSION');
     expect(durableEntryPermission(engine, fence, NOW)).toMatchObject({ allowFastNewEntries: false, allowDeepNewEntries: false });

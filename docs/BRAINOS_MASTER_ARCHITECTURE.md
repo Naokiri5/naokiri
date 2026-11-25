@@ -65,7 +65,7 @@ already allow. It never sizes a position, never authorizes an entry by itself an
 | Trading mode | `mind` (`SPOT_PAPER`, `FAST`, `DEEP`) | Run Session |
 | Execution environment | `environment` | Always `PAPER` from Run Session |
 | Market and instrument scope | `market_scope` | Derived from the lane: `BINANCE_SPOT`, `SOLANA_MEMECOIN`, `FUTURES` |
-| Authorized capital ceiling | `capital_ceiling` | Owner input; must be at most paper cash plus open cost basis |
+| Authorized capital ceiling | `capital_ceiling` | Owner input; must be at most paper cash plus open cost basis. Bounds open cost basis **plus** net losses (fees included) realized by positions opened under the mandate |
 | Risk policy version | `risk_policy_version` | Accepted policy at authorization |
 | Strategy configuration version | `strategy_config_version` | `id@version` list from `STRATEGIES` |
 | Owner identity | `authorized_by` | `owner:<step-up method>` |
@@ -76,11 +76,16 @@ already allow. It never sizes a position, never authorizes an entry by itself an
 
 **Enforcement points**, all inside the OMS write transaction:
 
-1. `paperSpotEntryDenial()` → `mandateEntryDenial()`: environment must be `PAPER`; the mandate must be complete, in scope
-   for its lane, unexpired, and bound to the current risk policy and strategy set. The entry's classified scope must
+1. `paperSpotEntryDenial()` → `mandateEntryDenial()`: environment must be `PAPER`; the mandate must be complete, bound to
+   the session it was granted with (`authorized_at = started_at`, so a reopen by any code version, including a rolled-back
+   binary, cannot reuse it: `SESSION_MANDATE_NOT_BOUND`), in scope for its lane, unexpired, and bound to the current risk
+   policy and strategy set. An entry without a strategy identity is denied. The entry's classified scope must
    match the mandate scope (`MARKET_OUTSIDE_SESSION_MANDATE`), and its strategy version must be in the authorized set.
-2. `paperSpotCapitalDenial()`: open paper cost basis plus the actual fill notional and fees must not exceed
-   `capital_ceiling` (`MANDATE_CAPITAL_CEILING`). The check runs under the same SQLite write lock as the fill.
+2. `paperSpotCapitalDenial()`: open paper cost basis, plus net realized loss of positions opened since authorization,
+   plus the actual fill notional and fees, must not exceed `capital_ceiling` (`MANDATE_CAPITAL_CEILING`). Gains offset
+   losses, so a session can never lose more than it was authorized. The check runs under the same SQLite write lock as
+   the fill. Policy-level daily, weekly and drawdown limits still apply independently.
+   FAST and DEEP sessions never inherit a previous mandate, and `durableEntryPermission` also checks it.
 3. Sessions upgraded from migration 6 have no mandate. They fail closed with `SESSION_MANDATE_MISSING`, and the owner
    must close and re-authorize them.
 
@@ -170,8 +175,14 @@ requires them, and its upsert leaves them untouched. Never edit migration 7 in p
 | Command | Result |
 |---|---|
 | `npm run typecheck` | Pass (server and web) |
-| `npm test -w server` | 62 files passed, 1 skipped; 814 tests passed, 3 opt-in skipped |
+| `npm test` (server) | 62 files passed, 1 skipped; 817 tests passed, 3 opt-in skipped |
+| `npm test` (web) | 44 tests passed |
+| `npm run build` | Pass |
+| `npm run scan:secrets` | Clean (365 tracked files) |
+| `npm audit --audit-level=high` | 0 vulnerabilities |
+| Independent trading-risk review | No blockers; the should-fix findings (loss-aware ceiling, session binding, required strategy identity, contained expiry drain) are fixed in this increment |
 | `npm run test:e2e -- --trace off` | 65 passed (Chromium, offline fixtures) |
 | Visual check | No horizontal overflow at 1440/1024/768/390 in dark and light themes |
 
-The full command list for the final commit is in the PR description.
+Not run: live provider tests (opt-in, need external connectivity), Railway deployment, and prospective unattended PAPER
+soak. GitHub Actions results for this branch are not yet available.

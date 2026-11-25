@@ -32,6 +32,8 @@ type Mandate = {
   authorized_at: number;
   expires_at: number;
   openExposure: number;
+  realizedLoss: number;
+  capitalInUse: number;
   expired: boolean;
 };
 type PaperSpotPreflight = Pick<Preflight, 'canRun' | 'canClose' | 'checks'> & {
@@ -160,7 +162,10 @@ function MandateSummary({ paper }: { paper: PaperSpotPreflight }) {
       </div>
       <div><dt>Position protection</dt><dd>{protection ? <Badge v={protection.status} /> : '—'}</dd></div>
     </dl>
-    <Meter label="Authorized capital in use" value={mandate.openExposure} limit={mandate.capital_ceiling} unit=" USD" />
+    <Meter label="Authorized capital in use" value={mandate.capitalInUse} limit={mandate.capital_ceiling} unit=" USD" />
+    <p className="hint mia-mandate-breakdown">
+      {fmt.usd(mandate.openExposure)} in open positions · {fmt.usd(mandate.realizedLoss)} net realized loss under this mandate, fees included
+    </p>
   </div>;
 }
 

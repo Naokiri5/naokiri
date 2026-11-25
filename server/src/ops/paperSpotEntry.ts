@@ -34,7 +34,7 @@ export function durableSessionStatus(): DurableBrainosSession | null {
 }
 
 /** The market and strategy of a specific entry, checked against the session's trading mandate. */
-export interface SessionEntry { scope: EntryScope; strategy?: { id: string; version: string } }
+export interface SessionEntry { scope: EntryScope; strategy: { id: string; version: string } | undefined }
 
 /**
  * Call inside the OMS write transaction, in addition to its existing checks and Risk Gate. Omit `entry`

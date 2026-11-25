@@ -10,7 +10,8 @@ import { currentPolicy } from '../risk/policy.js';
  * A mandate only ever NARROWS what the canonical risk gate and paper OMS already allow. It never sizes a
  * position, never authorizes an entry by itself and never unlocks LIVE. It binds one session to:
  *  - exactly one market scope (FAST → Solana memecoins, DEEP → futures, SPOT_PAPER → Binance spot);
- *  - an authorized capital ceiling, enforced against the actual fill inside the OMS write transaction;
+ *  - an authorized capital ceiling covering open cost basis plus net losses (fees included) realized under the
+ *    mandate, enforced against the actual fill inside the OMS write transaction;
  *  - the risk policy and strategy set the owner reviewed when authorizing;
  *  - an expiry, after which new entries fail closed and the session drains.
  */
@@ -110,13 +111,15 @@ export const sessionMandate = (columns: MandateColumns) => completeMandate(colum
  * Returns a stable denial code or null. Missing, malformed, expired or outdated mandates fail closed.
  */
 export function mandateEntryDenial(
-  session: MandateColumns & { environment: string; mind: string },
+  session: MandateColumns & { environment: string; mind: string; started_at: number | null },
   at: number,
-  entry?: { scope: EntryScope; strategy?: { id: string; version: string } },
+  entry?: { scope: EntryScope; strategy: { id: string; version: string } | undefined },
 ): string | null {
   if (session.environment !== 'PAPER') return 'SESSION_ENVIRONMENT_NOT_PAPER';
   const mandate = completeMandate(session);
   if (!mandate) return 'SESSION_MANDATE_MISSING';
+  // A mandate authorizes only the session it was granted with; any reopen (by any code version) sets a new start.
+  if (session.started_at !== mandate.authorized_at) return 'SESSION_MANDATE_NOT_BOUND';
   const laneScope = (LANE_SCOPE as Record<string, MarketScope | undefined>)[session.mind];
   if (!laneScope || mandate.market_scope !== laneScope) return 'SESSION_MANDATE_SCOPE_INVALID';
   if (!Number.isFinite(at) || at < mandate.authorized_at) return 'SESSION_MANDATE_CLOCK_INVALID';
@@ -125,7 +128,7 @@ export function mandateEntryDenial(
   if (mandate.strategy_config_version !== strategyConfigVersion()) return 'SESSION_STRATEGY_CONFIG_CHANGED';
   if (!entry) return null;
   if (entry.scope !== mandate.market_scope) return `MARKET_OUTSIDE_SESSION_MANDATE: ${entry.scope} entry in a ${mandate.market_scope} session`;
-  if (entry.strategy && !mandate.strategy_config_version.split(',').includes(`${entry.strategy.id}@${entry.strategy.version}`))
+  if (!entry.strategy || !mandate.strategy_config_version.split(',').includes(`${entry.strategy.id}@${entry.strategy.version}`))
     return 'SESSION_STRATEGY_OUTSIDE_MANDATE';
   return null;
 }
@@ -137,6 +140,23 @@ export function openPaperExposure(): number {
   )?.exposure ?? 0;
 }
 
+/** Net realized result, fees included, of every position opened since `since` (open or closed). */
+export function realizedNetSince(since: number): number {
+  return get<{ net: number | null }>(
+    'SELECT SUM(realized_pnl) net FROM positions WHERE account=? AND opened_at>=?', PAPER_ACCOUNT, since,
+  )?.net ?? 0;
+}
+
+/**
+ * Capital the mandate has consumed: all open cost basis plus net losses realized by positions opened under it.
+ * Gains offset losses, so a profitable session can redeploy them; losses can never exceed the ceiling.
+ */
+export function mandateCapitalInUse(mandate: TradingMandate) {
+  const openExposure = openPaperExposure();
+  const realizedLoss = Math.max(0, -realizedNetSince(mandate.authorized_at));
+  return { openExposure, realizedLoss, capitalInUse: openExposure + realizedLoss };
+}
+
 /**
  * Capital ceiling check for an entry whose actual cost (fill notional + fees) is known. Call it inside the OMS
  * write transaction so concurrent entries cannot jointly exceed the authorized capital.
@@ -144,11 +164,11 @@ export function openPaperExposure(): number {
 export function mandateCapitalDenial(columns: MandateColumns, entryCost: number): string | null {
   const mandate = completeMandate(columns);
   if (!mandate) return 'SESSION_MANDATE_MISSING';
-  const exposure = openPaperExposure();
-  if (!Number.isFinite(exposure) || exposure < 0 || !Number.isFinite(entryCost) || entryCost <= 0)
+  const { openExposure, realizedLoss, capitalInUse } = mandateCapitalInUse(mandate);
+  if (!Number.isFinite(capitalInUse) || openExposure < 0 || !Number.isFinite(entryCost) || entryCost <= 0)
     return 'MANDATE_CAPITAL_UNVERIFIABLE';
-  if (exposure + entryCost > mandate.capital_ceiling + 1e-9) {
-    return `MANDATE_CAPITAL_CEILING: open ${exposure.toFixed(2)} + entry ${entryCost.toFixed(2)} exceeds authorized ${mandate.capital_ceiling.toFixed(2)}`;
+  if (capitalInUse + entryCost > mandate.capital_ceiling + 1e-9) {
+    return `MANDATE_CAPITAL_CEILING: open ${openExposure.toFixed(2)} + realized loss ${realizedLoss.toFixed(2)} + entry ${entryCost.toFixed(2)} exceeds authorized ${mandate.capital_ceiling.toFixed(2)}`;
   }
   return null;
 }

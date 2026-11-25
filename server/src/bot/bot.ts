@@ -177,8 +177,11 @@ const protectionLane = () => runLane('protection', (lease) => {
     throw error;
   }
   // An expired mandate revokes entry authority without the owner present; exits keep running.
-  const versionBefore = durableSessionStatus()?.version;
-  if (drainExpiredMandate()?.version !== versionBefore) bus.publish('bot', botStatusView());
+  // Contained so a clock regression cannot skip the drain completion or the watchdog below; entries stay denied.
+  try {
+    const versionBefore = durableSessionStatus()?.version;
+    if (drainExpiredMandate()?.version !== versionBefore) bus.publish('bot', botStatusView());
+  } catch (error) { botStatus.lastError = `mandate expiry: ${errorText(error)}`; }
   if (durableSessionStatus()?.state === 'CLOSING_DRAINING_ENTRIES') {
     try {
       finishDurableClose(undefined, lease);

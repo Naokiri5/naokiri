@@ -12,7 +12,7 @@ import {
   type BrainosSessionState, type DurableBrainosSession,
 } from './paperSpotEntry.js';
 import {
-  buildMandate, NO_MANDATE, openPaperExposure, sessionMandate,
+  buildMandate, mandateEntryDenial, NO_MANDATE, openPaperExposure, sessionMandate,
   type MandateColumns, type MandateRequest,
 } from './tradingMandate.js';
 
@@ -146,10 +146,11 @@ export function openDurablePaperSession(engine: EngineView, mind: SessionMind, f
       throw new Error('SESSION_EXECUTION_LANE_NOT_CERTIFIED');
     if (getControl().emergency || getControl().pausedNewOrders)
       throw new Error('SESSION_OWNER_ENTRY_HALT');
+    // FAST and DEEP mandates are not designed yet; never inherit the previous session's mandate.
     return persist(old, 'RUNNING', 'OWNER_OPEN_SESSION', at, {
       environment: 'PAPER', mind, lease_holder: fence.holder,
       lease_acquired_at: fence.acquired_at, fence_epoch: old.fence_epoch + 1,
-      suspend_reason: 'NONE', started_at: at, closed_at: null,
+      suspend_reason: 'NONE', started_at: at, closed_at: null, ...NO_MANDATE,
     });
   });
 }
@@ -252,6 +253,8 @@ export function durableEntryPermission(engine: EngineView, fence: LeaseFence | n
     return no('STALE_OR_LOST_ENGINE_FENCE');
   if (state.environment !== 'PAPER') return no('LIVE_EXECUTION_NOT_CERTIFIED');
   if (state.mind === 'SPOT_PAPER') return no('PAPER_SPOT_SESSION_ONLY');
+  const mandate = mandateEntryDenial(state, at);
+  if (mandate) return no(mandate);
   if (getControl().emergency || getControl().pausedNewOrders) return no('OWNER_ENTRY_HALT');
   if (!reconcile().ok || unreconciledPaperOrders()) return no('EXECUTION_NOT_RECONCILED');
   if (!sessionPreflight(engine, state.mind, 'PAPER', at).canRun) return no('LANE_PREFLIGHT_NOT_CERTIFIED');

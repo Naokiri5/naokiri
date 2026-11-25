@@ -90,6 +90,7 @@
 .mia-mandate-summary dt { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase; }
 .mia-mandate-summary dd { margin: 4px 0 0; font-weight: 800; overflow-wrap: anywhere; }
 .mia-mandate-empty { margin: 12px 0 0; }
+.mia-mandate-breakdown { margin: -4px 0 0; }
 .mia-mandate-form { display: grid; gap: 12px; }
 .mia-mandate-form p { margin: 0; }
 .mia-mandate-form label { display: grid; gap: 5px; }
