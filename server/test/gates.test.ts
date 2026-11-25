@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize, relative } from 'node:path';
@@ -9,6 +9,7 @@ import { readiness } from '../src/ops/readiness.js';
 import { unreconciledPaperOrders } from '../src/exec/recovery.js';
 import { PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import * as gates from '../src/qa/gates.js';
+import { getControl, updateControl } from '../src/core/mode.js';
 import { freshDb } from './helpers.js';
 
 const ref = { file: 'server/test/quality.test.ts', fullName: 'data quality gate (Part 32.2) fresh multi-source data is OK' };
@@ -230,6 +231,25 @@ describe('release gate manifest and certification gaps', () => {
     expect(unreconciledPaperOrders()).toBe(2);
     expect(gates.releaseGates(null).gates.find(g => g.id === 'G05')?.status).toBe('FAIL');
   });
+
+  it.each([undefined, 'false', 'true'])(
+    'never authorizes LIVE from an environment acknowledgement (%s) or claimed certificate', ack => {
+      updateControl('owner', { mode: 'PAPER', pausedNewOrders: true, emergency: true });
+      const control = getControl();
+      const snapshot = () => ['settings', 'audit_log', 'orders', 'fills', 'positions', 'ledger_entries']
+        .map(table => all('SELECT * FROM ' + table));
+      const before = snapshot();
+      vi.stubEnv('MIA_OWNER_LIVE_ACK', ack);
+      vi.stubEnv('MIA_RELEASE_CERT_HASH', 'f'.repeat(64));
+      try {
+        // Exercise the actual central authority, not a stub promotion script.
+        expect(() => updateControl('owner', { mode: 'BOUNDED_LIVE' }, () => ({ ok: true })))
+          .toThrow('BOUNDED_LIVE blocked');
+        expect(gates.releaseGates(report(gates.TEST_GATE_REQUIREMENTS.G01)).liveAllowed).toBe(false);
+        expect(getControl()).toEqual(control);
+        expect(snapshot()).toEqual(before);
+      } finally { vi.unstubAllEnvs(); }
+    });
 
   it('keeps browser, worker coverage and factuality gaps pending even with complete automated evidence', () => {
     const input = report(gates.TEST_GATE_REQUIREMENTS.G01);
