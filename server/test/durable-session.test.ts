@@ -21,6 +21,7 @@ import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 
 const NOW = Date.UTC(2026, 10, 23, 13, 0, 0);
+const LIMITS = { capitalLimitUsd: 5_000, maxSessionLossUsd: 200 };
 const engine: EngineView = {
   running: true, role: 'LEADER', startedAt: NOW - 1_000,
   lastTickerAt: NOW, lastScanAt: NOW, lastMonitorAt: NOW, monitorFailing: false,
@@ -190,7 +191,7 @@ describe('durable Binance spot paper authorization', () => {
   it('starts only the selected spot lane after owner, risk, funds and protection checks', () => {
     expect(paperSpotEntryDenial(null, NOW)).toBeNull();
     const fence = acquireOrRenewLease('engine', 'leader-a', 1_000, NOW - 1)!;
-    expect(() => openPaperSpotSession(engine, fence, NOW)).toThrow('PAPER_SPOT_SESSION_PREFLIGHT_BLOCKED');
+    expect(() => openPaperSpotSession(engine, fence, LIMITS, NOW)).toThrow('PAPER_SPOT_SESSION_PREFLIGHT_BLOCKED');
     expect(durableSessionStatus()).toBeNull();
 
     prepareSpotSession();
@@ -201,7 +202,7 @@ describe('durable Binance spot paper authorization', () => {
     expect(sessionPreflight(engine, 'DEEP', 'LIVE', NOW).canRun).toBe(false);
 
     pendingApproval('legacy-order', NOW);
-    expect(openPaperSpotSession(engine, fence, NOW)).toMatchObject({ mind: 'SPOT_PAPER', state: 'RUNNING', fence_epoch: 1 });
+    expect(openPaperSpotSession(engine, fence, LIMITS, NOW)).toMatchObject({ mind: 'SPOT_PAPER', state: 'RUNNING', fence_epoch: 1 });
     expect(get<{ status: string }>("SELECT status FROM orders WHERE id='legacy-order'")?.status).toBe('CANCELLED');
     expect(paperSpotSessionPreflight(engine, NOW)).toMatchObject({ state: 'RUNNING', canRun: false, canClose: true });
     expect(paperSpotEntryDenial(fence, NOW, NOW)).toBeNull();
@@ -214,7 +215,7 @@ describe('durable Binance spot paper authorization', () => {
 
   it('keeps a stale session blocked after an owner control change is reversed', () => {
     const fence = prepareSpotSession();
-    openPaperSpotSession(engine, fence, NOW);
+    openPaperSpotSession(engine, fence, LIMITS, NOW);
     vi.setSystemTime(NOW + 1);
     updateControl('owner', { pausedNewOrders: true });
     expect(paperSpotEntryDenial(fence, NOW + 1)).toBe('SESSION_OWNER_ENTRY_HALT');
@@ -228,7 +229,7 @@ describe('durable Binance spot paper authorization', () => {
 
   it('atomically cancels pending approvals on close and preserves draining across takeover', () => {
     const fence = prepareSpotSession();
-    openPaperSpotSession(engine, fence, NOW);
+    openPaperSpotSession(engine, fence, LIMITS, NOW);
     pendingApproval('session-order', NOW + 1);
     pendingApproval('other-venue-order', NOW + 1, 'other-venue');
     const draining = requestPaperSpotClose(NOW + 2);
@@ -251,7 +252,7 @@ describe('durable Binance spot paper authorization', () => {
 
   it('requires explicit close after the owner clears the emergency stop', () => {
     const fence = prepareSpotSession();
-    openPaperSpotSession(engine, fence, NOW);
+    openPaperSpotSession(engine, fence, LIMITS, NOW);
     vi.setSystemTime(NOW + 1);
     updateControl('owner', { emergency: true, pausedNewOrders: true });
     expect(requestPaperSpotClose(NOW + 1)?.state).toBe('EMERGENCY_KILL_SWITCH');
@@ -259,9 +260,9 @@ describe('durable Binance spot paper authorization', () => {
     vi.setSystemTime(NOW + 2);
     updateControl('owner', { emergency: false, pausedNewOrders: false });
     expect(paperSpotSessionPreflight(engine, NOW + 2)).toMatchObject({ canRun: false, canClose: true });
-    expect(() => openPaperSpotSession(engine, fence, NOW + 2)).toThrow('SESSION_NOT_CLOSED');
+    expect(() => openPaperSpotSession(engine, fence, LIMITS, NOW + 2)).toThrow('SESSION_NOT_CLOSED');
     expect(requestPaperSpotClose(NOW + 2)?.state).toBe('CLOSING_DRAINING_ENTRIES');
     expect(finishDurableClose(NOW + 3, fence).state).toBe('CLOSED');
-    expect(openPaperSpotSession(engine, fence, NOW + 4).fence_epoch).toBe(2);
+    expect(openPaperSpotSession(engine, fence, LIMITS, NOW + 4).fence_epoch).toBe(2);
   });
 });

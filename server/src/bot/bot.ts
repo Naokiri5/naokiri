@@ -26,7 +26,7 @@ import { acquireOrRenewLease, ownsLease, releaseLease, LeaseLostError, type Leas
 import { checkScanStall, protectionIntervalMs, staleAfter } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
 import { isShuttingDown } from '../ops/shutdown.js';
-import { durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
+import { durableSessionStatus, enforceSessionLossBoundary, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
 import { record } from '../core/latency.js';
 import { hostname } from 'node:os';
@@ -176,6 +176,8 @@ const protectionLane = () => runLane('protection', (lease) => {
     if (!(error instanceof LeaseLostError)) botStatus.monitorFailing = true;
     throw error;
   }
+  // REFLEX runs after the protection pass, so an error here can never delay an exit.
+  try { sessionLossReflex(); } catch (error) { botStatus.lastError = `session boundary: ${errorText(error)}`; }
   if (durableSessionStatus()?.state === 'CLOSING_DRAINING_ENTRIES') {
     try {
       finishDurableClose(undefined, lease);
@@ -186,6 +188,18 @@ const protectionLane = () => runLane('protection', (lease) => {
   }
   try { checkScanStall(botStatus); } catch (error) { botStatus.lastError = `watchdog: ${errorText(error)}`; }
 });
+
+/** Suspend new entries once the owner's session loss limit is reached; positions stay protected. */
+function sessionLossReflex() {
+  const halt = enforceSessionLossBoundary();
+  if (!halt) return;
+  const loss = Math.abs(halt.sessionPnlUsd).toFixed(2);
+  const limit = halt.boundaries.max_loss_usd.toFixed(2);
+  journal('SYSTEM', `Session loss limit reached ($${loss} of $${limit}): new paper entries suspended`, undefined,
+    { sessionVersion: halt.session.version, fenceEpoch: halt.session.fence_epoch, sessionPnlUsd: halt.sessionPnlUsd, maxLossUsd: halt.boundaries.max_loss_usd });
+  notify('CRITICAL', 'Session loss limit reached', `The paper session lost $${loss}, reaching your $${limit} limit. MIA stopped new entries and keeps protecting open positions. Close the session to review it before authorizing a new one.`, 'session-boundary');
+  bus.publish('bot', botStatusView());
+}
 
 const booksLane = () => runLane('positionBooks', async () => {
   await refreshBooks(openPositions().map((p) => p.instrument));

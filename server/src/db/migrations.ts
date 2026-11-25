@@ -141,7 +141,18 @@ const MIGRATIONS: string[] = [
     reason TEXT NOT NULL, UNIQUE(bundle_id,decision_id)
   );
   `,
-]; 
+  /* 7 — BrainOS session boundaries: the owner's capital and loss limits for each authorized paper session (one row per
+     fence epoch). They can only block entries; the canonical risk gate, OMS and ledger keep their authority. */ `
+  CREATE TABLE brainos_session_boundaries (
+    session_id TEXT NOT NULL REFERENCES brainos_sessions(session_id), fence_epoch INTEGER NOT NULL,
+    capital_limit_usd REAL NOT NULL CHECK(capital_limit_usd > 0),
+    max_loss_usd REAL NOT NULL CHECK(max_loss_usd > 0 AND max_loss_usd <= capital_limit_usd),
+    start_equity_usd REAL NOT NULL CHECK(start_equity_usd > 0), start_performance_usd REAL NOT NULL,
+    set_at INTEGER NOT NULL, breached_at INTEGER, breach_reason TEXT,
+    PRIMARY KEY(session_id,fence_epoch)
+  );
+  `,
+];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
 export function migrate(db: DatabaseSync, target = MIGRATIONS.length) {

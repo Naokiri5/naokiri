@@ -24,7 +24,35 @@ type Preflight = {
   canClose: boolean;
   checks: Check[];
 };
-type PaperSpotPreflight = Pick<Preflight, 'canRun' | 'canClose' | 'checks'> & { state: string };
+type SessionBoundaries = {
+  capitalLimitUsd: number;
+  maxSessionLossUsd: number;
+  startEquityUsd: number;
+  setAt: number;
+  capitalUsedUsd: number;
+  sessionPnlUsd: number | null;
+  breachedAt: number | null;
+  breachReason: string | null;
+};
+type PaperSpotPreflight = Pick<Preflight, 'canRun' | 'canClose' | 'checks'> & {
+  state: string;
+  boundaries?: SessionBoundaries | null;
+  paperEquityUsd?: number | null;
+};
+
+/** Suggested starting values: half of paper equity at work, and a loss limit of 2% of equity (the default daily loss limit). */
+function suggestedBoundaries(equity: number | null | undefined) {
+  if (equity == null || !Number.isFinite(equity) || equity <= 0) return { capital: '', loss: '' };
+  return { capital: String(Math.floor(equity * 0.5)), loss: String(Math.max(1, Math.floor(equity * 0.02))) };
+}
+
+function boundaryProblem(capital: number, loss: number, equity: number | null | undefined) {
+  if (!Number.isFinite(capital) || capital <= 0) return 'Enter a capital limit above zero.';
+  if (!Number.isFinite(loss) || loss <= 0) return 'Enter a maximum session loss above zero.';
+  if (loss > capital) return 'The maximum session loss cannot exceed the capital limit.';
+  if (equity != null && capital > equity) return `The capital limit cannot exceed your paper equity of ${fmt.usd(equity)}.`;
+  return '';
+}
 
 const paperSessionLabels: Record<string, string> = {
   RUNNING: 'Paper session running',
@@ -79,8 +107,11 @@ export function AutopilotSession({ mind, onMindChange }: { mind: Mind; onMindCha
 function SessionPreflight({ mind, environment }: { mind: Mind; environment: Environment }) {
   const headingId = useId();
   const reasonId = useId();
+  const limitsId = useId();
   const [showStepUp, setShowStepUp] = useState(false);
   const [credential, setCredential] = useState('');
+  const [capitalLimit, setCapitalLimit] = useState('');
+  const [maxLoss, setMaxLoss] = useState('');
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState('');
   const { data, error, reload } = useApi<Preflight>(`/api/session/preflight?mind=${mind}&environment=${environment}`,
@@ -106,10 +137,22 @@ function SessionPreflight({ mind, environment }: { mind: Mind; environment: Envi
   const canRun = paperState?.canRun === true;
   const canClose = paperState?.canClose === true;
   const usesAuthenticator = authInfo.mode === 'privy';
+  const equity = paperState?.paperEquityUsd;
+  const limitsProblem = boundaryProblem(Number(capitalLimit), Number(maxLoss), equity);
+  const boundaries = paperState?.boundaries ?? null;
+
+  function openStepUp() {
+    if (!capitalLimit && !maxLoss) {
+      const suggestion = suggestedBoundaries(equity);
+      setCapitalLimit(suggestion.capital);
+      setMaxLoss(suggestion.loss);
+    }
+    setShowStepUp(true);
+  }
 
   async function changeSession(action: 'run' | 'close') {
-    if (pending || (action === 'run' ? !canRun || !credential : !canClose)) return;
-    const body = action === 'run' ? { password: credential } : {};
+    if (pending || (action === 'run' ? !canRun || !credential || !!limitsProblem : !canClose)) return;
+    const body = action === 'run' ? { password: credential, capitalLimitUsd: Number(capitalLimit), maxSessionLossUsd: Number(maxLoss) } : {};
     setCredential('');
     setShowStepUp(false);
     setActionError('');
@@ -139,11 +182,12 @@ function SessionPreflight({ mind, environment }: { mind: Mind; environment: Envi
           <Freshness at={preflight?.checkedAt} label="Checked" />
         </div>
         <p id={reasonId}>{details}</p>
+        {environment === 'PAPER' && boundaries && <SessionBoundaryUsage boundaries={boundaries} />}
         {environment === 'PAPER' && <p className="hint">FAST and DEEP provide research. Session controls apply to Binance spot paper trading.</p>}
         <ErrorLine e={actionError} />
       </div>
       <div className="mia-session-actions" aria-busy={pending}>
-        <button type="button" className="primary" disabled={!canRun || pending} aria-describedby={reasonId} onClick={() => setShowStepUp(true)}>
+        <button type="button" className="primary" disabled={!canRun || pending} aria-describedby={reasonId} onClick={openStepUp}>
           <Icon name="play" size={17} /> Run Session
         </button>
         <button type="button" disabled={!canClose || pending} aria-describedby={reasonId} onClick={() => void changeSession('close')}>Close Session</button>
@@ -179,7 +223,23 @@ function SessionPreflight({ mind, environment }: { mind: Mind; environment: Envi
     </details>
     {showStepUp && <Modal title="Authorize Binance spot paper session" onClose={dismissStepUp}>
       <form onSubmit={(event) => { event.preventDefault(); void changeSession('run'); }}>
-        <p>This session uses simulated funds and the current risk policy.</p>
+        <p>This session uses simulated funds and the current risk policy. Set how much capital MIA may have in open positions
+          and how much the session may lose before new entries stop. Open positions stay protected either way.</p>
+        <div className="grid g2" style={{ gap: 10 }}>
+          <label className="col" style={{ gap: 3 }}>
+            <span className="hint">Capital limit (USD){equity != null && <> · paper equity {fmt.usd(equity)}</>}</span>
+            <input type="number" inputMode="decimal" min="0" step="any" required value={capitalLimit} autoFocus
+              onChange={(event) => setCapitalLimit(event.target.value)} aria-describedby={limitsId} />
+          </label>
+          <label className="col" style={{ gap: 3 }}>
+            <span className="hint">Maximum session loss (USD)</span>
+            <input type="number" inputMode="decimal" min="0" step="any" required value={maxLoss}
+              onChange={(event) => setMaxLoss(event.target.value)} aria-describedby={limitsId} />
+          </label>
+        </div>
+        <p id={limitsId} className="hint" aria-live="polite">
+          {limitsProblem || 'Entries stop when open positions would exceed the capital limit, or when session losses reach the maximum.'}
+        </p>
         <div className="row">
           <input
             type={usesAuthenticator ? 'text' : 'password'}
@@ -192,14 +252,23 @@ function SessionPreflight({ mind, environment }: { mind: Mind; environment: Envi
             value={credential}
             onChange={(event) => setCredential(event.target.value)}
             required
-            autoFocus
           />
-          <button type="submit" className="primary" disabled={!credential || !canRun || pending}>Authorize and run</button>
+          <button type="submit" className="primary" disabled={!credential || !canRun || pending || !!limitsProblem}>Authorize and run</button>
           <button type="button" onClick={dismissStepUp}>Cancel</button>
         </div>
       </form>
     </Modal>}
   </section>;
+}
+
+function SessionBoundaryUsage({ boundaries }: { boundaries: SessionBoundaries }) {
+  const pnl = boundaries.sessionPnlUsd;
+  return <p className="hint" data-testid="session-boundaries">
+    Capital in use {fmt.usd(boundaries.capitalUsedUsd)} of {fmt.usd(boundaries.capitalLimitUsd)} · Session P&amp;L{' '}
+    {pnl == null ? 'unverified' : fmt.usd(pnl)} · {boundaries.breachedAt
+      ? <Badge v={`Loss limit ${fmt.usd(boundaries.maxSessionLossUsd)} reached`} tone="b-bad" />
+      : <>entries stop at a {fmt.usd(boundaries.maxSessionLossUsd)} loss</>}
+  </p>;
 }
 
 type Activity = {

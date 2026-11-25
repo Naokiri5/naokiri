@@ -16,7 +16,7 @@ import type { DecisionReport } from '../decision/engine.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { crashpoint } from './crashpoint.js';
 import { assertWriteFence, LeaseLostError, type LeaseFence } from '../ops/lease.js';
-import { paperSpotEntryDenial } from '../ops/paperSpotEntry.js';
+import { paperSpotCapitalDenial, paperSpotEntryDenial } from '../ops/paperSpotEntry.js';
 import { unreconciledPaperOrders } from './recovery.js';
 import { isShuttingDown } from '../ops/shutdown.js';
 import { recordPaperFill } from './fillEvents.js';
@@ -182,6 +182,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       if (!Number.isFinite(notional) || notional > fresh.sizing.maxNotional + 1e-9) {
         return { reason: `POSITION_NOTIONAL_LIMIT: fill ${notional.toFixed(2)}, limit ${fresh.sizing.maxNotional.toFixed(2)}` };
       }
+      // The owner's session capital boundary is checked at the executed notional, under the same write lock.
+      const capitalDenial = paperSpotCapitalDenial(notional, nowTs);
+      if (capitalDenial) return { reason: capitalDenial };
       // The canonical risk gate sized against a conservative entry. Defend that invariant again
       // using the actual depth-walk fill before writing any order, position or financial ledger row.
       const worstStopFill = fresh.sizing.conservativeStopFill;

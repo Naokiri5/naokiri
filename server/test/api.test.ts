@@ -42,7 +42,12 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(preflight.json()).toMatchObject({ canRun: false, canClose: false });
     expect((await post('run', {}, { cookie, 'x-mia-csrf': '0' })).statusCode).toBe(403);
     expect((await post('run')).statusCode).toBe(403);
-    expect((await post('run', { password: 'correct horse battery' })).statusCode).toBe(409);
+    expect((await post('run', { capitalLimitUsd: 1_000, maxSessionLossUsd: 50 })).statusCode).toBe(403);
+    expect((await post('run', { password: 'correct horse battery', unexpected: true })).statusCode).toBe(400);
+    // Session boundaries are required once the owner is verified.
+    expect((await post('run', { password: 'correct horse battery' })).statusCode).toBe(400);
+    expect((await post('run', { password: 'correct horse battery', capitalLimitUsd: 0, maxSessionLossUsd: 50 })).statusCode).toBe(400);
+    expect((await post('run', { password: 'correct horse battery', capitalLimitUsd: 1_000, maxSessionLossUsd: 50 })).statusCode).toBe(409);
     expect((await post('close')).json()).toEqual({ state: 'CLOSED' });
     expect(all('SELECT * FROM brainos_sessions')).toEqual([]);
     failureGate.reset();

@@ -4,6 +4,7 @@ import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { reconcile } from '../portfolio/calendar.js';
 import { currentPolicy } from '../risk/policy.js';
 import { ownsLease, type LeaseFence } from './lease.js';
+import { sessionBoundaries, sessionCapitalDenial, sessionLossDenial, type SessionBoundaryRow } from './sessionBoundaries.js';
 import type { SessionMind } from './sessionPreflight.js';
 
 export type BrainosSessionState = 'CLOSED' | 'RECOVERING_ON_BOOT' | 'RUNNING'
@@ -55,5 +56,22 @@ export function paperSpotEntryDenial(fence: LeaseFence | null, at: number, entry
   const ledger = reconcile();
   if (!ledger.ok || unreconciledPaperOrders()) return 'EXECUTION_NOT_RECONCILED';
   if (!currentPolicy() || !Number.isFinite(ledger.cash) || ledger.cash <= 0) return 'SESSION_RISK_POLICY_OR_FUNDS_UNAVAILABLE';
-  return null;
+  return sessionLossDenial(sessionBoundaries(session.session_id, session.fence_epoch), at);
+}
+
+/** The owner-set boundaries of the current session generation, if any. */
+export function activeSessionBoundaries(session = durableSessionStatus()): SessionBoundaryRow | null {
+  return session ? sessionBoundaries(session.session_id, session.fence_epoch) : null;
+}
+
+/**
+ * Called by the OMS inside its write transaction once the executed notional is known. Installations with no checkpoint
+ * keep their existing behavior; any other session must be a running spot paper session with capital headroom.
+ */
+export function paperSpotCapitalDenial(notional: number, at: number): string | null {
+  const session = durableSessionStatus();
+  if (!session) return null;
+  if (session.state !== 'RUNNING') return 'SESSION_NOT_RUNNING';
+  if (session.environment !== 'PAPER' || session.mind !== 'SPOT_PAPER') return 'SESSION_NOT_SPOT_PAPER';
+  return sessionCapitalDenial(activeSessionBoundaries(session), notional, at);
 }

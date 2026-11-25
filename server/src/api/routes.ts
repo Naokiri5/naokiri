@@ -53,6 +53,7 @@ import { readiness, staleAfter } from '../ops/readiness.js';
 import { commandStatus } from '../ops/commandStatus.js';
 import { SESSION_ENVIRONMENTS, SESSION_MINDS, paperSpotSessionPreflight, sessionPreflight } from '../ops/sessionPreflight.js';
 import { durableSessionStatus, openPaperSpotSession, requestPaperSpotClose, requirePaperSpotSession, suspendDurableEntries } from '../ops/durableSession.js';
+import { SESSION_BOUNDARIES } from '../ops/sessionBoundaries.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
 import { all, get, P, tx } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
@@ -83,6 +84,13 @@ const passphraseOnly = () => {
 };
 const PW = z.string().min(1).max(1024);
 const SESSION_STEP_UP = z.object({ password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional() }).strict();
+const SESSION_RUN_BODY = SESSION_STEP_UP.extend({ capitalLimitUsd: z.unknown().optional(), maxSessionLossUsd: z.unknown().optional() }).strict();
+/** Owner-facing messages for boundary inputs the server rejects when a session is authorized. */
+const SESSION_BOUNDARY_ERRORS: Record<string, string> = {
+  SESSION_CAPITAL_EXCEEDS_EQUITY: 'The session capital limit cannot exceed your paper account equity.',
+  SESSION_LOSS_LIMIT_EXCEEDS_CAPITAL: 'The maximum session loss cannot exceed the session capital limit.',
+  SESSION_BASELINE_UNVERIFIABLE: 'A current price is missing for an open position, so the session starting value cannot be verified. Try again when prices are current.',
+};
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
 const ID = z.string().min(1).max(150);
@@ -159,10 +167,18 @@ export async function routes(app: FastifyInstance) {
     return paperSpotSessionPreflight(botStatus);
   });
   app.post('/api/session/paper-spot/run', async (req) => {
-    stepUp(req, SESSION_STEP_UP.parse(req.body ?? {}));
+    // Step-up is verified before the boundaries are validated, so a request without owner proof is always 403.
+    const { password, otp, ...limits } = SESSION_RUN_BODY.parse(req.body ?? {});
+    stepUp(req, { password, otp });
+    const boundaries = SESSION_BOUNDARIES.parse(limits);
     const fence = activeEngineFence();
     if (!fence) throw httpError(409, 'The active engine must authorize a paper session.');
-    const session = openPaperSpotSession(botStatus, fence);
+    let session: ReturnType<typeof openPaperSpotSession>;
+    try { session = openPaperSpotSession(botStatus, fence, boundaries); } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      if (Object.hasOwn(SESSION_BOUNDARY_ERRORS, message)) throw httpError(400, SESSION_BOUNDARY_ERRORS[message]);
+      throw error;
+    }
     bus.publish('bot', botStatusView());
     return { state: session.state };
   });

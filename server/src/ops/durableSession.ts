@@ -8,11 +8,15 @@ import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { reconcile } from '../portfolio/calendar.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import {
-  BRAINOS_SESSION_ID, durableSessionStatus,
+  activeSessionBoundaries, BRAINOS_SESSION_ID, durableSessionStatus,
   type BrainosSessionState, type DurableBrainosSession,
 } from './paperSpotEntry.js';
+import {
+  lossLimitReached, markSessionBreach, recordSessionBoundaries, sessionBoundaryUsage,
+  type SessionBoundaryInput, type SessionBoundaryRow,
+} from './sessionBoundaries.js';
 
-export { durableSessionStatus, paperSpotEntryDenial } from './paperSpotEntry.js';
+export { activeSessionBoundaries, durableSessionStatus, paperSpotEntryDenial } from './paperSpotEntry.js';
 export type { BrainosSessionState, BrainosSuspendReason, DurableBrainosSession } from './paperSpotEntry.js';
 
 export interface EntryPermissionVerdict {
@@ -73,8 +77,11 @@ export function requirePaperSpotSession(at?: number) {
   });
 }
 
-/** Start the existing spot simulator after the authenticated owner has verified step-up. */
-export function openPaperSpotSession(engine: EngineView & { instanceId?: string }, fence: LeaseFence, at?: number) {
+/**
+ * Start the existing spot simulator after the authenticated owner has verified step-up. The owner's capital and loss
+ * boundaries are recorded in the same transaction, so a session can never run without them.
+ */
+export function openPaperSpotSession(engine: EngineView & { instanceId?: string }, fence: LeaseFence, boundaries: SessionBoundaryInput, at?: number) {
   return tx(() => {
     const now = at ?? Date.now();
     const old = durableSessionStatus() ?? baseline(now);
@@ -85,11 +92,41 @@ export function openPaperSpotSession(engine: EngineView & { instanceId?: string 
     }
     if (!paperSpotSessionPreflight(engine, now).canRun) throw new Error('PAPER_SPOT_SESSION_PREFLIGHT_BLOCKED');
     cancelPaperPendingApprovals('approval predates the new spot paper session', now);
-    return persist(old, 'RUNNING', 'OWNER_OPEN_SPOT_PAPER_SESSION', now, {
+    const running = persist(old, 'RUNNING', 'OWNER_OPEN_SPOT_PAPER_SESSION', now, {
       environment: 'PAPER', mind: 'SPOT_PAPER', lease_holder: fence.holder,
       lease_acquired_at: fence.acquired_at, fence_epoch: old.fence_epoch + 1,
       suspend_reason: 'NONE', started_at: now, closed_at: null,
     });
+    recordSessionBoundaries(running.session_id, running.fence_epoch, boundaries, now);
+    return running;
+  });
+}
+
+export interface SessionLossHalt {
+  session: DurableBrainosSession;
+  boundaries: SessionBoundaryRow;
+  sessionPnlUsd: number;
+}
+
+/**
+ * REFLEX: when a running spot paper session's verified loss reaches the owner's limit, suspend new entries, cancel
+ * pending approvals and record the breach, all in one transaction. It only reduces risk, so it needs no lease (like
+ * suspendDurableEntries). Open positions keep their protective stops and exits; resuming requires the owner to close
+ * the session and authorize a new one. Returns null when nothing changed.
+ */
+export function enforceSessionLossBoundary(at = Date.now()): SessionLossHalt | null {
+  return tx(() => {
+    const session = durableSessionStatus();
+    if (!session || session.state !== 'RUNNING' || session.mind !== 'SPOT_PAPER') return null;
+    const boundaries = activeSessionBoundaries(session);
+    // A session without boundaries is already denied entries by paperSpotEntryDenial; there is no limit to trip.
+    if (!boundaries) return null;
+    const usage = sessionBoundaryUsage(boundaries, at);
+    if (!lossLimitReached(boundaries, usage)) return null;
+    markSessionBreach(boundaries, 'SESSION_LOSS_LIMIT_REACHED', at);
+    cancelPaperPendingApprovals('session loss limit reached', at);
+    const halted = persist(session, 'ENTRY_SUSPENDED_RISK_HALT', 'SESSION_LOSS_LIMIT_REACHED', at, { suspend_reason: 'RISK_HALT' });
+    return { session: halted, boundaries: activeSessionBoundaries(halted)!, sessionPnlUsd: usage.sessionPnlUsd! };
   });
 }
 
