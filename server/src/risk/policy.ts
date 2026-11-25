@@ -17,6 +17,10 @@ export const RiskPolicy = z.object({
   cooldownMinutesAfterLossStreak: z.number().int().min(0).max(10_080),
   maxConcurrentPositions: z.number().int().min(1).max(20),
   maxPositionNotionalPct: z.number().min(1).max(50),
+  // Optional logical cash reserves. Existing accepted policies keep their prior behavior.
+  // Both are disjoint portions of the same PAPER cash balance, not separate wallets.
+  minUnallocatedReservePct: z.number().min(0).max(100).optional(),
+  minSettlementReservePct: z.number().min(0).max(100).optional(),
   maxSpreadBps: z.number().min(1).max(50),
   maxSlippageBps: z.number().min(1).max(100),
   maxCostR: z.number().min(0.01).max(0.5),
@@ -49,6 +53,7 @@ export function acceptPolicy(actor: string, input: unknown): PolicyVersion {
   const policy = RiskPolicy.parse(input);
   if (policy.drawdownHaltPct < policy.drawdownWarnPct) throw new Error('drawdownHaltPct must be ≥ drawdownWarnPct');
   if (policy.weeklyLossPct < policy.dailyLossPct) throw new Error('weeklyLossPct must be ≥ dailyLossPct');
+  if ((policy.minUnallocatedReservePct ?? 0) + (policy.minSettlementReservePct ?? 0) > 100) throw new Error('combined cash reserve percentages must not exceed 100');
   if (policy.maxOpenRiskPct < policy.riskPerTradePct) throw new Error('maxOpenRiskPct must be ≥ riskPerTradePct');
   const cur = currentPolicy(); const version = (cur?.version ?? 0) + 1;
   run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (?,?,?,?)', version, J(policy), Date.now(), actor);
