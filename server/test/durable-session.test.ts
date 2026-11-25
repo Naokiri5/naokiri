@@ -2,7 +2,9 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { all, closeDb, get, openDb, run } from '../src/db/db.js';
+import { migrate } from '../src/db/migrations.js';
 import { setupOwner } from '../src/api/auth.js';
 import { _test as scheduler, botStatus, stopBot } from '../src/bot/bot.js';
 import { config } from '../src/config.js';
@@ -10,17 +12,19 @@ import { updateControl } from '../src/core/mode.js';
 import { buildApp } from '../src/index.js';
 import { acquireOrRenewLease, currentLease } from '../src/ops/lease.js';
 import {
-  durableEntryPermission, durableSessionStatus, finishDurableClose,
+  drainExpiredMandate, durableEntryPermission, durableSessionStatus, finishDurableClose,
   openDurablePaperSession, openPaperSpotSession, paperSpotEntryDenial,
   recoverDurableSessionAfterTakeover, requestPaperSpotClose, suspendDurableEntries,
   type BrainosSessionState,
 } from '../src/ops/durableSession.js';
 import type { EngineView } from '../src/ops/readiness.js';
 import { paperSpotSessionPreflight, sessionPreflight } from '../src/ops/sessionPreflight.js';
+import { mandateEntryDenial, strategyConfigVersion } from '../src/ops/tradingMandate.js';
 import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 
 const NOW = Date.UTC(2026, 10, 23, 13, 0, 0);
+const MANDATE = { capitalCeiling: 5_000, durationHours: 24 };
 const engine: EngineView = {
   running: true, role: 'LEADER', startedAt: NOW - 1_000,
   lastTickerAt: NOW, lastScanAt: NOW, lastMonitorAt: NOW, monitorFailing: false,
@@ -190,7 +194,7 @@ describe('durable Binance spot paper authorization', () => {
   it('starts only the selected spot lane after owner, risk, funds and protection checks', () => {
     expect(paperSpotEntryDenial(null, NOW)).toBeNull();
     const fence = acquireOrRenewLease('engine', 'leader-a', 1_000, NOW - 1)!;
-    expect(() => openPaperSpotSession(engine, fence, NOW)).toThrow('PAPER_SPOT_SESSION_PREFLIGHT_BLOCKED');
+    expect(() => openPaperSpotSession(engine, fence, MANDATE, NOW)).toThrow('PAPER_SPOT_SESSION_PREFLIGHT_BLOCKED');
     expect(durableSessionStatus()).toBeNull();
 
     prepareSpotSession();
@@ -201,12 +205,15 @@ describe('durable Binance spot paper authorization', () => {
     expect(sessionPreflight(engine, 'DEEP', 'LIVE', NOW).canRun).toBe(false);
 
     pendingApproval('legacy-order', NOW);
-    expect(openPaperSpotSession(engine, fence, NOW)).toMatchObject({ mind: 'SPOT_PAPER', state: 'RUNNING', fence_epoch: 1 });
+    expect(openPaperSpotSession(engine, fence, MANDATE, NOW)).toMatchObject({ mind: 'SPOT_PAPER', state: 'RUNNING', fence_epoch: 1 });
     expect(get<{ status: string }>("SELECT status FROM orders WHERE id='legacy-order'")?.status).toBe('CANCELLED');
     expect(paperSpotSessionPreflight(engine, NOW)).toMatchObject({ state: 'RUNNING', canRun: false, canClose: true });
     expect(paperSpotEntryDenial(fence, NOW, NOW)).toBeNull();
     expect(paperSpotEntryDenial(null, NOW)).toBe('STALE_OR_LOST_ENGINE_FENCE');
-    expect(paperSpotEntryDenial(fence, NOW, NOW, false)).toBe('PAPER_SPOT_MARKET_OUTSIDE_SESSION_SCOPE');
+    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'BINANCE_SPOT', strategy: { id: 'trend_pullback', version: '1.0.0' } })).toBeNull();
+    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'FUTURES' })).toMatch(/^MARKET_OUTSIDE_SESSION_MANDATE/);
+    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'SOLANA_MEMECOIN' })).toMatch(/^MARKET_OUTSIDE_SESSION_MANDATE/);
+    expect(paperSpotEntryDenial(fence, NOW, NOW, { scope: 'UNSUPPORTED' })).toMatch(/^MARKET_OUTSIDE_SESSION_MANDATE/);
     expect(paperSpotEntryDenial(fence, NOW, NOW - 1)).toBe('ENTRY_EVIDENCE_OUTSIDE_SESSION');
     expect(paperSpotEntryDenial(fence, NOW, NOW + 1)).toBe('ENTRY_EVIDENCE_OUTSIDE_SESSION');
     expect(durableEntryPermission(engine, fence, NOW)).toMatchObject({ allowFastNewEntries: false, allowDeepNewEntries: false });
@@ -214,7 +221,7 @@ describe('durable Binance spot paper authorization', () => {
 
   it('keeps a stale session blocked after an owner control change is reversed', () => {
     const fence = prepareSpotSession();
-    openPaperSpotSession(engine, fence, NOW);
+    openPaperSpotSession(engine, fence, MANDATE, NOW);
     vi.setSystemTime(NOW + 1);
     updateControl('owner', { pausedNewOrders: true });
     expect(paperSpotEntryDenial(fence, NOW + 1)).toBe('SESSION_OWNER_ENTRY_HALT');
@@ -228,7 +235,7 @@ describe('durable Binance spot paper authorization', () => {
 
   it('atomically cancels pending approvals on close and preserves draining across takeover', () => {
     const fence = prepareSpotSession();
-    openPaperSpotSession(engine, fence, NOW);
+    openPaperSpotSession(engine, fence, MANDATE, NOW);
     pendingApproval('session-order', NOW + 1);
     pendingApproval('other-venue-order', NOW + 1, 'other-venue');
     const draining = requestPaperSpotClose(NOW + 2);
@@ -251,7 +258,7 @@ describe('durable Binance spot paper authorization', () => {
 
   it('requires explicit close after the owner clears the emergency stop', () => {
     const fence = prepareSpotSession();
-    openPaperSpotSession(engine, fence, NOW);
+    openPaperSpotSession(engine, fence, MANDATE, NOW);
     vi.setSystemTime(NOW + 1);
     updateControl('owner', { emergency: true, pausedNewOrders: true });
     expect(requestPaperSpotClose(NOW + 1)?.state).toBe('EMERGENCY_KILL_SWITCH');
@@ -259,9 +266,86 @@ describe('durable Binance spot paper authorization', () => {
     vi.setSystemTime(NOW + 2);
     updateControl('owner', { emergency: false, pausedNewOrders: false });
     expect(paperSpotSessionPreflight(engine, NOW + 2)).toMatchObject({ canRun: false, canClose: true });
-    expect(() => openPaperSpotSession(engine, fence, NOW + 2)).toThrow('SESSION_NOT_CLOSED');
+    expect(() => openPaperSpotSession(engine, fence, MANDATE, NOW + 2)).toThrow('SESSION_NOT_CLOSED');
     expect(requestPaperSpotClose(NOW + 2)?.state).toBe('CLOSING_DRAINING_ENTRIES');
     expect(finishDurableClose(NOW + 3, fence).state).toBe('CLOSED');
-    expect(openPaperSpotSession(engine, fence, NOW + 4).fence_epoch).toBe(2);
+    expect(openPaperSpotSession(engine, fence, MANDATE, NOW + 4).fence_epoch).toBe(2);
+  });
+});
+
+describe('durable trading mandate', () => {
+  const HOUR = 3_600_000;
+
+  it('persists the owner mandate with the session and records it in the event log', () => {
+    const fence = prepareSpotSession();
+    const session = openPaperSpotSession(engine, fence, { ...MANDATE, authorizedBy: 'owner:passphrase' }, NOW);
+    expect(session).toMatchObject({
+      market_scope: 'BINANCE_SPOT', capital_ceiling: 5_000, risk_policy_version: 1, authorized_by: 'owner:passphrase',
+      authorized_at: NOW, expires_at: NOW + 24 * HOUR, strategy_config_version: strategyConfigVersion(),
+    });
+    expect(durableSessionStatus()).toMatchObject({ capital_ceiling: 5_000, expires_at: NOW + 24 * HOUR });
+    const event = get<{ kind: string; mandate_json: string }>(
+      'SELECT kind, mandate_json FROM brainos_session_events ORDER BY seq DESC LIMIT 1')!;
+    expect(event.kind).toBe('OWNER_OPEN_SPOT_PAPER_SESSION');
+    expect(JSON.parse(event.mandate_json)).toMatchObject({ market_scope: 'BINANCE_SPOT', capital_ceiling: 5_000 });
+    expect(paperSpotSessionPreflight(engine, NOW)).toMatchObject({
+      mandate: { capital_ceiling: 5_000, openExposure: 0, expired: false },
+      authorization: { maxCapital: 10_000, minDurationHours: 1, maxDurationHours: 720 },
+    });
+  });
+
+  it('rejects a mandate beyond paper funds or duration bounds without granting entry authority', () => {
+    const fence = prepareSpotSession();
+    expect(() => openPaperSpotSession(engine, fence, { capitalCeiling: 10_001, durationHours: 24 }, NOW)).toThrow('MANDATE_CAPITAL_EXCEEDS_FUNDS');
+    expect(() => openPaperSpotSession(engine, fence, { capitalCeiling: 0, durationHours: 24 }, NOW)).toThrow('MANDATE_CAPITAL_INVALID');
+    expect(() => openPaperSpotSession(engine, fence, { capitalCeiling: Number.NaN, durationHours: 24 }, NOW)).toThrow('MANDATE_CAPITAL_INVALID');
+    expect(() => openPaperSpotSession(engine, fence, { capitalCeiling: 1_000, durationHours: 0 }, NOW)).toThrow('MANDATE_DURATION_INVALID');
+    expect(() => openPaperSpotSession(engine, fence, { capitalCeiling: 1_000, durationHours: 1.5 }, NOW)).toThrow('MANDATE_DURATION_INVALID');
+    expect(() => openPaperSpotSession(engine, fence, { capitalCeiling: 1_000, durationHours: 721 }, NOW)).toThrow('MANDATE_DURATION_INVALID');
+    expect(durableSessionStatus()?.state ?? 'CLOSED').toBe('CLOSED');
+    expect(all("SELECT * FROM brainos_session_events WHERE to_state='RUNNING'")).toHaveLength(0);
+  });
+
+  it('fails closed when the risk policy changes after authorization', () => {
+    const fence = prepareSpotSession();
+    openPaperSpotSession(engine, fence, MANDATE, NOW);
+    expect(paperSpotEntryDenial(fence, NOW, NOW)).toBeNull();
+    vi.setSystemTime(NOW + 1);
+    acceptPolicy('owner', { ...DEFAULT_POLICY });
+    expect(paperSpotEntryDenial(fence, NOW + 1)).toBe('SESSION_RISK_POLICY_CHANGED');
+    expect(paperSpotSessionPreflight(engine, NOW + 1).checks).toContainEqual(expect.objectContaining({
+      id: 'execution-lane', status: 'BLOCKED', detail: expect.stringContaining('risk policy changed'),
+    }));
+  });
+
+  it('drains an expired mandate without the owner and closes once reconciled', () => {
+    const fence = prepareSpotSession();
+    openPaperSpotSession(engine, fence, { capitalCeiling: 1_000, durationHours: 1 }, NOW);
+    pendingApproval('expiring-order', NOW + 1);
+    expect(drainExpiredMandate(NOW + HOUR - 1)?.state).toBe('RUNNING');
+    expect(paperSpotEntryDenial(fence, NOW + HOUR)).toBe('SESSION_MANDATE_EXPIRED');
+    const drained = drainExpiredMandate(NOW + HOUR)!;
+    expect(drained).toMatchObject({ state: 'CLOSING_DRAINING_ENTRIES', suspend_reason: 'MANDATE_EXPIRED' });
+    expect(get<{ status: string }>("SELECT status FROM orders WHERE id='expiring-order'")?.status).toBe('CANCELLED');
+    expect(get<{ kind: string }>('SELECT kind FROM brainos_session_events ORDER BY seq DESC LIMIT 1')?.kind).toBe('MANDATE_EXPIRED');
+    expect(drainExpiredMandate(NOW + HOUR + 1)?.version).toBe(drained.version);
+    expect(finishDurableClose(NOW + HOUR + 2)).toMatchObject({ state: 'CLOSED', closed_at: NOW + HOUR + 2 });
+  });
+
+  it('upgrades a pre-mandate session in place and denies its new entries', () => {
+    closeDb();
+    const upgradeFile = join(dir, 'v6.sqlite');
+    const raw = new DatabaseSync(upgradeFile);
+    migrate(raw, 6);
+    raw.prepare(`INSERT INTO brainos_sessions(session_id,version,state,environment,mind,lease_holder,lease_acquired_at,
+      fence_epoch,suspend_reason,started_at,closed_at,updated_at) VALUES ('brainos-autopilot',3,'RUNNING','PAPER','SPOT_PAPER',
+      'leader-a',?,2,'NONE',?,NULL,?)`).run(NOW - 1_000, NOW - 1_000, NOW);
+    migrate(raw);
+    raw.close();
+    openDb(upgradeFile);
+    const upgraded = durableSessionStatus()!;
+    expect(upgraded).toMatchObject({ version: 3, state: 'RUNNING', fence_epoch: 2, capital_ceiling: null, market_scope: null });
+    expect(mandateEntryDenial(upgraded, NOW)).toBe('SESSION_MANDATE_MISSING');
+    expect(paperSpotEntryDenial(null, NOW)).toBe('SESSION_MANDATE_MISSING');
   });
 });

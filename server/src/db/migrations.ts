@@ -141,7 +141,18 @@ const MIGRATIONS: string[] = [
     reason TEXT NOT NULL, UNIQUE(bundle_id,decision_id)
   );
   `,
-]; 
+  /* 7 — BrainOS trading mandate: the owner-authorized market scope, capital ceiling, policy and strategy versions
+     and expiry of a session. Existing rows keep NULL mandates and therefore cannot authorize new entries. */ `
+  ALTER TABLE brainos_sessions ADD COLUMN market_scope TEXT;
+  ALTER TABLE brainos_sessions ADD COLUMN capital_ceiling REAL;
+  ALTER TABLE brainos_sessions ADD COLUMN risk_policy_version INTEGER;
+  ALTER TABLE brainos_sessions ADD COLUMN authorized_by TEXT;
+  ALTER TABLE brainos_sessions ADD COLUMN authorized_at INTEGER;
+  ALTER TABLE brainos_sessions ADD COLUMN expires_at INTEGER;
+  ALTER TABLE brainos_sessions ADD COLUMN strategy_config_version TEXT;
+  ALTER TABLE brainos_session_events ADD COLUMN mandate_json TEXT;
+  `,
+];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
 export function migrate(db: DatabaseSync, target = MIGRATIONS.length) {

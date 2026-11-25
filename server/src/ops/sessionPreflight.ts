@@ -14,6 +14,7 @@ import { stepUpMethod } from '../security/stepUp.js';
 import { staleAfter, type EngineView } from './readiness.js';
 import { currentLease } from './lease.js';
 import { durableSessionStatus, paperSpotEntryDenial, type BrainosSessionState } from './paperSpotEntry.js';
+import { MANDATE_LIMITS, openPaperExposure, sessionMandate, type TradingMandate } from './tradingMandate.js';
 
 export const SESSION_MINDS = ['FAST', 'DEEP'] as const;
 export const SESSION_ENVIRONMENTS = ['PAPER', 'LIVE'] as const;
@@ -44,7 +45,18 @@ export interface PaperSpotSessionPreflight {
   canClose: boolean;
   state: BrainosSessionState;
   checks: PreflightCheck[];
+  /** The persisted mandate of the current or most recent session; null before the first mandate. */
+  mandate: (TradingMandate & { openExposure: number; expired: boolean }) | null;
+  /** Bounds for a new authorization, from the paper ledger at check time. */
+  authorization: { maxCapital: number; minDurationHours: number; maxDurationHours: number };
 }
+
+const MANDATE_DENIAL_DETAIL: Record<string, string> = {
+  SESSION_MANDATE_MISSING: 'This session has no trading mandate. Close it and authorize a new session with a capital limit.',
+  SESSION_MANDATE_EXPIRED: 'The session mandate has expired. New entries are blocked while MIA drains the session.',
+  SESSION_RISK_POLICY_CHANGED: 'The risk policy changed after authorization. Close the session and authorize a new one.',
+  SESSION_STRATEGY_CONFIG_CHANGED: 'The deployed strategy set changed after authorization. Close the session and authorize a new one.',
+};
 
 function researchChecks(mind: SessionMind, at: number): PreflightCheck[] {
   const research = dualResearchStatus(at);
@@ -164,8 +176,10 @@ export function paperSpotSessionPreflight(engine: EngineView & { instanceId?: st
     (engine.instanceId === undefined || lease.holder === engine.instanceId);
   const paperMode = control.mode === 'PAPER' || control.mode === 'APPROVAL';
   const controlsReady = paperMode && !control.emergency && !control.pausedNewOrders;
+  const session = durableSessionStatus();
   const activeDenial = state === 'RUNNING' ? paperSpotEntryDenial(lease, at) : null;
-  const leaseDetail = activeDenial === 'SESSION_OWNER_CONTROL_CHANGED'
+  const leaseDetail = activeDenial && MANDATE_DENIAL_DETAIL[activeDenial] ? MANDATE_DENIAL_DETAIL[activeDenial]
+    : activeDenial === 'SESSION_OWNER_CONTROL_CHANGED'
     ? 'Paper controls changed after authorization. Close the session and authorize a new one.'
     : activeDenial === 'STALE_OR_LOST_ENGINE_FENCE'
       ? 'The current engine lease does not authorize entries for this session.'
@@ -187,10 +201,19 @@ export function paperSpotSessionPreflight(engine: EngineView & { instanceId?: st
         : state === 'CLOSING_DRAINING_ENTRIES' ? 'Entry authority is revoked while positions and orders are reconciled.'
           : 'Close the existing session before starting a new one.' },
   ];
+  const mandate = session ? sessionMandate(session) : null;
+  const ledger = reconcile();
+  const openExposure = openPaperExposure();
   return {
     canRun: checks.every(check => check.status === 'PASS' || check.status === 'INFO'),
     canClose: state !== 'CLOSED' && !(state === 'EMERGENCY_KILL_SWITCH' && control.emergency),
     state,
     checks,
+    mandate: mandate ? { ...mandate, openExposure, expired: at >= mandate.expires_at } : null,
+    authorization: {
+      maxCapital: Number.isFinite(ledger.cash) ? Math.max(0, ledger.cash + openExposure) : 0,
+      minDurationHours: MANDATE_LIMITS.minDurationHours,
+      maxDurationHours: MANDATE_LIMITS.maxDurationHours,
+    },
   };
 }

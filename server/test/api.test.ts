@@ -39,10 +39,16 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     const preflight = await app.inject({ url, headers: { cookie } });
     expect(preflight.statusCode).toBe(200);
     expect(preflight.headers['cache-control']).toBe('no-store');
-    expect(preflight.json()).toMatchObject({ canRun: false, canClose: false });
-    expect((await post('run', {}, { cookie, 'x-mia-csrf': '0' })).statusCode).toBe(403);
-    expect((await post('run')).statusCode).toBe(403);
-    expect((await post('run', { password: 'correct horse battery' })).statusCode).toBe(409);
+    expect(preflight.json()).toMatchObject({ canRun: false, canClose: false, mandate: null,
+      authorization: { minDurationHours: 1, maxDurationHours: 720 } });
+    const mandate = { capitalCeiling: 1_000, durationHours: 24 };
+    expect((await post('run', mandate, { cookie, 'x-mia-csrf': '0' })).statusCode).toBe(403);
+    expect((await post('run', mandate)).statusCode).toBe(403);
+    // Run Session carries the owner's mandate; a missing or out-of-range mandate is rejected before step-up.
+    expect((await post('run', { password: 'correct horse battery' })).statusCode).toBe(400);
+    expect((await post('run', { ...mandate, durationHours: 721, password: 'correct horse battery' })).statusCode).toBe(400);
+    expect((await post('run', { ...mandate, capitalCeiling: -1, password: 'correct horse battery' })).statusCode).toBe(400);
+    expect((await post('run', { ...mandate, password: 'correct horse battery' })).statusCode).toBe(409);
     expect((await post('close')).json()).toEqual({ state: 'CLOSED' });
     expect(all('SELECT * FROM brainos_sessions')).toEqual([]);
     failureGate.reset();

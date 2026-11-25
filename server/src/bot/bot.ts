@@ -26,7 +26,7 @@ import { acquireOrRenewLease, ownsLease, releaseLease, LeaseLostError, type Leas
 import { checkScanStall, protectionIntervalMs, staleAfter } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
 import { isShuttingDown } from '../ops/shutdown.js';
-import { durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
+import { drainExpiredMandate, durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
 import { record } from '../core/latency.js';
 import { hostname } from 'node:os';
@@ -176,6 +176,9 @@ const protectionLane = () => runLane('protection', (lease) => {
     if (!(error instanceof LeaseLostError)) botStatus.monitorFailing = true;
     throw error;
   }
+  // An expired mandate revokes entry authority without the owner present; exits keep running.
+  const versionBefore = durableSessionStatus()?.version;
+  if (drainExpiredMandate()?.version !== versionBefore) bus.publish('bot', botStatusView());
   if (durableSessionStatus()?.state === 'CLOSING_DRAINING_ENTRIES') {
     try {
       finishDurableClose(undefined, lease);

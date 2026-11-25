@@ -53,6 +53,7 @@ import { readiness, staleAfter } from '../ops/readiness.js';
 import { commandStatus } from '../ops/commandStatus.js';
 import { SESSION_ENVIRONMENTS, SESSION_MINDS, paperSpotSessionPreflight, sessionPreflight } from '../ops/sessionPreflight.js';
 import { durableSessionStatus, openPaperSpotSession, requestPaperSpotClose, requirePaperSpotSession, suspendDurableEntries } from '../ops/durableSession.js';
+import { MANDATE_LIMITS } from '../ops/tradingMandate.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
 import { all, get, P, tx } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
@@ -83,6 +84,12 @@ const passphraseOnly = () => {
 };
 const PW = z.string().min(1).max(1024);
 const SESSION_STEP_UP = z.object({ password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional() }).strict();
+/** Run Session: step-up proof plus the owner's mandate (authorized capital and duration). */
+const SESSION_RUN = z.object({
+  password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional(),
+  capitalCeiling: z.number().finite().positive().max(1e12),
+  durationHours: z.number().int().min(MANDATE_LIMITS.minDurationHours).max(MANDATE_LIMITS.maxDurationHours),
+}).strict();
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
 const ID = z.string().min(1).max(150);
@@ -159,10 +166,12 @@ export async function routes(app: FastifyInstance) {
     return paperSpotSessionPreflight(botStatus);
   });
   app.post('/api/session/paper-spot/run', async (req) => {
-    stepUp(req, SESSION_STEP_UP.parse(req.body ?? {}));
+    const { capitalCeiling, durationHours, ...proof } = SESSION_RUN.parse(req.body ?? {});
+    stepUp(req, proof);
     const fence = activeEngineFence();
     if (!fence) throw httpError(409, 'The active engine must authorize a paper session.');
-    const session = openPaperSpotSession(botStatus, fence);
+    const session = openPaperSpotSession(botStatus, fence, { capitalCeiling, durationHours, authorizedBy: `owner:${stepUpMethod()}` });
+    audit('owner', 'session.paper_spot.run', { capitalCeiling, durationHours, expiresAt: session.expires_at, riskPolicyVersion: session.risk_policy_version });
     bus.publish('bot', botStatusView());
     return { state: session.state };
   });
