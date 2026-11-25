@@ -63,15 +63,36 @@ export function loadEvidenceKey(dataDir: string, envValue = env.MIA_EVIDENCE_KEY
 const DATA_DIR = env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data');
 const EVIDENCE = loadEvidenceKey(DATA_DIR);
 
-const intEnv = (name: string, fallback: number, min: number, max: number) => {
-  const raw = env[name]; if (raw == null || raw === '') return fallback;
+const intFrom = (source: NodeJS.ProcessEnv, name: string, fallback: number, min: number, max: number) => {
+  const raw = source[name]; if (raw == null || raw === '') return fallback;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < min || n > max) throw new Error(`${name} must be an integer between ${min} and ${max} (got "${raw}")`);
   return n;
 };
+const intEnv = (name: string, fallback: number, min: number, max: number) => intFrom(env, name, fallback, min, max);
+
+/**
+ * Listening port. MIA_PORT always wins; otherwise a platform-assigned PORT (Railway and similar hosts inject it);
+ * otherwise 8787. Both are validated, so a malformed value stops startup instead of binding somewhere unexpected.
+ */
+export function listenPort(source: NodeJS.ProcessEnv = env): number {
+  return intFrom(source, 'MIA_PORT', intFrom(source, 'PORT', 8787, 1, 65535), 1, 65535);
+}
+
+/**
+ * Number of trusted reverse-proxy hops in front of MIA (0 = trust none, the default). Only set this when every
+ * request must pass through those proxies (e.g. 1 = Railway edge, 2 = Cloudflare → Railway); MIA then takes the
+ * client address that many hops from the right of X-Forwarded-For, so a spoofed left-most value is ignored.
+ * Over-counting would let a client choose its own IP for rate limits; under-counting groups clients by proxy.
+ */
+export function trustProxyHops(source: NodeJS.ProcessEnv = env): number {
+  return intFrom(source, 'MIA_TRUST_PROXY', 0, 0, 5);
+}
 
 export const config = {
-  port: intEnv('MIA_PORT', 8787, 1, 65535),
+  port: listenPort(),
+  /** Trusted reverse-proxy hops (MIA_TRUST_PROXY); 0 keeps the socket address as the client IP. */
+  trustProxyHops: trustProxyHops(),
   host: env.MIA_HOST ?? (inContainer() ? '0.0.0.0' : '127.0.0.1'),
   dataDir: DATA_DIR,
   /** Disable all outbound polling (tests / offline). */

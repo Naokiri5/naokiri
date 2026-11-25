@@ -1,0 +1,16 @@
+# Keep the build context small and free of local state or secrets.
+.git
+.github
+.claude
+node_modules
+**/node_modules
+web/dist
+server/dist
+data
+e2e/.data
+test-results
+playwright-report
+*.log
+.env
+.env.*
+!.env.example

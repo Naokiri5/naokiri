@@ -1,6 +1,7 @@
 # Deployment & Operations Guide
 
 ## Deploy
+- **Production hosting:** Railway (single service, `Dockerfile` + `railway.json`, SQLite on a volume at `/data`) behind Cloudflare, with Privy sign-in. Follow `docs/operations/RAILWAY_CLOUDFLARE_DEPLOYMENT.md`. Vercel is retired.
 - Build before deployment: `npm ci && npm run build`. This builds `web/dist` and compiles the server into `server/dist`.
 - Start the compiled server with `NODE_ENV=production npm start`. Production startup requires both build outputs and does not depend on dev-only `tsx`/Vite packages. Local development can use `npm start` after `npm install`; the launcher falls back to `tsx` when no production build exists. Default bind is loopback on a desktop and `0.0.0.0` inside detected
   containers so forwarded ports work; override with `MIA_HOST`. Front it with a TLS reverse proxy if you expose it remotely.
