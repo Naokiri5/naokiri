@@ -194,3 +194,33 @@ Deferred:
 - FAST/DEEP isolated strategy evaluation needs authentic on-chain/order-book/funding histories, existing FLIN safety, verified margin/fee mechanics and the existing risk/exit logic. No synthetic tape promotes strategies; no PnL or live parity asserted by probe results. No market dataset supplied.
 - DITAS already has source-verified calibration, recent version-aware PAPER outcomes and research-only learning observation. Proposed new learner tables and caller-labeled verified outcomes cannot establish provenance or permission; do not enable automatic parameter mutations or count owner-entered forecasts as calibrated trade-win probabilities. Health-gated learning and actual adaptation remain open.
 - Genuine soak, Railway persistent runtime, Cloudflare, Privy and deployment checks remain unverified. No deployment or authorization change. Exact new CI and review required; keep draft.
+
+## Durable trading mandate increment (2026-11-25)
+
+The owner's mandate is now persisted with the BrainOS session through migration 7, which is append-only. It records
+market scope, authorized capital, risk policy and strategy-set versions, authorizer, and expiry. The paper OMS enforces
+it inside the entry write transaction: scope and strategy version through `paperSpotEntryDenial`, and the capital
+ceiling against the actual fill through `paperSpotCapitalDenial`. An expired mandate drains the session from the
+protection lane. Sessions upgraded without a mandate fail closed. The Autopilot page shows FAST and DEEP selection cards
+with server-reported readiness ("Research only"), a mandate summary, and capital and duration inputs in the Run
+step-up dialog. FAST and DEEP remain research-only, and LIVE remains locked. The landing redesign in PR #138 is not
+touched and remains authoritative. Classification, the pending register and the evidence are in
+[`../BRAINOS_MASTER_ARCHITECTURE.md`](../BRAINOS_MASTER_ARCHITECTURE.md).
+
+## BrainOS V2 FAST/DEEP roadmap: trade-built evidence increment (2026-11-26)
+
+Source: the owner's "BrainOS V2 — FAST & DEEP Upgrade Roadmap" PDF (14 pages). The repository was audited first. Most
+S2–S4 material was already absorbed or rejected in the increments above, so it is not re-imported. Implemented in
+the owning modules:
+- `server/src/market/tradeBars.ts` (P1.2): incremental trade-to-bar builder. It works in exact fixed point with
+  watermark finalization, quarantine of late, duplicate, future and malformed trades, deterministic rebuild on
+  retraction, invalidation for final bars, feed-gap flags, time-bounded dedupe and bounded memory. Final base bars
+  are merged into open accumulators and dropped. Its bars feed the canonical `FeatureEngine`.
+- `server/src/market/volumeSpike.ts` (P1.3): a pure, versioned volume-authenticity detector. It is a candidate
+  trigger only, with no trading authority.
+- `server/src/lab/tape-reader.ts` and `lab/eventReplay.ts`: `TRADE_TICK` events and `replayTradeEvidence`, which
+  replays through the same builder and detector. A parity test compares the replay digest to the live-path digest.
+- `scripts/benchmark-trade-bars.mjs`: latency percentiles and a memory soak mode.
+
+Not wired into the runtime: there is no authenticated Solana trade feed yet. Disposition of every roadmap item is in
+[`../BRAINOS_MASTER_ARCHITECTURE.md`](../BRAINOS_MASTER_ARCHITECTURE.md) section 14.

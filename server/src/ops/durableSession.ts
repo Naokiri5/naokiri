@@ -11,8 +11,12 @@ import {
   BRAINOS_SESSION_ID, durableSessionStatus,
   type BrainosSessionState, type DurableBrainosSession,
 } from './paperSpotEntry.js';
+import {
+  buildMandate, mandateEntryDenial, NO_MANDATE, openPaperExposure, sessionMandate,
+  type MandateColumns, type MandateRequest,
+} from './tradingMandate.js';
 
-export { durableSessionStatus, paperSpotEntryDenial } from './paperSpotEntry.js';
+export { durableSessionStatus, paperSpotCapitalDenial, paperSpotEntryDenial } from './paperSpotEntry.js';
 export type { BrainosSessionState, BrainosSuspendReason, DurableBrainosSession } from './paperSpotEntry.js';
 
 export interface EntryPermissionVerdict {
@@ -28,8 +32,13 @@ function baseline(at: number): DurableBrainosSession {
     session_id: BRAINOS_SESSION_ID, version: 0, state: 'CLOSED', environment: 'PAPER',
     mind: 'FAST', lease_holder: null, lease_acquired_at: null,
     fence_epoch: 0, suspend_reason: 'NONE', started_at: null, closed_at: null, updated_at: at,
+    ...NO_MANDATE,
   };
 }
+const mandateSnapshot = (session: MandateColumns) => {
+  const mandate = sessionMandate(session);
+  return mandate ? JSON.stringify(mandate) : null;
+};
 function persist(
   old: DurableBrainosSession, nextState: BrainosSessionState, kind: string, at: number,
   patch: Partial<DurableBrainosSession> = {},
@@ -39,23 +48,30 @@ function persist(
   const next = { ...old, ...patch, version: old.version + 1, state: nextState, updated_at: at };
   const outcome = run(`INSERT INTO brainos_sessions (
     session_id,version,state,environment,mind,lease_holder,lease_acquired_at,fence_epoch,
-    suspend_reason,started_at,closed_at,updated_at
-  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    suspend_reason,started_at,closed_at,updated_at,
+    market_scope,capital_ceiling,risk_policy_version,authorized_by,authorized_at,expires_at,strategy_config_version
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   ON CONFLICT(session_id) DO UPDATE SET
     version=excluded.version,state=excluded.state,environment=excluded.environment,
     mind=excluded.mind,lease_holder=excluded.lease_holder,
     lease_acquired_at=excluded.lease_acquired_at,fence_epoch=excluded.fence_epoch,
     suspend_reason=excluded.suspend_reason,started_at=excluded.started_at,
-    closed_at=excluded.closed_at,updated_at=excluded.updated_at
+    closed_at=excluded.closed_at,updated_at=excluded.updated_at,
+    market_scope=excluded.market_scope,capital_ceiling=excluded.capital_ceiling,
+    risk_policy_version=excluded.risk_policy_version,authorized_by=excluded.authorized_by,
+    authorized_at=excluded.authorized_at,expires_at=excluded.expires_at,
+    strategy_config_version=excluded.strategy_config_version
   WHERE brainos_sessions.version=?`,
   BRAINOS_SESSION_ID, next.version, next.state, next.environment, next.mind, next.lease_holder,
   next.lease_acquired_at, next.fence_epoch, next.suspend_reason,
-  next.started_at, next.closed_at, next.updated_at, old.version);
+  next.started_at, next.closed_at, next.updated_at,
+  next.market_scope, next.capital_ceiling, next.risk_policy_version, next.authorized_by,
+  next.authorized_at, next.expires_at, next.strategy_config_version, old.version);
   if (Number(outcome.changes) !== 1) throw new Error('SESSION_CHECKPOINT_CONFLICT');
   run(`INSERT INTO brainos_session_events(
-    session_id,version,from_state,to_state,kind,fence_epoch,ts
-  ) VALUES (?,?,?,?,?,?,?)`,
-  BRAINOS_SESSION_ID, next.version, old.state, next.state, kind, next.fence_epoch, at);
+    session_id,version,from_state,to_state,kind,fence_epoch,ts,mandate_json
+  ) VALUES (?,?,?,?,?,?,?,?)`,
+  BRAINOS_SESSION_ID, next.version, old.state, next.state, kind, next.fence_epoch, at, mandateSnapshot(next));
   return next;
 }
 
@@ -73,8 +89,15 @@ export function requirePaperSpotSession(at?: number) {
   });
 }
 
-/** Start the existing spot simulator after the authenticated owner has verified step-up. */
-export function openPaperSpotSession(engine: EngineView & { instanceId?: string }, fence: LeaseFence, at?: number) {
+/**
+ * Start the existing spot simulator after the authenticated owner has verified step-up. The owner's mandate
+ * (authorized capital and duration) is validated and persisted with the session; it only narrows the
+ * canonical risk gate and OMS.
+ */
+export function openPaperSpotSession(
+  engine: EngineView & { instanceId?: string }, fence: LeaseFence,
+  request: MandateRequest & { authorizedBy?: string }, at?: number,
+) {
   return tx(() => {
     const now = at ?? Date.now();
     const old = durableSessionStatus() ?? baseline(now);
@@ -84,12 +107,28 @@ export function openPaperSpotSession(engine: EngineView & { instanceId?: string 
       throw new Error('SESSION_LEADER_FENCE_REQUIRED');
     }
     if (!paperSpotSessionPreflight(engine, now).canRun) throw new Error('PAPER_SPOT_SESSION_PREFLIGHT_BLOCKED');
+    const mandate = buildMandate('SPOT_PAPER', request, {
+      at: now, availableCash: reconcile().cash + openPaperExposure(), authorizedBy: request.authorizedBy ?? 'owner',
+    });
     cancelPaperPendingApprovals('approval predates the new spot paper session', now);
     return persist(old, 'RUNNING', 'OWNER_OPEN_SPOT_PAPER_SESSION', now, {
       environment: 'PAPER', mind: 'SPOT_PAPER', lease_holder: fence.holder,
       lease_acquired_at: fence.acquired_at, fence_epoch: old.fence_epoch + 1,
-      suspend_reason: 'NONE', started_at: now, closed_at: null,
+      suspend_reason: 'NONE', started_at: now, closed_at: null, ...mandate,
     });
+  });
+}
+
+/**
+ * An expired mandate revokes entry authority. The session drains like an owner close: pending approvals are
+ * cancelled, protective exits keep running, and the protection lane closes it once everything reconciles.
+ */
+export function drainExpiredMandate(at = Date.now()) {
+  return tx(() => {
+    const old = durableSessionStatus();
+    if (!old || old.state !== 'RUNNING' || old.expires_at === null || at < old.expires_at) return old;
+    cancelPaperPendingApprovals('session mandate expired', at);
+    return persist(old, 'CLOSING_DRAINING_ENTRIES', 'MANDATE_EXPIRED', at, { suspend_reason: 'MANDATE_EXPIRED' });
   });
 }
 
@@ -107,10 +146,11 @@ export function openDurablePaperSession(engine: EngineView, mind: SessionMind, f
       throw new Error('SESSION_EXECUTION_LANE_NOT_CERTIFIED');
     if (getControl().emergency || getControl().pausedNewOrders)
       throw new Error('SESSION_OWNER_ENTRY_HALT');
+    // FAST and DEEP mandates are not designed yet; never inherit the previous session's mandate.
     return persist(old, 'RUNNING', 'OWNER_OPEN_SESSION', at, {
       environment: 'PAPER', mind, lease_holder: fence.holder,
       lease_acquired_at: fence.acquired_at, fence_epoch: old.fence_epoch + 1,
-      suspend_reason: 'NONE', started_at: at, closed_at: null,
+      suspend_reason: 'NONE', started_at: at, closed_at: null, ...NO_MANDATE,
     });
   });
 }
@@ -213,6 +253,8 @@ export function durableEntryPermission(engine: EngineView, fence: LeaseFence | n
     return no('STALE_OR_LOST_ENGINE_FENCE');
   if (state.environment !== 'PAPER') return no('LIVE_EXECUTION_NOT_CERTIFIED');
   if (state.mind === 'SPOT_PAPER') return no('PAPER_SPOT_SESSION_ONLY');
+  const mandate = mandateEntryDenial(state, at);
+  if (mandate) return no(mandate);
   if (getControl().emergency || getControl().pausedNewOrders) return no('OWNER_ENTRY_HALT');
   if (!reconcile().ok || unreconciledPaperOrders()) return no('EXECUTION_NOT_RECONCILED');
   if (!sessionPreflight(engine, state.mind, 'PAPER', at).canRun) return no('LANE_PREFLIGHT_NOT_CERTIFIED');

@@ -86,7 +86,7 @@ describe('BrainOS spot paper evidence flow', () => {
     try {
       // Exercise the production opener without calling network services or changing the test sign-in mode.
       config.offline = false;
-      session = openPaperSpotSession(engine, fence, start);
+      session = openPaperSpotSession(engine, fence, { capitalCeiling: 5_000, durationHours: 24 }, start);
       expect(session).toMatchObject({ state: 'RUNNING', environment: 'PAPER', mind: 'SPOT_PAPER' });
     } finally {
       config.offline = offline;

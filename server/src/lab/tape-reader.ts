@@ -27,7 +27,14 @@ const launch = z.strictObject({
   mintAuthorityRevoked: z.boolean(), freezeAuthorityRevoked: z.boolean(),
   hasPermanentDelegate: z.boolean(), hasTransferHook: z.boolean(), transferFeeBps: bps,
 });
-export type HistoricalEvent = z.infer<typeof book> | z.infer<typeof funding> | z.infer<typeof launch>;
+/** An executed trade or swap. `participant` is the funded wallet or account when the venue exposes it. */
+const trade = z.strictObject({
+  type: z.literal('TRADE_TICK'), tsMs: ts, venue, symbol,
+  eventId: z.string().regex(/^[A-Za-z0-9:_.-]{1,128}$/), priceFp: fp, baseQtyFp: fp,
+  aggressor: z.enum(['buy', 'sell']), participant: z.string().regex(/^[A-Za-z0-9]{1,64}$/).optional(),
+  finality: z.enum(['final', 'provisional']),
+}).refine(v => v.priceFp > 0n && v.baseQtyFp > 0n);
+export type HistoricalEvent = z.infer<typeof book> | z.infer<typeof funding> | z.infer<typeof launch> | z.infer<typeof trade>;
 export type HistoricalVenue = z.infer<typeof venue>;
 export interface TapeReadOptions {
   startTsMs?: number; endTsMs?: number; venues?: ReadonlySet<HistoricalVenue>;
@@ -60,7 +67,8 @@ export async function* streamCompressedMarketTape(path: string, opts: TapeReadOp
       value = JSON.parse(decoded);
     } catch { throw new Error('TAPE_PARSE_ERROR line ' + line); }
     const type = value && typeof value === 'object' && 'type' in value ? value.type : null;
-    const schema = type === 'BOOK_TICK' ? book : type === 'FUNDING_TICK' ? funding : type === 'MEMECOIN_LAUNCH_AUDIT' ? launch : null;
+    const schema = type === 'BOOK_TICK' ? book : type === 'FUNDING_TICK' ? funding
+      : type === 'MEMECOIN_LAUNCH_AUDIT' ? launch : type === 'TRADE_TICK' ? trade : null;
     const result = schema?.safeParse(value);
     if (!result?.success) throw new Error('TAPE_INVALID_EVENT line ' + line);
     const event = result.data;
