@@ -110,3 +110,24 @@ Reconciliation decisions:
 | Environment and Railway runbook | Current database path derives from MIA_DATA_DIR/mia.db and current HTTP settings use MIA_PORT/MIA_HOST. Proposed MIA_SQLITE_PATH and unlock flags are not canonical. Do not deploy, inject signing keys, or change service configuration without verified runtime and security gates. |
 
 PR checklist: preserve prior code and PAPER behavior; exact-head/merge CI required; actual SIGTERM integration and multi-process recovery evidence required; external OMS reservation/partial-fill/venue parity, per-engine exposure, DITAS health-gated learning, genuine soak and Privy wallet-signing authorization remain open. No real-money authorization or deployment changes. Keep draft.
+
+## P0–P2 launch roadmap reconciliation (2026-11-25)
+
+Twenty supplied PDFs describe a Python/PostgreSQL architecture and staged production sign-off. Two pairs (operator CLI and end-of-soak auditor) repeat content. Do not replace the existing Node/Fastify/SQLite stack or create parallel state authorities. Baseline e4dc84d passed CI run 45573750210.
+
+### Phase 1 — Core reliability (P0)
+- Extend server/test/runtime-shutdown.test.ts: launch actual src/main.ts under Node with tsx loader, isolated SQLite directory, offline networking, boot marker and HTTP readiness. Send actual SIGTERM; require exit 0 within 10s, reopen and check committed balance, quick_check and audit chain. This exercises offline idle shutdown, not mid-venue-I/O or complete descendant process-tree auditing. Windows explicitly excluded from POSIX signal test.
+- Extend server/test/brainos-wal-audit.test.ts: real child acquires canonical lease and commits fixture funds. Parent suspends child with SIGSTOP, waits for actual expiry and acquires the same database lease, commits a second fixture deposit, resumes old process with SIGCONT and requires LeaseLostError before stale transaction can mutate state. Child is reaped on completion/failure. Existing SIGKILL transaction regression remains. This is a two-process lease test, not full standby scheduler failover RTO certification.
+- Harden ops/lease.ts: finite safe-integer TTL/timestamps, valid identity, well-formed persisted lease, backward clock observation fails closed; reuse validation in read-only leaseWitness.ts. Regression exercises malformed timestamps and denied renewal without mutation. This is NOT immunity to forward clock jumps or a server-clock distributed lease. Preserve single-host SQLite deployment until an explicit reviewed database migration is warranted.
+
+### Phase 2 — Financial integrity (P0)
+- Existing transactional PAPER OMS, per-position reconciliation and unresolved-order entry freeze retained. Durable asynchronous external-order reservations and authenticated venue balance/fill reconciliation remain blocked by absent certified adapters. A missing venue order alone must not unlock an uncertain submission. Do not install PostgreSQL migrations, synthetic confirmed-balance seeding or separate emergency CLI. Existing owner control, pause, emergency and durable close paths remain authoritative. Do not force-evict leases or clear halts outside audited control and verified recovery.
+
+### Phase 3 — Risk and adaptation (P1)
+- Existing reserve floors, anti-churn, adaptive drawdown reductions and strategy lifecycle maintained. Engine-specific exposure attribution, verified performance profiles and atomic external reservation limits remain incomplete. No additional financial balance table or caller-provided performance promotion.
+
+### Phase 4 — Production certification (P2)
+- Health-gated DITAS, actual 72h unattended evidence, authenticated independent venue parity and verified Railway/Privy boundaries remain open.
+- Python container, tini/pytest workflows and migration predeploy scripts target an incompatible runtime; preserve current deployment until a separately reviewed Node image and volume/signal integration are tested. No Railway service mutation. Privy negative signing tests belong exclusively to isolated unfunded staging with verified endpoints and policy identity; generic HTTP errors or skipped tests cannot establish policy enforcement. Never run transaction requests against production funds to test rejection.
+- Caller-entered soak start/end and SHA are not independently authenticated continuous runtime evidence. Read-only snapshot checks complement rather than substitute for historical telemetry.
+- Launch sign-off: BLOCKED. Require exact merge SHA, three independently recorded clean CI runs, real process tests, review of all safety gates, and verified operational acceptance. No synthetic green check or automatic live unlock. Current draft targets #135 branch, not main. No deployment or authorization change.
