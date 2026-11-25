@@ -8,6 +8,9 @@ the one that is wrong. Do not add another master specification.
 **Last verified:** 2026-11-25, on branch `naokiri/fervent-dijkstra-46ctbr`, stacked on PR #137 head `b98d0d1`.
 **Execution authority:** PAPER only. LIVE is locked. FAST and DEEP are research-only pathways.
 
+The 64-responsibility verification matrix, weakness register, data-flow owner map and prioritized backlog are in
+[`BRAINOS_V2_COMPONENT_INVENTORY.md`](BRAINOS_V2_COMPONENT_INVENTORY.md).
+
 ## 1. Central authorities
 
 Each authority below has exactly one implementation. New work must extend it, not add a competitor.
