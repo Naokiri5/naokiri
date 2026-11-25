@@ -25,6 +25,7 @@ import type { DecisionReport } from '../decision/engine.js';
 import { acquireOrRenewLease, ownsLease, releaseLease, LeaseLostError, type LeaseFence } from '../ops/lease.js';
 import { checkScanStall, protectionIntervalMs, staleAfter } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
+import { isShuttingDown } from '../ops/shutdown.js';
 import { durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
 import { record } from '../core/latency.js';
@@ -295,7 +296,7 @@ function backupPass() {
 }
 
 export function startBot() {
-  if (botStatus.running || lanesBusy() || config.offline) return;
+  if (isShuttingDown() || botStatus.running || lanesBusy() || config.offline) return;
   Object.assign(botStatus, { running: true, startedAt: Date.now(), lastMonitorAt: 0, lastTickerAt: 0, lastScanAt: 0, monitorFailing: false });
   takeoverRefused = false;
   journal('SYSTEM', `MIA engine started in ${displayMode()} mode`);
