@@ -8,6 +8,7 @@ import { journal } from '../journal/journal.js';
 import { config } from '../config.js';
 import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
+import { isShuttingDown } from './shutdown.js';
 
 /**
  * Readiness for an always-on paper server (Phase 1). `ready` answers one question for a supervisor or load balancer:
@@ -35,6 +36,7 @@ function laneCheck(name: string, lastAt: number, limitMs: number, e: EngineView,
 
 export function readiness(e: EngineView, nowTs = Date.now()) {
   const checks: Check[] = [];
+  if (isShuttingDown()) checks.push({ name: 'lifecycle', status: 'fail', detail: 'process draining' });
   try {
     const v = get<{ v: number | null }>('SELECT MAX(version) v FROM schema_migrations')?.v ?? 0;
     checks.push(v === SCHEMA_VERSION ? { name: 'database', status: 'pass', detail: `schema v${v}` } : { name: 'database', status: 'fail', detail: `schema v${v}, expected v${SCHEMA_VERSION}` });
