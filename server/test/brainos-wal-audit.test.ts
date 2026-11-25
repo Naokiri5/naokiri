@@ -248,4 +248,97 @@ describe('BrainOS canonical WAL audit evidence (Q42/Q48 partial coverage)', () =
     }
   }, 30000);
 
+  it.skipIf(process.platform === 'win32')('a real standby process waits for lease expiry after primary SIGKILL', async () => {
+    // Both children use the same canonical SQLite lease and PAPER ledger. No venue or live money.
+    const script = `
+      import { openDb, closeDb, tx } from './src/db/db.ts';
+      import { acquireOrRenewLease, assertWriteFence } from './src/ops/lease.ts';
+      import { ledger, PAPER_ACCOUNT } from './src/portfolio/ledger.ts';
+      import { audit } from './src/core/audit.ts';
+      import { writeSync } from 'node:fs';
+      openDb(process.argv[1]);
+      const role = process.argv[2];
+      if (role === 'primary') {
+        const fence = acquireOrRenewLease('engine', role, 6000);
+        if (!fence) throw new Error('primary failed to acquire');
+        tx(() => {
+          assertWriteFence(fence);
+          ledger(PAPER_ACCOUNT, 'DEPOSIT', 100, 'primary');
+          audit('fixture', 'PRIMARY_COMMITTED');
+        });
+        writeSync(1, 'PRIMARY_READY');
+        // Keep the process alive until killed; no graceful release.
+        setInterval(() => {}, 1000);
+      } else {
+        const first = acquireOrRenewLease('engine', role, 6000);
+        if (first) throw new Error('standby acquired before primary expiry');
+        writeSync(1, 'STANDBY_WAITING');
+        const deadline = Date.now() + 12000;
+        let fence = null;
+        while (!fence && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 25));
+          fence = acquireOrRenewLease('engine', role, 6000);
+        }
+        if (!fence) throw new Error('standby takeover timed out');
+        tx(() => {
+          assertWriteFence(fence);
+          ledger(PAPER_ACCOUNT, 'DEPOSIT', 200, 'standby');
+          audit('fixture', 'STANDBY_COMMITTED');
+        });
+        writeSync(1, 'STANDBY_COMMITTED');
+        closeDb();
+      }
+    `;
+    const children: ReturnType<typeof launch>[] = [];
+    function launch(role: string) {
+      const proc = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, file, role], {
+        cwd: fileURLToPath(new URL('../', import.meta.url)),
+        env: { ...process.env, MIA_OFFLINE: '1', MIA_AUTH_MODE: 'passphrase' },
+        stdio: ['ignore', 'pipe', 'pipe'], shell: false,
+      });
+      let output = ''; let ended = false;
+      proc.stdout.on('data', chunk => { output += String(chunk); });
+      proc.stderr.on('data', chunk => { output += String(chunk); });
+      const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+        proc.once('error', reject);
+        proc.once('close', (code, signal) => { ended = true; resolve({ code, signal }); });
+      });
+      void exited.catch(() => {});
+      return { proc, exited, output: () => output, ended: () => ended };
+    }
+    async function marker(child: ReturnType<typeof launch>, text: string) {
+      const deadline = Date.now() + 10000;
+      while (!child.output().includes(text)) {
+        if (child.ended() || Date.now() >= deadline) throw new Error('missing ' + text + ': ' + child.output());
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    }
+    const watchdog = setTimeout(() => { for (const c of children) if (!c.ended()) c.proc.kill('SIGKILL'); }, 24000);
+    try {
+      const primary = launch('primary'); children.push(primary);
+      await marker(primary, 'PRIMARY_READY');
+      const original = currentLease('engine')!;
+      const standby = launch('standby'); children.push(standby);
+      await marker(standby, 'STANDBY_WAITING');
+      expect(currentLease('engine')).toEqual(original);
+      expect(primary.proc.kill('SIGKILL')).toBe(true);
+      expect(await primary.exited).toEqual({ code: null, signal: 'SIGKILL' });
+      expect(await standby.exited, standby.output()).toEqual({ code: 0, signal: null });
+      expect(standby.output()).toContain('STANDBY_COMMITTED');
+      const successor = currentLease('engine')!;
+      expect(successor.holder).toBe('standby');
+      expect(successor.acquired_at).toBeGreaterThan(original.expires_at);
+      expect(ownsLease(original)).toBe(false);
+      expect(() => tx(() => assertWriteFence(original))).toThrow('engine lease lost');
+      expect(cashBalance()).toBe(300);
+      expect(all('SELECT action FROM audit_log WHERE actor=? ORDER BY id', 'fixture'))
+        .toEqual([{ action: 'PRIMARY_COMMITTED' }, { action: 'STANDBY_COMMITTED' }]);
+      expect(verifyAuditChain().ok).toBe(true);
+    } finally {
+      clearTimeout(watchdog);
+      for (const c of children) if (!c.ended()) c.proc.kill('SIGKILL');
+      await Promise.all(children.map(c => c.exited.catch(() => {})));
+    }
+  }, 30000);
+
 });
