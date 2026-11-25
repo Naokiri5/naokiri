@@ -60,6 +60,38 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     expect(feedback.fees).toBeGreaterThan(0);
     expect(verifyAuditChain().ok).toBe(true);
   });
+  it('preserves the combined portfolio cash floor after fees and recalculates headroom for the next entry', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, minUnallocatedReservePct: 94, minSettlementReservePct: 5 });
+    const result = submitEntry(report(id, last), 'bot');
+    expect(result, JSON.stringify(result)).toMatchObject({ ok: true });
+    const cash = accountState().cash;
+    expect(cash).toBeGreaterThanOrEqual(9900 - 1e-8);
+    expect(cash).toBeLessThan(9901);
+    const second = seedInstrument('SOLUSDT', { seed: 3 });
+    const denied = submitEntry(report(second.inst.id, second.last), 'bot');
+    expect(denied.ok).toBe(false);
+    expect(denied.reason).toContain('SIZE_BELOW_VENUE_MINIMUM');
+    expect(openPositions()).toHaveLength(1);
+    expect(accountState().cash).toBe(cash);
+    expect(reconcile().ok).toBe(true);
+    setBook(id, last * 0.96);
+    monitorPositions();
+    expect(openPositions()).toHaveLength(0);
+    expect(reconcile().ok).toBe(true);
+  });
+  it('rechecks a newly tightened reserve policy at the entry write boundary', () => {
+    setCrashHook(point => {
+      if (point === 'entry.preTx') acceptPolicy('owner', { ...DEFAULT_POLICY, minUnallocatedReservePct: 95, minSettlementReservePct: 5 });
+    });
+    try {
+      const denied = submitEntry(report(id, last), 'bot');
+      expect(denied.ok).toBe(false);
+      expect(denied.reason).toContain('CASH_RESERVE_FLOOR_REACHED');
+    } finally { setCrashHook(null); }
+    expect(openPositions()).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
+    expect(paperFillEvents(0, 5).events).toHaveLength(0);
+  });
   it('rolls back a fill envelope with the failed OMS transaction', () => {
     const entry = report(id, last);
     setCrashHook((point) => { if (point === 'entry.precommit') throw new Error('fault before commit'); });
