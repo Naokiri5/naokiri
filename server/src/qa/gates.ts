@@ -6,6 +6,7 @@ import { currentPolicy } from '../risk/policy.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { WORKERS } from '../workers/registry.js';
 import { reconcile } from '../portfolio/calendar.js';
+import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
 /** Part 12.7 release gates. Evidence-driven; manual gates can only be satisfied by humans outside this app. */
@@ -156,8 +157,16 @@ export function releaseGates(report?: unknown) {
   g.push({ id: 'G03', name: 'All 100 worker roles tested; health observable', ...workers, status: 'PENDING', evidence: `${workers.evidence}; ${WORKERS.length} workers registered (requires 100); current offline CEX test covers 94 of 100, six on-chain roles and complete health coverage remain unproven` });
   const joe = testGate('G04');
   g.push({ id: 'G04', name: 'Trader Joe factuality & authorization tests', ...joe, status: 'PENDING', evidence: `${joe.evidence}; authorization checks do not certify LLM factuality; human review is required` });
-  const rec = reconcile();
-  g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile', status: rec.ok ? 'PASS' : 'FAIL', evidence: rec.detail });
+  try {
+    const rec = reconcile();
+    const unresolved = unreconciledPaperOrders();
+    g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile',
+      status: rec.ok && unresolved === 0 ? 'PASS' : 'FAIL',
+      evidence: `${rec.detail}; ${unresolved} unresolved paper order(s). External venue reconciliation is not certified.` });
+  } catch {
+    g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile',
+      status: 'FAIL', evidence: 'Canonical ledger or order recovery evidence unavailable.' });
+  }
   const ac = verifyAuditChain();
   g.push({ id: 'G06', name: 'Audit log integrity', status: ac.ok ? 'PASS' : 'FAIL', evidence: `${ac.entries} hash-chained entries${ac.ok ? ' verified' : `, broken at ${ac.brokenAt}`}` });
   g.push({ id: 'G07', name: 'Wallet permissions & signing isolation security tests', status: 'NOT_IMPLEMENTED', evidence: 'No signer exists in this build (by design). Requires isolated signer + external security test.' });
