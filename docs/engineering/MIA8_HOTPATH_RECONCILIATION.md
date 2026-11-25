@@ -194,3 +194,15 @@ Deferred:
 - FAST/DEEP isolated strategy evaluation needs authentic on-chain/order-book/funding histories, existing FLIN safety, verified margin/fee mechanics and the existing risk/exit logic. No synthetic tape promotes strategies; no PnL or live parity asserted by probe results. No market dataset supplied.
 - DITAS already has source-verified calibration, recent version-aware PAPER outcomes and research-only learning observation. Proposed new learner tables and caller-labeled verified outcomes cannot establish provenance or permission; do not enable automatic parameter mutations or count owner-entered forecasts as calibrated trade-win probabilities. Health-gated learning and actual adaptation remain open.
 - Genuine soak, Railway persistent runtime, Cloudflare, Privy and deployment checks remain unverified. No deployment or authorization change. Exact new CI and review required; keep draft.
+
+## Durable trading mandate increment (2026-11-25)
+
+The owner's mandate is now persisted with the BrainOS session through migration 7, which is append-only. It records
+market scope, authorized capital, risk policy and strategy-set versions, authorizer, and expiry. The paper OMS enforces
+it inside the entry write transaction: scope and strategy version through `paperSpotEntryDenial`, and the capital
+ceiling against the actual fill through `paperSpotCapitalDenial`. An expired mandate drains the session from the
+protection lane. Sessions upgraded without a mandate fail closed. The Autopilot page shows FAST and DEEP selection cards
+with server-reported readiness ("Research only"), a mandate summary, and capital and duration inputs in the Run
+step-up dialog. FAST and DEEP remain research-only, and LIVE remains locked. The landing redesign in PR #138 is not
+touched and remains authoritative. Classification, the pending register and the evidence are in
+[`../BRAINOS_MASTER_ARCHITECTURE.md`](../BRAINOS_MASTER_ARCHITECTURE.md).
