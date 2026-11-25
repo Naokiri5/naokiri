@@ -107,6 +107,35 @@ notification, and the v6→v7 upgrade. The `durable-session`, `brainos-paper-flo
 independent trading-risk review found no critical or high issues; its three medium findings (loss headroom, stale
 quotes, breach latch) are fixed as described above.
 
+## 5a. Isolated historical session simulation (2026-11-25)
+
+`server/src/lab/sessionSimulation.ts` connects the historical tape (`lab/tape-reader.ts`) to MIA's existing trading
+logic without any financial authority. It never opens the database, the OMS, the ledger or a lease.
+
+| Concern | Reused owner | Simulation behavior |
+|---|---|---|
+| Signals | `lab/strategies.ts` capsules, `regime/regime.ts`, `features/indicators.ts` | From closed candles only, once the tape clock reaches each close boundary |
+| Candle validation | `lab/backtest.ts` `assertStrategyHistory` (extracted, unchanged) | Same checks as the backtester |
+| Sizing | Formula of `risk/gate.ts` | `simulatedEntrySizing`; a parity test compares it with `evaluateRisk` |
+| Entry checks | Same rule set as the risk gate and OMS | Spread, slippage, price through stop, notional cap at the executed price, per-trade risk, cash |
+| Session limits | `ops/sessionBoundaries.ts` `evaluateBoundaryEntry` (extracted, unchanged) | Capital and loss headroom; latched loss limit stops new entries |
+| Exits | `lab/exits.ts` `stepExit` (shared with the paper OMS) | Against the bid; an exit larger than displayed bid depth is deferred, never invented |
+| Execution | Causal book replay | First matching book at or after signal + latency, within max wait; buys use ask depth |
+
+The report gives equity at liquidation value, drawdown, trades in USD and R (via the backtester's `stats`), rejection
+counts by reason, the loss-limit breach and a determinism hash. `npm run simulate -- --strategy <id> --candles <json>
+--tape <ndjson.gz> --symbol <s> --cash <usd> --capital <usd> --max-loss <usd>` runs it offline.
+
+Not modeled: worker/QCI consensus, the decision engine, cross-venue checks, cooldowns, correlation, adaptive sizing,
+multiple instruments and funding settlement. Results are research evidence about a strategy capsule and its execution
+costs. No real dataset has been supplied, so no strategy performance has been measured.
+
+Finding from the first synthetic run: when the 25% notional cap sizes a position (tight stops), the risk gate sizes it at
+the top ask while the OMS enforces the cap at the executed price. Any fill worse than the top ask is then refused with
+`POSITION_NOTIONAL_LIMIT`. This is deliberate fail-closed behavior on the paper path, but it means capped setups are
+skipped whenever an order walks the book. Sizing the cap against the worst permitted entry in `risk/gate.ts` would
+fix it; that change needs its own trading-risk review.
+
 ## 6. Remaining gaps, in recommended order
 
 1. **Land the stack.** #128 → #129 → #130 → #132 → #135 → #137 (and this increment) are open drafts totaling roughly

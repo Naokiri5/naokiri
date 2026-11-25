@@ -60,6 +60,34 @@ export interface SessionBoundaryUsage {
 
 export type SessionLossDenial = 'SESSION_BOUNDARIES_MISSING' | 'SESSION_LOSS_LIMIT_REACHED' | 'SESSION_LOSS_UNVERIFIABLE';
 
+/** Parse the owner's input and apply the cross-field rule. Shared by Run Session and the historical session simulator. */
+export function validateBoundaryInput(input: unknown): SessionBoundaryInput {
+  const limits = SESSION_BOUNDARIES.parse(input);
+  if (limits.maxSessionLossUsd > limits.capitalLimitUsd) throw new Error('SESSION_LOSS_LIMIT_EXCEEDS_CAPITAL');
+  return limits;
+}
+
+/**
+ * The entry rule, independent of where usage comes from (the paper account or a simulation): capital in use plus the
+ * new notional within the capital limit, and the worst case (P&L − open stop risk − planned loss) within the loss limit.
+ */
+export function evaluateBoundaryEntry(
+  limits: SessionBoundaryInput, usage: Pick<SessionBoundaryUsage, 'capitalUsedUsd' | 'sessionPnlUsd' | 'openRiskToStopsUsd'>,
+  notional: number, plannedMaxLoss: number,
+): string | null {
+  if (!Number.isFinite(notional) || notional <= 0 || !Number.isFinite(plannedMaxLoss) || plannedMaxLoss <= 0) return 'SESSION_ENTRY_INVALID';
+  const total = usage.capitalUsedUsd + notional;
+  if (!Number.isFinite(total) || total > limits.capitalLimitUsd + 1e-9) {
+    return `SESSION_CAPITAL_LIMIT: open ${usage.capitalUsedUsd.toFixed(2)} + fill ${notional.toFixed(2)} > limit ${limits.capitalLimitUsd.toFixed(2)}`;
+  }
+  if (usage.sessionPnlUsd === null || usage.openRiskToStopsUsd === null) return 'SESSION_LOSS_UNVERIFIABLE';
+  const worst = usage.sessionPnlUsd - usage.openRiskToStopsUsd - plannedMaxLoss;
+  if (!Number.isFinite(worst) || worst < -limits.maxSessionLossUsd - 1e-9) {
+    return `SESSION_LOSS_HEADROOM: worst case ${worst.toFixed(2)} if every stop is hit < -${limits.maxSessionLossUsd.toFixed(2)} limit`;
+  }
+  return null;
+}
+
 const freshQuote = (ts: number, at: number) => {
   const age = at - ts;
   return Number.isFinite(age) && age >= 0 && age <= QUALITY_LIMITS.maxExecQuoteAgeMs;
@@ -90,8 +118,7 @@ export function paperLiquidationValue(at: number): PaperLiquidationValue {
 
 /** Validate the owner's input against the current paper account and record it for this fence epoch. Call inside the opening transaction. */
 export function recordSessionBoundaries(sessionId: string, fenceEpoch: number, input: unknown, at: number): SessionBoundaryRow {
-  const limits = SESSION_BOUNDARIES.parse(input);
-  if (limits.maxSessionLossUsd > limits.capitalLimitUsd) throw new Error('SESSION_LOSS_LIMIT_EXCEEDS_CAPITAL');
+  const limits = validateBoundaryInput(input);
   const account = paperLiquidationValue(at);
   if (account.unverifiedMarks.length || !Number.isFinite(account.equityUsd) || !Number.isFinite(account.performanceUsd)
       || account.equityUsd <= 0) throw new Error('SESSION_BASELINE_UNVERIFIABLE');
@@ -149,15 +176,6 @@ export function checkSessionLoss(row: SessionBoundaryRow | null, at: number): Se
 export function checkSessionEntry(row: SessionBoundaryRow | null, notional: number, plannedMaxLoss: number, at: number): string | null {
   if (!row) return 'SESSION_BOUNDARIES_MISSING';
   if (!Number.isFinite(notional) || notional <= 0 || !Number.isFinite(plannedMaxLoss) || plannedMaxLoss <= 0) return 'SESSION_ENTRY_INVALID';
-  const usage = sessionBoundaryUsage(row, at);
-  const total = usage.capitalUsedUsd + notional;
-  if (!Number.isFinite(total) || total > row.capital_limit_usd + 1e-9) {
-    return `SESSION_CAPITAL_LIMIT: open ${usage.capitalUsedUsd.toFixed(2)} + fill ${notional.toFixed(2)} > limit ${row.capital_limit_usd.toFixed(2)}`;
-  }
-  if (usage.sessionPnlUsd === null || usage.openRiskToStopsUsd === null) return 'SESSION_LOSS_UNVERIFIABLE';
-  const worst = usage.sessionPnlUsd - usage.openRiskToStopsUsd - plannedMaxLoss;
-  if (!Number.isFinite(worst) || worst < -row.max_loss_usd - 1e-9) {
-    return `SESSION_LOSS_HEADROOM: worst case ${worst.toFixed(2)} if every stop is hit < -${row.max_loss_usd.toFixed(2)} limit`;
-  }
-  return null;
+  return evaluateBoundaryEntry({ capitalLimitUsd: row.capital_limit_usd, maxSessionLossUsd: row.max_loss_usd },
+    sessionBoundaryUsage(row, at), notional, plannedMaxLoss);
 }

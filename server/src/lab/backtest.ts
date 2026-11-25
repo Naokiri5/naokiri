@@ -18,15 +18,20 @@ export const BACKTEST_MODEL_VERSION = 2;
 // Stored results produced before model versioning omit modelVersion.
 export interface BtResult { strategyId: string; strategyVersion: string; modelVersion?: number; instrument: string; interval: string; bars: number; from: number; to: number; costs: BtCosts; splitAt: number; inSample: BtStats; outOfSample: BtStats; all: BtStats; trades: BtTrade[]; equityR: number[]; warnings: string[] }
 
-export function backtest(strat: StrategyDef, instrument: string, candles: Candle[], costs: BtCosts = { feeRate: 0.001, slippageBps: 3, spreadBps: 2 }, isFraction = 0.6): BtResult {
+/** Reject strategy history that is not complete, ordered, closed candles of the strategy's interval. */
+export function assertStrategyHistory(interval: StrategyDef['interval'], candles: readonly Candle[]) {
   // Evaluate the data at the last bar's closing boundary so older historical windows stay valid.
-  const duration = INTERVAL_MS[strat.interval];
+  const duration = INTERVAL_MS[interval];
   const asOf = (candles.at(-1)?.t ?? NaN) + duration;
-  const issues = validateCandles(candles, strat.interval, asOf);
+  const issues = validateCandles(candles, interval, asOf);
   if (candles.some(({ t, closeTime }) => closeTime != null && (closeTime < t + duration - 1 || closeTime >= t + duration))) {
     issues.push('inconsistent candle close timestamp');
   }
   if (issues.length) throw new Error(`invalid backtest history: ${issues.join(', ')}`);
+}
+
+export function backtest(strat: StrategyDef, instrument: string, candles: Candle[], costs: BtCosts = { feeRate: 0.001, slippageBps: 3, spreadBps: 2 }, isFraction = 0.6): BtResult {
+  assertStrategyHistory(strat.interval, candles);
   const eng = new FeatureEngine(); const trades: BtTrade[] = [];
   const splitAt = candles[Math.floor(candles.length * isFraction)]?.t ?? Infinity;
   let pos: { st: ReturnType<typeof newExitState>; entryT: number; regime: string; cost: number; proceeds: number; fees: number } | null = null;
