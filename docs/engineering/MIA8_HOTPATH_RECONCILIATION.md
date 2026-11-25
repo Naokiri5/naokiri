@@ -151,3 +151,30 @@ Deferred / rejected imports:
 5. No promote-live-bounded script, Railway deployment, signing policy change or new API route installed. Environment exports in a shell do not roll back a deployed runtime. Release certification remains BLOCKED until independently authenticated evidence and actual adapters exist.
 
 Exact new head CI, independent review and merge readiness remain required. Do not claim production certification, live settlement or completed P0-P2 roadmap from these incremental PAPER changes.
+
+## Stack consolidation and offline verification (2026-11-25)
+
+Source: ten owner-provided consolidation and phase-verification PDFs. Baseline b2005c1 passed CI run 45592947368; main was a39ddaa597172619d8c897e49464910ebad6681f. GitHub compare confirms main is an ancestor (140 baseline commits ahead). Backup branch backup/pr-137-pre-consolidation-b2005c1 points to the baseline SHA.
+
+| PR | Pinned head | Consolidation disposition |
+| --- | --- | --- |
+| #128 | 90b94790799e0645803c21441d5a939004f6c71e | Ancestor |
+| #129 | ed84155125c87ecfd30715464de330a794c1a8e6 | Ancestor |
+| #130 | 6900d8e7cc5074e80086f9d01db54afd561fecac | Ancestor |
+| #131 | 756becc9dda48649795091aa9848b299e5a75694 | Diverged one commit; inspect its two changed files: all nonblank patch additions present in baseline, including exit freshness, remaining-lot rounding and regression cases. |
+| #132 | ddbb08f6f296c561698232108eb52c0abb9105c9 | Ancestor |
+| #134 | b03f95b01d30c765fc4a964d01f6f373f3158adb | Ancestor |
+| #135 | af8ac9770369313df6d2cd061de4737fea305611 | Ancestor |
+| #136 | c4f3bc8b6bd0c69d909073106284cfb36feaa190 | Diverged one commit; all nonblank patch additions across five files present, except two imports expanded to include additional symbols. Leader-only checkpoint recovery and continuing protection tests retained. |
+| #137 | b2005c1bd5fb5f3331cbe161aa4a63139bc495e9 | Canonical consolidation source |
+
+Ancestry is not feature certification. Patch review establishes absorption of the two divergent changes, not complete behavioral equivalence of every later edit. Do not cherry-pick identical changes or merge redundant branches. Retarget the existing draft #137 to main rather than duplicate its branch/PR; keep all original PRs open until the consolidated candidate actually passes checks, receives review and merges. Do not close unrelated backlog items.
+
+Implementation:
+- scripts/verify-brainos-phases.sh: explicit full local offline verification (secret scan, typecheck, production build, existing server and web suites, three shuffled P0 runs), plus --p0-only for existing CI. Checks exact expected SHA when supplied and rejects tracked worktree changes. Run via bash after npm ci. Isolated temporary data/home/tmp and allowlisted process environment prevent inherited application secrets, production data paths and opt-in live test flags from being passed to test commands. Only test logs retained on failure; no production endpoint probes or new release authorization.
+- Existing CI invokes the script in the P0 step and uploads failure logs. No competing workflow; existing full QA, dependency audit and Playwright jobs are retained.
+- Existing gates.test.ts checks the actual canonical mode authority with absent/false/true MIA_OWNER_LIVE_ACK, a synthetic certificate and permissive callback: all must reject BOUNDED_LIVE, preserve PAPER emergency halt and leave financial/audit/settings records unchanged.
+
+Phase evidence: 1 (build/AST) and 2 (deterministic PAPER/lease/shutdown) have baseline CI evidence, not current-candidate evidence yet. 3 external reservations/settlement and 4 health-gated DITAS adaptation are still incomplete. Existing backtest and replay fixtures are regression evidence, not historical market profitability or full autonomous prospective certification. 5 Railway volume persistence, Privy signing isolation, Cloudflare origin protection and 6 72-hour/30-day prospective evaluation remain unverified. Use existing /api/ready, actual API auth, canonical MIA_DATA_DIR and existing server/src/main.ts composition root. Do not use proposed non-existent routes, environment flags, promotion scripts, shell sleeps in lieu of state assertions, broad DB dumps or unauthenticated production POST probes.
+
+At baseline all three Vercel status links explicitly reported build-rate-limit upgrade links; this is not evidence of a current source compilation error. Older PR descriptions report earlier TS2688 failures. Do not remove required checks, modify deployment bindings, or claim deployment migration completed. Retain owner-directed Railway/Cloudflare/Privy target and independently review release checks. Exact new main-target merge CI, security review and deployment verification required; no live activation and no merge while incomplete.
