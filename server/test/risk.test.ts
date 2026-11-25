@@ -30,6 +30,34 @@ describe('Risk gate (Part 17)', () => {
     expect(s.notional).toBeLessThanOrEqual(2500.01);        // 25% max notional
     expect(r.policyVersion).toBe(1); expect(r.traceId).toBe('t');
   });
+  it('preserves legacy sizing and clamps an explicitly accepted combined reserve including fees', () => {
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' });
+    ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const legacy = evaluateRisk(prop(id, last));
+    expect(legacy.decision).toBe('ALLOW');
+    expect(legacy.evaluated.cashReserveFloorUsd).toBeUndefined();
+    acceptPolicy('owner', { ...DEFAULT_POLICY, minUnallocatedReservePct: 94, minSettlementReservePct: 5 });
+    const capped = evaluateRisk(prop(id, last));
+    expect(capped.decision).toBe('ALLOW');
+    expect(capped.evaluated).toMatchObject({ cashReserveFloorUsd: 9900, cashReserveHeadroomUsd: 100 });
+    expect(capped.sizing!.maxNotional * (1 + DEFAULT_POLICY.feeRate)).toBeLessThanOrEqual(100 + 1e-8);
+    expect(capped.sizing!.qty).toBeLessThan(legacy.sizing!.qty);
+  });
+  it('denies at the reserve floor and rejects invalid or unauthorized reserve policy changes', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, minUnallocatedReservePct: 95, minSettlementReservePct: 5 });
+    updateControl('owner', { mode: 'PAPER' });
+    ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const denied = evaluateRisk(prop(id, last));
+    expect(denied.decision).toBe('DENY');
+    expect(denied.reasonCodes).toContain('CASH_RESERVE_FLOOR_REACHED');
+    for (const invalid of [
+      { minUnallocatedReservePct: 96, minSettlementReservePct: 5 },
+      { minUnallocatedReservePct: -1 },
+      { minSettlementReservePct: Infinity },
+      { minSettlementReservePct: NaN },
+    ]) expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, ...invalid })).toThrow();
+    expect(() => acceptPolicy('bot', { ...DEFAULT_POLICY, minUnallocatedReservePct: 50, minSettlementReservePct: 5 })).toThrow(/owner/);
+  });
   it('enforces daily loss breaker, stop direction, duplicates, pause and emergency', () => {
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     evaluateRisk(prop(id, last)); // establishes start-of-day mark
