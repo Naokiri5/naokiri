@@ -6,6 +6,7 @@ import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState } from '../src/portfolio/ledger.js';
 import { setSetting } from '../src/core/settings.js';
+import { run } from '../src/db/db.js';
 
 const prop = (id: string, last: number, extra: any = {}) => ({ instrumentId: id, strategyId: 'trend_pullback', side: 'buy' as const, entryPrice: last, stopPrice: last * 0.97, idempotencyKey: `k${Math.random()}`, traceId: 't', ...extra });
 describe('Risk gate (Part 17)', () => {
@@ -81,6 +82,43 @@ describe('Risk gate (Part 17)', () => {
     expect(evaluateRisk(prop(id, last)).reasonCodes.join()).toMatch(/DAILY_LOSS_BREAKER/);
     ledger(PAPER_ACCOUNT, 'DEPOSIT', 5_000); // topping up does not reset the breaker
     expect(evaluateRisk(prop(id, last)).reasonCodes.join()).toMatch(/DAILY_LOSS_BREAKER/);
+  });
+  it('uses persisted positions for cooldown and rolling entry limits', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, postExitCooldownMs: 10000, stopLossCooldownMs: 30000, entryFrequencyWindowMs: 60000, maxEntriesPerWindow: 1 });
+    updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10000);
+    const now = Date.now();
+    run("INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,realized_pnl,fees,planned_risk,exit_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      'fixture-position', PAPER_ACCOUNT, id, 'crypto', 'LONG', 'trend_pullback', 0, last, last * 0.97, last * 0.97, '{}', 'CLOSED', now - 20000, now - 5000, -1, 0, 10, 'STOP');
+    const denied = evaluateRisk(prop(id, last), now);
+    expect(denied.reasonCodes).toContain('ASSET_POST_EXIT_COOLDOWN');
+    expect(denied.reasonCodes).toContain('ENTRY_FREQUENCY_CAP');
+    expect(denied.evaluated.assetCooldownUntilMs).toBe(now + 25000);
+    const later = evaluateRisk(prop(id, last), now + 60000);
+    expect(later.reasonCodes).not.toContain('ASSET_POST_EXIT_COOLDOWN');
+    expect(later.reasonCodes).not.toContain('ENTRY_FREQUENCY_CAP');
+  });
+  it('reduces sizing on drawdown and preserves hard breakers', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, adaptiveDrawdownSizing: true });
+    updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10000);
+    const now = Date.now(); const initial = evaluateRisk(prop(id, last), now);
+    expect(initial.evaluated.adaptiveAllocationMultiplier).toBe(1);
+    const day = new Date(now).toISOString().slice(0, 10);
+    const monday = new Date(now); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+    setSetting('marks2:' + PAPER_ACCOUNT, { day, week: monday.toISOString().slice(0, 10), sodPerf: 0, sowPerf: 0, hwmPerf: 300 });
+    const reduced = evaluateRisk(prop(id, last), now);
+    expect(reduced.evaluated.adaptiveAllocationMultiplier).toBe(0.65);
+    expect(reduced.sizing!.riskBudget).toBeCloseTo(initial.sizing!.riskBudget * 0.65);
+    expect(reduced.sizing!.qty).toBeLessThan(initial.sizing!.qty);
+    setSetting('marks2:' + PAPER_ACCOUNT, { day, week: monday.toISOString().slice(0, 10), sodPerf: 0, sowPerf: 0, hwmPerf: 1000 });
+    const halted = evaluateRisk(prop(id, last), now);
+    expect(halted.decision).toBe('DENY');
+    expect(halted.reasonCodes).toContain('ADAPTIVE_DRAWDOWN_HALT');
+    expect(halted.reasonCodes.join()).toContain('DRAWDOWN_CAPITAL_PRESERVATION');
+  });
+  it('rejects incomplete frequency policy and invalid anti-churn configuration', () => {
+    expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, maxEntriesPerWindow: 2 })).toThrow();
+    expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, postExitCooldownMs: -1 })).toThrow();
+    expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, adaptiveDrawdownSizing: 'true' })).toThrow();
   });
   it('denies strategies not promoted to PAPER', () => {
     freshDb(false); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
