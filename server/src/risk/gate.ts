@@ -86,6 +86,36 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const pending = all("SELECT id FROM orders WHERE account=? AND instrument=? AND status='PENDING_APPROVAL' AND purpose='ENTRY' AND client_order_id<>?", account, p.instrumentId, p.idempotencyKey);
   if (pending.length) deny.push('PENDING_ENTRY_ORDER_EXISTS');
   if (all("SELECT id FROM orders WHERE client_order_id=? AND status<>'PENDING_APPROVAL'", p.idempotencyKey).length) deny.push('DUPLICATE_REQUEST (idempotency key reused)');
+  // Derive throttles from persisted positions; no resettable in-memory counter.
+  const cooldown = pol.postExitCooldownMs === undefined ? 0 : pol.postExitCooldownMs;
+  const stopCooldown = pol.stopLossCooldownMs === undefined ? 0 : pol.stopLossCooldownMs;
+  const window = pol.entryFrequencyWindowMs, cap = pol.maxEntriesPerWindow;
+  if (![cooldown, stopCooldown].every(v => Number.isSafeInteger(v) && v >= 0 && v <= 604_800_000)
+      || (window === undefined) !== (cap === undefined)
+      || (window !== undefined && (!Number.isSafeInteger(window) || window < 1000 || window > 86_400_000))
+      || (cap !== undefined && (!Number.isSafeInteger(cap) || cap < 1 || cap > 1000))
+      || (pol.adaptiveDrawdownSizing !== undefined && typeof pol.adaptiveDrawdownSizing !== 'boolean')) {
+    deny.push('INVALID_ADAPTIVE_RISK_POLICY'); return out();
+  }
+  if (cooldown > 0 || stopCooldown > 0) {
+    const previous = get<{ closed_at: number; exit_reason: string | null }>(
+      "SELECT closed_at,exit_reason FROM positions WHERE account=? AND instrument=? AND status='CLOSED' ORDER BY closed_at DESC,id DESC LIMIT 1", account, p.instrumentId);
+    if (previous) {
+      if (!Number.isSafeInteger(previous.closed_at) || previous.closed_at <= 0 || previous.closed_at > nowTs) deny.push('INVALID_EXIT_HISTORY');
+      else {
+        const isStop = previous.exit_reason === 'STOP' || previous.exit_reason === 'TRAIL_STOP';
+        const until = previous.closed_at + (isStop ? Math.max(cooldown, stopCooldown) : cooldown);
+        ev.assetCooldownUntilMs = until;
+        if (nowTs < until) deny.push('ASSET_POST_EXIT_COOLDOWN');
+      }
+    }
+  }
+  if (window !== undefined && cap !== undefined) {
+    const count = get<{ n: number }>("SELECT COUNT(*) n FROM positions WHERE account=? AND opened_at>? AND opened_at<=?", account, nowTs-window, nowTs)!.n;
+    ev.recentFilledEntries = count;
+    if (get("SELECT 1 FROM positions WHERE account=? AND opened_at>? LIMIT 1", account, nowTs)) deny.push('INVALID_ENTRY_HISTORY');
+    if (count >= cap) deny.push('ENTRY_FREQUENCY_CAP');
+  }
   // correlation / concentration (conservative when unknown)
   let correlated = 0;
   for (const o of open) { const c = correlation(o.instrument, p.instrumentId); if (c == null || c >= pol.correlationThreshold) correlated++; }
@@ -100,7 +130,19 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   // Keep the top ask for the separate notional cap, which must be enforced at the executed price.
   const worstPermittedEntry = estEntry * (1 + pol.maxSlippageBps / 10_000);
   const perUnitLoss = worstPermittedEntry - conservativeStopFill + pol.feeRate * (worstPermittedEntry + conservativeStopFill);
-  const riskBudget = acct.equity * (pol.riskPerTradePct / 100);
+  // Reduce only; reuse persisted deposit-invariant high-water marks and loss streaks.
+  let allocationMultiplier = 1;
+  if (pol.adaptiveDrawdownSizing === true) {
+    if (!Number.isFinite(acct.drawdownPct) || acct.drawdownPct < 0 || !Number.isSafeInteger(acct.consecutiveLosses) || acct.consecutiveLosses < 0) {
+      deny.push('INVALID_DRAWDOWN_EVIDENCE'); return out();
+    }
+    if (acct.drawdownPct >= 8 || acct.consecutiveLosses >= 7) allocationMultiplier = 0;
+    else if (acct.drawdownPct >= 5 || acct.consecutiveLosses >= 5) allocationMultiplier = 0.35;
+    else if (acct.drawdownPct >= 2.5 || acct.consecutiveLosses >= 3) allocationMultiplier = 0.65;
+    ev.adaptiveAllocationMultiplier = allocationMultiplier;
+    if (allocationMultiplier === 0) deny.push('ADAPTIVE_DRAWDOWN_HALT');
+  }
+  const riskBudget = acct.equity * (pol.riskPerTradePct / 100) * allocationMultiplier;
   let qty = perUnitLoss > 0 ? riskBudget / perUnitLoss : 0;
   // The only financial authority is the canonical gate, re-evaluated inside the OMS
   // transaction. Treat the two optional reserves as disjoint logical cash portions.
@@ -113,7 +155,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
     deny.push('INVALID_CASH_RESERVE_POLICY');
     return out();
   }
-  let maxNotional = Math.min(acct.equity * (pol.maxPositionNotionalPct / 100), acct.cash * 0.98);
+  let maxNotional = Math.min(acct.equity * (pol.maxPositionNotionalPct / 100), acct.cash * 0.98) * allocationMultiplier;
   if (unallocatedPct + settlementPct > 0) {
     const floor = acct.equity * ((unallocatedPct + settlementPct) / 100);
     const cashHeadroom = acct.cash - floor;
