@@ -40,18 +40,18 @@ jobs:
         run: npm run build
       - name: Unit & integration tests (offline, deterministic)
         run: npm run qa -w server
-      # Reproducible shuffled P0 regressions on the same tested merge commit.
-      # These are targeted test runs, not independent full CI runs or live certification.
+      # Same local and CI P0 verification entrypoint, not a release certificate.
       - name: P0 reliability regressions (three shuffled runs)
-        working-directory: server
         env:
-          MIA_OFFLINE: '1'
-          MIA_AUTH_MODE: passphrase
-        run: |
-          for seed in 13701 13702 13703; do
-            echo "P0 regression seed: $seed"
-            npm exec -- vitest run --sequence.shuffle --sequence.seed="$seed" test/runtime-shutdown.test.ts test/brainos-wal-audit.test.ts
-          done
+          EXPECTED_SHA: ${{ github.sha }}
+        run: bash scripts/verify-brainos-phases.sh --p0-only
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: p0-offline-verification-logs
+          path: ${{ runner.temp }}/mia-brainos-verify.*/logs/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Web unit tests (status ribbon model)
         run: npm test -w web
       - uses: actions/upload-artifact@v4

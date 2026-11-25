@@ -151,3 +151,46 @@ Deferred / rejected imports:
 5. No promote-live-bounded script, Railway deployment, signing policy change or new API route installed. Environment exports in a shell do not roll back a deployed runtime. Release certification remains BLOCKED until independently authenticated evidence and actual adapters exist.
 
 Exact new head CI, independent review and merge readiness remain required. Do not claim production certification, live settlement or completed P0-P2 roadmap from these incremental PAPER changes.
+
+## Stack consolidation and offline verification (2026-11-25)
+
+Source: ten owner-provided consolidation and phase-verification PDFs. Baseline b2005c1 passed CI run 45592947368; main was a39ddaa597172619d8c897e49464910ebad6681f. GitHub compare confirms main is an ancestor (140 baseline commits ahead). Backup branch backup/pr-137-pre-consolidation-b2005c1 points to the baseline SHA.
+
+| PR | Pinned head | Consolidation disposition |
+| --- | --- | --- |
+| #128 | 90b94790799e0645803c21441d5a939004f6c71e | Ancestor |
+| #129 | ed84155125c87ecfd30715464de330a794c1a8e6 | Ancestor |
+| #130 | 6900d8e7cc5074e80086f9d01db54afd561fecac | Ancestor |
+| #131 | 756becc9dda48649795091aa9848b299e5a75694 | Diverged one commit; inspect its two changed files: all nonblank patch additions present in baseline, including exit freshness, remaining-lot rounding and regression cases. |
+| #132 | ddbb08f6f296c561698232108eb52c0abb9105c9 | Ancestor |
+| #134 | b03f95b01d30c765fc4a964d01f6f373f3158adb | Ancestor |
+| #135 | af8ac9770369313df6d2cd061de4737fea305611 | Ancestor |
+| #136 | c4f3bc8b6bd0c69d909073106284cfb36feaa190 | Diverged one commit; all nonblank patch additions across five files present, except two imports expanded to include additional symbols. Leader-only checkpoint recovery and continuing protection tests retained. |
+| #137 | b2005c1bd5fb5f3331cbe161aa4a63139bc495e9 | Canonical consolidation source |
+
+Ancestry is not feature certification. Patch review establishes absorption of the two divergent changes, not complete behavioral equivalence of every later edit. Do not cherry-pick identical changes or merge redundant branches. Retarget the existing draft #137 to main rather than duplicate its branch/PR; keep all original PRs open until the consolidated candidate actually passes checks, receives review and merges. Do not close unrelated backlog items.
+
+Implementation:
+- scripts/verify-brainos-phases.sh: explicit full local offline verification (secret scan, typecheck, production build, existing server and web suites, three shuffled P0 runs), plus --p0-only for existing CI. Checks exact expected SHA when supplied and rejects tracked worktree changes. Run via bash after npm ci. Isolated temporary data/home/tmp and allowlisted process environment prevent inherited application secrets, production data paths and opt-in live test flags from being passed to test commands. Only test logs retained on failure; no production endpoint probes or new release authorization.
+- Existing CI invokes the script in the P0 step and uploads failure logs. No competing workflow; existing full QA, dependency audit and Playwright jobs are retained.
+- Existing gates.test.ts checks the actual canonical mode authority with absent/false/true MIA_OWNER_LIVE_ACK, a synthetic certificate and permissive callback: all must reject BOUNDED_LIVE, preserve PAPER emergency halt and leave financial/audit/settings records unchanged.
+
+Phase evidence: 1 (build/AST) and 2 (deterministic PAPER/lease/shutdown) have baseline CI evidence, not current-candidate evidence yet. 3 external reservations/settlement and 4 health-gated DITAS adaptation are still incomplete. Existing backtest and replay fixtures are regression evidence, not historical market profitability or full autonomous prospective certification. 5 Railway volume persistence, Privy signing isolation, Cloudflare origin protection and 6 72-hour/30-day prospective evaluation remain unverified. Use existing /api/ready, actual API auth, canonical MIA_DATA_DIR and existing server/src/main.ts composition root. Do not use proposed non-existent routes, environment flags, promotion scripts, shell sleeps in lieu of state assertions, broad DB dumps or unauthenticated production POST probes.
+
+At baseline all three Vercel status links explicitly reported build-rate-limit upgrade links; this is not evidence of a current source compilation error. Older PR descriptions report earlier TS2688 failures. Do not remove required checks, modify deployment bindings, or claim deployment migration completed. Retain owner-directed Railway/Cloudflare/Privy target and independently review release checks. Exact new main-target merge CI, security review and deployment verification required; no live activation and no merge while incomplete.
+
+## Historical tape and causal replay foundation (2026-11-25)
+
+Eight supplied PDFs cover a historical event backtester, compressed tape reader, FAST/DEEP evaluators, proposed second CanonicalOMS and adapter factory, DITAS learner and roadmap. Baseline 8baa736 passed CI 45640357855; PR #137 targets main. All three Vercel checks remained failed.
+
+Implemented:
+- server/src/lab/tape-reader.ts: bounded streaming gzip NDJSON validation, strict venue/event schema, exact decimal-string BigInt conversion (1e9 scale), real boolean flags, safe integer timestamps and global monotonic chronology. Validate the suffix even if outside the requested filter window; full validation requires consuming the stream. Reject unknown/crossed/negative/malformed records and oversized lines. Caller-provided data is not authenticated market evidence.
+- server/src/lab/eventReplay.ts: single-venue/symbol, deterministic research-only execution-cost probes over typed iterable or async iterable tapes. Positive latency, bounded pending queue, later matching observation, bounded wait, no invented after-EOF fills, observed top-depth budget shared across due probes, conservative integer spread/slippage/fee estimates, streaming digest of input/observations/options. No orders, portfolio, strategy promotion or runtime authority. Trusted research callback, not arbitrary-code sandbox. Funding and launch events are not settled as cash flow. Existing candle backtest, exit capsule and Monte Carlo remain canonical; this is a complementary execution-evidence foundation, not a complete historical BrainOS backtest.
+- server/test/historical-replay.test.ts: compressed parsing, invalid records, suffix chronology, missing/malformed files, cancellation, determinism, delayed same-instrument observation, costs, depth contention, expiry and no EOF execution.
+
+Deferred:
+- Do not install the proposed parallel orchestrator_leases, canonical_orders, envelope_budgets, order_fills and financial ledger. Existing lease, OMS, orders, fills, ledger and risk authority remain canonical. The proposed epoch comparison alone lacks current lease ownership/expiry verification, automatic release after missing venue lookup is unsafe, and Number conversions can silently lose scaled integer precision. Native SQLite does not make a parallel authority safe.
+- Do not install a live adapter with caller-injected unlock callback or API credentials. Current BOUNDED_LIVE hard lock remains. Proposed in-memory simulator records do not survive crash and sanitizing client IDs can collide. Actual durable external reservations, authenticated settlement, scoped venue identity and cumulative fill reconciliation remain incomplete.
+- FAST/DEEP isolated strategy evaluation needs authentic on-chain/order-book/funding histories, existing FLIN safety, verified margin/fee mechanics and the existing risk/exit logic. No synthetic tape promotes strategies; no PnL or live parity asserted by probe results. No market dataset supplied.
+- DITAS already has source-verified calibration, recent version-aware PAPER outcomes and research-only learning observation. Proposed new learner tables and caller-labeled verified outcomes cannot establish provenance or permission; do not enable automatic parameter mutations or count owner-entered forecasts as calibrated trade-win probabilities. Health-gated learning and actual adaptation remain open.
+- Genuine soak, Railway persistent runtime, Cloudflare, Privy and deployment checks remain unverified. No deployment or authorization change. Exact new CI and review required; keep draft.
