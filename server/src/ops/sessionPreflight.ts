@@ -14,8 +14,7 @@ import { stepUpMethod } from '../security/stepUp.js';
 import { staleAfter, type EngineView } from './readiness.js';
 import { currentLease } from './lease.js';
 import { activeSessionBoundaries, durableSessionStatus, paperSpotEntryDenial, type BrainosSessionState } from './paperSpotEntry.js';
-import { sessionBoundaryUsage, type SessionBoundaryRow, type SessionBoundaryUsage } from './sessionBoundaries.js';
-import { accountState, PAPER_ACCOUNT } from '../portfolio/ledger.js';
+import { paperLiquidationValue, sessionBoundaryUsage, type SessionBoundaryRow, type SessionBoundaryUsage } from './sessionBoundaries.js';
 
 export const SESSION_MINDS = ['FAST', 'DEEP'] as const;
 export const SESSION_ENVIRONMENTS = ['PAPER', 'LIVE'] as const;
@@ -49,9 +48,10 @@ export interface PaperSpotSessionPreflight {
   /** Owner-set limits of the current session generation and their live usage; null while no session is open. */
   boundaries: null | {
     capitalLimitUsd: number; maxSessionLossUsd: number; startEquityUsd: number; setAt: number;
-    capitalUsedUsd: number; sessionPnlUsd: number | null; breachedAt: number | null; breachReason: string | null;
+    capitalUsedUsd: number; sessionPnlUsd: number | null; openRiskToStopsUsd: number | null;
+    breachedAt: number | null; breachReason: string | null;
   };
-  /** Current paper equity, used to suggest boundaries before Run; null when it cannot be verified. */
+  /** Current paper equity at liquidation value, used to suggest boundaries before Run; null when it cannot be verified. */
   paperEquityUsd: number | null;
 }
 
@@ -66,7 +66,7 @@ function boundaryCheck(state: BrainosSessionState, row: SessionBoundaryRow | nul
       detail: `The session reached its ${usd(row.max_loss_usd)} loss limit. New entries are stopped; open positions stay protected. Close the session to review it.` };
   }
   if (usage.sessionPnlUsd === null) {
-    return { ...base, status: 'UNVERIFIED', detail: 'A position price is missing, so the session loss cannot be verified. New entries wait until prices return.' };
+    return { ...base, status: 'UNVERIFIED', detail: 'A position price is missing or out of date, so the session loss cannot be verified. New entries wait until prices are current.' };
   }
   return { ...base, status: 'PASS',
     detail: `Capital in use ${usd(usage.capitalUsedUsd)} of ${usd(row.capital_limit_usd)}. Session P&L ${usd(usage.sessionPnlUsd)}; entries stop at a ${usd(row.max_loss_usd)} loss.` };
@@ -76,7 +76,7 @@ const DENIAL_DETAILS: Record<string, string> = {
   SESSION_OWNER_CONTROL_CHANGED: 'Paper controls changed after authorization. Close the session and authorize a new one.',
   STALE_OR_LOST_ENGINE_FENCE: 'The current engine lease does not authorize entries for this session.',
   SESSION_LOSS_LIMIT_REACHED: 'The session loss limit is reached. New entries are stopped.',
-  SESSION_LOSS_UNVERIFIABLE: 'Session loss cannot be verified while a position price is missing.',
+  SESSION_LOSS_UNVERIFIABLE: 'Session loss cannot be verified while a position price is missing or out of date.',
   SESSION_BOUNDARIES_MISSING: 'This session has no capital or loss limits.',
 };
 
@@ -229,7 +229,7 @@ export function paperSpotSessionPreflight(engine: EngineView & { instanceId?: st
     boundaries: boundaryRow && usage ? {
       capitalLimitUsd: boundaryRow.capital_limit_usd, maxSessionLossUsd: boundaryRow.max_loss_usd,
       startEquityUsd: boundaryRow.start_equity_usd, setAt: boundaryRow.set_at,
-      capitalUsedUsd: usage.capitalUsedUsd, sessionPnlUsd: usage.sessionPnlUsd,
+      capitalUsedUsd: usage.capitalUsedUsd, sessionPnlUsd: usage.sessionPnlUsd, openRiskToStopsUsd: usage.openRiskToStopsUsd,
       breachedAt: boundaryRow.breached_at, breachReason: boundaryRow.breach_reason,
     } : null,
     paperEquityUsd: verifiedEquity(at),
@@ -237,6 +237,6 @@ export function paperSpotSessionPreflight(engine: EngineView & { instanceId?: st
 }
 
 function verifiedEquity(at: number) {
-  const acct = accountState(PAPER_ACCOUNT, at);
-  return acct.marksMissing.length || !Number.isFinite(acct.equity) ? null : acct.equity;
+  const account = paperLiquidationValue(at);
+  return account.unverifiedMarks.length || !Number.isFinite(account.equityUsd) ? null : account.equityUsd;
 }

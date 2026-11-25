@@ -31,6 +31,7 @@ type SessionBoundaries = {
   setAt: number;
   capitalUsedUsd: number;
   sessionPnlUsd: number | null;
+  openRiskToStopsUsd: number | null;
   breachedAt: number | null;
   breachReason: string | null;
 };
@@ -238,7 +239,7 @@ function SessionPreflight({ mind, environment }: { mind: Mind; environment: Envi
           </label>
         </div>
         <p id={limitsId} className="hint" aria-live="polite">
-          {limitsProblem || 'Entries stop when open positions would exceed the capital limit, or when session losses reach the maximum.'}
+          {limitsProblem || 'MIA takes a new trade only if the session could still stay within the maximum loss when every open stop is hit. A price gap can still go past it; MIA then stops new entries.'}
         </p>
         <div className="row">
           <input
@@ -263,11 +264,13 @@ function SessionPreflight({ mind, environment }: { mind: Mind; environment: Envi
 
 function SessionBoundaryUsage({ boundaries }: { boundaries: SessionBoundaries }) {
   const pnl = boundaries.sessionPnlUsd;
+  const worst = pnl == null || boundaries.openRiskToStopsUsd == null ? null : pnl - boundaries.openRiskToStopsUsd;
   return <p className="hint" data-testid="session-boundaries">
     Capital in use {fmt.usd(boundaries.capitalUsedUsd)} of {fmt.usd(boundaries.capitalLimitUsd)} · Session P&amp;L{' '}
-    {pnl == null ? 'unverified' : fmt.usd(pnl)} · {boundaries.breachedAt
+    {pnl == null ? 'unverified' : fmt.usd(pnl)}
+    {worst != null && boundaries.openRiskToStopsUsd! > 0 && <> ({fmt.usd(worst)} if every stop is hit)</>} · {boundaries.breachedAt
       ? <Badge v={`Loss limit ${fmt.usd(boundaries.maxSessionLossUsd)} reached`} tone="b-bad" />
-      : <>entries stop at a {fmt.usd(boundaries.maxSessionLossUsd)} loss</>}
+      : <>loss limit {fmt.usd(boundaries.maxSessionLossUsd)}</>}
   </p>;
 }
 

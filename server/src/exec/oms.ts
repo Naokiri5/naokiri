@@ -16,7 +16,7 @@ import type { DecisionReport } from '../decision/engine.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { crashpoint } from './crashpoint.js';
 import { assertWriteFence, LeaseLostError, type LeaseFence } from '../ops/lease.js';
-import { paperSpotCapitalDenial, paperSpotEntryDenial } from '../ops/paperSpotEntry.js';
+import { paperSpotEntryDenial, paperSpotSizeDenial } from '../ops/paperSpotEntry.js';
 import { unreconciledPaperOrders } from './recovery.js';
 import { isShuttingDown } from '../ops/shutdown.js';
 import { recordPaperFill } from './fillEvents.js';
@@ -182,9 +182,6 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       if (!Number.isFinite(notional) || notional > fresh.sizing.maxNotional + 1e-9) {
         return { reason: `POSITION_NOTIONAL_LIMIT: fill ${notional.toFixed(2)}, limit ${fresh.sizing.maxNotional.toFixed(2)}` };
       }
-      // The owner's session capital boundary is checked at the executed notional, under the same write lock.
-      const capitalDenial = paperSpotCapitalDenial(notional, nowTs);
-      if (capitalDenial) return { reason: capitalDenial };
       // The canonical risk gate sized against a conservative entry. Defend that invariant again
       // using the actual depth-walk fill before writing any order, position or financial ledger row.
       const worstStopFill = fresh.sizing.conservativeStopFill;
@@ -196,6 +193,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       if (actualPlannedMaxLoss > fresh.sizing.remainingOpenRisk + 1e-9) {
         return { reason: 'EXECUTED_AGGREGATE_RISK_LIMIT: depth-walk fill exceeds the account risk budget' };
       }
+      // The owner's session capital and loss boundaries, at the executed fill and under the same write lock.
+      const boundaryDenial = paperSpotSizeDenial(notional, actualPlannedMaxLoss, nowTs);
+      if (boundaryDenial) return { reason: boundaryDenial };
       const fee = notional * pol.feeRate;
       const R = fill.price - s.stopLoss;
       const tgts = s.takeProfit.map((t) => ({ r: (t.price - fill.price) / R, fraction: t.fraction }));

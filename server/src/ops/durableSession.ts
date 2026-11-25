@@ -105,28 +105,43 @@ export function openPaperSpotSession(engine: EngineView & { instanceId?: string 
 export interface SessionLossHalt {
   session: DurableBrainosSession;
   boundaries: SessionBoundaryRow;
-  sessionPnlUsd: number;
+  /** Current verified session P&L; null when a mark is unverified now (the breach was latched earlier). */
+  sessionPnlUsd: number | null;
 }
 
+const runningSpotSession = () => {
+  const session = durableSessionStatus();
+  return session && session.state === 'RUNNING' && session.mind === 'SPOT_PAPER' ? session : null;
+};
+
 /**
- * REFLEX: when a running spot paper session's verified loss reaches the owner's limit, suspend new entries, cancel
- * pending approvals and record the breach, all in one transaction. It only reduces risk, so it needs no lease (like
+ * REFLEX: when a running spot paper session's verified loss reaches the owner's limit (or a breach was already latched
+ * by an entry check), suspend new entries and cancel pending approvals. The breach is latched in its own transaction
+ * first, so a failed state change can never reopen entries. It only reduces risk, so it needs no lease (like
  * suspendDurableEntries). Open positions keep their protective stops and exits; resuming requires the owner to close
  * the session and authorize a new one. Returns null when nothing changed.
  */
 export function enforceSessionLossBoundary(at = Date.now()): SessionLossHalt | null {
-  return tx(() => {
-    const session = durableSessionStatus();
-    if (!session || session.state !== 'RUNNING' || session.mind !== 'SPOT_PAPER') return null;
-    const boundaries = activeSessionBoundaries(session);
+  const latched = tx(() => {
+    const session = runningSpotSession();
     // A session without boundaries is already denied entries by paperSpotEntryDenial; there is no limit to trip.
+    const boundaries = session ? activeSessionBoundaries(session) : null;
     if (!boundaries) return null;
     const usage = sessionBoundaryUsage(boundaries, at);
-    if (!lossLimitReached(boundaries, usage)) return null;
-    markSessionBreach(boundaries, 'SESSION_LOSS_LIMIT_REACHED', at);
+    if (boundaries.breached_at === null) {
+      if (!lossLimitReached(boundaries, usage)) return null;
+      markSessionBreach(boundaries, 'SESSION_LOSS_LIMIT_REACHED', at);
+    }
+    return { sessionPnlUsd: usage.sessionPnlUsd };
+  });
+  if (!latched) return null;
+  return tx(() => {
+    const session = runningSpotSession();
+    const boundaries = session ? activeSessionBoundaries(session) : null;
+    if (!session || !boundaries || boundaries.breached_at === null) return null;
     cancelPaperPendingApprovals('session loss limit reached', at);
     const halted = persist(session, 'ENTRY_SUSPENDED_RISK_HALT', 'SESSION_LOSS_LIMIT_REACHED', at, { suspend_reason: 'RISK_HALT' });
-    return { session: halted, boundaries: activeSessionBoundaries(halted)!, sessionPnlUsd: usage.sessionPnlUsd! };
+    return { session: halted, boundaries, sessionPnlUsd: latched.sessionPnlUsd };
   });
 }
 

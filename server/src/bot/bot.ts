@@ -193,11 +193,12 @@ const protectionLane = () => runLane('protection', (lease) => {
 function sessionLossReflex() {
   const halt = enforceSessionLossBoundary();
   if (!halt) return;
-  const loss = Math.abs(halt.sessionPnlUsd).toFixed(2);
   const limit = halt.boundaries.max_loss_usd.toFixed(2);
-  journal('SYSTEM', `Session loss limit reached ($${loss} of $${limit}): new paper entries suspended`, undefined,
-    { sessionVersion: halt.session.version, fenceEpoch: halt.session.fence_epoch, sessionPnlUsd: halt.sessionPnlUsd, maxLossUsd: halt.boundaries.max_loss_usd });
-  notify('CRITICAL', 'Session loss limit reached', `The paper session lost $${loss}, reaching your $${limit} limit. MIA stopped new entries and keeps protecting open positions. Close the session to review it before authorizing a new one.`, 'session-boundary');
+  const now = halt.sessionPnlUsd === null ? 'unverified' : `${halt.sessionPnlUsd < 0 ? '-' : ''}$${Math.abs(halt.sessionPnlUsd).toFixed(2)}`;
+  journal('SYSTEM', `Session loss limit of $${limit} reached (session P&L now ${now}): new paper entries suspended`, undefined,
+    { sessionVersion: halt.session.version, fenceEpoch: halt.session.fence_epoch, sessionPnlUsd: halt.sessionPnlUsd,
+      maxLossUsd: halt.boundaries.max_loss_usd, breachedAt: halt.boundaries.breached_at });
+  notify('CRITICAL', 'Session loss limit reached', `The paper session reached your $${limit} loss limit (session P&L now ${now}). MIA stopped new entries and keeps protecting open positions. Close the session to review it before authorizing a new one.`, 'session-boundary');
   bus.publish('bot', botStatusView());
 }
 

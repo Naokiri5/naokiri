@@ -73,24 +73,39 @@ On #137, **Run Session** accepted only step-up; boundaries came solely from the 
 - **Run Session requires** `capitalLimitUsd` and `maxSessionLossUsd` (`ops/sessionBoundaries.ts`). Validation: positive,
   finite, loss ≤ capital, capital ≤ current paper equity, every open position priced. Stored per fence epoch in
   migration **v7** `brainos_session_boundaries`, in the same transaction that opens the session; any refusal rolls back.
-- **Capital boundary**: the entry cost of all open paper positions plus the executed fill notional must stay within the
-  limit. Checked in `exec/oms.ts` `submitEntry` after the depth-walk fill and before any write. Deny-only: sizing by the
-  risk gate is unchanged.
-- **Loss boundary**: session P&L = (equity − net deposits) − the value at Run, so deposits and withdrawals never count.
-  A missing mark makes the loss unverifiable: entries are denied, but no breach is recorded.
-- **REFLEX** (`enforceSessionLossBoundary`): when verified loss reaches the limit, the session moves to
-  `ENTRY_SUSPENDED_RISK_HALT`, the breach is recorded once, pending paper approvals are cancelled and a CRITICAL
-  notification is sent. It runs in the protection lane **after** `monitorPositions`, inside its own error guard, so it
-  can never delay an exit. Resuming requires the owner to close the session and authorize a new one, which takes a new
-  baseline.
+- **Capital boundary**: the entry notional of all open paper positions plus the executed fill notional must stay within
+  the limit. Fees are not capital; they count toward the loss. Deny-only: sizing by the risk gate is unchanged.
+- **Loss boundary**: session P&L is measured at liquidation value (fresh bid less the exit fee) and is
+  deposit-invariant: (equity − net deposits) − the same measure at Run, so deposits and withdrawals never count.
+- **Pre-trade loss headroom**: an entry is allowed only if the worst case stays within the limit: current session P&L,
+  minus the loss if every open position exits at its stop (with the policy stop-fill buffer and exit fee), minus the new
+  trade's planned maximum loss from the OMS depth walk. Both boundary checks run in `exec/oms.ts` `submitEntry` after
+  the executed fill is simulated and before any write.
+- **Fail closed**: a missing, stale (older than `maxExecQuoteAgeMs`) or future-dated quote for any open position makes
+  the loss unverifiable. Entries are denied, but no breach is recorded.
+- **Latched breach**: the first verified observation of loss at or beyond the limit, whether in an entry check or the
+  REFLEX, records the breach. It never clears for that session generation, even if the price recovers.
+- **REFLEX** (`enforceSessionLossBoundary`): latches the breach in its own transaction, then moves the session to
+  `ENTRY_SUSPENDED_RISK_HALT`, cancels pending paper approvals and sends a CRITICAL notification. If that state change
+  fails, the latch still blocks entries. It runs in the protection lane **after** `monitorPositions`, inside its own
+  error guard, so it can never delay an exit. Resuming requires the owner to close the session and authorize a new
+  one, which takes a new baseline.
+- **Limits of the guarantee**: the headroom check bounds the loss at planned stop fills. A gap through a stop (the
+  tests use a 40% gap) can still realize more than the limit; the REFLEX then stops new entries. Installations that
+  never created a session checkpoint keep their earlier controls and have no session boundaries until the owner
+  selects Paper or Approval or runs a session (existing #137 behavior).
 - **Visibility**: the preflight returns a `session-boundaries` check and a `boundaries` payload; Autopilot asks for both
   limits in the Run dialog (pre-filled with 50% of equity and 2% of equity) and shows capital in use and session P&L.
 - **Compatibility**: a session that was running before v7 has no boundaries row and is denied new entries
   (`SESSION_BOUNDARIES_MISSING`) until the owner closes it and runs a new one. Takeover already suspends sessions.
 
-Tests: `server/test/session-boundaries.test.ts` (validation and rollback, capital rejection without ledger writes,
-REFLEX with continued stop protection, missing marks, deposit invariance, legacy session, protection-lane REFLEX and
-notification, v6→v7 upgrade), plus updated `durable-session`, `brainos-paper-flow` and `api` tests.
+Tests: `server/test/session-boundaries.test.ts` covers validation and rollback, capital and headroom rejections without
+ledger writes, open-position capital and stop risk, and a position carried over from before Run. It also covers the gap
+REFLEX with continued stop protection, a breach that stays latched after recovery and after a failed state change,
+missing, stale and future-dated quotes, deposit invariance, a legacy session, the protection-lane REFLEX and its
+notification, and the v6→v7 upgrade. The `durable-session`, `brainos-paper-flow` and `api` tests were updated. An
+independent trading-risk review found no critical or high issues; its three medium findings (loss headroom, stale
+quotes, breach latch) are fixed as described above.
 
 ## 6. Remaining gaps, in recommended order
 
