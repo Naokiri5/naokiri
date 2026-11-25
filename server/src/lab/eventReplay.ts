@@ -59,20 +59,22 @@ export async function replayBookProbes(
     digest.update(encode(event) + '\n');
     const relevant = event.type === 'BOOK_TICK' && event.venue === o.venue && event.symbol === o.symbol;
     if (relevant) {
-      if (typeof event.bidFp !== 'bigint' || typeof event.askFp !== 'bigint' || typeof event.availableTopQtyFp !== 'bigint' ||
-          event.bidFp <= 0n || event.askFp < event.bidFp || event.availableTopQtyFp < 0n) throw new Error('REPLAY_INVALID_BOOK');
+      if (typeof event.bidFp !== 'bigint' || typeof event.askFp !== 'bigint' || typeof event.bidQtyFp !== 'bigint' ||
+          typeof event.askQtyFp !== 'bigint' || event.bidFp <= 0n || event.askFp < event.bidFp ||
+          event.bidQtyFp < 0n || event.askQtyFp < 0n) throw new Error('REPLAY_INVALID_BOOK');
       matchingBooks++;
     }
     // Expiry follows the virtual clock, including events for unrelated instruments.
-    // Consume displayed capacity only once across probes on the same observation.
-    let available = relevant ? event.availableTopQtyFp : 0n;
+    // Consume each side's displayed capacity only once across probes on the same observation:
+    // buys take ask depth, sells take bid depth.
+    const available = relevant ? { buy: event.askQtyFp, sell: event.bidQtyFp } : { buy: 0n, sell: 0n };
     while (pending.length && pending[0].dueTsMs <= last) {
       const p = pending[0];
       if (last - p.dueTsMs > o.maxWaitMs) { pending.shift(); finish(p, 'EXPIRED', null); continue; }
       if (!relevant) break;
       pending.shift();
-      if (p.qtyFp > available) { finish(p, 'INSUFFICIENT_DEPTH', last); continue; }
-      available -= p.qtyFp;
+      if (p.qtyFp > available[p.side]) { finish(p, 'INSUFFICIENT_DEPTH', last); continue; }
+      available[p.side] -= p.qtyFp;
       const price = p.side === 'buy'
         ? ceilDiv(event.askFp * (BPS + BigInt(o.slippageBps)), BPS)
         : event.bidFp * (BPS - BigInt(o.slippageBps)) / BPS;

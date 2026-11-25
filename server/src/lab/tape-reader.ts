@@ -4,7 +4,8 @@ import { TextDecoder } from 'node:util';
 import { z } from 'zod';
 
 /** Research-only historical evidence. Units are 1e9 fixed point, not floats.
- * A tape is caller-supplied, not authenticated venue evidence.
+ * A tape is caller-supplied, not authenticated venue evidence. A book tick carries the displayed top-of-book quantity
+ * for each side: buys can only consume ask depth and sells only bid depth.
  */
 const fp = z.string().regex(/^(0|[1-9][0-9]{0,38})$/).transform(v => BigInt(v));
 const signedFp = z.string().regex(/^(0|-?[1-9][0-9]{0,38})$/).transform(v => BigInt(v));
@@ -14,7 +15,7 @@ const symbol = z.string().regex(/^[A-Za-z0-9._:/-]{1,128}$/);
 const bps = z.number().int().min(0).max(10_000);
 const book = z.strictObject({
   type: z.literal('BOOK_TICK'), tsMs: ts, venue, symbol,
-  bidFp: fp, askFp: fp, availableTopQtyFp: fp,
+  bidFp: fp, askFp: fp, bidQtyFp: fp, askQtyFp: fp,
 }).refine(v => v.bidFp > 0n && v.askFp >= v.bidFp);
 const funding = z.strictObject({
   type: z.literal('FUNDING_TICK'), tsMs: ts, venue: z.literal('BINANCE_FUTURES'),

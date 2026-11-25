@@ -7,9 +7,9 @@ import { MAX_TAPE_LINE_BYTES, streamCompressedMarketTape, type HistoricalEvent }
 import { replayBookProbes, type ReplayObservation } from '../src/lab/eventReplay.js';
 
 const fp = 1_000_000_000n;
-const book = (tsMs: number, ask = 100n * fp, quantity = 2n * fp, symbol = 'BTCUSDT') => ({
+const book = (tsMs: number, ask = 100n * fp, quantity = 2n * fp, symbol = 'BTCUSDT', bidQuantity = quantity) => ({
   type: 'BOOK_TICK' as const, venue: 'BINANCE_SPOT' as const, symbol, tsMs,
-  bidFp: ask - fp, askFp: ask, availableTopQtyFp: quantity,
+  bidFp: ask - fp, askFp: ask, bidQtyFp: bidQuantity, askQtyFp: quantity,
 });
 const encode = (v: unknown) => JSON.stringify(v, (_, value) => typeof value === 'bigint' ? value.toString() : value);
 async function collect(path: string, opts?: Parameters<typeof streamCompressedMarketTape>[1]) {
@@ -41,7 +41,9 @@ describe('compressed historical tape evidence', () => {
     { ...book(10), tsMs: 1.5 },
     { ...book(10), venue: 'UNKNOWN' },
     { ...book(10), bidFp: 200n * fp },
-    { ...book(10), availableTopQtyFp: -1n },
+    { ...book(10), askQtyFp: -1n },
+    { ...book(10), bidQtyFp: -1n },
+    { ...book(10), availableTopQtyFp: 1n },
     { ...book(10), askFp: 100 },
     { ...book(10), askFp: '0x100' },
     { ...book(10), type: 'UNKNOWN' },
@@ -93,6 +95,21 @@ describe('causal historical book replay', () => {
     const result = await replayBookProbes([book(100), book(101), book(120, 100n * fp, fp)], options,
       event => event.tsMs < 120 ? { side: 'buy', qtyFp: fp } : null);
     expect(result).toMatchObject({ probes: 2, observed: 1, insufficient: 1 });
+  });
+  it('consumes ask depth for buys and bid depth for sells, each at most once per observation', async () => {
+    // Deep ask (5), thin bid (1): two sells cannot both fill, but buys are unaffected by the thin bid.
+    const thinBid = book(120, 100n * fp, 5n * fp, 'BTCUSDT', fp);
+    const sides = ['sell', 'sell', 'buy', 'buy'] as const;
+    const observations: ReplayObservation[] = [];
+    let call = 0;
+    const result = await replayBookProbes([book(100), book(101), book(102), book(103), thinBid], options,
+      event => event.tsMs < 120 ? { side: sides[call++], qtyFp: fp } : null, row => observations.push(row));
+    expect(result).toMatchObject({ probes: 4, observed: 3, insufficient: 1 });
+    expect(observations.map(({ side, status }) => [side, status])).toEqual([
+      ['sell', 'OBSERVED'], ['sell', 'INSUFFICIENT_DEPTH'], ['buy', 'OBSERVED'], ['buy', 'OBSERVED'],
+    ]);
+    // Sells execute at the bid less slippage, rounded down against the seller.
+    expect(observations[0].priceFp).toBe(98_950_500_000n);
   });
   it('expires stale probes and rejects reversed clocks and invalid latency', async () => {
     const signal = () => ({ side: 'sell' as const, qtyFp: fp });
