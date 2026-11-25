@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { all, closeDb, openDb, run } from '../src/db/db.js';
+import { all, closeDb, openDb, run, tx } from '../src/db/db.js';
 import { audit, verifyAuditChain } from '../src/core/audit.js';
-import { acquireOrRenewLease, currentLease, ownsLease } from '../src/ops/lease.js';
-import { cashBalance, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
+import { acquireOrRenewLease, assertWriteFence, currentLease, ownsLease } from '../src/ops/lease.js';
+import { cashBalance, ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { requirePaperSpotSession } from '../src/ops/durableSession.js';
 import { inspectLeaseWitness } from '../src/ops/leaseWitness.js';
 
@@ -140,5 +140,95 @@ describe('BrainOS canonical WAL audit evidence (Q42/Q48 partial coverage)', () =
     expect(currentLease('engine')).toEqual(successor);
     expect(verifyAuditChain().ok).toBe(true);
   });
+
+  it.skipIf(process.platform === 'win32')('fences a real suspended leader after another process takes over its expired lease', async () => {
+    const script = `
+      import { openDb, closeDb, tx } from './src/db/db.ts';
+      import { acquireOrRenewLease, assertWriteFence, LeaseLostError } from './src/ops/lease.ts';
+      import { ledger, PAPER_ACCOUNT } from './src/portfolio/ledger.ts';
+      import { audit } from './src/core/audit.ts';
+      import { writeSync } from 'node:fs';
+      openDb(process.argv[1]);
+      const fence = acquireOrRenewLease('engine', 'suspended-fixture', 3000);
+      if (!fence) throw new Error('fixture did not acquire the lease');
+      tx(() => {
+        assertWriteFence(fence);
+        ledger(PAPER_ACCOUNT, 'DEPOSIT', 100, 'leader-committed');
+        audit('fixture', 'LEADER_COMMITTED');
+      });
+      process.stdin.once('data', () => {
+        try {
+          tx(() => {
+            assertWriteFence(fence);
+            ledger(PAPER_ACCOUNT, 'DEPOSIT', 999, 'stale-leader');
+            audit('fixture', 'STALE_LEADER_WRITE');
+          });
+          writeSync(1, 'STALE_WRITE_ACCEPTED');
+          closeDb(); process.exit(2);
+        } catch (error) {
+          if (!(error instanceof LeaseLostError)) throw error;
+          writeSync(1, 'STALE_WRITE_FENCED');
+          closeDb(); process.exit(0);
+        }
+      });
+      writeSync(1, 'LEASE_READY');
+      process.stdin.resume();
+    `;
+    const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script, file], {
+      cwd: fileURLToPath(new URL('../', import.meta.url)),
+      env: { ...process.env, MIA_OFFLINE: '1', MIA_AUTH_MODE: 'passphrase' },
+      stdio: ['pipe', 'pipe', 'pipe'], shell: false,
+    });
+    let output = ''; let ended = false;
+    child.stdout.on('data', chunk => { output += String(chunk); });
+    child.stderr.on('data', chunk => { output += String(chunk); });
+    child.stdin.on('error', () => { /* checked through process exit */ });
+    const exited = new Promise<{code: number | null; signal: NodeJS.Signals | null}>((resolve, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => { ended = true; resolve({ code, signal }); });
+    });
+    void exited.catch(() => {});
+    const watchdog = setTimeout(() => child.kill('SIGKILL'), 20_000);
+    try {
+      const deadline = Date.now() + 10_000;
+      while (!output.includes('LEASE_READY')) {
+        if (ended || Date.now() >= deadline) throw new Error('lease fixture failed to start: ' + output);
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(child.kill('SIGSTOP')).toBe(true);
+      const original = currentLease('engine')!;
+      expect(original.holder).toBe('suspended-fixture');
+      expect(cashBalance()).toBe(100);
+      // Wait for actual lease expiry, then the test process competes for the same SQLite lease.
+      // No synthetic clock advance and no second database.
+      let successor = acquireOrRenewLease('engine', 'successor-fixture', 10_000);
+      while (!successor) {
+        if (Date.now() >= deadline) throw new Error('successor failed to acquire expired lease');
+        await new Promise(resolve => setTimeout(resolve, 25));
+        successor = acquireOrRenewLease('engine', 'successor-fixture', 10_000);
+      }
+      expect(successor.acquired_at).toBeGreaterThan(original.expires_at);
+      expect(ownsLease(original)).toBe(false);
+      tx(() => {
+        assertWriteFence(successor!);
+        ledger(PAPER_ACCOUNT, 'DEPOSIT', 200, 'successor-committed');
+        audit('fixture', 'SUCCESSOR_COMMITTED');
+      });
+      child.stdin.write('attempt');
+      expect(child.kill('SIGCONT')).toBe(true);
+      expect(await exited, output).toEqual({ code: 0, signal: null });
+      expect(output).toContain('STALE_WRITE_FENCED');
+      expect(output).not.toContain('STALE_WRITE_ACCEPTED');
+      expect(cashBalance()).toBe(300);
+      expect(all('SELECT action FROM audit_log WHERE actor=? ORDER BY id', 'fixture'))
+        .toEqual([{ action: 'LEADER_COMMITTED' }, { action: 'SUCCESSOR_COMMITTED' }]);
+      expect(currentLease('engine')?.holder).toBe('successor-fixture');
+      expect(verifyAuditChain().ok).toBe(true);
+    } finally {
+      clearTimeout(watchdog);
+      if (!ended) child.kill('SIGKILL');
+      await exited.catch(() => {});
+    }
+  }, 30000);
 
 });
