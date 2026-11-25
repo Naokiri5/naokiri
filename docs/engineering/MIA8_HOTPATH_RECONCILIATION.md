@@ -85,3 +85,28 @@ Source: seven owner-provided PDFs, priorities 1–8. Baseline f75d66c passed CI 
 | 8 Railway/Privy boundary | Preserve existing hard LIVE lock and release gates. A writable directory and configured Privy identifiers alone do not establish volume persistence, least-privilege policy enforcement, or wallet authorization. No production promotion script or deployment changes. |
 
 The proposed external-order state machine has no explicit fence in its ReserveOrderInput contract; callbacks for ledger and protective-stop writes must not introduce nontransactional side effects. Require definitive venue status and authenticated cumulative executions, not timeout or missing order evidence, before releasing reserved funds. The reconciliation additions are PAPER-only, not full external order recovery or multi-sleeve parity. Do not merge until exact new head/merge CI is verified; LIVE remains locked.
+
+## Runtime lifecycle and deployment safety reconciliation (2026-11-25)
+
+Source: fifteen owner PDFs covering shutdown, startup recovery, boot/OMS tests, adapter factory, readiness, burn-in manifest, verification scripts, environment template, runbook and PR checklist. Baseline 9d15b1b passed CI run 45541731006.
+
+Implemented in canonical runtime:
+- ops/shutdown.ts: one-way process-local drain latch. Not a second session authority; existing durable session and lease still control entries.
+- exec/oms.ts: deny new entries before evaluation and inside the existing write transaction; do not enqueue new approvals while draining. Do not disable existing position exits. This is PAPER behavior; no external reservations are claimed.
+- main.ts: shared startup promise, register SIGINT/SIGTERM before waiting for app construction/listen, avoid scheduler start after latch closes, reuse drainBot. Repeated signals do not start another drain. An undrained engine exits nonzero without explicitly closing the active SQLite handle; lease expiration and existing recovery govern the next process. After successful engine and HTTP drain, wait for the resumable knowledge-ingestion queue, request PASSIVE WAL checkpoint, and close the canonical DB. A busy/partial checkpoint retains committed frames; no forced truncation while another process may hold readers.
+- bot/bot.ts: refuse scheduler restart during shutdown. ops/readiness.ts: existing /api/ready returns 503 while draining; /api/health retains its liveness behavior.
+- server/test/oms.test.ts: regression of pre-transaction shutdown race, no new orders/approvals and continuing protective exits. server/test/runtime-shutdown.test.ts: actual latch and HTTP readiness transition (Fastify injection). Actual OS signal timing, active SSE/ingestion drain, Railway rolling replacement and power-loss/restart tests remain pending; existing WAL recovery coverage is separate.
+
+Reconciliation decisions:
+| Proposal | Decision |
+| --- | --- |
+| Express composition root, better-sqlite3, second OMS and worker stack | Reject replacement; current Fastify buildApp, main.ts, node:sqlite migrations, exec/oms.ts, bot scheduler and lease remain canonical. |
+| Startup external-order reconciler | Retain existing takeover integrity and durable session recovery. Missing venue lookup after retries is not proof of non-delivery. Never automatically reject or free ambiguous external reservations without definitive authenticated evidence and fenced ownership. External polling/settlement remains unimplemented. |
+| Shutdown after adapter timeout | Do not explicitly close SQLite beneath active operations or claim success. Retain durable unresolved state and fail nonzero. No real adapter calls exist in this branch. |
+| Adapter factory | Do not import simulated TESTNET acknowledgements as genuine venue evidence or instantiate live clients based on a manifest digest. Existing PAPER simulator and hard LIVE mode denial remain. |
+| Readiness and certification | Reuse /api/ready and qa/gates.ts; no second health route or per-request expensive full integrity scan. Existing takeover verifies audit/memory and ledger. Genuine independently attested 72h soak remains pending. |
+| Manifest builder | Caller-supplied SHA/timestamps and fallback venue equity equal to internal equity cannot independently prove parity or elapsed unattended operation; no release-authorizing digest produced. |
+| Local bootstrap/CI scripts | Existing CI already binds actual event SHA and runs workspace checks. Do not manufacture missing module files or synthetic certification artifacts. |
+| Environment and Railway runbook | Current database path derives from MIA_DATA_DIR/mia.db and current HTTP settings use MIA_PORT/MIA_HOST. Proposed MIA_SQLITE_PATH and unlock flags are not canonical. Do not deploy, inject signing keys, or change service configuration without verified runtime and security gates. |
+
+PR checklist: preserve prior code and PAPER behavior; exact-head/merge CI required; actual SIGTERM integration and multi-process recovery evidence required; external OMS reservation/partial-fill/venue parity, per-engine exposure, DITAS health-gated learning, genuine soak and Privy wallet-signing authorization remain open. No real-money authorization or deployment changes. Keep draft.
