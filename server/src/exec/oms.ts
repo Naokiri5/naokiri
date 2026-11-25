@@ -18,6 +18,7 @@ import { crashpoint } from './crashpoint.js';
 import { assertWriteFence, LeaseLostError, type LeaseFence } from '../ops/lease.js';
 import { paperSpotEntryDenial } from '../ops/paperSpotEntry.js';
 import { unreconciledPaperOrders } from './recovery.js';
+import { isShuttingDown } from '../ops/shutdown.js';
 import { recordPaperFill } from './fillEvents.js';
 
 /**
@@ -133,6 +134,7 @@ function simulateExitFill(instrumentId: string, qty: number, bufferPct: number, 
 
 /** Entry submission with Part 29 L5 last-moment validation. */
 export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', executionTs?: number, fence?: LeaseFence): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
+  if (isShuttingDown()) return { ok: false, reason: 'PROCESS_SHUTTING_DOWN' };
   const t0 = performance.now();
   const s = report;
   const coid = `entry-${report.candidateId}`;
@@ -147,6 +149,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
     crashpoint('entry.preTx');
     try { return tx(() => {
       assertWriteFence(fence);
+      if (isShuttingDown()) return { conflict: 'PROCESS_SHUTTING_DOWN' };
       // Check current order state and run the canonical risk gate under the same SQLite write lock as the fill.
       const current = get<ApprovalOrder>('SELECT * FROM orders WHERE client_order_id=?', coid);
       if (existing && (!current || current.id !== existing.id || !matchesApproval(current, report))) {
@@ -242,6 +245,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
   return { ok: true, orderId, positionId: posId };
 
   function sessionDenial(at: number, order?: ApprovalOrder) {
+    if (isShuttingDown()) return 'PROCESS_SHUTTING_DOWN';
     return paperSpotEntryDenial(fence ?? null, at, entryEvidenceAt(report, at, order?.created_at), inSpotScope(report));
   }
 
@@ -280,12 +284,13 @@ function inSpotScope(report: DecisionReport) {
 
 /** APPROVAL mode: queue a pending order for the owner. */
 export function queueForApproval(report: DecisionReport, fence?: LeaseFence) {
+  if (isShuttingDown()) return null;
   const coid = `entry-${report.candidateId}`;
   if (report.decision !== 'APPROVED_FOR_USER_CONFIRMATION') return null;
   const id = tx(() => {
     assertWriteFence(fence);
     const nowTs = Date.now();
-    if (paperSpotEntryDenial(fence ?? null, nowTs, entryEvidenceAt(report, nowTs), inSpotScope(report))) return null;
+    if (isShuttingDown() || paperSpotEntryDenial(fence ?? null, nowTs, entryEvidenceAt(report, nowTs), inSpotScope(report))) return null;
     const { mode, emergency, pausedNewOrders } = getControl();
     if (emergency || pausedNewOrders || (mode !== 'PAPER' && mode !== 'APPROVAL')) return null;
     if (unreconciledPaperOrders()) return null;
