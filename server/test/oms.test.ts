@@ -11,7 +11,10 @@ import { paperFillEvents } from '../src/exec/fillEvents.js';
 import { paperChoiceOutcomes } from '../src/ditas/execution.js';
 import { reconcile, calendar } from '../src/portfolio/calendar.js';
 import { verifyAuditChain } from '../src/core/audit.js';
-import { run, all, get, J } from '../src/db/db.js';
+import { run, all, get, J, closeDb, openDb } from '../src/db/db.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { walkBook, QUALITY_LIMITS } from '../src/market/quality.js';
 import type { DecisionReport } from '../src/decision/engine.js';
 import { acquireOrRenewLease, type LeaseFence } from '../src/ops/lease.js';
@@ -91,6 +94,33 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     expect(openPositions()).toHaveLength(0);
     expect(accountState().cash).toBe(10_000);
     expect(paperFillEvents(0, 5).events).toHaveLength(0);
+  });
+  it('keeps the post-stop cooldown and filled-entry frequency cap across a WAL reopen', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mia-antichurn-'));
+    const file = join(dir, 'paper.sqlite');
+    try {
+      freshDb(true, file);
+      acceptPolicy('owner', { ...DEFAULT_POLICY, postExitCooldownMs: 10000, stopLossCooldownMs: 30000,
+        entryFrequencyWindowMs: 60000, maxEntriesPerWindow: 1 });
+      updateControl('owner', { mode: 'PAPER' });
+      ledger(PAPER_ACCOUNT, 'DEPOSIT', 10000);
+      expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+      setBook(id, last * 0.96);
+      monitorPositions();
+      expect(openPositions()).toHaveLength(0);
+      expect(reconcile().ok).toBe(true);
+      const cash = accountState().cash;
+      closeDb(); openDb(file);
+      const denied = submitEntry(report(id, last * 0.96), 'bot');
+      expect(denied.ok).toBe(false);
+      expect(denied.reason).toContain('ASSET_POST_EXIT_COOLDOWN');
+      expect(denied.reason).toContain('ENTRY_FREQUENCY_CAP');
+      expect(accountState().cash).toBe(cash);
+      expect(openPositions()).toHaveLength(0);
+      expect(reconcile().ok).toBe(true);
+    } finally {
+      closeDb(); rmSync(dir, { recursive: true, force: true });
+    }
   });
   it('rolls back a fill envelope with the failed OMS transaction', () => {
     const entry = report(id, last);
