@@ -12,7 +12,7 @@ export type PrivyPublicConfig = {
 export function PrivyShell({ appId, children }: { appId: string; children: ReactNode }) {
   return <PrivyProvider appId={appId} config={{
     loginMethods: ['wallet'],
-    appearance: { theme: 'dark', accentColor: '#4f8cff', showWalletLoginFirst: true },
+    appearance: { theme: 'light', accentColor: '#2B2430', logo: '/brand/mia-compact-black.webp', showWalletLoginFirst: true },
     embeddedWallets: {
       ethereum: { createOnLogin: 'off' },
       solana: { createOnLogin: 'off' },
@@ -83,7 +83,7 @@ export function WalletLogin({ appId, onDone }: { appId: string; onDone: () => vo
   };
   return <main className="mia-wallet-login"><section className="mia-wallet-card" aria-labelledby="mia-wallet-heading">
     <div className="mia-wallet-mark" aria-hidden="true">M</div>
-    <div className="mia-wallet-eyebrow">MIA · SECURE ACCESS</div>
+    <div className="mia-wallet-eyebrow">MIA AI · Secure access</div>
     <h1 id="mia-wallet-heading">Connect your wallet</h1>
     <p>Sign in to the MIA command center using your Privy-connected wallet. No passphrase or seed phrase required.</p>
     <button className="primary mia-wallet-button" disabled={!ready || busy || loggingOut} onClick={start}>
@@ -96,6 +96,7 @@ export function WalletLogin({ appId, onDone }: { appId: string; onDone: () => vo
     {error && <div className="banner stale" role="alert">{error}</div>}
     <div className="mia-wallet-security"><span>Verified wallet login</span><span>Owner access protected</span><span>LIVE trading locked</span></div>
     <p className="hint">Wallets are for identity only. MIA will not sign transactions, transfer funds or export keys.</p>
+    <a className="mia-wallet-back" href="/">Back to the MIA AI home page</a>
   </section></main>;
 }
 
