@@ -67,6 +67,11 @@ knowledge A–F, audit log). A separate "BrainOS orchestrator" would duplicate t
 
 ## 5. Increment delivered here: owner-set session boundaries + REFLEX
 
+> **Superseded (2026-11-25).** PR #139 merged a canonical trading mandate (`ops/tradingMandate.ts`, migration 7) into
+> #137 with its own capital ceiling. The separate boundaries table below duplicated that authority and used the same
+> migration number, so it was removed from this branch. Its loss-limit ideas are tracked as W12 in
+> `docs/BRAINOS_V2_COMPONENT_INVENTORY.md`, to be added to the mandate. The text below is kept as design history.
+
 The brief makes the owner responsible for "authorizing a session and establishing capital and risk boundaries."
 On #137, **Run Session** accepted only step-up; boundaries came solely from the account-wide risk policy.
 
@@ -118,13 +123,13 @@ logic without any financial authority. It never opens the database, the OMS, the
 | Candle validation | `lab/backtest.ts` `assertStrategyHistory` (extracted, unchanged) | Same checks as the backtester |
 | Sizing | Formula of `risk/gate.ts` | `simulatedEntrySizing`; a parity test compares it with `evaluateRisk` |
 | Entry checks | Same rule set as the risk gate and OMS | Spread, slippage, price through stop, notional cap at the executed price, per-trade risk, cash |
-| Session limits | `ops/sessionBoundaries.ts` `evaluateBoundaryEntry` (extracted, unchanged) | Capital and loss headroom; latched loss limit stops new entries |
+| Session limits | Same rule as `ops/tradingMandate.ts` `mandateCapitalDenial` | Open cost + realized loss + entry cost (fees included) within the authorized capital. Optional `maxSessionLossUsd` models the proposed W12 extension (headroom and latched loss limit) |
 | Exits | `lab/exits.ts` `stepExit` (shared with the paper OMS) | Against the bid; an exit larger than displayed bid depth is deferred, never invented |
 | Execution | Causal book replay | First matching book at or after signal + latency, within max wait; buys use ask depth |
 
 The report gives equity at liquidation value, drawdown, trades in USD and R (via the backtester's `stats`), rejection
 counts by reason, the loss-limit breach and a determinism hash. `npm run simulate -- --strategy <id> --candles <json>
---tape <ndjson.gz> --symbol <s> --cash <usd> --capital <usd> --max-loss <usd>` runs it offline.
+--tape <ndjson.gz> --symbol <s> --cash <usd> --capital <usd> [--max-loss <usd>]` runs it offline.
 
 Not modeled: worker/QCI consensus, the decision engine, cross-venue checks, cooldowns, correlation, adaptive sizing,
 multiple instruments and funding settlement. Results are research evidence about a strategy capsule and its execution

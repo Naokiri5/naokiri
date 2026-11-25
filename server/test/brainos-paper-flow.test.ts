@@ -7,19 +7,46 @@ import { config } from '../src/config.js';
 import { verifyAuditChain } from '../src/core/audit.js';
 import { updateControl } from '../src/core/mode.js';
 import { all, closeDb, get, openDb } from '../src/db/db.js';
+import { decide } from '../src/decision/engine.js';
 import { paperChoiceOutcomes } from '../src/ditas/execution.js';
 import { memoryEvents } from '../src/ditas/memory.js';
 import { paperFillEvents } from '../src/exec/fillEvents.js';
 import { monitorPositions, submitEntry } from '../src/exec/oms.js';
+import { buildContext } from '../src/market/scanner.js';
 import { market } from '../src/market/store.js';
 import { finishDurableClose, openPaperSpotSession, requestPaperSpotClose } from '../src/ops/durableSession.js';
 import { acquireOrRenewLease } from '../src/ops/lease.js';
 import type { EngineView } from '../src/ops/readiness.js';
 import { reconcile } from '../src/portfolio/calendar.js';
 import { cashBalance, ledger, openPositions, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
+import { runConsensus } from '../src/qci/coordinator.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
+import type { Candidate } from '../src/workers/types.js';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
-import { eligiblePaperDecision as eligibleDecision } from './paperDecision.js';
+
+async function eligibleDecision(instrument: ReturnType<typeof seedInstrument>) {
+  const { inst, last } = instrument;
+  const candidate: Candidate = {
+    id: `paper-flow-${inst.symbol}`, traceId: `paper-flow-trace-${inst.symbol}`, eventId: `paper-flow-event-${inst.symbol}`,
+    instrumentId: inst.id, symbol: inst.symbol, base: inst.base, market: 'crypto', venue: 'binance',
+    strategyId: 'trend_pullback', strategyVersion: '1.0.0', interval: '1h', regime: 'TREND_UP', createdAt: Date.now(),
+    signal: {
+      direction: 'long', entryRef: last, stop: last * 0.95, targets: [{ r: 2, fraction: 1 }],
+      maxHoldBars: 48, trailAfterR: 1, trigger: 'fixture entry', invalidation: 'stop hit', reasons: ['fixture signal'],
+    },
+  };
+  const context = buildContext(candidate);
+  const observed = await runConsensus(context);
+  const report = decide(candidate, context, {
+    ...observed,
+    state: 'STRONG_CONSENSUS',
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    weighted_opposition: 0,
+    domains: observed.domains.map(domain => ({ ...domain, score: 1, support: 1, oppose: 0, abstain: 0 })),
+  }, { trades: 100, expectancyR: 0.2 }, 0);
+  expect(report).toMatchObject({ decision: 'PAPER_TRADE', risk: { decision: 'ALLOW' } });
+  return report;
+}
 
 let dbDir: string | undefined;
 afterEach(() => {
@@ -59,7 +86,7 @@ describe('BrainOS spot paper evidence flow', () => {
     try {
       // Exercise the production opener without calling network services or changing the test sign-in mode.
       config.offline = false;
-      session = openPaperSpotSession(engine, fence, { capitalLimitUsd: 5_000, maxSessionLossUsd: 500 }, start);
+      session = openPaperSpotSession(engine, fence, { capitalCeiling: 5_000, durationHours: 24 }, start);
       expect(session).toMatchObject({ state: 'RUNNING', environment: 'PAPER', mind: 'SPOT_PAPER' });
     } finally {
       config.offline = offline;

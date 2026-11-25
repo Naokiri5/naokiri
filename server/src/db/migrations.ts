@@ -141,16 +141,16 @@ const MIGRATIONS: string[] = [
     reason TEXT NOT NULL, UNIQUE(bundle_id,decision_id)
   );
   `,
-  /* 7 — BrainOS session boundaries: the owner's capital and loss limits for each authorized paper session (one row per
-     fence epoch). They can only block entries; the canonical risk gate, OMS and ledger keep their authority. */ `
-  CREATE TABLE brainos_session_boundaries (
-    session_id TEXT NOT NULL REFERENCES brainos_sessions(session_id), fence_epoch INTEGER NOT NULL,
-    capital_limit_usd REAL NOT NULL CHECK(capital_limit_usd > 0),
-    max_loss_usd REAL NOT NULL CHECK(max_loss_usd > 0 AND max_loss_usd <= capital_limit_usd),
-    start_equity_usd REAL NOT NULL CHECK(start_equity_usd > 0), start_performance_usd REAL NOT NULL,
-    set_at INTEGER NOT NULL, breached_at INTEGER, breach_reason TEXT,
-    PRIMARY KEY(session_id,fence_epoch)
-  );
+  /* 7 — BrainOS trading mandate: the owner-authorized market scope, capital ceiling, policy and strategy versions
+     and expiry of a session. Existing rows keep NULL mandates and therefore cannot authorize new entries. */ `
+  ALTER TABLE brainos_sessions ADD COLUMN market_scope TEXT;
+  ALTER TABLE brainos_sessions ADD COLUMN capital_ceiling REAL;
+  ALTER TABLE brainos_sessions ADD COLUMN risk_policy_version INTEGER;
+  ALTER TABLE brainos_sessions ADD COLUMN authorized_by TEXT;
+  ALTER TABLE brainos_sessions ADD COLUMN authorized_at INTEGER;
+  ALTER TABLE brainos_sessions ADD COLUMN expires_at INTEGER;
+  ALTER TABLE brainos_sessions ADD COLUMN strategy_config_version TEXT;
+  ALTER TABLE brainos_session_events ADD COLUMN mandate_json TEXT;
   `,
 ];
 

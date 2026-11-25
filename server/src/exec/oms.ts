@@ -16,7 +16,8 @@ import type { DecisionReport } from '../decision/engine.js';
 import { reportUnprotected, markRecovered, sweepClosedPositions } from './incidents.js';
 import { crashpoint } from './crashpoint.js';
 import { assertWriteFence, LeaseLostError, type LeaseFence } from '../ops/lease.js';
-import { paperSpotEntryDenial, paperSpotSizeDenial } from '../ops/paperSpotEntry.js';
+import { paperSpotCapitalDenial, paperSpotEntryDenial, type SessionEntry } from '../ops/paperSpotEntry.js';
+import { classifyEntryScope } from '../ops/tradingMandate.js';
 import { unreconciledPaperOrders } from './recovery.js';
 import { isShuttingDown } from '../ops/shutdown.js';
 import { recordPaperFill } from './fillEvents.js';
@@ -193,9 +194,6 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       if (actualPlannedMaxLoss > fresh.sizing.remainingOpenRisk + 1e-9) {
         return { reason: 'EXECUTED_AGGREGATE_RISK_LIMIT: depth-walk fill exceeds the account risk budget' };
       }
-      // The owner's session capital and loss boundaries, at the executed fill and under the same write lock.
-      const boundaryDenial = paperSpotSizeDenial(notional, actualPlannedMaxLoss, nowTs);
-      if (boundaryDenial) return { reason: boundaryDenial };
       const fee = notional * pol.feeRate;
       const R = fill.price - s.stopLoss;
       const tgts = s.takeProfit.map((t) => ({ r: (t.price - fill.price) / R, fraction: t.fraction }));
@@ -209,6 +207,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       if (!Number.isFinite(total) || !Number.isFinite(cash) || total > cash + 1e-9) {
         return { reason: `INSUFFICIENT_CASH: need ${total.toFixed(2)}, have ${cash.toFixed(2)}` };
       }
+      // The owner's session mandate caps total open cost basis, checked against the actual fill under this lock.
+      const capital = paperSpotCapitalDenial(total);
+      if (capital) return { reason: capital };
       const oid = existing ? existing.id : insertOrder({ clientOrderId: coid, instrument: s.instrumentId, side: 'BUY', type: 'MARKET', qty, status: 'NEW', purpose: 'ENTRY', decisionId: s.id, at: nowTs });
       run("UPDATE orders SET status='FILLED', qty=?, filled_qty=?, avg_price=?, fees=?, position_id=?, updated_at=? WHERE id=?", qty, qty, fill.price, fee, posId, nowTs, oid);
       crashpoint('entry.order');
@@ -249,7 +250,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
 
   function sessionDenial(at: number, order?: ApprovalOrder) {
     if (isShuttingDown()) return 'PROCESS_SHUTTING_DOWN';
-    return paperSpotEntryDenial(fence ?? null, at, entryEvidenceAt(report, at, order?.created_at), inSpotScope(report));
+    return paperSpotEntryDenial(fence ?? null, at, entryEvidenceAt(report, at, order?.created_at), sessionEntry(report));
   }
 
   function reject(reason: string) {
@@ -278,11 +279,9 @@ function entryEvidenceAt(report: DecisionReport, at: number, approvalAt = at) {
   return decisionAt <= at && approvalAt <= at ? Math.min(decisionAt, approvalAt) : NaN;
 }
 
-function inSpotScope(report: DecisionReport) {
-  const instrument = market.instruments.get(report.instrumentId);
-  return report.market === 'crypto' && report.venue === 'binance' &&
-    instrument?.market === 'crypto' && instrument.venue === 'binance' &&
-    report.instrumentId === `crypto:binance:${instrument.symbol}`;
+/** The market scope and strategy version an entry would trade, for the session mandate check. */
+function sessionEntry(report: DecisionReport): SessionEntry {
+  return { scope: classifyEntryScope(report), strategy: report.strategy };
 }
 
 /** APPROVAL mode: queue a pending order for the owner. */
@@ -293,7 +292,7 @@ export function queueForApproval(report: DecisionReport, fence?: LeaseFence) {
   const id = tx(() => {
     assertWriteFence(fence);
     const nowTs = Date.now();
-    if (isShuttingDown() || paperSpotEntryDenial(fence ?? null, nowTs, entryEvidenceAt(report, nowTs), inSpotScope(report))) return null;
+    if (isShuttingDown() || paperSpotEntryDenial(fence ?? null, nowTs, entryEvidenceAt(report, nowTs), sessionEntry(report))) return null;
     const { mode, emergency, pausedNewOrders } = getControl();
     if (emergency || pausedNewOrders || (mode !== 'PAPER' && mode !== 'APPROVAL')) return null;
     if (unreconciledPaperOrders()) return null;

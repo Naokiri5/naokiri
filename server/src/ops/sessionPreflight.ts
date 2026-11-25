@@ -13,8 +13,8 @@ import { requiredReadEvidenceGaps, type CapabilityGraphId } from '../knowledge/c
 import { stepUpMethod } from '../security/stepUp.js';
 import { staleAfter, type EngineView } from './readiness.js';
 import { currentLease } from './lease.js';
-import { activeSessionBoundaries, durableSessionStatus, paperSpotEntryDenial, type BrainosSessionState } from './paperSpotEntry.js';
-import { paperLiquidationValue, sessionBoundaryUsage, type SessionBoundaryRow, type SessionBoundaryUsage } from './sessionBoundaries.js';
+import { durableSessionStatus, paperSpotEntryDenial, type BrainosSessionState } from './paperSpotEntry.js';
+import { MANDATE_LIMITS, mandateCapitalInUse, openPaperExposure, sessionMandate, type TradingMandate } from './tradingMandate.js';
 
 export const SESSION_MINDS = ['FAST', 'DEEP'] as const;
 export const SESSION_ENVIRONMENTS = ['PAPER', 'LIVE'] as const;
@@ -45,39 +45,18 @@ export interface PaperSpotSessionPreflight {
   canClose: boolean;
   state: BrainosSessionState;
   checks: PreflightCheck[];
-  /** Owner-set limits of the current session generation and their live usage; null while no session is open. */
-  boundaries: null | {
-    capitalLimitUsd: number; maxSessionLossUsd: number; startEquityUsd: number; setAt: number;
-    capitalUsedUsd: number; sessionPnlUsd: number | null; openRiskToStopsUsd: number | null;
-    breachedAt: number | null; breachReason: string | null;
-  };
-  /** Current paper equity at liquidation value, used to suggest boundaries before Run; null when it cannot be verified. */
-  paperEquityUsd: number | null;
+  /** The persisted mandate of the current or most recent session; null before the first mandate. */
+  mandate: (TradingMandate & { openExposure: number; realizedLoss: number; capitalInUse: number; expired: boolean }) | null;
+  /** Bounds for a new authorization, from the paper ledger at check time. */
+  authorization: { maxCapital: number; minDurationHours: number; maxDurationHours: number };
 }
 
-const usd = (value: number) => `${value < 0 ? '-' : ''}$${Math.abs(value).toFixed(2)}`;
-
-function boundaryCheck(state: BrainosSessionState, row: SessionBoundaryRow | null, usage: SessionBoundaryUsage | null): PreflightCheck {
-  const base = { id: 'session-boundaries', label: 'Session boundaries' };
-  if (state === 'CLOSED') return { ...base, status: 'INFO', detail: 'You set a capital limit and a maximum session loss when you run a session.' };
-  if (!row || !usage) return { ...base, status: 'BLOCKED', detail: 'This session has no capital or loss limits. Close it and run a new session.' };
-  if (row.breached_at !== null) {
-    return { ...base, status: 'BLOCKED', observedAt: row.breached_at,
-      detail: `The session reached its ${usd(row.max_loss_usd)} loss limit. New entries are stopped; open positions stay protected. Close the session to review it.` };
-  }
-  if (usage.sessionPnlUsd === null) {
-    return { ...base, status: 'UNVERIFIED', detail: 'A position price is missing or out of date, so the session loss cannot be verified. New entries wait until prices are current.' };
-  }
-  return { ...base, status: 'PASS',
-    detail: `Capital in use ${usd(usage.capitalUsedUsd)} of ${usd(row.capital_limit_usd)}. Session P&L ${usd(usage.sessionPnlUsd)}; entries stop at a ${usd(row.max_loss_usd)} loss.` };
-}
-
-const DENIAL_DETAILS: Record<string, string> = {
-  SESSION_OWNER_CONTROL_CHANGED: 'Paper controls changed after authorization. Close the session and authorize a new one.',
-  STALE_OR_LOST_ENGINE_FENCE: 'The current engine lease does not authorize entries for this session.',
-  SESSION_LOSS_LIMIT_REACHED: 'The session loss limit is reached. New entries are stopped.',
-  SESSION_LOSS_UNVERIFIABLE: 'Session loss cannot be verified while a position price is missing or out of date.',
-  SESSION_BOUNDARIES_MISSING: 'This session has no capital or loss limits.',
+const MANDATE_DENIAL_DETAIL: Record<string, string> = {
+  SESSION_MANDATE_MISSING: 'This session has no trading mandate. Close it and authorize a new session with a capital limit.',
+  SESSION_MANDATE_NOT_BOUND: 'This mandate was granted to an earlier session. Close it and authorize a new session.',
+  SESSION_MANDATE_EXPIRED: 'The session mandate has expired. New entries are blocked while MIA drains the session.',
+  SESSION_RISK_POLICY_CHANGED: 'The risk policy changed after authorization. Close the session and authorize a new one.',
+  SESSION_STRATEGY_CONFIG_CHANGED: 'The deployed strategy set changed after authorization. Close the session and authorize a new one.',
 };
 
 function researchChecks(mind: SessionMind, at: number): PreflightCheck[] {
@@ -189,10 +168,7 @@ export function sessionPreflight(engine: EngineView, mind: SessionMind, environm
 
 /** Readiness for the existing Binance spot simulator and its independent protection lane. */
 export function paperSpotSessionPreflight(engine: EngineView & { instanceId?: string }, at = Date.now()): PaperSpotSessionPreflight {
-  const session = durableSessionStatus();
-  const state = session?.state ?? 'CLOSED';
-  const boundaryRow = state === 'CLOSED' ? null : activeSessionBoundaries(session);
-  const usage = boundaryRow ? sessionBoundaryUsage(boundaryRow, at) : null;
+  const state = durableSessionStatus()?.state ?? 'CLOSED';
   const control = getControl();
   const policy = currentPolicy();
   const stepUp = stepUpMethod();
@@ -201,9 +177,15 @@ export function paperSpotSessionPreflight(engine: EngineView & { instanceId?: st
     (engine.instanceId === undefined || lease.holder === engine.instanceId);
   const paperMode = control.mode === 'PAPER' || control.mode === 'APPROVAL';
   const controlsReady = paperMode && !control.emergency && !control.pausedNewOrders;
+  const session = durableSessionStatus();
   const activeDenial = state === 'RUNNING' ? paperSpotEntryDenial(lease, at) : null;
-  const leaseDetail = activeDenial ? DENIAL_DETAILS[activeDenial] ?? 'New entries are blocked by the current paper session checks.'
-    : leader ? 'The current leader holds the paper execution lease.' : 'The active paper engine must hold a current execution lease.';
+  const leaseDetail = activeDenial && MANDATE_DENIAL_DETAIL[activeDenial] ? MANDATE_DENIAL_DETAIL[activeDenial]
+    : activeDenial === 'SESSION_OWNER_CONTROL_CHANGED'
+    ? 'Paper controls changed after authorization. Close the session and authorize a new one.'
+    : activeDenial === 'STALE_OR_LOST_ENGINE_FENCE'
+      ? 'The current engine lease does not authorize entries for this session.'
+      : activeDenial ? 'New entries are blocked by the current paper session checks.'
+        : leader ? 'The current leader holds the paper execution lease.' : 'The active paper engine must hold a current execution lease.';
   const checks: PreflightCheck[] = [
     { id: 'environment', label: 'Trading environment', status: 'INFO', detail: 'Binance spot simulation uses the paper account.' },
     { id: 'risk-policy', label: 'Risk policy', status: policy ? 'PASS' : 'BLOCKED',
@@ -214,29 +196,25 @@ export function paperSpotSessionPreflight(engine: EngineView & { instanceId?: st
     { id: 'owner-verification', label: 'Owner verification', status: stepUp === 'unavailable' ? 'BLOCKED' : 'PASS',
       detail: stepUp === 'unavailable' ? 'Set up an authenticator in Security Center to authorize sensitive actions.' : 'Owner verification is available for sensitive actions.' },
     ...paperChecks(engine, at),
-    boundaryCheck(state, boundaryRow, usage),
     { id: 'execution-lane', label: 'Spot paper execution', status: leader && !activeDenial ? 'PASS' : 'BLOCKED', detail: leaseDetail },
     { id: 'session-lifecycle', label: 'Session controls', status: state === 'CLOSED' ? 'PASS' : 'BLOCKED',
       detail: state === 'CLOSED' ? 'A new spot paper session requires explicit owner authorization.'
         : state === 'CLOSING_DRAINING_ENTRIES' ? 'Entry authority is revoked while positions and orders are reconciled.'
           : 'Close the existing session before starting a new one.' },
   ];
+  const mandate = session ? sessionMandate(session) : null;
+  const ledger = reconcile();
+  const openExposure = openPaperExposure();
   return {
     canRun: checks.every(check => check.status === 'PASS' || check.status === 'INFO'),
     canClose: state !== 'CLOSED' && !(state === 'EMERGENCY_KILL_SWITCH' && control.emergency),
     state,
     checks,
-    boundaries: boundaryRow && usage ? {
-      capitalLimitUsd: boundaryRow.capital_limit_usd, maxSessionLossUsd: boundaryRow.max_loss_usd,
-      startEquityUsd: boundaryRow.start_equity_usd, setAt: boundaryRow.set_at,
-      capitalUsedUsd: usage.capitalUsedUsd, sessionPnlUsd: usage.sessionPnlUsd, openRiskToStopsUsd: usage.openRiskToStopsUsd,
-      breachedAt: boundaryRow.breached_at, breachReason: boundaryRow.breach_reason,
-    } : null,
-    paperEquityUsd: verifiedEquity(at),
+    mandate: mandate ? { ...mandate, ...mandateCapitalInUse(mandate), expired: at >= mandate.expires_at } : null,
+    authorization: {
+      maxCapital: Number.isFinite(ledger.cash) ? Math.max(0, ledger.cash + openExposure) : 0,
+      minDurationHours: MANDATE_LIMITS.minDurationHours,
+      maxDurationHours: MANDATE_LIMITS.maxDurationHours,
+    },
   };
-}
-
-function verifiedEquity(at: number) {
-  const account = paperLiquidationValue(at);
-  return account.unverifiedMarks.length || !Number.isFinite(account.equityUsd) ? null : account.equityUsd;
 }

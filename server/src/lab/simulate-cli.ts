@@ -1,10 +1,11 @@
 /**
  * Offline historical session simulation (research only; never touches the database, orders or the paper account).
  *   npm run simulate -- --strategy trend_pullback --candles eth-1h.json --tape eth-books.ndjson.gz --symbol ETHUSDT \
- *     --cash 10000 --capital 5000 --max-loss 200 [--venue BINANCE_SPOT] [--latency-ms 1000] [--max-wait-ms 5000]
+ *     --cash 10000 --capital 5000 [--max-loss 200] [--venue BINANCE_SPOT] [--latency-ms 1000] [--max-wait-ms 5000]
  *     [--slippage-bps 5] [--from <ms>] [--to <ms>] [--policy policy.json] [--step-size 0.0001] [--out report.json]
  * --candles: JSON array of closed candles ({ t, o, h, l, c, v, closeTime? }) for the strategy interval.
  * --tape: gzip NDJSON book/funding/launch events read by lab/tape-reader.ts.
+ * --capital: authorized capital, as in the session's trading mandate. --max-loss: proposed mandate extension (optional).
  * --policy: optional risk policy JSON (defaults to the built-in default policy, not the owner's accepted one).
  * Relative paths resolve from the server/ directory; pass absolute paths when running from the repository root.
  */
@@ -53,7 +54,8 @@ try {
     endTsMs: values.to === undefined ? undefined : num('to', values.to),
   }), {
     venue, symbol: required('symbol'), startingCashUsd: num('cash', values.cash), policy,
-    boundaries: { capitalLimitUsd: num('capital', values.capital), maxSessionLossUsd: num('max-loss', values['max-loss']) },
+    capitalCeilingUsd: num('capital', values.capital),
+    maxSessionLossUsd: values['max-loss'] === undefined ? undefined : num('max-loss', values['max-loss']),
     latencyMs: num('latency-ms', values['latency-ms']), maxWaitMs: num('max-wait-ms', values['max-wait-ms']),
     slippageBps: num('slippage-bps', values['slippage-bps']),
     stepSize: values['step-size'] === undefined ? undefined : num('step-size', values['step-size']),

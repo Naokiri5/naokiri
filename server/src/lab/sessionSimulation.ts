@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import { FeatureEngine } from '../features/indicators.js';
 import { INTERVAL_MS, type Candle } from '../market/types.js';
-import { evaluateBoundaryEntry, validateBoundaryInput, type SessionBoundaryInput } from '../ops/sessionBoundaries.js';
 import { classifyRegime } from '../regime/regime.js';
 import { DEFAULT_POLICY, RiskPolicy } from '../risk/policy.js';
 import { assertStrategyHistory, stats, type BtStats } from './backtest.js';
@@ -21,8 +21,11 @@ import type { HistoricalEvent, HistoricalVenue } from './tape-reader.js';
  *   slippage, notional, per-trade risk, cash and the owner's session boundaries are checked before every entry.
  * - Exits use the shared exit capsule (lab/exits.ts, also used by the paper OMS) against the bid. An exit larger than
  *   the displayed bid depth is deferred, never invented; the position stays open.
- * - Equity is marked at liquidation value (bid less the exit fee). When the session loss limit is reached, the breach
- *   is latched: no new entries, open positions are still managed (the REFLEX analogue).
+ * - The owner's capital ceiling follows the canonical trading mandate (ops/tradingMandate.ts mandateCapitalDenial):
+ *   open cost + net realized loss + the new entry's cost (fees included) must stay within the authorized capital.
+ * - Optional maxSessionLossUsd is a PROPOSED mandate extension, not yet enforced by the live session: equity is marked
+ *   at liquidation value (bid less the exit fee); entries need worst-case headroom, and once the loss is reached the
+ *   breach is latched (no new entries, open positions still managed — the REFLEX analogue).
  * - Not modeled: QCI/worker consensus, the decision engine, cross-venue checks, cooldowns, correlation and adaptive
  *   sizing. Results are research evidence about the strategy capsule and execution costs, not a certification.
  */
@@ -30,7 +33,10 @@ export interface SessionSimulationOptions {
   venue: HistoricalVenue;
   symbol: string;
   startingCashUsd: number;
-  boundaries: SessionBoundaryInput;
+  /** Authorized capital, as in the session's trading mandate. Must not exceed starting cash. */
+  capitalCeilingUsd: number;
+  /** Proposed mandate extension: maximum session loss at liquidation value. Omit to model today's live mandate. */
+  maxSessionLossUsd?: number;
   latencyMs: number;
   maxWaitMs: number;
   /** Execution cost beyond the touch, charged against the trader on every fill. */
@@ -40,6 +46,11 @@ export interface SessionSimulationOptions {
   /** Venue lot size; quantities are floored to it as the risk gate does. */
   stepSize?: number;
 }
+
+const LIMITS = z.object({
+  capitalCeilingUsd: z.number().finite().positive().max(1e12),
+  maxSessionLossUsd: z.number().finite().positive().max(1e12).optional(),
+}).strict();
 
 export interface SimulatedEntrySizing {
   qty: number; riskBudget: number; maxNotional: number; perUnitLoss: number; conservativeStopFill: number;
@@ -112,8 +123,8 @@ export async function simulateSession(
       !safe(o.latencyMs, 1, 86_400_000) || !safe(o.maxWaitMs, 0, 86_400_000) || !safe(o.slippageBps, 0, 1_000) ||
       (o.stepSize !== undefined && !(Number.isFinite(o.stepSize) && o.stepSize > 0))) throw new Error('INVALID_SIMULATION_OPTIONS');
   const policy = RiskPolicy.parse(o.policy ?? DEFAULT_POLICY);
-  const limits = validateBoundaryInput(o.boundaries);
-  if (limits.capitalLimitUsd > o.startingCashUsd) throw new Error('SESSION_CAPITAL_EXCEEDS_EQUITY');
+  const limits = LIMITS.parse({ capitalCeilingUsd: o.capitalCeilingUsd, maxSessionLossUsd: o.maxSessionLossUsd });
+  if (limits.capitalCeilingUsd > o.startingCashUsd) throw new Error('MANDATE_CAPITAL_EXCEEDS_FUNDS');
   assertStrategyHistory(strategy.interval, candles);
 
   const duration = INTERVAL_MS[strategy.interval];
@@ -179,10 +190,18 @@ export async function simulateSession(
     if (notional > sizing.maxNotional + 1e-9) return reject('POSITION_NOTIONAL_LIMIT');
     const plannedMaxLoss = sizing.qty * (fill - sizing.conservativeStopFill + fee * (fill + sizing.conservativeStopFill));
     if (!(plannedMaxLoss > 0) || plannedMaxLoss > sizing.riskBudget + 1e-9) return reject('EXECUTED_TRADE_RISK_LIMIT');
-    const denial = evaluateBoundaryEntry(limits, { capitalUsedUsd: 0, sessionPnlUsd: cash - o.startingCashUsd, openRiskToStopsUsd: 0 },
-      notional, plannedMaxLoss);
-    if (denial) return reject(denial.split(':')[0], denial);
     const entryFee = notional * fee;
+    // Canonical mandate ceiling (flat account: no open cost, so capital in use is the net realized loss).
+    const realizedLoss = Math.max(0, o.startingCashUsd - cash);
+    if (realizedLoss + notional + entryFee > limits.capitalCeilingUsd + 1e-9) {
+      return reject('MANDATE_CAPITAL_CEILING', `realized loss ${realizedLoss.toFixed(2)} + entry ${(notional + entryFee).toFixed(2)} > ${limits.capitalCeilingUsd.toFixed(2)}`);
+    }
+    if (limits.maxSessionLossUsd !== undefined) {
+      const worst = (cash - o.startingCashUsd) - plannedMaxLoss;
+      if (worst < -limits.maxSessionLossUsd - 1e-9) {
+        return reject('SESSION_LOSS_HEADROOM', `worst case ${worst.toFixed(2)} if the stop is hit < -${limits.maxSessionLossUsd.toFixed(2)}`);
+      }
+    }
     if (notional + entryFee > cash + 1e-9) return reject('INSUFFICIENT_CASH');
     cash -= notional + entryFee;
     position = { st: newExitState(fill, p.stop, sizing.qty, p.targets, p.trailAfterR, p.maxHoldBars), signalTs: p.signalTs,
@@ -227,7 +246,7 @@ export async function simulateSession(
     maxDrawdownUsd = Math.max(maxDrawdownUsd, peak - equity);
     maxDrawdownPct = Math.max(maxDrawdownPct, peak > 0 ? ((peak - equity) / peak) * 100 : 0);
     const pnl = equity - o.startingCashUsd;
-    if (!lossLimit && pnl <= -limits.maxSessionLossUsd) {
+    if (!lossLimit && limits.maxSessionLossUsd !== undefined && pnl <= -limits.maxSessionLossUsd) {
       lossLimit = { reachedAt: book.ts, sessionPnlUsd: pnl };
       record('LOSS_LIMIT_REACHED', `session P&L ${pnl.toFixed(2)} <= -${limits.maxSessionLossUsd}`);
       if (pending) reject('SESSION_LOSS_LIMIT_REACHED');

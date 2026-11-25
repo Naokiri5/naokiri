@@ -35,7 +35,7 @@ const book = (tsMs: number, mid: number, opts: { bidQty?: number; askQty?: numbe
 };
 const OPTIONS: SessionSimulationOptions = {
   venue: 'BINANCE_SPOT', symbol: 'ETHUSDT', startingCashUsd: 10_000,
-  boundaries: { capitalLimitUsd: 5_000, maxSessionLossUsd: 200 }, latencyMs: 1_000, maxWaitMs: 5_000, slippageBps: 5,
+  capitalCeilingUsd: 5_000, maxSessionLossUsd: 200, latencyMs: 1_000, maxWaitMs: 5_000, slippageBps: 5,
 };
 const run = (tape: HistoricalEvent[], options: Partial<SessionSimulationOptions> = {}, strategy = fixtureStrategy()) =>
   simulateSession(strategy, CANDLES, tape, { ...OPTIONS, ...options });
@@ -96,8 +96,8 @@ describe('isolated historical session simulation', () => {
     ['SPREAD', { spreadBps: 40 }, {}],
     ['PRICE_THROUGH_STOP', { mid: P * 0.94 }, {}],
     ['SLIPPAGE', {}, { slippageBps: 25 }],
-    ['SESSION_CAPITAL_LIMIT', {}, { boundaries: { capitalLimitUsd: 100, maxSessionLossUsd: 50 } }],
-    ['SESSION_LOSS_HEADROOM', {}, { boundaries: { capitalLimitUsd: 5_000, maxSessionLossUsd: 10 } }],
+    ['MANDATE_CAPITAL_CEILING', {}, { capitalCeilingUsd: 100 }],
+    ['SESSION_LOSS_HEADROOM', {}, { maxSessionLossUsd: 10 }],
   ] as const)('rejects an entry with %s like the canonical rules or owner boundaries', async (reason, bookOptions, options) => {
     const { mid = P, ...entryBook } = bookOptions as { mid?: number; askQty?: number; spreadBps?: number };
     const report = await run([book(C, P), book(C + 1_000, mid, entryBook)], options as Partial<SessionSimulationOptions>);
@@ -132,6 +132,18 @@ describe('isolated historical session simulation', () => {
     expect(report.maxDrawdownUsd).toBeGreaterThan(200);
   });
 
+  it('models today\'s live mandate when no loss limit is given: realized losses count against the capital ceiling', async () => {
+    const qty = simulatedEntrySizing(DEFAULT_POLICY, 10_000, 10_000, askOf(P), P * 0.95).qty;
+    const tape = [book(C, P), book(C + 1_000, P), book(C + 2_000, P * 0.5, { bidQty: qty / 4 }), book(C + 3_000, P * 0.5),
+      book(C + 3 * HOUR + 500, P), book(C + 3 * HOUR + 1_500, P)];
+    const strategy = fixtureStrategy([SIGNAL_INDEX + 1, SIGNAL_INDEX + 4]);
+    // No session loss limit: the second signal trades because realized loss + its cost still fits the ceiling.
+    expect(await run(tape, { maxSessionLossUsd: undefined }, strategy)).toMatchObject({ lossLimit: null, entries: 2 });
+    // A ceiling that the realized loss has used up refuses it.
+    expect(await run(tape, { maxSessionLossUsd: undefined, capitalCeilingUsd: 1_000 }, strategy))
+      .toMatchObject({ entries: 1, rejections: { MANDATE_CAPITAL_CEILING: 1 } });
+  });
+
   it('reports an open position at the end of the tape without inventing an exit', async () => {
     const report = await run([book(C, P), book(C + 1_000, P), book(C + 2_000, P * 1.01)]);
     expect(report.trades).toEqual([]);
@@ -142,8 +154,9 @@ describe('isolated historical session simulation', () => {
 
   it('rejects invalid options, policies, histories and tapes', async () => {
     await expect(run([], { latencyMs: 0 })).rejects.toThrow('INVALID_SIMULATION_OPTIONS');
-    await expect(run([], { boundaries: { capitalLimitUsd: 20_000, maxSessionLossUsd: 100 } })).rejects.toThrow('SESSION_CAPITAL_EXCEEDS_EQUITY');
-    await expect(run([], { boundaries: { capitalLimitUsd: 100, maxSessionLossUsd: 200 } })).rejects.toThrow('SESSION_LOSS_LIMIT_EXCEEDS_CAPITAL');
+    await expect(run([], { capitalCeilingUsd: 20_000 })).rejects.toThrow('MANDATE_CAPITAL_EXCEEDS_FUNDS');
+    await expect(run([], { capitalCeilingUsd: 0 })).rejects.toThrow();
+    await expect(run([], { maxSessionLossUsd: Number.NaN })).rejects.toThrow();
     await expect(run([], { policy: { ...DEFAULT_POLICY, riskPerTradePct: 10 } })).rejects.toThrow();
     await expect(run([book(C, P), book(C - 1, P)])).rejects.toThrow('SIM_NON_MONOTONIC');
     await expect(simulateSession(fixtureStrategy(), [...CANDLES].reverse(), [], OPTIONS)).rejects.toThrow('invalid backtest history');

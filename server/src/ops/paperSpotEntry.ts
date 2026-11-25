@@ -4,14 +4,14 @@ import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { reconcile } from '../portfolio/calendar.js';
 import { currentPolicy } from '../risk/policy.js';
 import { ownsLease, type LeaseFence } from './lease.js';
-import { checkSessionEntry, checkSessionLoss, sessionBoundaries, type SessionBoundaryRow } from './sessionBoundaries.js';
 import type { SessionMind } from './sessionPreflight.js';
+import { mandateCapitalDenial, mandateEntryDenial, type EntryScope, type MandateColumns } from './tradingMandate.js';
 
 export type BrainosSessionState = 'CLOSED' | 'RECOVERING_ON_BOOT' | 'RUNNING'
   | 'ENTRY_SUSPENDED_RISK_HALT' | 'CLOSING_DRAINING_ENTRIES' | 'EMERGENCY_KILL_SWITCH';
 export type BrainosSuspendReason = 'NONE' | 'OWNER_CLOSE_REQUESTED' | 'RISK_HALT'
-  | 'LEASE_FENCING_LOST' | 'RECONCILIATION_MISMATCH' | 'EMERGENCY_HALT';
-export interface DurableBrainosSession {
+  | 'LEASE_FENCING_LOST' | 'RECONCILIATION_MISMATCH' | 'EMERGENCY_HALT' | 'MANDATE_EXPIRED';
+export interface DurableBrainosSession extends MandateColumns {
   session_id: string;
   version: number;
   state: BrainosSessionState;
@@ -33,14 +33,21 @@ export function durableSessionStatus(): DurableBrainosSession | null {
   return get<DurableBrainosSession>('SELECT * FROM brainos_sessions WHERE session_id=?', BRAINOS_SESSION_ID) ?? null;
 }
 
-/** Call inside the OMS write transaction, in addition to its existing checks and Risk Gate. */
-export function paperSpotEntryDenial(fence: LeaseFence | null, at: number, entryCreatedAt?: number, inSpotScope = true): string | null {
+/** The market and strategy of a specific entry, checked against the session's trading mandate. */
+export interface SessionEntry { scope: EntryScope; strategy: { id: string; version: string } | undefined }
+
+/**
+ * Call inside the OMS write transaction, in addition to its existing checks and Risk Gate. Omit `entry`
+ * only for read-only status checks that do not concern a specific order.
+ */
+export function paperSpotEntryDenial(fence: LeaseFence | null, at: number, entryCreatedAt?: number, entry?: SessionEntry): string | null {
   const session = durableSessionStatus();
   // Installations with no checkpoint still use their existing owner-configured paper controls.
   if (!session) return null;
   if (session.state !== 'RUNNING') return 'SESSION_NOT_RUNNING';
   if (session.environment !== 'PAPER' || session.mind !== 'SPOT_PAPER') return 'SESSION_NOT_SPOT_PAPER';
-  if (!inSpotScope) return 'PAPER_SPOT_MARKET_OUTSIDE_SESSION_SCOPE';
+  const mandate = mandateEntryDenial(session, at, entry);
+  if (mandate) return mandate;
   if (!fence || fence.name !== 'engine' || session.lease_holder !== fence.holder ||
       session.lease_acquired_at !== fence.acquired_at || !ownsLease(fence, at)) return 'STALE_OR_LOST_ENGINE_FENCE';
   const started = session.started_at;
@@ -56,23 +63,16 @@ export function paperSpotEntryDenial(fence: LeaseFence | null, at: number, entry
   const ledger = reconcile();
   if (!ledger.ok || unreconciledPaperOrders()) return 'EXECUTION_NOT_RECONCILED';
   if (!currentPolicy() || !Number.isFinite(ledger.cash) || ledger.cash <= 0) return 'SESSION_RISK_POLICY_OR_FUNDS_UNAVAILABLE';
-  return checkSessionLoss(sessionBoundaries(session.session_id, session.fence_epoch), at);
-}
-
-/** The owner-set boundaries of the current session generation, if any. */
-export function activeSessionBoundaries(session = durableSessionStatus()): SessionBoundaryRow | null {
-  return session ? sessionBoundaries(session.session_id, session.fence_epoch) : null;
+  return null;
 }
 
 /**
- * Called by the OMS inside its write transaction once the executed notional and planned maximum loss are known.
- * Installations with no checkpoint keep their existing behavior; any other session must be a running spot paper
- * session with capital and loss headroom for this trade.
+ * Authorized-capital check for an entry whose actual cost (fill notional plus fees) is known. Call inside the
+ * OMS write transaction after `paperSpotEntryDenial` has passed.
  */
-export function paperSpotSizeDenial(notional: number, plannedMaxLoss: number, at: number): string | null {
+export function paperSpotCapitalDenial(entryCost: number): string | null {
   const session = durableSessionStatus();
+  // Installations with no checkpoint still use their existing owner-configured paper controls.
   if (!session) return null;
-  if (session.state !== 'RUNNING') return 'SESSION_NOT_RUNNING';
-  if (session.environment !== 'PAPER' || session.mind !== 'SPOT_PAPER') return 'SESSION_NOT_SPOT_PAPER';
-  return checkSessionEntry(activeSessionBoundaries(session), notional, plannedMaxLoss, at);
+  return mandateCapitalDenial(session, entryCost);
 }

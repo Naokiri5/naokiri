@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
-import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
+import { acceptPolicy, currentPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
+import { strategyConfigVersion } from '../src/ops/tradingMandate.js';
 import { updateControl, getControl } from '../src/core/mode.js';
 import { setSetting } from '../src/core/settings.js';
 import { ledger, PAPER_ACCOUNT, accountState, openPositions } from '../src/portfolio/ledger.js';
@@ -30,8 +31,11 @@ function report(id: string, last: number, over: Partial<DecisionReport> = {}): D
 
 function seedSpotCheckpoint(fence: LeaseFence, startedAt: number, state: 'RUNNING' | 'CLOSING_DRAINING_ENTRIES') {
   run(`INSERT INTO brainos_sessions (session_id, version, state, environment, mind, lease_holder, lease_acquired_at,
-    fence_epoch, suspend_reason, started_at, updated_at) VALUES ('brainos-autopilot', 1, ?, 'PAPER', 'SPOT_PAPER', ?, ?, 1, ?, ?, ?)`,
-    state, fence.holder, fence.acquired_at, state === 'RUNNING' ? 'NONE' : 'OWNER_CLOSE_REQUESTED', startedAt, startedAt);
+    fence_epoch, suspend_reason, started_at, updated_at, market_scope, capital_ceiling, risk_policy_version, authorized_by,
+    authorized_at, expires_at, strategy_config_version)
+    VALUES ('brainos-autopilot', 1, ?, 'PAPER', 'SPOT_PAPER', ?, ?, 1, ?, ?, ?, 'BINANCE_SPOT', 10000, ?, 'owner:test', ?, ?, ?)`,
+    state, fence.holder, fence.acquired_at, state === 'RUNNING' ? 'NONE' : 'OWNER_CLOSE_REQUESTED', startedAt, startedAt,
+    currentPolicy()!.version, startedAt, startedAt + 86_400_000, strategyConfigVersion());
 }
 
 describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
@@ -246,7 +250,8 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     const engine = acquireOrRenewLease('engine', 'worker', 10_000)!;
     seedSpotCheckpoint(engine, Date.now(), 'RUNNING');
     const candidate = report(id, last, { market: 'crypto-dex' });
-    expect(submitEntry(candidate, 'bot', undefined, engine)).toEqual({ ok: false, reason: 'PAPER_SPOT_MARKET_OUTSIDE_SESSION_SCOPE' });
+    expect(submitEntry(candidate, 'bot', undefined, engine)).toEqual({
+      ok: false, reason: 'MARKET_OUTSIDE_SESSION_MANDATE: UNSUPPORTED entry in a BINANCE_SPOT session' });
     expect(queueForApproval({ ...candidate, decision: 'APPROVED_FOR_USER_CONFIRMATION' }, engine)).toBeNull();
     expect(listOrders()).toHaveLength(0);
   });
