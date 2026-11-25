@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { TradeBarBuilder, type TradeBar, type TradeBarConfig } from '../market/tradeBars.js';
+import { assessVolumeSpike, VOLUME_SPIKE_POLICY_V1, type VolumeSpikeAssessment, type VolumeSpikeVerdict } from '../market/volumeSpike.js';
 import type { HistoricalEvent, HistoricalVenue } from './tape-reader.js';
 
 type Book = Extract<HistoricalEvent, { type: 'BOOK_TICK' }>;
@@ -94,5 +96,75 @@ export async function replayBookProbes(
     version: 1, evidence: 'RESEARCH_UNVERIFIED_TAPE' as const, tradingAuthority: false as const,
     eventsProcessed, matchingBooks, probes, observed, insufficient, expired, endOfTape,
     determinismHash: digest.digest('hex'),
+  };
+}
+
+export interface TradeEvidenceOptions {
+  venue: HistoricalVenue; symbol: string;
+  bars: Omit<TradeBarConfig, 'instrumentId'>;
+  /** Intervals assessed together for persistence, finest first; each must be a configured bar interval. */
+  detectorIntervalsMs: readonly number[];
+  /** Launch time for launch-age confidence, when known. */
+  launchTsMs?: number;
+}
+export interface TradeEvidenceAssessment { atMs: number; barStartMs: number; assessment: VolumeSpikeAssessment }
+
+/**
+ * Deterministic replay of trade-built bars and FAST volume assessments through the SAME `TradeBarBuilder` and
+ * `assessVolumeSpike` used for live evidence (live/replay parity). The tape clock is the receive clock, so lateness,
+ * quarantine and finalization behave exactly as they would live. Evidence only: no orders, capital or promotion.
+ */
+export async function replayTradeEvidence(
+  events: AsyncIterable<HistoricalEvent> | Iterable<HistoricalEvent>,
+  options: Readonly<TradeEvidenceOptions>,
+  onAssessment: (row: Readonly<TradeEvidenceAssessment>) => void = () => {},
+) {
+  const finest = options.detectorIntervalsMs[0];
+  if (!/^[A-Za-z0-9._:/-]{1,128}$/.test(options.symbol) || options.detectorIntervalsMs.length === 0 ||
+      !options.detectorIntervalsMs.every((i) => options.bars.intervalsMs.includes(i)) ||
+      (options.launchTsMs !== undefined && !safe(options.launchTsMs, 0, Number.MAX_SAFE_INTEGER)))
+    throw new Error('INVALID_TRADE_REPLAY_OPTIONS');
+  const builder = new TradeBarBuilder({ ...options.bars, instrumentId: `${options.venue}:${options.symbol}`.replace(/\//g, '.') });
+  const digest = createHash('sha256');
+  digest.update(encode({ version: 1, policy: VOLUME_SPIKE_POLICY_V1.version, ...options }) + '\n');
+  const verdicts: Record<VolumeSpikeVerdict, number> = { AUTHENTIC_SPIKE: 0, SUSPECT_SPIKE: 0, NO_SPIKE: 0, INSUFFICIENT_EVIDENCE: 0 };
+  const statuses: Record<string, number> = {};
+  let last = -1, eventsProcessed = 0, trades = 0;
+  function assess(finalized: TradeBar[], atMs: number) {
+    for (const bar of finalized) {
+      if (bar.intervalMs !== finest) continue;
+      const assessment = assessVolumeSpike({
+        windows: options.detectorIntervalsMs.map((intervalMs) => ({ intervalMs, bars: builder.finalBars(intervalMs) })),
+        launchAgeMs: options.launchTsMs === undefined ? null : atMs - options.launchTsMs,
+      });
+      verdicts[assessment.verdict]++;
+      const row = Object.freeze({ atMs, barStartMs: bar.startMs, assessment });
+      digest.update(encode(row) + '\n');
+      onAssessment(row);
+    }
+  }
+  for await (const event of events) {
+    if (!safe(event.tsMs, 0, Number.MAX_SAFE_INTEGER) || event.tsMs < last) throw new Error('REPLAY_NON_MONOTONIC');
+    last = event.tsMs; eventsProcessed++;
+    if (event.type === 'TRADE_TICK' && event.venue === options.venue && event.symbol === options.symbol) {
+      trades++;
+      const { status, finalized } = builder.ingest({
+        instrumentId: builder.config.instrumentId, eventId: event.eventId, eventTimeMs: event.tsMs,
+        priceFp: event.priceFp, baseQtyFp: event.baseQtyFp, aggressor: event.aggressor,
+        participant: event.participant, finality: event.finality,
+      }, event.tsMs);
+      statuses[status] = (statuses[status] ?? 0) + 1;
+      assess(finalized, event.tsMs);
+    } else {
+      // The virtual clock advances on every event, so bars finalize even while this instrument is quiet.
+      assess(builder.advance(event.tsMs), event.tsMs);
+    }
+  }
+  const barsDigest = builder.digest();
+  digest.update(barsDigest + '\n');
+  return {
+    version: 1, evidence: 'RESEARCH_UNVERIFIED_TAPE' as const, tradingAuthority: false as const,
+    policyVersion: VOLUME_SPIKE_POLICY_V1.version, eventsProcessed, trades, ingest: statuses, verdicts,
+    quality: builder.quality(), barsDigest, determinismHash: digest.digest('hex'),
   };
 }

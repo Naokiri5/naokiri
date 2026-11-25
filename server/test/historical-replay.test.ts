@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { MAX_TAPE_LINE_BYTES, streamCompressedMarketTape, type HistoricalEvent } from '../src/lab/tape-reader.js';
-import { replayBookProbes, type ReplayObservation } from '../src/lab/eventReplay.js';
+import { replayBookProbes, replayTradeEvidence, type ReplayObservation, type TradeEvidenceAssessment } from '../src/lab/eventReplay.js';
+import { TradeBarBuilder } from '../src/market/tradeBars.js';
 
 const fp = 1_000_000_000n;
 const book = (tsMs: number, ask = 100n * fp, quantity = 2n * fp, symbol = 'BTCUSDT') => ({
@@ -99,5 +100,81 @@ describe('causal historical book replay', () => {
     expect(await replayBookProbes([book(100), book(200)], options, signal)).toMatchObject({ expired: 1, endOfTape: 1 });
     await expect(replayBookProbes([book(100), book(99)], options, signal)).rejects.toThrow('REPLAY_NON_MONOTONIC');
     await expect(replayBookProbes([], { ...options, latencyMs: 0 }, signal)).rejects.toThrow('INVALID_REPLAY_OPTIONS');
+  });
+});
+
+describe('trade-evidence replay (live/replay parity)', () => {
+  let dir: string, file: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'mia-trade-tape-')); file = join(dir, 'trades.ndjson.gz'); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const T = 1_800_000_000_000;
+  const BARS = {
+    baseIntervalMs: 1_000, intervalsMs: [1_000, 5_000, 15_000], allowedLatenessMs: 1_000, maxFutureSkewMs: 1_000,
+    maxFinalBars: 200, maxTradesPerBaseBar: 1_000, maxParticipantsPerBar: 1_000, retractionWindowMs: 10_000, maxSeenIds: 100_000,
+  };
+  const options = { venue: 'SOLANA_JUPITER' as const, symbol: 'MEME/SOL', bars: BARS, detectorIntervalsMs: [1_000, 5_000, 15_000], launchTsMs: T - 3_600_000 };
+  /** Deterministic bursty baseline for 20 minutes, then 15 seconds of broad-based buying, then a quiet tail. */
+  function tape() {
+    let state = 7, n = 0;
+    const random = () => (state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0) / 2 ** 32;
+    const rows: object[] = [];
+    const tick = (tsMs: number, qty: bigint, participant: string, aggressor: 'buy' | 'sell') => rows.push({
+      type: 'TRADE_TICK', tsMs, venue: 'SOLANA_JUPITER', symbol: 'MEME/SOL', eventId: `sig${++n}:0`,
+      priceFp: fp.toString(), baseQtyFp: qty.toString(), aggressor, participant, finality: 'final',
+    });
+    for (let s = 0; s < 1_200; s++) {
+      const count = Math.floor(random() * 7);
+      for (let k = 0; k < count; k++) tick(T + s * 1_000 + k * 100, fp * BigInt(1 + Math.floor(random() ** 3 * 9)), `organic${(s * 7 + k) % 40}`, random() < 0.55 ? 'buy' : 'sell');
+    }
+    for (let s = 0; s < 15; s++) for (let i = 0; i < 20; i++) tick(T + 1_200_000 + s * 1_000 + i * 10, 5n * fp, `buyer${i}`, 'buy');
+    // An unrelated instrument keeps the virtual clock moving, so the final bars close without more MEME trades.
+    rows.push(book(T + 1_220_000));
+    return rows;
+  }
+  const write = (rows: object[]) => writeFileSync(file, gzipSync(rows.map(encode).join('\n') + '\n'));
+
+  it('replays a compressed tape deterministically through the live bar builder and detector', async () => {
+    write(tape());
+    const seen: TradeEvidenceAssessment[] = [];
+    const first = await replayTradeEvidence(streamCompressedMarketTape(file), options, (row) => seen.push(row));
+    const second = await replayTradeEvidence(streamCompressedMarketTape(file), options);
+    expect(second.determinismHash).toBe(first.determinismHash);
+    expect(first).toMatchObject({ tradingAuthority: false, evidence: 'RESEARCH_UNVERIFIED_TAPE', policyVersion: 'volume-spike.v1' });
+    expect(first.ingest).toEqual({ ACCEPTED: first.trades });
+    expect(first.verdicts.AUTHENTIC_SPIKE).toBeGreaterThanOrEqual(1);
+    const spike = seen.find((row) => row.assessment.verdict === 'AUTHENTIC_SPIKE')!;
+    expect(spike.barStartMs).toBeGreaterThanOrEqual(T + 1_200_000);
+    expect(spike.assessment.tradingAuthority).toBe(false);
+  });
+
+  it('produces the same bars as feeding the live builder directly', async () => {
+    const rows = tape();
+    write(rows);
+    const replay = await replayTradeEvidence(streamCompressedMarketTape(file), options);
+    const live = new TradeBarBuilder({ ...BARS, instrumentId: 'SOLANA_JUPITER:MEME.SOL' });
+    for await (const event of streamCompressedMarketTape(file)) {
+      if (event.type !== 'TRADE_TICK') { live.advance(event.tsMs); continue; }
+      live.ingest({ instrumentId: live.config.instrumentId, eventId: event.eventId, eventTimeMs: event.tsMs, priceFp: event.priceFp,
+        baseQtyFp: event.baseQtyFp, aggressor: event.aggressor, participant: event.participant, finality: event.finality }, event.tsMs);
+    }
+    expect(live.digest()).toBe(replay.barsDigest);
+  });
+
+  it('rejects malformed trade ticks instead of defaulting them', async () => {
+    const valid = { type: 'TRADE_TICK', tsMs: 1, venue: 'SOLANA_JUPITER', symbol: 'MEME/SOL', eventId: 'sig1:0',
+      priceFp: '1000000000', baseQtyFp: '1000000000', aggressor: 'buy', finality: 'final' };
+    for (const bad of [
+      { ...valid, priceFp: '0' }, { ...valid, priceFp: 1_000_000_000 }, { ...valid, aggressor: 'long' },
+      { ...valid, finality: undefined }, { ...valid, participant: 'not a wallet!' }, { ...valid, extra: true },
+    ]) {
+      write([bad]);
+      await expect(collect(file)).rejects.toThrow('TAPE_INVALID_EVENT');
+    }
+    write([valid]);
+    expect(await collect(file)).toEqual([{ ...valid, priceFp: fp, baseQtyFp: fp }]);
+  });
+
+  it('rejects options whose detector windows are not built', async () => {
+    await expect(replayTradeEvidence([], { ...options, detectorIntervalsMs: [60_000] })).rejects.toThrow('INVALID_TRADE_REPLAY_OPTIONS');
   });
 });
