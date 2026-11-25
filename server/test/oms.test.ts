@@ -122,6 +122,39 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
       closeDb(); rmSync(dir, { recursive: true, force: true });
     }
   });
+  it('detects offsetting closed-position PnL errors even when aggregate drift is zero', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    setBook(id, last * 0.96); monitorPositions();
+    const second = seedInstrument('SOLUSDT', { seed: 3 });
+    expect(submitEntry(report(second.inst.id, second.last), 'bot').ok).toBe(true);
+    setBook(second.inst.id, second.last * 0.96); monitorPositions();
+    expect(openPositions()).toHaveLength(0);
+    expect(reconcile()).toMatchObject({ ok: true, closedPositions: 2, mismatchedClosedPositions: 0 });
+    const closed = all<{id: string}>("SELECT id FROM positions WHERE status='CLOSED' ORDER BY id");
+    run('UPDATE positions SET realized_pnl=realized_pnl+1 WHERE id=?', closed[0].id);
+    run('UPDATE positions SET realized_pnl=realized_pnl-1 WHERE id=?', closed[1].id);
+    const rec = reconcile();
+    expect(rec.difference).toBeLessThan(1e-6);
+    expect(rec).toMatchObject({ ok: false, mismatchedClosedPositions: 2 });
+  });
+  it('flags unlinked principal movements rather than silently ignoring them', () => {
+    ledger(PAPER_ACCOUNT, 'BUY', -25, 'missing-order');
+    expect(reconcile()).toMatchObject({ ok: false, orphanPrincipalEntries: 1 });
+  });
+  it.each(['SUBMITTING', 'AMBIGUOUS', 'PARTIALLY_FILLED', 'RESERVED', 'UNKNOWN_STATE'])(
+    'blocks new entries on unresolved %s orders without blocking protection', status => {
+      expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+      const second = seedInstrument('SOLUSDT', { seed: 3 });
+      run("INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,status,purpose,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        'unresolved-fixture','unresolved-fixture',PAPER_ACCOUNT,'binance-paper',second.inst.id,'BUY','MARKET',1,status,'ENTRY',Date.now(),Date.now());
+      const denied = submitEntry(report(second.inst.id, second.last), 'bot');
+      expect(denied.ok).toBe(false);
+      expect(denied.reason).toContain('UNRECONCILED_PAPER_ORDERS');
+      setBook(id, last * 0.96); monitorPositions();
+      expect(openPositions()).toHaveLength(0);
+      expect(get('SELECT status FROM orders WHERE id=?','unresolved-fixture')).toEqual({ status });
+    }
+  );
   it('rolls back a fill envelope with the failed OMS transaction', () => {
     const entry = report(id, last);
     setCrashHook((point) => { if (point === 'entry.precommit') throw new Error('fault before commit'); });
