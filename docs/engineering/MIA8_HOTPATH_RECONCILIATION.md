@@ -68,3 +68,20 @@ Reconciliation and exclusions:
 | P2 session harness, CLI, HMAC, readiness and promotion | Existing qa/gates.ts and core/mode.ts remain authoritative; no signer, live adapter, live startup unlock, or production deployment change. The proposed CLI has a fallback development signing secret and seeds synthetic winning trades. A signed synthetic artifact does not prove prospective performance, venue reconciliation, or security. No eval-based deploy/rollback commands. Tests of simulated readiness are not production certification. |
 
 Gate: #137 remains draft until exact-head CI and integration review. All live controls stay locked; no live unlock, certification artifact, or deployment was performed.
+
+## Eight-priority OMS and release hardening increment (2026-11-25)
+
+Source: seven owner-provided PDFs, priorities 1–8. Baseline f75d66c passed CI run 45535860115. Reuse #137, not the proposed replacement packages/server hierarchy.
+
+| Priority | Canonical implementation / remaining gap |
+| --- | --- |
+| 1 Exact merge evidence | Existing .github/workflows/ci.yml checks out and asserts github.sha in both jobs (PR event merge commit, push event head). It still runs the existing typecheck, build, tests, audit and browser checks. No duplicate workflow. Branch protection, fresh exact-merge checks and independent approval remain separate. |
+| 2 Durable external-order reservations | PAPER settles within one SQLite transaction and does not dispatch to an external venue. No second balance or OMS created. External reservations require real venue identity, owner-authorized funds, persisted lease fence and transactionally coupled order/ledger updates; not implemented. |
+| 3 Ambiguous and partial fill reconciliation | Existing portfolio/calendar.ts reconciliation now checks each closed position individually and detects unlinked BUY/SELL principal entries. Equal and opposite errors cannot cancel in the account aggregate. exec/recovery.ts denies new entries on unknown and unresolved persisted PAPER order states; exits remain independent. Regression tests in server/test/oms.test.ts. This detects faults; does not automatically backfill venue fills or release external locks. Open PRs #64/#72 contain a related read-only venue assessor absent from this branch: reconcile ownership before importing it. |
+| 4 Engine exposure | Existing long-only spot positions remain authoritative. No independent sleeve balances or position store. Actual per-engine classification, reserved/ambiguous exposure, venue leverage and isolated breakers remain unfinished. |
+| 5 Strategy sizing | Preserve versioned Strategy Lab and reduction-only risk sizing. Proposed multipliers up to 2x cannot override existing authorized limits; caller-supplied performance snapshots are not verified evidence. |
+| 6 DITAS learning | Preserve canonical immutable decision/outcome memory and existing calibration. Health-gated adaptive updates remain unfinished. |
+| 7 Unattended certification | 72h actual PAPER/TESTNET soak remains pending. A SHA-256 digest of a caller-supplied JSON manifest is not trusted attestation; hydrating a fresh in-memory DB from the manifest cannot verify actual persisted production integrity. Dry-run with a zero-hour minimum must never issue a live-authorizing certificate. |
+| 8 Railway/Privy boundary | Preserve existing hard LIVE lock and release gates. A writable directory and configured Privy identifiers alone do not establish volume persistence, least-privilege policy enforcement, or wallet authorization. No production promotion script or deployment changes. |
+
+The proposed external-order state machine has no explicit fence in its ReserveOrderInput contract; callbacks for ledger and protective-stop writes must not introduce nontransactional side effects. Require definitive venue status and authenticated cumulative executions, not timeout or missing order evidence, before releasing reserved funds. The reconciliation additions are PAPER-only, not full external order recovery or multi-sleeve parity. Do not merge until exact new head/merge CI is verified; LIVE remains locked.
