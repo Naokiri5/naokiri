@@ -10,11 +10,27 @@ export interface Lease { name: string; holder: string; acquired_at: number; rene
 export type LeaseFence = Pick<Lease, 'name' | 'holder' | 'acquired_at'>;
 export const currentLease = (name: string) => get<Lease>('SELECT * FROM runtime_leases WHERE name=?', name) ?? null;
 
+/** Reject malformed persisted leases and backward observations, not just expired ones.
+ * SQLite is a single-host clock domain; this is not distributed-clock certification.
+ */
+export function validLeaseAt(lease: Lease, at: number): boolean {
+  return Number.isSafeInteger(at) && at >= 0 &&
+    typeof lease.name === 'string' && lease.name.length > 0 &&
+    typeof lease.holder === 'string' && lease.holder.length > 0 &&
+    [lease.acquired_at, lease.renewed_at, lease.expires_at].every(Number.isSafeInteger) &&
+    lease.acquired_at >= 0 && lease.acquired_at <= lease.renewed_at &&
+    lease.renewed_at <= at && lease.expires_at > lease.renewed_at;
+}
+
 export function acquireOrRenewLease(name: string, holder: string, ttlMs: number, clock?: number): Lease | null {
-  if (!(ttlMs > 0)) throw new Error('lease ttl must be positive');
+  if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) throw new Error('lease ttl must be a positive safe integer');
+  if (!name || !holder) throw new Error('lease identity must not be empty');
   return tx(() => {
     const nowTs = clock ?? Date.now();
+    if (!Number.isSafeInteger(nowTs) || nowTs < 0 || !Number.isSafeInteger(nowTs + ttlMs))
+      throw new Error('invalid lease clock or expiry');
     const cur = currentLease(name);
+    if (cur && !validLeaseAt(cur, nowTs)) return null;
     const stillValid = !!cur && cur.expires_at >= nowTs;
     if (stillValid && cur.holder !== holder) return null;
     const lease: Lease = { name, holder, acquired_at: stillValid ? cur.acquired_at : nowTs, renewed_at: nowTs, expires_at: nowTs + ttlMs };
@@ -31,7 +47,7 @@ export const tryAcquireLease = (name: string, holder: string, ttlMs: number, now
 
 export function ownsLease(fence: LeaseFence, nowTs = Date.now()) {
   const current = currentLease(fence.name);
-  return current?.holder === fence.holder && current.acquired_at === fence.acquired_at && current.expires_at >= nowTs;
+  return !!current && validLeaseAt(current, nowTs) && current.holder === fence.holder && current.acquired_at === fence.acquired_at && current.expires_at >= nowTs;
 }
 
 export class LeaseLostError extends Error {
