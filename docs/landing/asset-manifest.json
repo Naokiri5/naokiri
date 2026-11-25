@@ -1,0 +1,32 @@
+{
+  "version": "5.0.0",
+  "generated": "2026-11-25",
+  "assets": [
+    { "id": "logo-compact-black", "file": "web/public/brand/mia-compact-black.webp", "source": "MIA_AI_Brand_Guidelines_V3.pdf, embedded compact lockup (alpha), exported black", "format": "webp", "dimensions": "480x179", "section": "landing nav, entry shell (via symbol), Privy modal logo", "approval": "official artwork, unmodified geometry", "priority": "high", "fallback": "text 'MIA AI'" },
+    { "id": "logo-compact-white", "file": "web/public/brand/mia-compact-white.webp", "source": "same as above, exported white", "format": "webp", "dimensions": "480x179", "section": "chapter 05, footer", "approval": "official artwork", "priority": "low", "fallback": "text 'MIA AI'" },
+    { "id": "logo-lockup-slogan-black", "file": "web/public/brand/mia-lockup-slogan-black.webp", "source": "Brand Guidelines V3, slogan lockup", "format": "webp", "dimensions": "1040x388", "section": "reserved (min 420 px)", "approval": "official artwork", "priority": "low", "fallback": "compact lockup + slogan text" },
+    { "id": "logo-lockup-slogan-white", "file": "web/public/brand/mia-lockup-slogan-white.webp", "source": "Brand Guidelines V3, slogan lockup", "format": "webp", "dimensions": "1040x388", "section": "reserved (min 420 px)", "approval": "official artwork", "priority": "low", "fallback": "compact lockup + slogan text" },
+    { "id": "logo-symbol-black", "file": "web/public/brand/mia-symbol-black.webp", "source": "Brand Guidelines V3, standalone symbol", "format": "webp", "dimensions": "256x248", "section": "entry shell; dashboard and sign-in via CSS mask (black/white per theme)", "approval": "official artwork", "priority": "medium", "fallback": "none needed" },
+    { "id": "logo-symbol-white", "file": "web/public/brand/mia-symbol-white.webp", "source": "Brand Guidelines V3, standalone symbol", "format": "webp", "dimensions": "256x248", "section": "dark surfaces", "approval": "official artwork", "priority": "low", "fallback": "none needed" },
+    { "id": "favicon", "file": "web/public/favicon.ico", "source": "Brand Guidelines V3 app icon (1024)", "format": "ico 16/32/48", "dimensions": "48x48", "section": "browser tab", "approval": "official icon, resized", "priority": "high", "fallback": "favicon-32.png" },
+    { "id": "favicon-32", "file": "web/public/favicon-32.png", "source": "Brand Guidelines V3 app icon", "format": "png", "dimensions": "32x32", "section": "browser tab", "approval": "official icon, resized", "priority": "high", "fallback": "favicon.ico" },
+    { "id": "apple-touch-icon", "file": "web/public/apple-touch-icon.png", "source": "Brand Guidelines V3 app icon", "format": "png", "dimensions": "180x180", "section": "iOS home screen", "approval": "official icon, resized", "priority": "low", "fallback": "favicon" },
+    { "id": "app-icons", "file": "web/public/brand/icon-192.png, web/public/brand/icon-512.png", "source": "Brand Guidelines V3 app icon", "format": "png", "dimensions": "192x192, 512x512", "section": "future web manifest", "approval": "official icon, resized", "priority": "low", "fallback": "favicon" },
+    { "id": "aureus-master", "file": "web/public/mascot/aureus-988.webp", "source": "user-supplied pastel mascot master render; near-white background removed with an edge-connected matte, colors untouched", "format": "webp (alpha)", "dimensions": "988x1416", "section": "chapters 01 (peek), 02 (hero + detail crops), 05 (welcome)", "approval": "user-supplied master; cutout pending owner review", "priority": "medium", "fallback": "aureus-560.webp" },
+    { "id": "aureus-560", "file": "web/public/mascot/aureus-560.webp", "source": "downscaled aureus-master", "format": "webp (alpha)", "dimensions": "560x803", "section": "small screens", "approval": "derived", "priority": "medium", "fallback": "aureus-master" },
+    { "id": "signal-terminal", "file": "web/src/landing/components/Campaign.tsx#SignalTerminal", "source": "original inline SVG drawn for MIA AI", "format": "svg (inline)", "dimensions": "440x540 viewBox", "section": "chapter 01", "approval": "original, pending design review", "priority": "high", "fallback": "none (inline)" },
+    { "id": "street-sign", "file": "web/src/landing/components/Campaign.tsx#StreetSign", "source": "original HTML/CSS", "format": "html", "dimensions": "responsive", "section": "chapter 02", "approval": "original", "priority": "medium", "fallback": "plain links" },
+    { "id": "signal-tape", "file": "web/src/landing/components/Campaign.tsx#SignalTape", "source": "original HTML/CSS", "format": "html", "dimensions": "responsive", "section": "chapter 01", "approval": "original", "priority": "low", "fallback": "hidden" },
+    { "id": "stickers", "file": "web/src/landing/components/Campaign.tsx#Sticker", "source": "original inline SVG set: arc, aperture, loop, fork, gate, wave", "format": "svg (inline)", "dimensions": "80x80 viewBox", "section": "chapters 01, 02, 04", "approval": "original", "priority": "low", "fallback": "hidden" },
+    { "id": "brainos-core", "file": "web/src/landing/components/brainCoreScene.ts", "source": "original three.js scene (procedural, no textures)", "format": "WebGL", "dimensions": "responsive", "section": "chapter 03", "approval": "original", "priority": "deferred (lazy chunk)", "fallback": "BrainCore.tsx CoreFallback SVG" }
+  ],
+  "missing": [
+    "Approved SVG brand kit (rasters extracted from the V3 PDF are used instead)",
+    "AUREUS turnaround, rig or approved pose/frame sequence (T12 and articulated T18 states)",
+    "Approved architectural 3D environment for a full camera fly-through (T05)"
+  ],
+  "references_not_shipped": [
+    "loanmeme.io (not inspected from this environment)",
+    "Mellow campaign site, Buenos Aires street-sign poster, The Boys compilation (inspiration only, not supplied as files)"
+  ]
+}

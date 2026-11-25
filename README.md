@@ -34,7 +34,7 @@ npm install
 npm start              # builds the UI on first run if needed, then serves API + UI on port 8787
 ```
 
-Open **http://localhost:8787/** for the public Obsidian Palazzo landing page, or **http://localhost:8787/app** for the **Privy wallet sign-in**. Production MIA no longer offers the old passphrase form. Before login, configure the [Privy wallet setup guide](docs/operations/PRIVY_SIGN_IN.md): set `MIA_PRIVY_APP_ID`, provision the correct `MIA_PRIVY_OWNER_ID` on the server, enable wallet-only login and register the exact HTTPS origin in Privy. The server prints its base URLs:
+Open **http://localhost:8787/** for the public MIA AI V5 landing page ([design notes](docs/landing/V5_LANDING.md)), or **http://localhost:8787/app** for the **Privy wallet sign-in**. Production MIA no longer offers the old passphrase form. Before login, configure the [Privy wallet setup guide](docs/operations/PRIVY_SIGN_IN.md): set `MIA_PRIVY_APP_ID`, provision the correct `MIA_PRIVY_OWNER_ID` on the server, enable wallet-only login and register the exact HTTPS origin in Privy. The server prints its base URLs:
 
 ```
   ➜ Local:     http://localhost:8787/
@@ -57,7 +57,7 @@ Development with hot reload: `npm run dev` starts the backend (8787) and Vite (h
 | Docker, dev container, Codespaces, Gitpod, Claude Code cloud session | `0.0.0.0` (auto-detected) | the forwarded URL for port **8787** |
 | WSL2, a VM, or another device on your LAN | set `MIA_HOST=0.0.0.0` | `http://<machine-ip>:8787/` |
 
-`MIA_HOST` and `MIA_PORT` always override the defaults. Binding `0.0.0.0` exposes the sign-in endpoint to the network: use HTTPS/TLS, the server-verified Privy owner identity and MIA's protected session/CSRF rules. Never expose the offline-only passphrase recovery mode publicly. A static Vercel frontend alone cannot authenticate MIA users: `/api/*` must reach a persistent MIA Fastify backend.
+`MIA_HOST` and `MIA_PORT` always override the defaults. Binding `0.0.0.0` exposes the sign-in endpoint to the network: use HTTPS/TLS, the server-verified Privy owner identity and MIA's protected session/CSRF rules. Never expose the offline-only passphrase recovery mode publicly. Production hosting is one Railway service behind Cloudflare: see [Railway + Cloudflare + Privy deployment](docs/operations/RAILWAY_CLOUDFLARE_DEPLOYMENT.md) (`Dockerfile`, `railway.json`). Vercel is no longer used.
 
 ### Troubleshooting
 

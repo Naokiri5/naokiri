@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased: V5 brand experience and Railway hosting
+- New public landing page (MIA AI V5 "Intelligence Unleashed"): five chapters, one scroll controller, AUREUS mascot,
+  lazy three.js BrainOS core with SVG fallback, click-only entry shell into the existing Privy sign-in, reduced-motion
+  path. See `docs/landing/V5_LANDING.md`. The previous Obsidian Palazzo landing styles were removed.
+- Dashboard, sign-in and Privy modal use the mascot-derived palette (pastel default, graphite dark theme) and the
+  official Horizon Bear mark; trading status colors remain semantic. The protected app is now a lazy chunk.
+- Hosting moves to Railway (`Dockerfile`, `railway.json`, entrypoint) behind Cloudflare; Vercel is retired. The server
+  listens on `PORT` when `MIA_PORT` is unset, and `MIA_TRUST_PROXY` (default off) sets trusted proxy hops for client IPs.
+  See `docs/operations/RAILWAY_CLOUDFLARE_DEPLOYMENT.md`.
+
 ## Unreleased: engine lease hardening (builds on the Phase 1 engine lease in bot/bot.ts and ops/)
 - The lanes re-check the lease synchronously with the existing holdEngine() right before writing after awaited network
   calls: the position monitor and approval expiry in the ticker lane, OMS writes from onDecision in the scan lane, and

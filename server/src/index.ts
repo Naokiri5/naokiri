@@ -15,7 +15,9 @@ import { seedConcepts } from './knowledge/concepts.js';
 
 export async function buildApp() {
   openDb(); seedStrategies(); seedCatalog(); seedConcepts(); resumeIngestion();
-  const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'req.body.accessToken', 'req.body.password', 'req.body.current', 'req.body.next', 'req.body.otp', 'req.body.consoleCode'] }, bodyLimit: 256 * 1024 });
+  // Trust exactly N proxy hops (MIA_TRUST_PROXY): addresses are trusted from the socket outward while hop < N.
+  const hops = config.trustProxyHops;
+  const app = Fastify({ trustProxy: hops > 0 ? (_address: string, hop: number) => hop < hops : false, genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'req.body.accessToken', 'req.body.password', 'req.body.current', 'req.body.next', 'req.body.otp', 'req.body.consoleCode'] }, bodyLimit: 256 * 1024 });
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('x-request-id', req.id);
     reply.header('x-content-type-options', 'nosniff'); reply.header('x-frame-options', 'DENY'); reply.header('referrer-policy', 'no-referrer');

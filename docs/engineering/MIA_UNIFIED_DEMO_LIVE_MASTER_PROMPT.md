@@ -166,7 +166,7 @@ Privy user/wallet identity and actual trade authorization are separate concerns.
 ## 9 — STORAGE, RUNTIME AND DEPLOYMENT
 
 - Current backend uses Node/Fastify polling, SQLite WAL and an in-process engine lease. Deploy on persistent compute with persistent, backed-up data storage; do not put the long-running engine into an ordinary Vercel Function.
-- Keep Vercel for frontend, Cloudflare for routing/security, and a suitable durable backend runtime for stateful engine + API. Verify secrets, TLS, WebSocket/SSE support, canonical host and secure cookies.
+- Superseded 2026-11-25: Railway hosts the single stateful service (engine + API + UI), Cloudflare provides routing/security, and Vercel is retired (see `docs/operations/RAILWAY_CLOUDFLARE_DEPLOYMENT.md`). Verify secrets, TLS, WebSocket/SSE support, canonical host and secure cookies.
 - Current Vercel `naokiri-server` failed at the inspected commit with `TS2688 Cannot find type definition file for 'node'`. Repair workspace installation and dev-dependency presence in build; do not conflate a successful build with production operational certification.
 - Verify backup restore, failover, leader fencing, stale-data shutdown, open-position monitoring, market-provider outages, venue API outages and domain cutover before a live release.
 

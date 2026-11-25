@@ -63,11 +63,13 @@ function CandleChart({ candles, features }: { candles: any[]; features: any }) {
     if (!ref.current) return;
     const css = getComputedStyle(document.documentElement);
     const c = createChart(ref.current, { autoSize: true, layout: { background: { color: 'transparent' }, textColor: css.getPropertyValue('--muted').trim(), fontFamily: 'IBM Plex Mono' }, grid: { vertLines: { color: css.getPropertyValue('--line').trim() }, horzLines: { color: css.getPropertyValue('--line').trim() } }, timeScale: { timeVisible: true }, rightPriceScale: { borderVisible: false } });
-    series.current.c = c.addSeries(CandlestickSeries, { upColor: '#22c38e', downColor: '#f0505a', borderVisible: false, wickUpColor: '#22c38e', wickDownColor: '#f0505a' });
+    const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+    const up = v('--up', '#22c38e'); const down = v('--down', '#f0505a');
+    series.current.c = c.addSeries(CandlestickSeries, { upColor: up, downColor: down, borderVisible: false, wickUpColor: up, wickDownColor: down });
     series.current.v = c.addSeries(HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, color: 'rgba(139,150,168,.35)' });
     c.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
-    series.current.e20 = c.addSeries(LineSeries, { color: '#4f8cff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    series.current.e50 = c.addSeries(LineSeries, { color: '#a78bfa', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    series.current.e20 = c.addSeries(LineSeries, { color: v('--info', '#4f8cff'), lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    series.current.e50 = c.addSeries(LineSeries, { color: v('--violet', '#a78bfa'), lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     chart.current = c; return () => { c.remove(); chart.current = null; };
   }, []);
   useEffect(() => {

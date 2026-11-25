@@ -26,7 +26,7 @@
    ```
 
    Optionally supply `MIA_PRIVY_VERIFICATION_KEY` with the public key from your app; without it, the backend fetches Privy's public JWKS over HTTPS. Never place app secrets, trading keys, passphrases or private keys in frontend `VITE_*` variables or GitHub.
-4. Ensure `/api/*` on the frontend's HTTPS origin reaches the **same persistent Fastify backend** that owns the MIA SQLite data and session database. Keep a durable volume for `MIA_DATA_DIR` and an independently verified backup. **A static Vercel site by itself is not the MIA backend.** Do not move the existing Fastify/SQLite service into ephemeral serverless processes without a tested persistence and streaming design.
+4. Ensure `/api/*` on the frontend's HTTPS origin reaches the **same persistent Fastify backend** that owns the MIA SQLite data and session database. Keep a durable volume for `MIA_DATA_DIR` and an independently verified backup. Production uses one Railway service (API, SSE and UI on the same origin) with a volume for `MIA_DATA_DIR`; see `docs/operations/RAILWAY_CLOUDFLARE_DEPLOYMENT.md`. Vercel has been retired. Do not move the Fastify/SQLite service into ephemeral serverless processes without a tested persistence and streaming design.
 5. Place the domain's DNS and HTTPS routing under operator control (Cloudflare can provide DNS/proxy). Confirm cookies, `/api/auth/state`, and authenticated API/SSE requests work through the production HTTPS origin. Never allow cache/CDN storage for `/api/*` responses.
 
 ## Owner enrollment
@@ -69,7 +69,7 @@ npm run scan:secrets
 npm audit --audit-level=high
 ```
 
-The unit/Playwright fixtures **do not** count as a real-world Privy wallet sign-in. If an external Vercel build is blocked by a project quota or rate limit, resolve the deployment limit separately; do not report a successful release on the basis of GitHub Actions alone.
+The unit/Playwright fixtures **do not** count as a real-world Privy wallet sign-in. A successful Railway build or GitHub Actions run is not a real-world sign-in test; complete the release checks in `docs/operations/RAILWAY_CLOUDFLARE_DEPLOYMENT.md` on the production origin.
 
 ## Rollback / incident handling
 
