@@ -1,16 +1,36 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { config, REPO_ROOT } from '../config.js';
-import { all, get } from '../db/db.js';
+import { all, get, getDb } from '../db/db.js';
 import { currentPolicy } from '../risk/policy.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { WORKERS } from '../workers/registry.js';
 import { reconcile } from '../portfolio/calendar.js';
+import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
 /** Part 12.7 release gates. Evidence-driven; manual gates can only be satisfied by humans outside this app. */
 export interface Gate { id: string; name: string; status: 'PASS' | 'FAIL' | 'PENDING' | 'NOT_CERTIFIED' | 'NOT_IMPLEMENTED'; evidence: string }
 export interface TestRef { file: string; fullName: string }
+
+export const RELEASE_GATE_EVIDENCE_MAX_AGE_MS = 3 * 60_000;
+interface ReleaseGateEvidence {
+  checkedAt: number;
+  passed: number;
+  total: number;
+  liveAllowed: boolean;
+  summary: string;
+  unmetGateIds: readonly string[];
+}
+
+const releaseEvidence = new WeakMap<ReturnType<typeof getDb>, ReleaseGateEvidence>();
+
+/** Reuses the last canonical evaluation for advisory display without rereading QA or the audit chain. */
+export function recentReleaseGateEvidence(at = Date.now()): ReleaseGateEvidence | null {
+  const evidence = releaseEvidence.get(getDb());
+  if (!evidence || evidence.checkedAt > at || at - evidence.checkedAt > RELEASE_GATE_EVIDENCE_MAX_AGE_MS) return null;
+  return evidence;
+}
 
 const marketTests: readonly TestRef[] = [
   ...['fresh multi-source data is OK', 'stale quote fails closed', 'cross-venue deviation fails', 'missing instrument fails'].map(title => ({ file: 'server/test/quality.test.ts', fullName: `data quality gate (Part 32.2) ${title}` })),
@@ -137,8 +157,16 @@ export function releaseGates(report?: unknown) {
   g.push({ id: 'G03', name: 'All 100 worker roles tested; health observable', ...workers, status: 'PENDING', evidence: `${workers.evidence}; ${WORKERS.length} workers registered (requires 100); current offline CEX test covers 94 of 100, six on-chain roles and complete health coverage remain unproven` });
   const joe = testGate('G04');
   g.push({ id: 'G04', name: 'Trader Joe factuality & authorization tests', ...joe, status: 'PENDING', evidence: `${joe.evidence}; authorization checks do not certify LLM factuality; human review is required` });
-  const rec = reconcile();
-  g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile', status: rec.ok ? 'PASS' : 'FAIL', evidence: rec.detail });
+  try {
+    const rec = reconcile();
+    const unresolved = unreconciledPaperOrders();
+    g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile',
+      status: rec.ok && unresolved === 0 ? 'PASS' : 'FAIL',
+      evidence: `${rec.detail}; ${unresolved} unresolved paper order(s). External venue reconciliation is not certified.` });
+  } catch {
+    g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile',
+      status: 'FAIL', evidence: 'Canonical ledger or order recovery evidence unavailable.' });
+  }
   const ac = verifyAuditChain();
   g.push({ id: 'G06', name: 'Audit log integrity', status: ac.ok ? 'PASS' : 'FAIL', evidence: `${ac.entries} hash-chained entries${ac.ok ? ' verified' : `, broken at ${ac.brokenAt}`}` });
   g.push({ id: 'G07', name: 'Wallet permissions & signing isolation security tests', status: 'NOT_IMPLEMENTED', evidence: 'No signer exists in this build (by design). Requires isolated signer + external security test.' });
@@ -155,7 +183,11 @@ export function releaseGates(report?: unknown) {
   g.push({ id: 'G12', name: 'Live venue adapter + transaction firewall implemented', status: 'NOT_IMPLEMENTED', evidence: 'Deliberately absent until gates G07–G10 pass.' });
   g.push({ id: 'G13', name: 'Independent Release Auditor go/no-go', status: 'NOT_CERTIFIED', evidence: 'Human sign-off required.' });
   g.push({ id: 'G14', name: 'Owner explicit authorization for live execution', status: 'PENDING', evidence: 'Can only be recorded after all other gates pass.' });
-  const liveAllowed = g.every((x) => x.status === 'PASS');
-  return { gates: g, liveAllowed, summary: `${g.filter((x) => x.status === 'PASS').length}/${g.length} gates passed — live execution ${liveAllowed ? 'ELIGIBLE' : 'LOCKED'}` };
+  const unmetGateIds = g.filter((gate) => gate.status !== 'PASS').map((gate) => gate.id);
+  const passed = g.length - unmetGateIds.length;
+  const liveAllowed = unmetGateIds.length === 0;
+  const summary = `${passed}/${g.length} gates passed — live execution ${liveAllowed ? 'ELIGIBLE' : 'LOCKED'}`;
+  if (!arguments.length) releaseEvidence.set(getDb(), { checkedAt: Date.now(), passed, total: g.length, liveAllowed, summary, unmetGateIds });
+  return { gates: g, liveAllowed, summary };
 }
 export const openDefects = () => all('SELECT * FROM journal WHERE kind=? ORDER BY ts DESC LIMIT 50', 'RISK');

@@ -2,10 +2,11 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { freshDb, seedInstrument } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { evaluateRisk } from '../src/risk/gate.js';
-import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
+import { acceptPolicy, currentPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState } from '../src/portfolio/ledger.js';
 import { setSetting } from '../src/core/settings.js';
+import { run } from '../src/db/db.js';
 
 const prop = (id: string, last: number, extra: any = {}) => ({ instrumentId: id, strategyId: 'trend_pullback', side: 'buy' as const, entryPrice: last, stopPrice: last * 0.97, idempotencyKey: `k${Math.random()}`, traceId: 't', ...extra });
 describe('Risk gate (Part 17)', () => {
@@ -30,6 +31,34 @@ describe('Risk gate (Part 17)', () => {
     expect(s.notional).toBeLessThanOrEqual(2500.01);        // 25% max notional
     expect(r.policyVersion).toBe(1); expect(r.traceId).toBe('t');
   });
+  it('preserves legacy sizing and clamps an explicitly accepted combined reserve including fees', () => {
+    acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' });
+    ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const legacy = evaluateRisk(prop(id, last));
+    expect(legacy.decision).toBe('ALLOW');
+    expect(legacy.evaluated.cashReserveFloorUsd).toBeUndefined();
+    acceptPolicy('owner', { ...DEFAULT_POLICY, minUnallocatedReservePct: 94, minSettlementReservePct: 5 });
+    const capped = evaluateRisk(prop(id, last));
+    expect(capped.decision).toBe('ALLOW');
+    expect(capped.evaluated).toMatchObject({ cashReserveFloorUsd: 9900, cashReserveHeadroomUsd: 100 });
+    expect(capped.sizing!.maxNotional * (1 + DEFAULT_POLICY.feeRate)).toBeLessThanOrEqual(100 + 1e-8);
+    expect(capped.sizing!.qty).toBeLessThan(legacy.sizing!.qty);
+  });
+  it('denies at the reserve floor and rejects invalid or unauthorized reserve policy changes', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, minUnallocatedReservePct: 95, minSettlementReservePct: 5 });
+    updateControl('owner', { mode: 'PAPER' });
+    ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const denied = evaluateRisk(prop(id, last));
+    expect(denied.decision).toBe('DENY');
+    expect(denied.reasonCodes).toContain('CASH_RESERVE_FLOOR_REACHED');
+    for (const invalid of [
+      { minUnallocatedReservePct: 96, minSettlementReservePct: 5 },
+      { minUnallocatedReservePct: -1 },
+      { minSettlementReservePct: Infinity },
+      { minSettlementReservePct: NaN },
+    ]) expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, ...invalid })).toThrow();
+    expect(() => acceptPolicy('bot', { ...DEFAULT_POLICY, minUnallocatedReservePct: 50, minSettlementReservePct: 5 })).toThrow(/owner/);
+  });
   it('enforces daily loss breaker, stop direction, duplicates, pause and emergency', () => {
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     evaluateRisk(prop(id, last)); // establishes start-of-day mark
@@ -53,6 +82,51 @@ describe('Risk gate (Part 17)', () => {
     expect(evaluateRisk(prop(id, last)).reasonCodes.join()).toMatch(/DAILY_LOSS_BREAKER/);
     ledger(PAPER_ACCOUNT, 'DEPOSIT', 5_000); // topping up does not reset the breaker
     expect(evaluateRisk(prop(id, last)).reasonCodes.join()).toMatch(/DAILY_LOSS_BREAKER/);
+  });
+  it('uses persisted positions for cooldown and rolling entry limits', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, postExitCooldownMs: 10000, stopLossCooldownMs: 30000, entryFrequencyWindowMs: 60000, maxEntriesPerWindow: 1 });
+    updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10000);
+    const now = Date.now();
+    run("INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,realized_pnl,fees,planned_risk,exit_reason) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      'fixture-position', PAPER_ACCOUNT, id, 'crypto', 'LONG', 'trend_pullback', 0, last, last * 0.97, last * 0.97, '{}', 'CLOSED', now - 20000, now - 5000, -1, 0, 10, 'STOP');
+    const denied = evaluateRisk(prop(id, last), now);
+    expect(denied.reasonCodes).toContain('ASSET_POST_EXIT_COOLDOWN');
+    expect(denied.reasonCodes).toContain('ENTRY_FREQUENCY_CAP');
+    expect(denied.evaluated.assetCooldownUntilMs).toBe(now + 25000);
+    const later = evaluateRisk(prop(id, last), now + 60000);
+    expect(later.reasonCodes).not.toContain('ASSET_POST_EXIT_COOLDOWN');
+    expect(later.reasonCodes).not.toContain('ENTRY_FREQUENCY_CAP');
+  });
+  it('reduces sizing on drawdown and preserves hard breakers', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, adaptiveDrawdownSizing: true });
+    updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10000);
+    const now = Date.now(); const initial = evaluateRisk(prop(id, last), now);
+    expect(initial.evaluated.adaptiveAllocationMultiplier).toBe(1);
+    const day = new Date(now).toISOString().slice(0, 10);
+    const monday = new Date(now); monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+    setSetting('marks2:' + PAPER_ACCOUNT, { day, week: monday.toISOString().slice(0, 10), sodPerf: 0, sowPerf: 0, hwmPerf: 300 });
+    const reduced = evaluateRisk(prop(id, last), now);
+    expect(reduced.evaluated.adaptiveAllocationMultiplier).toBe(0.65);
+    expect(reduced.sizing!.riskBudget).toBeCloseTo(initial.sizing!.riskBudget * 0.65);
+    expect(reduced.sizing!.qty).toBeLessThan(initial.sizing!.qty);
+    setSetting('marks2:' + PAPER_ACCOUNT, { day, week: monday.toISOString().slice(0, 10), sodPerf: 0, sowPerf: 0, hwmPerf: 1000 });
+    const halted = evaluateRisk(prop(id, last), now);
+    expect(halted.decision).toBe('DENY');
+    expect(halted.reasonCodes).toContain('ADAPTIVE_DRAWDOWN_HALT');
+    expect(halted.reasonCodes.join()).toContain('DRAWDOWN_CAPITAL_PRESERVATION');
+  });
+  it('rolls back a risk policy version when audit persistence fails', () => {
+    const prior = acceptPolicy('owner', DEFAULT_POLICY);
+    run("CREATE TEMP TRIGGER fixture_reject_policy_audit BEFORE INSERT ON audit_log WHEN NEW.action='risk.policy.accept' BEGIN SELECT RAISE(ABORT, 'fixture policy audit failure'); END");
+    try {
+      expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, postExitCooldownMs: 10000 })).toThrow('fixture policy audit failure');
+      expect(currentPolicy()).toEqual(prior);
+    } finally { run('DROP TRIGGER fixture_reject_policy_audit'); }
+  });
+  it('rejects incomplete frequency policy and invalid anti-churn configuration', () => {
+    expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, maxEntriesPerWindow: 2 })).toThrow();
+    expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, postExitCooldownMs: -1 })).toThrow();
+    expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, adaptiveDrawdownSizing: 'true' })).toThrow();
   });
   it('denies strategies not promoted to PAPER', () => {
     freshDb(false); market.reset(); seedInstrument('BTCUSDT'); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);

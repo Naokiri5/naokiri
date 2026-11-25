@@ -4,7 +4,7 @@ import { isExpired } from '../qci/coordinator.js';
 import { scoreOpportunity, type OpportunityScore } from './scoring.js';
 import { evaluateRisk, type RiskDecision } from '../risk/gate.js';
 import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
-import { getControl } from '../core/mode.js';
+import { controlAuthority } from '../core/mode.js';
 import { recordOpportunity } from '../ditas/memory.js';
 import { run, J, tx } from '../db/db.js';
 import { uid, iso } from '../core/util.js';
@@ -12,6 +12,7 @@ import { record } from '../core/latency.js';
 import { bus } from '../core/bus.js';
 import { readIndicators } from '../workers/indicators.js';
 import { strategyKnowledge, type KnowledgeRef } from '../knowledge/integration.js';
+import { routeThinking, type ThinkRoutingResult } from './think-router.js';
 
 /** Part 8 central decision engine — the only component that can produce a trade decision. */
 export type DecisionState = 'APPROVED_FOR_MONITORING' | 'WAIT_FOR_CONFIRMATION' | 'PAPER_TRADE' | 'APPROVED_FOR_USER_CONFIRMATION' | 'APPROVED_FOR_BOUNDED_EXECUTION' | 'REJECTED' | 'INSUFFICIENT_DATA';
@@ -30,6 +31,7 @@ export interface DecisionReport {
   steps: PipelineStep[]; indicators: ReturnType<typeof readIndicators>;
   /** Explanatory knowledge references (Academy). Never read by the risk gate or OMS. */
   knowledge?: { refs: KnowledgeRef[]; authority: string };
+  thinking?: ThinkRoutingResult;
   disclaimer: string;
 }
 
@@ -53,23 +55,27 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
   const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
 
   let decision: DecisionState; let risk: RiskDecision | null = null;
-  const mode = getControl().mode;
-  if (q.status === 'FAIL' || !ctx.ticker) decision = 'INSUFFICIENT_DATA';
+  const authority = controlAuthority(), mode = authority.control.mode;
+  if (authority.unavailableMode) decision = 'REJECTED';
+  else if (q.status === 'FAIL' || !ctx.ticker) decision = 'INSUFFICIENT_DATA';
   else if (!ctx.safety.eligibleForAutomation || qci.state === 'VETOED') decision = 'REJECTED';
   else if (expired) decision = 'WAIT_FOR_CONFIRMATION';
   else if (qci.state === 'NO_QUORUM' || qci.state === 'MIXED_CONSENSUS') decision = 'WAIT_FOR_CONFIRMATION';
   else if (opp.score < pol.minOpportunityScore) decision = 'APPROVED_FOR_MONITORING';
   else if (mode === 'OBSERVE') decision = 'APPROVED_FOR_MONITORING';
+  // Defense in depth: a stale or directly persisted LIVE mode must never produce a
+  // PAPER_TRADE decision. PR #117 also protects the lower-level mode authority;
+  // this decision engine remains non-executing until a certified LIVE path exists.
+  else if (mode !== 'PAPER' && mode !== 'APPROVAL') decision = 'REJECTED';
   else {
-    risk = evaluateRisk({ instrumentId: cand.instrumentId, strategyId: cand.strategyId, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stop, idempotencyKey: `entry-${cand.id}`, traceId: cand.traceId });
+    risk = evaluateRisk({ instrumentId: cand.instrumentId, strategyId: cand.strategyId, strategyVersion: cand.strategyVersion, side: 'buy', entryPrice: s.entryRef, stopPrice: s.stop, idempotencyKey: `entry-${cand.id}`, traceId: cand.traceId });
     decision = risk.decision === 'DENY' ? 'REJECTED' : risk.decision === 'NEEDS_REVIEW' ? 'APPROVED_FOR_USER_CONFIRMATION' : mode === 'APPROVAL' ? 'APPROVED_FOR_USER_CONFIRMATION' : 'PAPER_TRADE';
-    // BOUNDED_LIVE is unreachable: mode change is blocked by the release gate.
   }
   step('Expected fees / slippage / impact', risk?.evaluated.costR != null ? (Number(risk.evaluated.costR) <= pol.maxCostR ? 'PASS' : 'FAIL') : 'SKIP', risk ? `cost ${risk.evaluated.costR}R, spread ${risk.evaluated.spreadBps}bps, impact ${risk.evaluated.impactBps}bps` : 'computed by risk engine when eligible');
   step('Position size', risk?.sizing ? 'PASS' : 'SKIP', risk?.sizing ? `qty ${risk.sizing.qty} ($${risk.sizing.notional}), planned max loss $${risk.sizing.plannedMaxLoss}` : '—');
   step('Portfolio correlation & exposure', correlatedOpen > 0 ? 'WARN' : 'PASS', `${correlatedOpen} correlated open positions`);
   step('Independent deterministic risk approval (Part 17)', risk ? (risk.decision === 'ALLOW' ? 'PASS' : risk.decision === 'NEEDS_REVIEW' ? 'WARN' : 'FAIL') : 'SKIP', risk ? `${risk.decision} ${risk.reasonCodes.join('; ')}` : 'not reached');
-  step('Execution permission (Part 9)', mode === 'OBSERVE' ? 'FAIL' : 'PASS', `mode ${mode}`);
+  step('Execution permission (Part 9)', mode === 'PAPER' || mode === 'APPROVAL' ? 'PASS' : 'FAIL', `mode ${mode}; only PAPER or APPROVAL is currently eligible`);
   step('Last-moment revalidation', 'SKIP', 'performed by OMS immediately before submission');
 
   const sup = qci.challenge.find((c) => c.reviewer === 'BULL')?.findings ?? [];
@@ -88,6 +94,19 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
     dataFreshness: { quoteAgeMs: q.quoteAgeMs, candleAgeMs: q.candleAgeMs, bookAgeMs: q.bookAgeMs, status: q.status },
     opportunity: opp, consensus: { id: qci.consensus_id, state: expired ? 'EXPIRED' : qci.state, support: qci.weighted_support, opposition: qci.weighted_opposition, expiresAt: qci.expires_at },
     risk, decision, finalDecision: final, steps, indicators: readIndicators(ctx.f), knowledge: strategyKnowledge(cand.strategyId),
+    thinking: routeThinking({
+      preference: 'AUTO',
+      marketDataValid: q.status !== 'FAIL',
+      mandatoryCoverageComplete: qci.state !== 'NO_QUORUM',
+      hardVetoPresent: qci.state === 'VETOED' || risk?.decision === 'DENY',
+      consensusExpired: expired,
+      conflictingEvidence: qci.state === 'MIXED_CONSENSUS',
+      unusualRegime: cand.regime === 'HIGH_VOLATILITY' || cand.regime === 'UNKNOWN',
+      executionUncertain: !ctx.impact?.filledFully,
+      portfolioExposureElevated: correlatedOpen > 0,
+      // This is an advisory route label. It schedules no work in the entry pipeline.
+      deepReviewBudgetAvailable: true,
+    }),
     disclaimer: 'Opportunity score and consensus are evidence summaries, not probabilities of profit. Paper trading only.',
   };
   record('decision.engine', performance.now() - t0);

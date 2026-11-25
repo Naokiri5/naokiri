@@ -1,5 +1,8 @@
 # MIA 4.1 — Architecture & Trust Boundaries (Part 22.2)
 
+> BrainOS master architecture, trading-mandate model, subsystem classification and pending-work register:
+> [`BRAINOS_MASTER_ARCHITECTURE.md`](BRAINOS_MASTER_ARCHITECTURE.md). This document keeps the 4.1 trust boundaries.
+
 ## Runtime topology
 
 ```

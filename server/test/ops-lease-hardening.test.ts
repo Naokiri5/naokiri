@@ -1,21 +1,35 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { freshDb, seedInstrument } from './helpers.js';
+import { freshDb, seedInstrument, setBook } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
-import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
+import { ledger, openPositions, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { all, get, run } from '../src/db/db.js';
 import { config } from '../src/config.js';
 import { currentLease, tryAcquireLease } from '../src/ops/lease.js';
-import { readiness, _resetWatchdog } from '../src/ops/readiness.js';
-import { botStatus, stopBot, ENGINE_LEASE, engineLeaseTtlMs, _test } from '../src/bot/bot.js';
+import { readiness, protectionIntervalMs, _resetWatchdog } from '../src/ops/readiness.js';
+import { botStatus, botStatusView, startBot, stopBot, ENGINE_LEASE, engineLeaseTtlMs, _test } from '../src/bot/bot.js';
 import * as lab from '../src/lab/lab.js';
 import * as oms from '../src/exec/oms.js';
+import { setCrashHook } from '../src/exec/crashpoint.js';
 import type { DecisionReport } from '../src/decision/engine.js';
 
 // Network lanes are replaced; everything that writes (OMS, ledger, lease, journal) is the real code.
-const hooks = vi.hoisted(() => ({ duringAwait: (): void => {} }));
-vi.mock('../src/market/fabric.js', async (orig) => ({ ...(await orig<object>()), ensureRules: async () => {}, refreshTickers: async () => { hooks.duringAwait(); }, refreshBooks: async () => {}, refreshDeep: async () => {}, refreshBackground: async () => { hooks.duringAwait(); } }));
+const hooks = vi.hoisted(() => ({
+  duringAwait: (): void => {},
+  tickers: async (): Promise<void> => {},
+  books: async (): Promise<void> => {},
+  deep: async (): Promise<void> => {},
+}));
+vi.mock('../src/market/fabric.js', async (orig) => ({
+  ...(await orig<object>()),
+  ensureRules: async () => {},
+  refreshTickers: async () => { hooks.duringAwait(); await hooks.tickers(); },
+  refreshBooks: () => hooks.books(),
+  refreshDeep: () => hooks.deep(),
+  refreshBackground: async () => { hooks.duringAwait(); },
+}));
+vi.mock('../src/ops/backup.js', async (orig) => ({ ...(await orig<object>()), maybeScheduledBackup: () => null }));
 vi.mock('../src/whales/prints.js', async (orig) => ({ ...(await orig<object>()), scanPrints: async () => {} }));
 vi.mock('../src/news/news.js', async (orig) => ({ ...(await orig<object>()), refreshNews: async () => 0 }));
 vi.mock('../src/lab/lab.js', async (orig) => { const real = await orig<typeof import('../src/lab/lab.js')>(); return { ...real, checkStrategyHealth: vi.fn(real.checkStrategyHealth) }; });
@@ -38,11 +52,15 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     Object.assign(botStatus, { running: true, role: 'STOPPED', lastError: null, lastMonitorAt: 0, monitorFailing: false, startedAt: Date.now() });
-    hooks.duringAwait = () => {}; vi.mocked(oms.monitorPositions).mockClear(); vi.mocked(oms.submitEntry).mockClear(); vi.mocked(lab.checkStrategyHealth).mockClear(); _resetWatchdog();
+    hooks.duringAwait = () => {};
+    hooks.tickers = async () => {};
+    hooks.books = async () => {};
+    hooks.deep = async () => {};
+    vi.mocked(oms.monitorPositions).mockClear(); vi.mocked(oms.submitEntry).mockClear(); vi.mocked(lab.checkStrategyHealth).mockClear(); _resetWatchdog();
   });
-  afterEach(() => { stopBot(); _test.resetTakeoverRefusal(); (config as any).offline = wasOffline; });
+  afterEach(() => { stopBot(); setCrashHook(null); vi.useRealTimers(); _test.resetTakeoverRefusal(); (config as any).offline = wasOffline; });
 
-  it('hotLane re-checks the lease after its awaits: a lost lease skips the monitor writes and drops to STANDBY', async () => {
+  it('a ticker refresh that loses the lease leaves scheduling authority with the successor', async () => {
     hooks.duringAwait = steal;
     await _test.hotLane();
     expect(oms.monitorPositions).not.toHaveBeenCalled();
@@ -51,8 +69,9 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(all("SELECT title FROM notifications WHERE source='engine-lease'").map((n: any) => n.title)).toEqual(['Engine lease lost']);
   });
 
-  it('onDecision re-checks the lease synchronously: a decision after the lease was lost writes nothing', () => {
+  it('onDecision re-checks the lease synchronously: a decision after the lease was lost writes nothing', async () => {
     expect(_test.holdEngine()).toBe(true);
+    await _test.protectionLane();
     _test.onDecision(report(id, last)); expect(count('positions')).toBe(1); // control: the leader trades
     steal();
     const before = [count('orders'), count('positions'), count('ledger_entries')];
@@ -62,17 +81,101 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(botStatus.role).toBe('STANDBY');
   });
 
+  it('fences entry commits when another holder takes over after the scheduler check', async () => {
+    await _test.protectionLane();
+    setCrashHook((point) => { if (point === 'entry.preTx') steal(); });
+    _test.onDecision(report(id, last));
+    expect(botStatus.role).toBe('STANDBY');
+    expect(count('orders')).toBe(0);
+    expect(count('fills')).toBe(0);
+    expect(count('positions')).toBe(0);
+  });
+
+  it('fences protective exits at the write lock and leaves the position for the successor', async () => {
+    expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+    setBook(id, last * 0.96);
+    setCrashHook((point) => { if (point === 'monitor.preTx') steal(); });
+    await _test.protectionLane();
+    expect(botStatus.role).toBe('STANDBY');
+    expect(openPositions()).toHaveLength(1);
+    expect(count('fills')).toBe(1);
+    expect(count('protection_incidents')).toBe(0);
+  });
+
+  it('closes a protected paper position on schedule while ticker and book refreshes are still pending', async () => {
+    vi.useFakeTimers();
+    (config as any).offline = false;
+    stopBot();
+    expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+    let releaseRefreshes!: () => void;
+    const pending = new Promise<void>((resolve) => { releaseRefreshes = resolve; });
+    hooks.tickers = () => pending;
+    hooks.books = () => pending;
+    try {
+      startBot();
+      await vi.advanceTimersByTimeAsync(1);
+      const priorPass = botStatus.lastMonitorAt;
+      expect(botStatusView().lanes.ticker.inFlight).toBe(true);
+      expect(botStatusView().lanes.positionBooks.inFlight).toBe(true);
+      setBook(id, last * 0.96);
+      await vi.advanceTimersByTimeAsync(protectionIntervalMs());
+      expect(openPositions()).toHaveLength(0);
+      expect(botStatus.lastMonitorAt - priorPass).toBe(protectionIntervalMs());
+      expect(botStatusView().lanes.ticker.inFlight).toBe(true);
+      expect(readiness(botStatus).checks.find((check) => check.name === 'monitor')?.status).toBe('pass');
+    } finally {
+      stopBot();
+      releaseRefreshes();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+  });
+
+  it('keeps checking positions while the scanner waits on deep market data', async () => {
+    vi.useFakeTimers();
+    (config as any).offline = false;
+    stopBot();
+    expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+    let releaseScan!: () => void;
+    const pending = new Promise<void>((resolve) => { releaseScan = resolve; });
+    hooks.deep = () => pending;
+    try {
+      startBot();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(botStatusView().lanes.scan.inFlight).toBe(true);
+      setBook(id, last * 0.96);
+      await vi.advanceTimersByTimeAsync(protectionIntervalMs());
+      expect(openPositions()).toHaveLength(0);
+      expect(botStatusView().lanes.scan.inFlight).toBe(true);
+    } finally {
+      stopBot();
+      releaseScan();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+  });
+
+  it('freezes automated exposure while the monitor fails and resumes after a successful pass', async () => {
+    vi.mocked(oms.monitorPositions).mockImplementationOnce(() => { throw new Error('protection failure'); });
+    await _test.protectionLane();
+    _test.onDecision(report(id, last));
+    expect(count('fills')).toBe(0);
+    await _test.protectionLane();
+    _test.onDecision(report(id, last));
+    expect(count('fills')).toBe(1);
+  });
+
   it('lastMonitorAt advances only after an error-free monitor pass; readiness fails while the monitor errors or is stale', async () => {
     (config as any).offline = false;
     const monitor = (e: typeof botStatus) => readiness(e).checks.find((c) => c.name === 'monitor');
-    await _test.hotLane();
+    await _test.protectionLane();
     const ok = botStatus.lastMonitorAt; expect(ok).toBeGreaterThan(0); expect(monitor(botStatus)!.status).toBe('pass');
     vi.mocked(oms.monitorPositions).mockImplementationOnce(() => { throw new Error('boom'); });
-    await new Promise((r) => setTimeout(r, 5)); await _test.hotLane();
+    vi.useFakeTimers();
+    vi.setSystemTime(ok + 5);
+    await _test.protectionLane();
     expect(botStatus.lastMonitorAt).toBe(ok); expect(botStatus.monitorFailing).toBe(true);
     expect(monitor(botStatus)).toMatchObject({ status: 'fail', detail: 'last position-monitor pass failed' });
     expect(readiness(botStatus).ready).toBe(false);
-    await _test.hotLane();
+    await _test.protectionLane();
     expect(botStatus.lastMonitorAt).toBeGreaterThan(ok); expect(botStatus.monitorFailing).toBe(false); expect(monitor(botStatus)!.status).toBe('pass');
   });
 
@@ -86,9 +189,11 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(get<any>("SELECT title FROM notifications WHERE source='engine-lease'")!.title).toBe('Engine stopped: integrity check failed');
   });
 
-  it('takeover integrity also fails on an open position without its protective stop, and on a newer schema', () => {
+  it('takeover integrity also fails on an open position without its protective stop, and on a newer schema', async () => {
     const restart = () => { stopBot(); _test.resetTakeoverRefusal(); Object.assign(botStatus, { running: true, role: 'STANDBY' }); };
-    expect(_test.holdEngine()).toBe(true); _test.onDecision(report(id, last));
+    expect(_test.holdEngine()).toBe(true);
+    await _test.protectionLane();
+    _test.onDecision(report(id, last));
     run("DELETE FROM orders WHERE purpose='PROTECTIVE_STOP'");
     restart(); run('DELETE FROM runtime_leases');
     expect(_test.holdEngine()).toBe(false); expect(botStatus.lastError).toMatch(/protective stops: 1 open position\(s\) without a matching active stop/);
@@ -133,5 +238,16 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(_test.holdEngine()).toBe(true); expect(botStatus.role).toBe('LEADER');
     run("UPDATE audit_log SET hash='tampered' WHERE id=(SELECT MIN(id) FROM audit_log)");
     expect(_test.holdEngine()).toBe(true); expect(botStatus.role).toBe('LEADER');
+  });
+
+  it('reconciles again when the same holder returns after its lease expired', () => {
+    expect(_test.holdEngine()).toBe(true);
+    const old = currentLease(ENGINE_LEASE)!;
+    run("UPDATE audit_log SET hash='tampered' WHERE id=(SELECT MIN(id) FROM audit_log)");
+    vi.useFakeTimers();
+    vi.setSystemTime(old.expires_at + 1);
+    expect(_test.holdEngine()).toBe(false);
+    expect(botStatus.role).toBe('STOPPED');
+    expect(currentLease(ENGINE_LEASE)).toBeNull();
   });
 });

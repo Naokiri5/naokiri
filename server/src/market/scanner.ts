@@ -1,3 +1,4 @@
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { recordOpportunity } from '../ditas/memory.js';
 import { marketBreadth } from './bubbles.js';
 import { market } from './store.js';
@@ -68,11 +69,16 @@ export function buildContext(cand: Candidate): WorkerContext {
   };
 }
 
-export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
+export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: string) => void, continueScan?: () => boolean) {
   const t0 = performance.now();
   const ctl = getControl();
   let candidates = 0;
   for (const id of market.universe) {
+    // Scheduled scans give due protection timers a turn between instruments.
+    if (continueScan) {
+      await nextTurn();
+      if (!continueScan()) return { candidates, universe: market.universe.length };
+    }
     const inst = market.instruments.get(id); const d = market.deep.get(id); const t = market.tickers.get(id);
     if (!inst || !d || !t) continue;
     const f1 = d.engines['1h'].last;
@@ -107,6 +113,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
       const proposalMemory = recordOpportunity({ kind: 'PROPOSAL', instrumentId: id, strategyId: s.id, dedupeKey: `proposal:${cand.id}`, reason: sig.reasons.join('; '), candidate: cand, ctx });
       ctx.memorySnapshotId = proposalMemory.snapshotId ?? undefined;
       const qci = await runConsensus(ctx);
+      if (continueScan && !continueScan()) return { candidates, universe: market.universe.length };
       const correlatedOpen = openPositions().filter((p) => { const c = correlation(p.instrument, id); return c == null || c >= (currentPolicy()?.policy ?? DEFAULT_POLICY).correlationThreshold; }).length;
       const rep = decide(cand, ctx, qci, ctx.strategyStats, correlatedOpen);
       record('pipeline.candidate_to_decision', Date.now() - cand.createdAt);
@@ -114,7 +121,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
       if (rep.decision === 'REJECTED' || rep.decision === 'INSUFFICIENT_DATA') rejectLog(inst.symbol, 'decision', `${s.id}: ${rep.decision} — ${[...qci.reason_codes, ...(rep.risk?.reasonCodes ?? [])].slice(0, 3).join('; ')}`);
       lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
       processed.add(key);
-      onDecision?.(rep);
+      onDecision?.(rep, ctx.memorySnapshotId);
       } catch (e: any) {
         // One failing candidate must not abort the scan for the rest of the universe; it is retried next cycle.
         processed.delete(key); rejectLog(inst.symbol, 'error', `${s.id}: ${String(e?.message ?? e).slice(0, 200)}`);

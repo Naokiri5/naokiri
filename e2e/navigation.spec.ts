@@ -1,94 +1,111 @@
 import { test, expect, type Page } from '@playwright/test';
 
-/**
- * PR A — six-destination navigation. Presentation only: every original URL must still open its page, and nothing in
- * the navigation can change the operating mode. Runs after app.spec.ts has created the owner (serial, same server).
- */
+/** MIA 6.0 four-section navigation. Real pages and existing authority stay unchanged. */
 const PW = 'e2e owner passphrase';
-const GROUPS: [string, string[]][] = [
-  ['Markets', ['/terminal', '/scanner', '/discover', '/bubbles', '/whales', '/holders', '/copy', '/news']],
-  ['Autopilot', ['/bot', '/risk', '/lab']],
-  ['Portfolio', ['/portfolio', '/history', '/journal', '/calendar', '/wallet']],
-  ['AI Intelligence', ['/intelligence', '/ditas', '/qhef', '/academy']],
-  ['Settings & Security', ['/connections', '/notifications', '/security', '/qa', '/settings']],
-];
+const DESTINATIONS = [
+  ['Autopilot', '/autopilot'],
+  ['Portfolio', '/smart-portfolio'],
+  ['Trader Joe', '/trader-joe'],
+  ['Settings', '/settings'],
+] as const;
+
 test.describe.configure({ mode: 'serial' });
-let page: Page; const errors: string[] = [];
+let page: Page;
+const errors: string[] = [];
 async function login(p: Page) {
-  await p.context().route('https://fonts.googleapis.com/**', (r) => r.fulfill({ contentType: 'text/css', body: '' }));
-  p.on('pageerror', (e) => errors.push(e.message)); p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-  await p.goto('/app'); const pw = p.locator('input[type=password]');
-  if (await p.getByText('Owner setup').count()) { await pw.nth(0).fill(PW); await pw.nth(1).fill(PW); } else await pw.first().fill(PW);
-  await p.locator('form button').first().click(); await expect(p.locator('h1')).toBeVisible();
-}
-test.beforeAll(async ({ browser }) => { page = await browser.newPage(); await login(page); });
-
-test('every original route is reachable from its destination and keeps its URL', async () => {
-  const side = page.getByRole('navigation', { name: 'Main' });
-  await page.goto('/app'); await expect(side.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('.mode')).not.toHaveText(/^(…|CHECKING)$/); const modeBefore = await page.locator('.mode').textContent();
-  for (const [group, paths] of GROUPS) {
-    const btn = side.getByRole('button', { name: group });
-    if ((await btn.getAttribute('aria-expanded')) !== 'true') await btn.click();
-    await expect(btn).toHaveAttribute('aria-expanded', 'true');
-    for (const path of paths) {
-      await side.locator(`#nav-${await btn.getAttribute('aria-controls').then((x) => x!.slice(4))} a[href="${path}"]`).click();
-      await expect(page).toHaveURL(new RegExp(`${path.replace('/', '\\/')}$`)); await expect(page.locator('h1')).toBeVisible();
-    }
+  await p.context().route('https://fonts.googleapis.com/**', r => r.fulfill({ contentType: 'text/css', body: '' }));
+  p.on('pageerror', e => errors.push(e.message));
+  p.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  await p.goto('/app');
+  const pw = p.locator('input[type=password]');
+  if (await p.getByText('Owner setup').count()) {
+    await pw.nth(0).fill(PW);
+    await pw.nth(1).fill(PW);
+  } else {
+    await pw.first().fill(PW);
   }
-  await side.getByRole('link', { name: 'Trader Joe' }).click(); await expect(page).toHaveURL(/\/joe$/);
-  expect(await page.locator('.mode').textContent()).toBe(modeBefore); // navigation never changes the operating mode
+  await p.locator('form button').first().click();
+  await expect(p.locator('h1')).toBeVisible();
+}
+test.beforeAll(async ({ browser }) => {
+  page = await browser.newPage();
+  await login(page);
 });
 
-test('deep links still work and highlight their destination; sibling tabs link related pages', async () => {
-  await page.goto('/terminal/BTCUSDT'); await expect(page.locator('h1')).toBeVisible();
-  const markets = page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Markets' });
-  await expect(markets).toHaveAttribute('aria-expanded', 'true');
-  const tabs = page.getByRole('navigation', { name: 'Markets pages' });
-  await expect(tabs.getByRole('link')).toHaveCount(8);
-  await tabs.getByRole('link', { name: 'AI Scanner' }).click(); await expect(page).toHaveURL(/\/scanner$/);
-});
-
-test('groups are keyboard operable', async () => {
+test('exactly four main links lead to existing functional views without altering trading mode', async () => {
   await page.goto('/app');
-  const btn = page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Portfolio' });
-  const before = await btn.getAttribute('aria-expanded');
-  await btn.focus(); await page.keyboard.press('Enter');
-  await expect(btn).toHaveAttribute('aria-expanded', before === 'true' ? 'false' : 'true');
-  await page.keyboard.press('Enter'); await expect(btn).toHaveAttribute('aria-expanded', before ?? 'false');
+  const sidebar = page.getByRole('navigation', { name: 'Main' });
+  await expect(sidebar.getByRole('link')).toHaveCount(4);
+  await expect(page.locator('.mode')).not.toHaveText(/^(CHECKING|…|UNKNOWN)$/);
+  const before = await page.locator('.mode').textContent();
+  for (const [name, path] of DESTINATIONS) {
+    const link = sidebar.getByRole('link', { name, exact: true });
+    await expect(link).toHaveAttribute('href', path);
+    await link.click();
+    await expect(page).toHaveURL(new RegExp(`${path.replaceAll('/', '\\/')}$`));
+    await expect(page.locator('h1')).toBeVisible();
+  }
+  expect(await page.locator('.mode').textContent()).toBe(before);
+  await expect(page.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=live]')).toHaveText(/LOCKED/);
 });
 
-test('collapsed rail keeps every destination one click away', async () => {
-  await page.goto('/app'); await page.getByRole('button', { name: 'Collapse menu' }).click();
-  const side = page.getByRole('navigation', { name: 'Main' });
-  await side.getByRole('link', { name: 'Autopilot' }).click(); await expect(page).toHaveURL(/\/bot$/);
-  await page.getByRole('button', { name: 'Expand menu' }).click();
-  await expect(side.getByRole('button', { name: 'Autopilot' })).toBeVisible();
+test('legacy deep links stay functional and highlight the owning primary section', async () => {
+  const pairs = [
+    ['/terminal/BTCUSDT', 'Autopilot'],
+    ['/bot', 'Autopilot'],
+    ['/overview', 'Autopilot'],
+    ['/joe', 'Trader Joe'],
+    ['/ditas', 'Trader Joe'],
+    ['/portfolio', 'Portfolio'],
+    ['/history', 'Portfolio'],
+    ['/risk', 'Settings'],
+    ['/lab', 'Settings'],
+    ['/security', 'Settings'],
+  ] as const;
+  const sidebar = page.getByRole('navigation', { name: 'Main' });
+  for (const [path, section] of pairs) {
+    await page.goto(path);
+    await expect(page.locator('h1')).toBeVisible();
+    await expect(sidebar.getByRole('link', { name: section, exact: true })).toHaveClass(/active/);
+  }
 });
 
-test('command palette understands plain-language synonyms', async () => {
-  await page.goto('/app'); await expect(page.locator('h1')).toBeVisible(); await page.keyboard.press('Control+k');
-  const box = page.getByRole('textbox', { name: 'Command' }); const opts = page.getByRole('option');
-  await box.fill('profit'); await expect(opts.filter({ hasText: 'Portfolio' }).first()).toBeVisible(); await expect(opts.filter({ hasText: 'Profit Calendar' })).toBeVisible();
-  await box.fill('ai bots'); await expect(opts.filter({ hasText: 'AI Intelligence' })).toBeVisible();
-  await box.fill('fund'); await expect(opts.filter({ hasText: 'Bot Account' })).toBeVisible(); await expect(opts.filter({ hasText: 'Wallet & Withdrawals' })).toBeVisible();
-  await box.fill('pause new'); await expect(opts.first()).toContainText('Pause new orders'); // actions named directly stay first
+test('command palette still discovers old screens and the existing risk-reducing action', async () => {
+  await page.goto('/app');
+  await expect(page.locator('h1')).toBeVisible();
+  await page.keyboard.press('Control+k');
+  await expect(page.getByRole('dialog', { name: 'Command palette' })).toBeVisible();
+  const input = page.getByRole('textbox', { name: 'Command' });
+  const options = page.getByRole('option');
+  await input.fill('ai bots');
+  await expect(options.filter({ hasText: 'AI Intelligence' })).toBeVisible();
+  await input.fill('profit calendar');
+  await expect(options.filter({ hasText: 'Profit Calendar' })).toBeVisible();
+  await input.fill('pause new');
+  await expect(options.first()).toContainText('Pause new orders');
   await page.keyboard.press('Escape');
 });
 
-test('mobile: bottom bar + More, mode badge stays visible, Escape closes the menu', async ({ browser }) => {
-  const m = await browser.newPage({ viewport: { width: 390, height: 844 } }); await login(m);
-  await expect(m.locator('.mode')).toBeVisible();
-  const bar = m.getByRole('navigation', { name: 'Mobile' });
-  await bar.getByRole('link', { name: 'Markets' }).click(); await expect(m).toHaveURL(/\/terminal$/);
-  await bar.getByRole('button', { name: 'More pages' }).click();
-  const side = m.getByRole('navigation', { name: 'Main' }); await expect(side).toBeVisible();
-  await side.getByRole('button', { name: 'Settings & Security' }).click();
-  await side.locator('a[href="/security"]').click(); await expect(m).toHaveURL(/\/security$/); await expect(side).toBeHidden();
-  await bar.getByRole('button', { name: 'More pages' }).click(); await expect(side).toBeVisible();
-  await m.keyboard.press('Escape'); await expect(side).toBeHidden();
-  expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await m.close();
+test('mobile navigation exposes the same four destinations and command search without overflow', async ({ browser }) => {
+  const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  await login(mobile);
+  const bar = mobile.getByRole('navigation', { name: 'Main' });
+  await expect(bar.getByRole('link')).toHaveCount(4);
+  for (const [name, path] of DESTINATIONS) {
+    const link = bar.getByRole('link', { name, exact: true });
+    await expect(link).toHaveAttribute('href', path);
+  }
+  await bar.getByRole('link', { name: 'Portfolio' }).click();
+  await expect(mobile).toHaveURL(/\/smart-portfolio$/);
+  await mobile.getByRole('button', { name: 'Open command palette' }).click();
+  const palette = mobile.getByRole('dialog', { name: 'Command palette' });
+  await expect(palette).toBeVisible();
+  await mobile.keyboard.press('Escape');
+  await expect(palette).toBeHidden();
+  expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await mobile.close();
 });
 
-test('no console errors during navigation', async () => { expect(errors, errors.join('\n')).toEqual([]); });
+test('no uncaught frontend errors during navigation', async () => {
+  expect(errors, errors.join('\n')).toEqual([]);
+});

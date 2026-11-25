@@ -8,11 +8,15 @@ import { market } from '../market/store.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { INTERVAL_MS, type Candle, type Interval } from '../market/types.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
+import { assertWriteFence, type LeaseFence } from '../ops/lease.js';
 
 /** Part 18 lifecycle: RESEARCH → BACKTESTED → PAPER → (LIVE_CANDIDATE, gated) | SUSPENDED | RETIRED */
 export type StrategyStatus = 'RESEARCH' | 'BACKTESTED' | 'PAPER' | 'LIVE_CANDIDATE' | 'SUSPENDED' | 'RETIRED';
 export function seedStrategies() {
-  for (const s of STRATEGIES) if (!get('SELECT 1 FROM strategies WHERE id=?', s.id)) run('INSERT INTO strategies(id,name,version,status,params,updated_at,note) VALUES (?,?,?,?,?,?,?)', s.id, s.name, s.version, 'RESEARCH', J({ interval: s.interval, regimes: s.suitableRegimes }), Date.now(), s.description);
+  for (const s of STRATEGIES) run(
+    'INSERT INTO strategies(id,name,version,status,params,updated_at,note) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING',
+    s.id, s.name, s.version, 'RESEARCH', J({ interval: s.interval, regimes: s.suitableRegimes }), Date.now(), s.description,
+  );
 }
 export function listStrategies() {
   return all<any>('SELECT * FROM strategies ORDER BY id').map((r) => ({ ...r, params: P(r.params), stats: strategyStats(r.id), live: paperStats(r.id) }));
@@ -21,12 +25,16 @@ export function setStrategyStatus(actor: string, id: string, status: StrategySta
   if (!strategyById(id)) throw new Error('unknown strategy');
   if (status === 'LIVE_CANDIDATE') throw new Error('LIVE_CANDIDATE requires release-gate certification (Part 12.7) — not available in this build');
   if (actor !== 'owner' && status !== 'SUSPENDED' && status !== 'RETIRED') throw new Error('only the owner may promote or re-enable a strategy');
-  if (status === 'PAPER' && !(strategyStats(id)?.trades)) throw new Error('promotion to PAPER requires at least one stored backtest');
-  run('UPDATE strategies SET status=?, updated_at=?, note=COALESCE(?, note) WHERE id=?', status, Date.now(), note ?? null, id);
-  const susp = new Set(getSetting<string[]>('suspendedStrategies', []));
-  status === 'SUSPENDED' || status === 'RETIRED' ? susp.add(id) : susp.delete(id);
-  setSetting('suspendedStrategies', [...susp]);
-  audit(actor, 'strategy.status', { id, status, note });
+  // Lifecycle row, suspension index and audit record must commit together. The
+  // existing OMS checks both status and suspension inside its entry transaction.
+  tx(() => {
+    if (status === 'PAPER' && !(strategyStats(id)?.trades)) throw new Error('promotion to PAPER requires at least one stored backtest');
+    run('UPDATE strategies SET status=?, updated_at=?, note=COALESCE(?, note) WHERE id=?', status, Date.now(), note ?? null, id);
+    const susp = new Set(getSetting<string[]>('suspendedStrategies', []));
+    status === 'SUSPENDED' || status === 'RETIRED' ? susp.add(id) : susp.delete(id);
+    setSetting('suspendedStrategies', [...susp]);
+    audit(actor, 'strategy.status', { id, status, note });
+  });
 }
 export async function fetchHistory(symbol: string, interval: Interval, bars = 3000, cutoff = Date.now()): Promise<Candle[]> {
   const duration = INTERVAL_MS[interval];
@@ -124,7 +132,7 @@ export function paperStats(strategyId: string, nowTs = Date.now()) {
   return { trades, expectancyR, winRate: returns.filter(result => result > 0).length / trades };
 }
 /** Strategy health (Part 18.5): suspend when paper expectancy decays well below backtest after enough trades. */
-export function checkStrategyHealth() {
+export function checkStrategyHealth(fence?: LeaseFence) {
   const flagged: string[] = [];
   const nowTs = Date.now();
   const hasPaperStatus = (id: string) => !!get("SELECT 1 FROM strategies WHERE id=? AND status='PAPER'", id);
@@ -135,6 +143,7 @@ export function checkStrategyHealth() {
     const b = strategyStats(s.id);
     if (b && b.expectancyR <= p.expectancyR + 0.3) continue;
     const suspended = tx(() => {
+      assertWriteFence(fence);
       if (!hasPaperStatus(s.id)) return false;
       setStrategyStatus('strategy-health-monitor', s.id, 'SUSPENDED', `auto-suspended: paper expectancy ${p.expectancyR.toFixed(2)}R over ${p.trades} trades`);
       return true;

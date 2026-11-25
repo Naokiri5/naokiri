@@ -14,7 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # For PR events github.sha is GitHub's tested merge commit, not just the source head.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact tested commit
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Tested commit: $EXPECTED_SHA"
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -30,6 +40,18 @@ jobs:
         run: npm run build
       - name: Unit & integration tests (offline, deterministic)
         run: npm run qa -w server
+      # Same local and CI P0 verification entrypoint, not a release certificate.
+      - name: P0 reliability regressions (three shuffled runs)
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: bash scripts/verify-brainos-phases.sh --p0-only
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: p0-offline-verification-logs
+          path: ${{ runner.temp }}/mia-brainos-verify.*/logs/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Web unit tests (status ribbon model)
         run: npm test -w web
       - uses: actions/upload-artifact@v4
@@ -43,7 +65,17 @@ jobs:
     needs: checks
     timeout-minutes: 20
     steps:
+      # For PR events github.sha is GitHub's tested merge commit, not just the source head.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact tested commit
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Tested commit: $EXPECTED_SHA"
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc

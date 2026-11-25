@@ -1,0 +1,86 @@
+@font-face {
+  font-family: Manrope;
+  src: url('./assets/fonts/manrope-latin.woff2') format('woff2');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Instrument Serif';
+  src: url('./assets/fonts/instrument-serif-latin-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  --mia-ui: Manrope, system-ui, sans-serif;
+  --mia-display: 'Instrument Serif', Georgia, serif;
+  --mia-mono: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  --mia-ink: #100e1b;
+  --mia-navy: #161326;
+  --mia-panel: #1d1930;
+  --mia-elevated: #29243d;
+  --mia-text: #f6f3fc;
+  --mia-muted: #b9b3cc;
+  --mia-faint: #a29ab6;
+  --mia-line: #36304a;
+  --mia-edge: #4b4165;
+  --mia-lavender: #c4a9ff;
+  --mia-azure: #7cd9ff;
+  --mia-lime: #d2fa7b;
+  --mia-gold: #e0bd83;
+  --mia-gain: #75e3b9;
+  --mia-loss: #ff949e;
+  --mia-warning: #f0c375;
+  --mia-on-action: #1b2412;
+  --mia-action: #d2fa7b;
+  --mia-action-hover: #e4ffa7;
+  /* BrainOS mandate accents: FAST is candy pink, DEEP is soft sky. `*-ink` variants are the text-safe forms. */
+  --mia-fast: #f48bb8;
+  --mia-deep: #a5d8ff;
+  --mia-fast-ink: #f48bb8;
+  --mia-deep-ink: #a5d8ff;
+  --mia-cream: #fff8f1;
+  --mia-graphite: #302d39;
+}
+
+:root[data-theme='light'] {
+  --mia-ink: #f8f7fc;
+  --mia-navy: #f0edf7;
+  --mia-panel: #fff;
+  --mia-elevated: #ece7f7;
+  --mia-text: #211a34;
+  --mia-muted: #534963;
+  --mia-faint: #645873;
+  --mia-line: #dfd7ea;
+  --mia-edge: #cfc2de;
+  --mia-lavender: #6239a0;
+  --mia-azure: #10627d;
+  --mia-lime: #426514;
+  --mia-gold: #79551f;
+  --mia-gain: #096a4c;
+  --mia-loss: #a72442;
+  --mia-warning: #805212;
+  --mia-on-action: #f7ffeb;
+  --mia-action: #355b1e;
+  --mia-action-hover: #244412;
+  --mia-fast-ink: #a3245f;
+  --mia-deep-ink: #1b5e87;
+}
+
+.mia-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mia-text);
+  font-family: var(--mia-ui);
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.075em;
+  white-space: nowrap;
+}
+
+.mia-mark, .mia-wordmark-point { color: var(--mia-lime); }

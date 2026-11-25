@@ -1,4 +1,11 @@
 import { ditasRoutes } from '../ditas/routes.js';
+import { recentChoiceShadows } from '../ditas/memory.js';
+import { paperChoiceOutcomes } from '../ditas/execution.js';
+import { assessFastMemecoinResearch, reconstructDeepFuturesResearch } from '../choice/dualResearch.js';
+import { dualResearchStatus } from '../choice/dualRuntime.js';
+import { FUTURES_RESEARCH_SYMBOLS, fetchFuturesResearchSnapshot } from '../providers/binanceFuturesResearch.js';
+import { catalogSummary } from '../fabric/catalog.js';
+import { paperFillEvents } from '../exec/fillEvents.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
@@ -21,7 +28,7 @@ import { readIndicators, INDICATOR_SPECIALISTS } from '../workers/indicators.js'
 import { WORKERS, DOMAINS, REQUIRED_DOMAINS } from '../workers/registry.js';
 import { POOL, quarantined, releaseQuarantine } from '../workers/runtime.js';
 import { workerEffectiveness } from '../workers/effectiveness.js';
-import { overviewSnapshot } from '../dashboard/overview.js';
+import { activityFeed, overviewSnapshot } from '../dashboard/overview.js';
 import { QCI_POLICY, DOMAIN_WEIGHTS } from '../qci/coordinator.js';
 import { providers } from '../providers/http.js';
 import { latencyReport } from '../core/latency.js';
@@ -41,10 +48,14 @@ import * as wallet from '../wallet/wallet.js';
 import { listNotifications, markRead, notify } from '../notify/notify.js';
 import { releaseGates } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
-import { botStatus, botStatusView } from '../bot/bot.js';
-import { readiness } from '../ops/readiness.js';
+import { activeEngineFence, botStatus, botStatusView } from '../bot/bot.js';
+import { readiness, staleAfter } from '../ops/readiness.js';
+import { commandStatus } from '../ops/commandStatus.js';
+import { SESSION_ENVIRONMENTS, SESSION_MINDS, paperSpotSessionPreflight, sessionPreflight } from '../ops/sessionPreflight.js';
+import { durableSessionStatus, openPaperSpotSession, requestPaperSpotClose, requirePaperSpotSession, suspendDurableEntries } from '../ops/durableSession.js';
+import { MANDATE_LIMITS } from '../ops/tradingMandate.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
-import { all, get, P } from '../db/db.js';
+import { all, get, P, tx } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { config, inContainer } from '../config.js';
@@ -72,6 +83,13 @@ const passphraseOnly = () => {
   if (!passphraseSignInAllowed()) throw httpError(403, 'passphrase authentication is disabled; connect a wallet with Privy');
 };
 const PW = z.string().min(1).max(1024);
+const SESSION_STEP_UP = z.object({ password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional() }).strict();
+/** Run Session: step-up proof plus the owner's mandate (authorized capital and duration). */
+const SESSION_RUN = z.object({
+  password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional(),
+  capitalCeiling: z.number().finite().positive().max(1e12),
+  durationHours: z.number().int().min(MANDATE_LIMITS.minDurationHours).max(MANDATE_LIMITS.maxDurationHours),
+}).strict();
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
 const ID = z.string().min(1).max(150);
@@ -83,7 +101,7 @@ const httpError = (code: number, msg: string) => Object.assign(new Error(msg), {
 const isServerFault = (e: any) => e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError
   || /^ERR_SQLITE|^SQLITE/.test(String(e?.code ?? '')) || /SQLITE_|database is locked/i.test(String(e?.message ?? ''));
 // Per-session budgets for routes that call paid APIs, many upstream endpoints, or run long CPU work.
-const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2) };
+const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2), futuresResearch: limiter(8, 2) };
 
 export async function routes(app: FastifyInstance) {
   /**
@@ -139,6 +157,30 @@ export async function routes(app: FastifyInstance) {
 
   await ditasRoutes(app);
   await knowledgeRoutes(app);
+  app.get('/api/session/preflight', async (req) => {
+    const { mind, environment } = z.object({ mind: z.enum(SESSION_MINDS), environment: z.enum(SESSION_ENVIRONMENTS) }).strict().parse(req.query);
+    return sessionPreflight(botStatus, mind, environment);
+  });
+  app.get('/api/session/paper-spot', async (_req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return paperSpotSessionPreflight(botStatus);
+  });
+  app.post('/api/session/paper-spot/run', async (req) => {
+    const { capitalCeiling, durationHours, ...proof } = SESSION_RUN.parse(req.body ?? {});
+    stepUp(req, proof);
+    const fence = activeEngineFence();
+    if (!fence) throw httpError(409, 'The active engine must authorize a paper session.');
+    const session = openPaperSpotSession(botStatus, fence, { capitalCeiling, durationHours, authorizedBy: `owner:${stepUpMethod()}` });
+    audit('owner', 'session.paper_spot.run', { capitalCeiling, durationHours, expiresAt: session.expires_at, riskPolicyVersion: session.risk_policy_version });
+    bus.publish('bot', botStatusView());
+    return { state: session.state };
+  });
+  app.post('/api/session/paper-spot/close', async (req) => {
+    z.object({}).strict().parse(req.body ?? {});
+    const session = requestPaperSpotClose();
+    bus.publish('bot', botStatusView());
+    return { state: session?.state ?? 'CLOSED' };
+  });
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
   app.post('/api/risk/incidents/:id/ack', async (req) => {
@@ -232,6 +274,7 @@ export async function routes(app: FastifyInstance) {
       unread: get<{ n: number }>('SELECT COUNT(*) n FROM notifications WHERE read=0')!.n, gates: gates.summary, liveAllowed: gates.liveAllowed, offline: config.offline, scanIntervalMs: config.scanIntervalMs, tickerIntervalMs: config.tickerIntervalMs, serverTime: Date.now() };
   });
   app.get('/api/overview', async () => overviewSnapshot());
+  app.get('/api/activity', async () => ({ activity: activityFeed() }));
 
   // ── markets ──
   app.get('/api/markets', async () => ({ tickers: [...market.tickers.values()].filter((t) => t.quoteVolume > 1e6 && isEligibleSpot(t.base, t.quote)).sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 300), universe: market.universe, asOf: market.tickersFetchedAt }));
@@ -267,6 +310,53 @@ export async function routes(app: FastifyInstance) {
 
   // ── scanner / decisions ──
   app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
+  // Authenticated research and replay views.
+  app.get('/api/fabric/catalog', async () => catalogSummary());
+  app.get('/api/fabric/events', async (req) => {
+    const query = z.object({
+      after: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
+      limit: z.coerce.number().int().min(1).max(100).default(50),
+    }).parse(req.query ?? {});
+    return paperFillEvents(query.after, query.limit);
+  });
+  app.get('/api/choice/dual/status', async () => dualResearchStatus());
+  app.get('/api/choice/dual/fast', async () =>
+    assessFastMemecoinResearch(market.dex, market.dexFetchedAt));
+  app.get('/api/choice/dual/deep', async (req) => {
+    limit(req, 'futuresResearch', 'futures chart research');
+    const { symbol } = z.object({
+      symbol: z.enum(FUTURES_RESEARCH_SYMBOLS).default('BTCUSDT'),
+    }).parse(req.query ?? {});
+    try {
+      if (config.offline) throw new Error('FUTURES_RESEARCH_OFFLINE');
+      const snapshot = await fetchFuturesResearchSnapshot(symbol);
+      return reconstructDeepFuturesResearch(snapshot);
+    } catch (error: unknown) {
+      return {
+        version: 'mia-dual-research-v1' as const, lane: 'DEEP_FUTURES' as const,
+        rolloutMode: 'RESEARCH_ONLY' as const, tradingAuthority: false as const,
+        market: 'CRYPTO_PERPETUAL_FUTURES' as const, symbol,
+        state: 'NO_TRADE' as const, reason: 'FUTURES_SOURCE_UNAVAILABLE_OR_INVALID',
+        errorClass: error instanceof Error && error.message.startsWith('UNUSABLE_FUTURES_CANDLES')
+          ? 'INVALID_CANDLES' : 'PROVIDER_UNAVAILABLE',
+        plan: null,
+      };
+    }
+  });
+  app.get('/api/choice/shadow', async (req) => {
+    const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }).parse(req.query ?? {});
+    const rounds = recentChoiceShadows(limit);
+    const compared = rounds.flatMap((round) => [round.firstEligibleDecisionId, round.selectedDecisionId])
+      .filter((id): id is string => typeof id === 'string');
+    return {
+      rolloutMode: 'SHADOW_ONLY' as const,
+      releaseReadiness: 'NOT_CERTIFIED' as const,
+      reason: 'Active allocation requires prospective paper evidence based on net expectancy and a validated reservation lifecycle.',
+      tradingAuthority: false,
+      rounds,
+      observedPaperOutcomes: paperChoiceOutcomes(compared),
+    };
+  });
   app.get('/api/decisions', async (req) => { const q = z.object({ decision: TOKEN.optional() }).parse(req.query); return all<any>(`SELECT id, instrument, strategy, decision, score, risk_decision, created_at FROM decisions ${q.decision ? 'WHERE decision=?' : ''} ORDER BY created_at DESC LIMIT 300`, ...(q.decision ? [q.decision] : [])); });
   app.get('/api/decisions/:id', async (req, reply) => { const r = get<any>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found'); const c = get<any>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id); return { report: P(r.report), consensus: c ? P(c.record) : null }; });
   app.post('/api/analyze', async (req) => { const { symbol, strategyId } = z.object({ symbol: z.string().min(1).max(20), strategyId: z.string().max(60).optional() }).parse(req.body); const i = market.bySymbol(symbol); if (!i) throw httpError(404, 'unknown symbol'); limit(req, 'analyze', 'analysis'); return analyzeInstrument(i.id, strategyId); });
@@ -302,24 +392,56 @@ export async function routes(app: FastifyInstance) {
     const cur = getControl();
     const reEnables = !!patch.disabledStrategies && cur.disabledStrategies.some((s) => !patch.disabledStrategies!.includes(s));
     if (patch.mode || patch.emergency === false || patch.pausedNewOrders === false || reEnables) stepUp(req, b);
-    return updateControl('owner', patch, (m) => {
-      if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
-      if ((m === 'PAPER' || m === 'APPROVAL') && !currentPolicy()) return { ok: false, reason: 'accept a risk policy before enabling paper execution' };
-      return { ok: true };
+    return tx(() => {
+      const paperRequested = patch.mode === 'PAPER' || patch.mode === 'APPROVAL';
+      if (paperRequested) requirePaperSpotSession();
+      const current = getControl();
+      const changed = (patch.mode !== undefined && patch.mode !== current.mode)
+        || (patch.pausedNewOrders !== undefined && patch.pausedNewOrders !== current.pausedNewOrders)
+        || (patch.emergency !== undefined && patch.emergency !== current.emergency)
+        || (patch.disabledStrategies !== undefined && JSON.stringify(patch.disabledStrategies) !== JSON.stringify(current.disabledStrategies));
+      if (!changed) return current;
+      if (durableSessionStatus()?.state === 'RUNNING') {
+        suspendDurableEntries(patch.emergency ? 'EMERGENCY_HALT' : 'RISK_HALT');
+      }
+      return updateControl('owner', patch, (m) => {
+        if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
+        if ((m === 'PAPER' || m === 'APPROVAL') && !currentPolicy()) return { ok: false, reason: 'accept a risk policy before enabling paper execution' };
+        return { ok: true };
+      });
     });
   });
   app.post('/api/emergency/:action', async (req) => {
     const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), password: PW.optional() }).strict().parse(req.body ?? {});
-    if (a === 'pause') return oms.pauseNewOrders('owner');
+    if (a === 'pause') {
+      const result = oms.pauseNewOrders('owner');
+      suspendDurableEntries('RISK_HALT');
+      return result;
+    }
     if (a === 'cancel-pending') return oms.cancelPendingEntries('owner');
     if (a === 'protect') return oms.protectPositions(true);
-    if (a === 'stop') return oms.emergencyStop('owner');
+    if (a === 'stop') {
+      const result = oms.emergencyStop('owner');
+      const session = durableSessionStatus();
+      if (session && session.state !== 'CLOSED') suspendDurableEntries('EMERGENCY_HALT');
+      return result;
+    }
     if (a === 'close-all') { stepUp(req, b); return oms.closeAllPositions('owner', b.confirm ?? ''); }
     throw httpError(404, 'unknown emergency action');
   });
 
   // ── bot account / portfolio / orders ──
-  app.get('/api/bot', async () => ({ status: botStatusView(), account: accountState(), positions: oms.listPositions('OPEN'), pending: all("SELECT * FROM orders WHERE status='PENDING_APPROVAL' ORDER BY created_at DESC"), strategies: lab.listStrategies(), ledger: all('SELECT * FROM ledger_entries WHERE account=? ORDER BY ts DESC LIMIT 100', PAPER_ACCOUNT) }));
+  app.get('/api/bot', async () => {
+    const account = accountState();
+    const status = botStatusView(account);
+    return {
+      status, account, command: commandStatus(status),
+      positions: oms.listPositions('OPEN'),
+      pending: all("SELECT * FROM orders WHERE account=? AND venue=? AND purpose='ENTRY' AND status='PENDING_APPROVAL' ORDER BY created_at DESC", PAPER_ACCOUNT, oms.VENUE),
+      strategies: lab.listStrategies(),
+      ledger: all('SELECT * FROM ledger_entries WHERE account=? ORDER BY ts DESC LIMIT 100', PAPER_ACCOUNT),
+    };
+  });
   app.post('/api/bot/allocation', async (req) => {
     const b = z.object({ amount: z.number().positive().max(10_000_000), direction: z.enum(['DEPOSIT', 'WITHDRAW']) }).parse(req.body);
     if (b.direction === 'WITHDRAW' && b.amount > accountState().cash) throw new Error('cannot remove more than available paper cash');
@@ -332,7 +454,15 @@ export async function routes(app: FastifyInstance) {
     return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
   });
   app.get('/api/orders', async () => oms.listOrders(300));
-  app.post('/api/orders/:id/approve', async (req) => oms.decideApproval(idOf(req), true));
+  app.post('/api/orders/:id/approve', async (req) => {
+    if (!durableSessionStatus()) return oms.decideApproval(idOf(req), true);
+    const fence = activeEngineFence();
+    const monitorAge = Date.now() - botStatus.lastMonitorAt;
+    if (!fence || botStatus.monitorFailing || monitorAge < 0 || monitorAge > staleAfter().monitorMs) {
+      throw httpError(409, 'Paper approval requires the active engine and a current protection check.');
+    }
+    return oms.decideApproval(idOf(req), true, fence);
+  });
   app.post('/api/orders/:id/reject', async (req) => oms.decideApproval(idOf(req), false));
   app.post('/api/positions/:id/close', async (req) => oms.closePosition('owner', idOf(req)));
 

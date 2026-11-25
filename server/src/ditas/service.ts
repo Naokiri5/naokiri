@@ -29,7 +29,22 @@ export function forecastCohorts() { return all<{ cohort: string; n: number }>('S
 export function calibrationFor(cohort?: string) {
   if (!cohort) return { ...calibrationReport([]), cohort: null, cohorts: forecastCohorts(), note: 'Select an exact forecast cohort. Different strategies, versions, horizons and targets are never pooled.' };
   const rows = all<{ probability: number; outcome: 0 | 1 }>('SELECT f.probability,o.outcome FROM ditas_forecasts f JOIN ditas_outcomes o ON o.forecast_id=f.id WHERE f.cohort=? ORDER BY f.created_at', cohort);
-  return { ...calibrationReport(rows), cohort, cohorts: forecastCohorts(), provenance: 'OWNER_REPORTED observations; independent market-source verification pending.' };
+  // Keep historical combined metrics for API compatibility, but never label
+  // owner observations as independently verified or mix them into source-only drift.
+  const verified = sourceVerifiedCalibration(cohort);
+  return { ...calibrationReport(rows), cohort, cohorts: forecastCohorts(),
+    provenance: 'Mixed or owner-reported observations; see sourceVerified for provider-backed outcomes only.',
+    sourceVerified: verified };
+}
+/** Derived from immutable WAL rows, survives restart without mutable counters.
+ * Exact cohort includes model, strategy, target and horizon; never pool them.
+ * Provider-backed outcome is not proof of a calibrated production model.
+ */
+export function sourceVerifiedCalibration(cohort: string) {
+  const rows = all<{ probability: number; outcome: 0 | 1 }>(
+    "SELECT f.probability,o.outcome FROM ditas_forecasts f JOIN ditas_outcomes o ON o.forecast_id=f.id WHERE f.cohort=? AND json_extract(o.payload,'$.provenance')='BINANCE_PUBLIC_CLOSED_BAR' AND f.created_at<f.target_at AND f.target_at<=o.created_at ORDER BY f.target_at DESC,f.id DESC LIMIT 200", cohort);
+  return { ...calibrationReport(rows), cohort, windowLimit: 200,
+    provenance: 'BINANCE_PUBLIC_CLOSED_BAR', tradingAuthority: false as const, automaticPromotion: false as const };
 }
 export function ditasOverview(cohort?: string) {
   const events = memoryEvents(100);
@@ -97,4 +112,18 @@ export function addOutcome(forecastId: string, observedPrice: number, observedAt
   if (get('SELECT 1 FROM ditas_outcomes WHERE forecast_id=?', forecastId)) throw new Error('duplicate outcome: this forecast is already settled');
   run('INSERT INTO ditas_outcomes(id,forecast_id,created_at,outcome,payload) VALUES (?,?,?,?,?)', id, forecastId, now, outcome, J(payload));
   return { id, forecastId, createdAt: now, outcome, ...payload };
+}
+
+// BrainOS internal learning observes canonical records on the existing background lane.
+// These records are NOT an independently verified calibration cohort. No writes or model promotion.
+export function recentInternalLearningEvidence(now = Date.now()) {
+  if (!Number.isSafeInteger(now) || now <= 0) throw new Error('INVALID_LEARNING_OBSERVATION_TIME');
+  const closed = all<{ closed_at: number }>(
+    "SELECT closed_at FROM positions WHERE account=? AND status='CLOSED' AND closed_at>0 AND closed_at<=? ORDER BY closed_at DESC LIMIT 100",
+    PAPER_ACCOUNT, now);
+  const outcomes = all<{ id: string }>(
+    "SELECT o.id FROM ditas_outcomes o JOIN ditas_forecasts f ON f.id=o.forecast_id WHERE f.created_at<f.target_at AND f.target_at<=o.created_at AND o.created_at<=? AND json_extract(o.payload,'$.provenance')='OWNER_REPORTED_UNVERIFIED' ORDER BY o.created_at DESC LIMIT 100",
+    now);
+  return { observedAt: now, recentPaperClosedCount: closed.length,
+    latestPaperClosedAt: closed[0]?.closed_at ?? null, recentOwnerReportedOutcomes: outcomes.length };
 }

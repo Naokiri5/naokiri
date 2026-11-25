@@ -33,8 +33,8 @@ export function seedBacktestFixture(strategyId = STRATEGIES[0].id) {
   };
   run('INSERT INTO backtests(id,strategy_id,created_at,instrument,interval,result) VALUES (?,?,?,?,?,?)', `bt_fixture_${strategyId}`, strategyId, Date.now(), result.instrument, strategy.interval, J(result));
 }
-export function freshDb(promote = true) {
-  closeDb(); openDb(':memory:'); seedStrategies();
+export function freshDb(promote = true, file = ':memory:') {
+  closeDb(); openDb(file); seedStrategies();
   if (promote) run("UPDATE strategies SET status='PAPER'");
 }
 /** Seed an instrument with synthetic candles on all intervals plus a deep book and cross-venue quote. */

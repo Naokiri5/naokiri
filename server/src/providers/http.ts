@@ -35,11 +35,11 @@ export const provider = (id: string) => registry.get(id);
 
 /** Simple token bucket per provider to respect documented public rate limits. */
 class Bucket {
-  private tokens: number; private last = Date.now();
+  private tokens: number; private last = performance.now();
   constructor(private perMin: number) { this.tokens = perMin; }
   async take() {
     for (;;) {
-      const t = Date.now();
+      const t = performance.now();
       this.tokens = Math.min(this.perMin, this.tokens + ((t - this.last) / 60_000) * this.perMin);
       this.last = t;
       if (this.tokens >= 1) { this.tokens -= 1; return; }
@@ -48,21 +48,50 @@ class Bucket {
   }
 }
 const buckets = new Map<string, Bucket>();
-export function setRateLimit(id: string, perMin: number) { buckets.set(id, new Bucket(perMin)); }
+export function setRateLimit(id: string, perMin: number) {
+  if (!Number.isFinite(perMin) || perMin < 1) throw new Error('INVALID_PROVIDER_RATE_LIMIT');
+  buckets.set(id, new Bucket(perMin));
+}
 
 export class ProviderError extends Error { constructor(public providerId: string, msg: string, public status?: number) { super(`${providerId}: ${msg}`); } }
+
+// Shared across all callers of a provider (including scanner and position-book lanes).
+// A cooldown suppresses HTTP calls, not the independent local protection monitor.
+const cooldowns = new Map<string, { until: number; status: number }>();
+
+function retryDelayMs(raw: string | null, status: number): number {
+  const fallback = status === 418 ? 120_000 : 60_000;
+  if (raw == null || !raw.trim()) return fallback;
+  const value = raw.trim();
+  const delay = /^\d+$/.test(value) ? Number(value) * 1000 : Date.parse(value) - Date.now();
+  return Number.isFinite(delay) && delay > 0 ? Math.max(1000, delay) : fallback;
+}
+function enforceCooldown(id: string) {
+  const current = cooldowns.get(id);
+  if (!current) return;
+  if (performance.now() < current.until) throw new ProviderError(id, 'rate-limit cooldown active', current.status);
+  cooldowns.delete(id);
+}
 
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
 export async function fetchProvider(id: string, url: string, opts: { timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string> } = {}): Promise<any> {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
   if (config.offline) throw new ProviderError(id, 'offline mode');
+  enforceCooldown(id);
   await buckets.get(id)?.take();
+  // Another caller may have received a 429 while this one waited for a token.
+  enforceCooldown(id);
   const t0 = performance.now();
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
   try {
     const res = await fetch(url, { signal: ctl.signal, redirect: 'follow', headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } });
+    if (res.status === 429 || (id === 'binance' && res.status === 418)) {
+      const until = performance.now() + retryDelayMs(res.headers.get('retry-after'), res.status);
+      const prior = cooldowns.get(id);
+      if (!prior || until > prior.until) cooldowns.set(id, { until, status: res.status });
+    }
     if (res.status === 404) { // resource-level miss (e.g. product not listed) — provider itself is reachable
       Object.assign(info, { lastOkAt: Date.now(), lastLatencyMs: Math.round(performance.now() - t0) });
       throw Object.assign(new ProviderError(id, 'HTTP 404 (resource not found)', 404), { resourceMiss: true });
@@ -72,8 +101,11 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
     const ms = performance.now() - t0;
     record(`provider.${id}`, ms);
     const prev = info.status;
-    Object.assign(info, { status: 'LIVE', lastOkAt: Date.now(), okCount: info.okCount + 1, lastLatencyMs: Math.round(ms) });
-    if (prev !== 'LIVE') bus.publish('health', { provider: id, status: 'LIVE' });
+    // An earlier in-flight request succeeding does not cancel a later rate-limit response.
+    const cooling = (cooldowns.get(id)?.until ?? -Infinity) > performance.now();
+    const status = cooling ? 'DEGRADED' : 'LIVE';
+    Object.assign(info, { status, lastOkAt: Date.now(), okCount: info.okCount + 1, lastLatencyMs: Math.round(ms) });
+    if (prev !== status) bus.publish('health', { provider: id, status });
     return body;
   } catch (e: any) {
     if (e?.resourceMiss) throw e;
