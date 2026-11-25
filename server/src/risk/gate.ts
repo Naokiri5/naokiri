@@ -102,7 +102,34 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const perUnitLoss = worstPermittedEntry - conservativeStopFill + pol.feeRate * (worstPermittedEntry + conservativeStopFill);
   const riskBudget = acct.equity * (pol.riskPerTradePct / 100);
   let qty = perUnitLoss > 0 ? riskBudget / perUnitLoss : 0;
-  const maxNotional = Math.min(acct.equity * (pol.maxPositionNotionalPct / 100), acct.cash * 0.98);
+  // The only financial authority is the canonical gate, re-evaluated inside the OMS
+  // transaction. Treat the two optional reserves as disjoint logical cash portions.
+  // Do not invent settlement balances, allocate against stale proposals, or release cash
+  // on an exit request. The ledger credits cash only after the existing exit settles.
+  const unallocatedPct = pol.minUnallocatedReservePct === undefined ? 0 : pol.minUnallocatedReservePct;
+  const settlementPct = pol.minSettlementReservePct === undefined ? 0 : pol.minSettlementReservePct;
+  if (![unallocatedPct, settlementPct].every(v => Number.isFinite(v) && v >= 0 && v <= 100)
+      || unallocatedPct + settlementPct > 100) {
+    deny.push('INVALID_CASH_RESERVE_POLICY');
+    return out();
+  }
+  let maxNotional = Math.min(acct.equity * (pol.maxPositionNotionalPct / 100), acct.cash * 0.98);
+  if (unallocatedPct + settlementPct > 0) {
+    const floor = acct.equity * ((unallocatedPct + settlementPct) / 100);
+    const cashHeadroom = acct.cash - floor;
+    const reserveNotional = Math.max(0, cashHeadroom / (1 + pol.feeRate));
+    if (![floor, cashHeadroom, reserveNotional].every(Number.isFinite)
+        || !Number.isFinite(pol.feeRate) || pol.feeRate < 0) {
+      deny.push('INVALID_CASH_RESERVE_EVIDENCE');
+      return out();
+    }
+    ev.cashReserveFloorUsd = floor;
+    ev.cashReserveHeadroomUsd = Math.max(0, cashHeadroom);
+    if (cashHeadroom <= 0) deny.push('CASH_RESERVE_FLOOR_REACHED');
+    maxNotional = Math.min(maxNotional, reserveNotional);
+    // Use the worst allowed entry to avoid allocating beyond the reserve on a depth walk.
+    qty = Math.min(qty, reserveNotional / worstPermittedEntry);
+  }
   if (qty * estEntry > maxNotional) qty = maxNotional / estEntry;
   qty = floorStep(qty, inst.stepSize);
   const notional = qty * estEntry;
