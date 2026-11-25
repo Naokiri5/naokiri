@@ -22,6 +22,45 @@ const atomic = <T>(fn: () => T): T => tx(fn); // tx joins an enclosing transacti
 const pick = (obj: any, keys: string) => Object.fromEntries(keys.split(' ').filter(k => obj[k] !== undefined).map(k => [k, obj[k]]));
 const feature = (f: any) => f ? pick(f, 't n close ema9 ema20 ema50 ema200 rsi14 atr14 atrPct macd macdSignal macdHist adx14 plusDI minusDI bbMid bbUpper bbLower bbWidth bbPctB donchHigh20 donchLow20 donchHigh55 donchLow55 obv obvSlope10 volZ20 relVol20 takerBuyRatio ret1 ret5 ret20 roc10 realizedVol20 stochK14 williamsR14 cci20 mfi14 vwap20 zscore20 swingHigh swingLow ema20Slope5 ema50Slope10 bbWidthPctile100 efficiencyRatio10') : null;
 
+/**
+ * Candle history is stored as content-addressed chunks of CANDLE_CHUNK bars aligned on the bar time. Closed chunks are
+ * identical between consecutive snapshots, so each is written once; a snapshot keeps only the ordered chunk hashes.
+ * The snapshot hash covers those chunk hashes, so the full history stays tamper-evident.
+ */
+export const CANDLE_CHUNK = 25;
+const INTERVAL_MS_FOR: Record<string, number> = { '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 };
+function storeCandleChunks(candles: Record<string, any[]>, at: number) {
+  const refs: Record<string, string[]> = {};
+  for (const [interval, bars] of Object.entries(candles)) {
+    const span = CANDLE_CHUNK * (INTERVAL_MS_FOR[interval] ?? 1);
+    const groups = new Map<number, any[]>();
+    for (const bar of bars) {
+      const key = Math.floor(bar.t / span);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(bar);
+    }
+    refs[interval] = [...groups.keys()].sort((a, b) => a - b).map((key) => {
+      const blob = J(groups.get(key)); const hash = sha256(blob);
+      run('INSERT OR IGNORE INTO ditas_blobs(hash,created_at,bytes,payload) VALUES (?,?,?,?)', hash, at, blob.length, blob);
+      return hash;
+    });
+  }
+  return refs;
+}
+/** Rehydrates a stored snapshot payload; v2 chunk references are verified against their hashes. */
+function hydrateSnapshot(payload: any) {
+  if (payload?.schemaVersion !== 'ditas.snapshot.v2') return payload;
+  const candles: Record<string, any[]> = {};
+  for (const [interval, hashes] of Object.entries(payload.candleChunks as Record<string, string[]>)) {
+    candles[interval] = hashes.flatMap((hash) => {
+      const blob = get<{ payload: string }>('SELECT payload FROM ditas_blobs WHERE hash=?', hash);
+      if (!blob || sha256(blob.payload) !== hash) throw new Error(`DITAS_BLOB_INTEGRITY: ${interval} chunk ${hash.slice(0, 12)} missing or altered`);
+      return P<any[]>(blob.payload);
+    });
+  }
+  return { ...payload, candles };
+}
+
 /** Explicit allowlist: no credentials, config, chats or unrestricted agent tool context. */
 function capture(instrumentId: string, interval: Interval, asOf: number, ctx?: WorkerContext) {
   const d = market.deep.get(instrumentId), t = market.tickers.get(instrumentId);
@@ -43,14 +82,22 @@ function hashEvent(r: any) {
   return sha256(J([r.id, r.dedupe_key, r.created_at, r.kind, r.instrument, r.strategy, r.decision_id, r.snapshot_id, r.parent_event_id, r.payload, r.prev_hash]));
 }
 
-export function recordOpportunity(input: { kind: Exclude<MemoryKind, 'CORRECTION' | 'CHOICE_SHADOW'>; instrumentId: string; strategyId?: string; interval?: Interval; dedupeKey: string; reason: string; candidate?: Candidate; ctx?: WorkerContext; report?: DecisionReport; snapshotId?: string }) {
+/**
+ * `snapshotAt` lets one scan pass share a single market-state snapshot across strategies: identical state captured at
+ * the same instant has the same content address, so it is stored once instead of once per strategy.
+ */
+export function recordOpportunity(input: { kind: Exclude<MemoryKind, 'CORRECTION' | 'CHOICE_SHADOW'>; instrumentId: string; strategyId?: string; interval?: Interval; dedupeKey: string; reason: string; candidate?: Candidate; ctx?: WorkerContext; report?: DecisionReport; snapshotId?: string; snapshotAt?: number }) {
   return atomic(() => {
     const exists = get<any>('SELECT * FROM ditas_events WHERE dedupe_key=?', input.dedupeKey);
     if (exists) return eventRow(exists);
     const ts = Date.now(), id = uid('evt');
     let snapshotId = input.snapshotId ?? input.ctx?.memorySnapshotId;
     if (snapshotId) { const original = get<any>('SELECT instrument FROM ditas_snapshots WHERE id=?', snapshotId); if (!original || original.instrument !== input.instrumentId) throw new Error('invalid original snapshot reference'); }
-    else { const snapshot = J(capture(input.instrumentId, input.interval ?? '1h', ts, input.ctx)); const hash = sha256(snapshot); snapshotId = `snap_${hash}`;
+    else {
+      const asOf = input.snapshotAt !== undefined && Number.isSafeInteger(input.snapshotAt) && input.snapshotAt <= ts ? input.snapshotAt : ts;
+      const { candles, ...state } = capture(input.instrumentId, input.interval ?? '1h', asOf, input.ctx);
+      const snapshot = J({ ...state, schemaVersion: 'ditas.snapshot.v2', candleChunks: storeCandleChunks(candles, ts) });
+      const hash = sha256(snapshot); snapshotId = `snap_${hash}`;
       run('INSERT OR IGNORE INTO ditas_snapshots(id,created_at,instrument,payload,hash) VALUES (?,?,?,?,?)', snapshotId, ts, input.instrumentId, snapshot, hash); }
 
     const payload = J({ reason: input.reason, strategy: input.strategyId ? { id: input.strategyId, version: strategyById(input.strategyId)?.version ?? null } : null, candidate: input.candidate ?? null, report: input.report ?? null, prediction: { probability: null, status: 'UNCALIBRATED' } });
@@ -108,13 +155,25 @@ export function memoryEvents(limit = 100) { return all<any>('SELECT * FROM ditas
 export function memoryDetail(id: string) {
   const r = get<any>('SELECT * FROM ditas_events WHERE id=?', id); if (!r) return null;
   const snapshot = r.snapshot_id ? get<any>('SELECT * FROM ditas_snapshots WHERE id=?', r.snapshot_id) : null;
-  return { event: eventRow(r), snapshot: snapshot ? { id: snapshot.id, createdAt: snapshot.created_at, hash: snapshot.hash, ...P(snapshot.payload) } : null,
+  return { event: eventRow(r), snapshot: snapshot ? { id: snapshot.id, createdAt: snapshot.created_at, hash: snapshot.hash, ...hydrateSnapshot(P(snapshot.payload)) } : null,
     relatedEvents: all<any>('SELECT * FROM ditas_events WHERE parent_event_id=? ORDER BY seq', id).map(eventRow) };
 }
 /** Verifies the event chain and snapshot hashes; rows may come from a backup snapshot instead of the live database. */
-export function verifyMemory(events: any[] = all<any>('SELECT * FROM ditas_events ORDER BY seq'), snapshots: any[] = all<any>('SELECT * FROM ditas_snapshots')) {
+export function verifyMemory(
+  events: any[] = all<any>('SELECT * FROM ditas_events ORDER BY seq'),
+  snapshots: any[] = all<any>('SELECT * FROM ditas_snapshots'),
+  blobs: any[] = all<any>('SELECT hash,payload FROM ditas_blobs'),
+) {
   let prev = 'GENESIS';
   for (const r of events) { if (r.prev_hash !== prev || r.hash !== hashEvent(r)) return { ok: false, brokenAt: r.id }; prev = r.hash; }
-  for (const r of snapshots) if (sha256(r.payload) !== r.hash || r.id !== `snap_${r.hash}`) return { ok: false, brokenAt: r.id };
+  const blobHashes = new Set<string>();
+  for (const b of blobs) { if (sha256(b.payload) !== b.hash) return { ok: false, brokenAt: `blob_${b.hash}` }; blobHashes.add(b.hash); }
+  for (const r of snapshots) {
+    if (sha256(r.payload) !== r.hash || r.id !== `snap_${r.hash}`) return { ok: false, brokenAt: r.id };
+    const p = P<any>(r.payload);
+    if (p?.schemaVersion === 'ditas.snapshot.v2' &&
+        Object.values((p.candleChunks ?? {}) as Record<string, string[]>).some((hashes) => hashes.some((h) => !blobHashes.has(h))))
+      return { ok: false, brokenAt: r.id };
+  }
   return { ok: true, entries: events.length };
 }

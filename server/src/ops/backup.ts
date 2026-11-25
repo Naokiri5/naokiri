@@ -144,7 +144,10 @@ export function verifyBackup(file: string, key: Buffer | null = backupKey()): Ve
       add('schema', v === m.schema && v <= SCHEMA_VERSION, `v${v} (manifest v${m.schema}, code v${SCHEMA_VERSION})`);
       const a = verifyAuditChain(snap.prepare('SELECT * FROM audit_log ORDER BY id').all());
       add('audit chain', a.ok, a.ok ? `${a.entries} entries` : `broken at entry ${a.brokenAt}`);
-      const d = verifyMemory(snap.prepare('SELECT * FROM ditas_events ORDER BY seq').all(), snap.prepare('SELECT * FROM ditas_snapshots').all());
+      // Backups taken before migration 8 have no blob table; their snapshots are all v1 and need no blobs.
+      const hasBlobs = !!snap.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ditas_blobs'").get();
+      const d = verifyMemory(snap.prepare('SELECT * FROM ditas_events ORDER BY seq').all(), snap.prepare('SELECT * FROM ditas_snapshots').all(),
+        hasBlobs ? snap.prepare('SELECT hash,payload FROM ditas_blobs').all() : []);
       add('decision memory chain', d.ok, d.ok ? `${d.entries} events` : `broken at ${d.brokenAt}`);
     } catch (e: any) { add('open', false, `cannot read snapshot: ${String(e?.message ?? e).slice(0, 200)}`); }
     finally { snap?.close(); }

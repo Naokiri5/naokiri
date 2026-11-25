@@ -224,3 +224,25 @@ the owning modules:
 
 Not wired into the runtime: there is no authenticated Solana trade feed yet. Disposition of every roadmap item is in
 [`../BRAINOS_MASTER_ARCHITECTURE.md`](../BRAINOS_MASTER_ARCHITECTURE.md) section 14.
+
+## DITAS snapshot storage leak fix and Railway runtime port (2026-11-26)
+
+Root cause of the Railway "storage pressure" incident: every DITAS snapshot embedded the full candle history, 400 bars
+× 3 timeframes (about 220 KB), and the scanner wrote one snapshot per instrument × strategy × closed 1h bar. That is
+roughly 400 MB/day against a 500 MB volume. The production database held 362 MB.
+
+- Migration 8 (append-only) adds `ditas_blobs`, the table the event catalog already named.
+- Snapshot schema v2 stores candle history as aligned, content-addressed chunks of 25 bars. A snapshot keeps the ordered
+  chunk hashes, so its own hash still covers the full history. `memoryDetail` rehydrates and verifies every chunk, so the
+  API contract (a full 400-bar `candles` field) is unchanged. `verifyMemory` and backup verification check the blobs.
+- One scan pass shares a single snapshot instant (`snapshotAt`), so strategies rejecting the same instrument share one
+  snapshot.
+- Existing v1 snapshots are untouched and still verify. Nothing is deleted.
+
+Evidence: `test/ditas-storage.test.ts` fails 5/5 on the old code and passes with the fix. In a 90-second live run, 73
+snapshots and 13.35 MB became 25 snapshots, 0.32 MB of snapshots and 4.86 MB of one-time chunk history. Later snapshots
+add less than 10 % of a full copy.
+
+PR #138's Railway runtime (Dockerfile, `railway.json`, entrypoint, `PORT` and trusted-proxy config, tests and guide)
+is now on the BrainOS branch. Railway deployment is waiting for the owner's plan upgrade: the Hobby plan caps volumes at
+500 MB. Required Railway variables before going live: `MIA_BACKUP_KEY` (owner-generated) and the existing Privy values.

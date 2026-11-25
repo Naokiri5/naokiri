@@ -152,6 +152,10 @@ const MIGRATIONS: string[] = [
   ALTER TABLE brainos_sessions ADD COLUMN strategy_config_version TEXT;
   ALTER TABLE brainos_session_events ADD COLUMN mandate_json TEXT;
   `,
+  /* 8 — DITAS content-addressed blobs: candle history in snapshots is stored once per aligned chunk and referenced by
+     hash, instead of being copied into every snapshot (about 220 KB each). Existing v1 snapshots are untouched. */ `
+  CREATE TABLE ditas_blobs (hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL, bytes INTEGER NOT NULL, payload TEXT NOT NULL);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */

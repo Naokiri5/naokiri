@@ -73,6 +73,8 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
   const t0 = performance.now();
   const ctl = getControl();
   let candidates = 0;
+  // One instant per pass: strategies that reject the same instrument share one content-addressed snapshot.
+  const passAt = Date.now();
   for (const id of market.universe) {
     // Scheduled scans give due protection timers a turn between instruments.
     if (continueScan) {
@@ -99,12 +101,12 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
       if (processed.has(key)) { continue; }
       // survive restarts: a decision for this instrument/strategy after this candle closed already exists
       if (get('SELECT 1 FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? LIMIT 1', id, s.id, f1.t + INTERVAL_MS[s.interval])) continue;
-      if (q.status === 'FAIL') { recordOpportunity({ kind: 'REJECTED', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Data quality: ${q.issues.join('; ')}` }); rejectLog(inst.symbol, 'data-quality', q.issues.join('; ')); continue; }
-      if (!s.suitableRegimes.includes(reg.regime)) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Regime ${reg.regime} unsuitable for strategy ${s.version}` }); continue; }
+      if (q.status === 'FAIL') { recordOpportunity({ kind: 'REJECTED', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, snapshotAt: passAt, reason: `Data quality: ${q.issues.join('; ')}` }); rejectLog(inst.symbol, 'data-quality', q.issues.join('; ')); continue; }
+      if (!s.suitableRegimes.includes(reg.regime)) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, snapshotAt: passAt, reason: `Regime ${reg.regime} unsuitable for strategy ${s.version}` }); continue; }
       const sig = s.generate(f1);
-      if (!sig) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Strategy ${s.version}: no entry condition` }); continue; }
+      if (!sig) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, snapshotAt: passAt, reason: `Strategy ${s.version}: no entry condition` }); continue; }
       row.signals.push(s.id);
-      if (!safety.eligibleForAutomation) { recordOpportunity({ kind: 'REJECTED', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Safety: ${safety.reasons.join('; ')}` }); rejectLog(inst.symbol, 'safety', `${s.id}: ${safety.status} — ${safety.reasons.join('; ')}`); continue; }
+      if (!safety.eligibleForAutomation) { recordOpportunity({ kind: 'REJECTED', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, snapshotAt: passAt, reason: `Safety: ${safety.reasons.join('; ')}` }); rejectLog(inst.symbol, 'safety', `${s.id}: ${safety.status} — ${safety.reasons.join('; ')}`); continue; }
       candidates++;
       try {
       const cand: Candidate = { id: uid('cand'), eventId: `${inst.symbol}:${s.interval}:${f1.t}`, traceId: uid('trace'), instrumentId: id, symbol: inst.symbol, base: inst.base, market: 'crypto', venue: 'binance',
