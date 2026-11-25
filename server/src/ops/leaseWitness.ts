@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { verifyAuditChain } from '../core/audit.js';
-import type { Lease } from './lease.js';
+import { validLeaseAt, type Lease } from './lease.js';
 import type { DurableBrainosSession } from './paperSpotEntry.js';
 
 export type LeaseObservation = 'ABSENT' | 'CURRENT' | 'EXPIRED' | 'INVALID';
@@ -12,13 +12,6 @@ export interface LeaseWitness {
   audit: { ok: boolean; entries: number; brokenAt?: number };
   /** An observation is not a fencing token or permission to trade. */
   tradingAuthority: false;
-}
-
-function validLease(lease: Lease, at: number): boolean {
-  return typeof lease.holder === 'string' && lease.holder.length > 0 &&
-    [lease.acquired_at, lease.renewed_at, lease.expires_at].every(Number.isSafeInteger) &&
-    lease.acquired_at >= 0 && lease.acquired_at <= lease.renewed_at &&
-    lease.renewed_at <= at && lease.expires_at > lease.renewed_at;
 }
 
 /**
@@ -35,7 +28,7 @@ export function inspectLeaseWitness(file: string, at = Date.now()): LeaseWitness
     db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=1000; BEGIN');
     const row = db.prepare("SELECT name,holder,acquired_at,renewed_at,expires_at FROM runtime_leases WHERE name='engine'").get() as Lease | undefined;
     const checkpoint = db.prepare("SELECT * FROM brainos_sessions WHERE session_id='brainos-autopilot'").get() as DurableBrainosSession | undefined;
-    const lease: LeaseObservation = !row ? 'ABSENT' : !validLease(row, at) ? 'INVALID' :
+    const lease: LeaseObservation = !row ? 'ABSENT' : !validLeaseAt(row, at) ? 'INVALID' :
       row.expires_at < at ? 'EXPIRED' : 'CURRENT';
     const session = !checkpoint ? 'ABSENT' : checkpoint.state !== 'RUNNING' ? 'NOT_RUNNING' :
       lease === 'CURRENT' && row && checkpoint.lease_holder === row.holder &&
