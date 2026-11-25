@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { freshDb, seedInstrument } from './helpers.js';
 import { market } from '../src/market/store.js';
 import { evaluateRisk } from '../src/risk/gate.js';
-import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
+import { acceptPolicy, currentPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, accountState } from '../src/portfolio/ledger.js';
 import { setSetting } from '../src/core/settings.js';
@@ -114,6 +114,14 @@ describe('Risk gate (Part 17)', () => {
     expect(halted.decision).toBe('DENY');
     expect(halted.reasonCodes).toContain('ADAPTIVE_DRAWDOWN_HALT');
     expect(halted.reasonCodes.join()).toContain('DRAWDOWN_CAPITAL_PRESERVATION');
+  });
+  it('rolls back a risk policy version when audit persistence fails', () => {
+    const prior = acceptPolicy('owner', DEFAULT_POLICY);
+    run("CREATE TEMP TRIGGER fixture_reject_policy_audit BEFORE INSERT ON audit_log WHEN NEW.action='risk.policy.accept' BEGIN SELECT RAISE(ABORT, 'fixture policy audit failure'); END");
+    try {
+      expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, postExitCooldownMs: 10000 })).toThrow('fixture policy audit failure');
+      expect(currentPolicy()).toEqual(prior);
+    } finally { run('DROP TRIGGER fixture_reject_policy_audit'); }
   });
   it('rejects incomplete frequency policy and invalid anti-churn configuration', () => {
     expect(() => acceptPolicy('owner', { ...DEFAULT_POLICY, maxEntriesPerWindow: 2 })).toThrow();
