@@ -96,6 +96,13 @@ test('server readiness explains the disabled session controls and the Live lock'
   await page.goto('/app');
   const session = page.getByRole('region', { name: 'MIA Autopilot' });
   await expect(session.getByText('Preflight checked', { exact: true })).toBeVisible();
+  // FAST and DEEP report server readiness; neither research pathway is presented as executable.
+  const lanes = page.getByRole('group', { name: 'Intelligence view' });
+  for (const lane of ['FAST', 'DEEP']) {
+    await expect(lanes.getByRole('button', { name: lane })).toContainText('Research only');
+    await expect(lanes.getByRole('button', { name: lane })).toContainText('Execution is not certified.');
+  }
+  await expect(session.getByText(/No active mandate\. Run Session asks you to authorize capital/)).toBeVisible();
   await expect(session.getByRole('button', { name: 'Run Session' })).toBeDisabled();
   await expect(session.getByRole('button', { name: 'Close Session' })).toBeDisabled();
   await expect(session.getByRole('link', { name: 'Emergency controls' })).toHaveAttribute('href', '/risk');
