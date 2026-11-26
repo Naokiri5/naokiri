@@ -15,7 +15,11 @@ import { unreconciledPaperOrders } from '../exec/recovery.js';
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
 export interface RiskProposal { instrumentId: string; strategyId: string; strategyVersion?: string; side: 'buy'; entryPrice: number; stopPrice: number; idempotencyKey: string; traceId: string; account?: string }
-export interface Sizing { qty: number; notional: number; maxNotional: number; riskBudget: number; remainingOpenRisk: number; plannedMaxLoss: number; perUnitLoss: number; conservativeStopFill: number; estEntry: number; estFees: number }
+/**
+ * `notional` and `estFees` are top-of-book estimates (best ask, both legs). `limitPrice`, `maxEntryFee` and `maxCost`
+ * are the conservative execution bounds: the worst entry the slippage policy permits and the most the entry may spend.
+ */
+export interface Sizing { qty: number; notional: number; maxNotional: number; riskBudget: number; remainingOpenRisk: number; plannedMaxLoss: number; perUnitLoss: number; conservativeStopFill: number; estEntry: number; estFees: number; limitPrice: number; maxEntryFee: number; maxCost: number }
 export interface RiskDecision { decision: RiskDecisionKind; reasonCodes: string[]; evaluated: Record<string, number | string | boolean | null>; sizing: Sizing | null; policyVersion: number | null; ts: string; traceId: string }
 
 export function evaluateRisk(p: RiskProposal, nowTs = Date.now()): RiskDecision {
@@ -198,7 +202,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
     ev.costR = round(costR, 4);
     if (costR > pol.maxCostR) deny.push(`COST_R ${costR.toFixed(3)} > ${pol.maxCostR}`);
   }
-  const sizing: Sizing = { qty, notional: round(notional, 2), maxNotional, riskBudget, remainingOpenRisk, plannedMaxLoss: round(plannedMaxLoss, 2), perUnitLoss, conservativeStopFill, estEntry, estFees: round(pol.feeRate * notional * 2, 4) };
+  const sizing: Sizing = { qty, notional: round(notional, 2), maxNotional, riskBudget, remainingOpenRisk, plannedMaxLoss: round(plannedMaxLoss, 2), perUnitLoss, conservativeStopFill, estEntry, estFees: round(pol.feeRate * notional * 2, 4), limitPrice: worstPermittedEntry, maxEntryFee: qty * worstPermittedEntry * pol.feeRate, maxCost: qty * worstPermittedEntry * (1 + pol.feeRate) };
   return out(sizing);
 
   function out(sz: Sizing | null = null): RiskDecision {
