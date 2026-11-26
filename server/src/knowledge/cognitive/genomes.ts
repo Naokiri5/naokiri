@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { deflatedSharpe } from '../../lab/overfitting.js';
+import { deflatedSharpe, MIN_DEFLATED_SHARPE, sharpeEstimatorVariance } from '../../lab/overfitting.js';
 import type {
   BrainSkillId, MarketVenueClass, MiaStrategyGenome, ReadinessStatus, RejectionReasonCode,
 } from './contracts.js';
@@ -84,6 +84,7 @@ export interface ValidationMetrics {
   walkForwardWindows: number;
   holdoutSampleCount: number;
   verifiedHistoricalData: boolean;
+  /** Per observation (per trade or bar), NOT annualized; values outside [-5, 5] are rejected as invalid evidence. */
   walkForwardNetSharpe: number;
   /** Observations behind walkForwardNetSharpe, and the raw (non-excess) moments of those returns. */
   walkForwardSampleCount: number;
@@ -117,18 +118,20 @@ const valid = (m:ValidationMetrics,g:MiaStrategyGenome) => Boolean(
   && [m.walkForwardNetSharpe,m.holdoutNetSharpe,m.maxDrawdownPct,m.calibrationBrierScore,
       m.costMismatchPct,m.correlationCreepScore,m.driftScore,m.returnSkewness,m.returnKurtosis].every(Number.isFinite)
   && Number.isInteger(m.walkForwardSampleCount) && m.walkForwardSampleCount >= 30 && m.returnKurtosis >= 1
+  && Math.abs(m.walkForwardNetSharpe) <= 5
   && m.maxDrawdownPct >= 0 && m.calibrationBrierScore >= 0
   && m.calibrationBrierScore <= 1
 );
 /** Minimum deflated Sharpe for a genome to count as out-of-sample verified (shared with Strategy Lab qualification). */
-export const GENOME_MIN_DEFLATED_SHARPE = 0.95;
+export const GENOME_MIN_DEFLATED_SHARPE = MIN_DEFLATED_SHARPE;
 /**
  * Research-only validation; no mutation of the existing strategy registry,
  * no portfolio exposure, no promotions, and no fabricated test outcomes.
  *
  * Multiple testing: a genome that passes every gate must also keep a deflated Sharpe of at least
  * GENOME_MIN_DEFLATED_SHARPE against the best of N no-skill trials. N is the larger of the genomes evaluated in this
- * call and `options.totalTrials` (the size of the whole research programme), so batching cannot shrink it.
+ * call and `options.totalTrials` (the size of the whole research programme), so batching cannot shrink it. Callers
+ * that resume a programme in slices must pass the programme's full size, not the remaining slice.
  */
 export async function runStrategyGenomeFunnel(
   candidates: readonly MiaStrategyGenome[], hooks: StrategyEvaluatorHooks,
@@ -174,9 +177,10 @@ export async function runStrategyGenomeFunnel(
     return evaluatedSharpes.reduce((a, v) => a + (v - mean) ** 2, 0) / (evaluatedSharpes.length - 1);
   })() : null;
   for (const { genome: g, metrics: m } of survivors) {
-    // Without two evaluated trials, use the variance of this genome's own Sharpe estimator.
+    // The estimator variance of this genome's Sharpe is a floor, so near-identical trials cannot collapse the benchmark.
     const sr = m.walkForwardNetSharpe;
-    const variance = crossTrialVariance ?? Math.max(0, 1 - m.returnSkewness * sr + ((m.returnKurtosis - 1) / 4) * sr * sr) / (m.walkForwardSampleCount - 1);
+    const floor = sharpeEstimatorVariance(sr, m.walkForwardSampleCount, m.returnSkewness, m.returnKurtosis);
+    const variance = Math.max(crossTrialVariance ?? 0, floor);
     const { dsr } = deflatedSharpe({ sharpe: sr, n: m.walkForwardSampleCount, skewness: m.returnSkewness, kurtosis: m.returnKurtosis, trials, sharpeVariance: variance });
     if (!(dsr >= GENOME_MIN_DEFLATED_SHARPE)) { rejects.push(rejected(g,'SELECTION_BIAS_UNCONTROLLED')); continue; }
     verified.push({...g,experimentId:m.experimentId,state:'OUT_OF_SAMPLE_VERIFIED',executionAuthority:false});

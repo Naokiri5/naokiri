@@ -103,9 +103,14 @@ export function oosCohort(strategyId: string) {
   }
   // Keep existing evidence usable until a run with the current fill model is available for this strategy.
   const { modelVersion, instruments, trades } = current.instruments.size ? current : legacy;
-  // Every stored run of this version is a trial for multiple-testing purposes, including runs superseded above.
-  const runOosR = rows.map((row) => P<BtResult>(row.result)).filter((r) => r.strategyVersion === definition.version)
-    .map((r) => r.trades.filter((trade) => trade.segment === 'OOS').map((trade) => trade.r));
+  // Every distinct configuration run for this version is a trial, including runs superseded above. Identical re-runs
+  // (same instrument, window, bar count and fill model) are one trial, so repeating a run cannot dilute the benchmark.
+  const trials = new Map<string, number[]>();
+  for (const r of rows.map((row) => P<BtResult>(row.result)).filter((r) => r.strategyVersion === definition.version)) {
+    const key = J([r.instrument, r.interval, r.from, r.to, r.bars, r.modelVersion ?? 1]);
+    if (!trials.has(key)) trials.set(key, r.trades.filter((trade) => trade.segment === 'OOS').map((trade) => trade.r));
+  }
+  const runOosR = [...trials.values()];
   return { strategyVersion: definition.version, modelVersion, instruments: instruments.size, trades, backtestRuns: runOosR.length, runOosR };
 }
 

@@ -5,14 +5,14 @@
  * never LIVE authorization.
  */
 import { stats, BACKTEST_MODEL_VERSION, type BtTrade } from './backtest.js';
-import { deflatedSharpe, returnMoments } from './overfitting.js';
+import { deflatedSharpe, MIN_DEFLATED_SHARPE, returnMoments, sharpeEstimatorVariance } from './overfitting.js';
 
 /** Thresholds are fixed in code so they are reviewed like any other risk rule; they are not owner-tunable at runtime. */
 export const QUALIFICATION_RULES = Object.freeze({
   minOosTrades: 30,
   /** z for a one-sided 97.5% / two-sided 95% interval on mean trade R. */
   confidenceZ: 1.96,
-  minDeflatedSharpe: 0.95,
+  minDeflatedSharpe: MIN_DEFLATED_SHARPE,
 });
 
 export type QualificationReason =
@@ -25,7 +25,7 @@ export interface QualificationEvidence {
   instruments: number;
   /** Out-of-sample trades, net of the backtest's fee, spread and slippage model, in R. */
   trades: readonly BtTrade[];
-  /** OOS trade R of every stored backtest run of this version: each run is one trial. */
+  /** OOS trade R of every distinct backtest configuration of this version: each one is a trial. */
   runOosR: readonly (readonly number[])[];
 }
 
@@ -36,31 +36,40 @@ export interface QualificationReport {
   metrics: null | {
     oosTrades: number; instruments: number; trials: number; expectancyR: number; expectancyLowerR: number;
     sharpePerTrade: number; skewness: number; kurtosis: number; deflatedSharpe: number; deflatedSharpeBenchmark: number;
-    sharpeVarianceSource: 'CROSS_TRIAL' | 'ESTIMATOR'; profitFactor: number; maxDrawdownR: number;
+    sharpeVarianceSource: 'CROSS_TRIAL' | 'ESTIMATOR'; profitFactor: number;
+    /** Over the pooled trades in exit-time order. */
+    maxDrawdownR: number;
     /** Extra cost per trade, in R, that would remove the measured edge. */
     breakevenExtraCostR: number;
   };
   rules: typeof QUALIFICATION_RULES;
+  limitations: readonly string[];
   automaticPromotion: false;
   liveAuthority: false;
 }
 
+const LIMITATIONS = Object.freeze([
+  'Costs are the backtest model (fixed fee, spread and slippage), not measured executable depth.',
+  'Trades pooled across instruments can overlap in time and are not independent, so the sample size is optimistic.',
+  'OOS is the latest segment of each history; selection made while designing a strategy in code is not counted as a trial.',
+]);
 const report = (reasons: QualificationReason[], strategyVersion: string | null, metrics: QualificationReport['metrics'] = null): QualificationReport =>
-  ({ verdict: reasons.length ? 'NOT_QUALIFIED' : 'QUALIFIED', reasons, strategyVersion, metrics, rules: QUALIFICATION_RULES, automaticPromotion: false, liveAuthority: false });
+  ({ verdict: reasons.length ? 'NOT_QUALIFIED' : 'QUALIFIED', reasons, strategyVersion, metrics, rules: QUALIFICATION_RULES, limitations: LIMITATIONS, automaticPromotion: false, liveAuthority: false });
 
 /**
- * Variance of Sharpe across trials. With two or more runs of at least two trades, use the cross-sectional variance of
- * their OOS Sharpe ratios (as in the DSR paper); otherwise fall back to the variance of the Sharpe estimator itself.
+ * Variance of Sharpe across trials: the cross-sectional variance of the trials' OOS Sharpe ratios (as in the DSR paper)
+ * when two or more trials have at least two trades, floored at the variance of the Sharpe estimator itself, so
+ * near-identical trials cannot collapse the benchmark.
  */
 function sharpeVariance(evidence: QualificationEvidence, moments: ReturnType<typeof returnMoments>) {
+  const floor = sharpeEstimatorVariance(moments.sharpe, moments.n, moments.skewness, moments.kurtosis);
   const runSharpes = evidence.runOosR.filter((r) => r.length >= 2).map((r) => returnMoments(r).sharpe);
   if (runSharpes.length >= 2) {
     const mean = runSharpes.reduce((s, v) => s + v, 0) / runSharpes.length;
-    return { variance: runSharpes.reduce((s, v) => s + (v - mean) ** 2, 0) / (runSharpes.length - 1), source: 'CROSS_TRIAL' as const };
+    const cross = runSharpes.reduce((s, v) => s + (v - mean) ** 2, 0) / (runSharpes.length - 1);
+    if (cross > floor) return { variance: cross, source: 'CROSS_TRIAL' as const };
   }
-  const sr = moments.sharpe;
-  const variance = Math.max(0, 1 - moments.skewness * sr + ((moments.kurtosis - 1) / 4) * sr * sr) / (moments.n - 1);
-  return { variance, source: 'ESTIMATOR' as const };
+  return { variance: floor, source: 'ESTIMATOR' as const };
 }
 
 export function qualifyEvidence(evidence: QualificationEvidence | null): QualificationReport {
@@ -79,7 +88,7 @@ export function qualifyEvidence(evidence: QualificationEvidence | null): Qualifi
   if (!(moments.mean > 0)) reasons.push('NON_POSITIVE_EXPECTANCY');
   else if (!(lower > 0)) reasons.push('EXPECTANCY_NOT_SIGNIFICANT');
   if (!(dsr >= QUALIFICATION_RULES.minDeflatedSharpe)) reasons.push('DEFLATED_SHARPE_TOO_LOW');
-  const s = stats([...evidence.trades]);
+  const s = stats([...evidence.trades].sort((a, b) => a.exitT - b.exitT));
   return report(reasons, evidence.strategyVersion, {
     oosTrades: moments.n, instruments: evidence.instruments, trials, expectancyR: moments.mean, expectancyLowerR: lower,
     sharpePerTrade: moments.sharpe, skewness: moments.skewness, kurtosis: moments.kurtosis, deflatedSharpe: dsr,

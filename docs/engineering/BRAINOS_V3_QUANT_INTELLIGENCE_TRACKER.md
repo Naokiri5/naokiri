@@ -45,6 +45,19 @@ done only when reproducible evidence in this repository shows it. Updated 2026-1
   The shared backtest fixture is still labelled synthetic; it now carries a 60-trade cohort that qualifies, with
   explicit weak and legacy variants.
 
+## Independent trading-risk review
+
+No blockers. Fixed: cross-trial Sharpe variance is floored at the estimator variance (repeated near-identical runs can
+no longer shrink the DSR benchmark); identical re-runs count as one trial; one shared 0.95 threshold; per-observation
+Sharpe enforced in the genome contract; drawdown computed in exit-time order; verdicts carry their limitations.
+Documented rather than fixed: pooled cross-instrument trades are not independent (sample size optimistic); costs are the
+backtest model, not measured depth; a resumed genome programme must pass its full size; no strategy code hash yet, so a
+logic change without a version bump keeps old evidence.
+
+**Owner decision needed:** strategies already in PAPER before this rule keep their status. The Lab now shows their
+verdict (for example `NOT_QUALIFIED: NO_BACKTEST`). Demoting them, or adding a risk-gate denial for unqualified PAPER
+strategies, would stop current paper trading, so it is left to the owner.
+
 ## Not claimed
 
 No strategy has been measured as qualified on real market data in this repository. Qualification is necessary for

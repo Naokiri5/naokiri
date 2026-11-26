@@ -13,6 +13,17 @@
  */
 
 const EULER_MASCHERONI = 0.5772156649015329;
+/** Minimum deflated Sharpe for Strategy Lab qualification and genome verification (one shared rule). */
+export const MIN_DEFLATED_SHARPE = 0.95;
+
+/**
+ * Variance of a Sharpe estimate under the no-skill null for n observations with the given raw moments. Used as a floor
+ * for cross-trial variance, so repeated near-identical trials cannot shrink the DSR benchmark toward zero.
+ */
+export function sharpeEstimatorVariance(sharpe: number, n: number, skewness = 0, kurtosis = 3): number {
+  if (!Number.isInteger(n) || n < 2) throw new Error('SHARPE_VARIANCE_INPUT_INVALID');
+  return Math.max(0, 1 - skewness * sharpe + ((kurtosis - 1) / 4) * sharpe * sharpe) / (n - 1);
+}
 
 /** Standard normal CDF (Abramowitz and Stegun 7.1.26 via erf; absolute error below 1.5e-7). */
 export function normalCdf(x: number): number {
@@ -89,6 +100,7 @@ function sharpeOf(values: readonly number[]): number {
   const n = values.length; if (n < 2) return 0;
   const mean = values.reduce((s, v) => s + v, 0) / n;
   const sd = Math.sqrt(values.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1));
+  // Zero dispersion ranks by the sign of the mean only (used for ranking, never reported as a Sharpe).
   return sd > 0 ? mean / sd : mean > 0 ? Number.MAX_VALUE : mean < 0 ? -Number.MAX_VALUE : 0;
 }
 

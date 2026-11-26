@@ -38,7 +38,7 @@ describe('probabilistic and deflated Sharpe ratio', () => {
     const benchmark = expectedMaxSharpe(100, 0.5 / days) * Math.sqrt(days);
     expect(benchmark).toBeCloseTo(1.79, 1);
     const { dsr } = deflatedSharpe({ sharpe: 2.5 / Math.sqrt(days), n: 1250, skewness: -3, kurtosis: 10, trials: 100, sharpeVariance: 0.5 / days });
-    expect(dsr).toBeCloseTo(0.90, 1);
+    expect(dsr).toBeCloseTo(0.90, 2); // paper: 0.9004
   });
 
   it('needs more evidence as the number of trials grows', () => {
@@ -54,6 +54,10 @@ describe('probabilistic and deflated Sharpe ratio', () => {
     expect(m.skewness).toBeCloseTo(0, 1);
     expect(m.kurtosis).toBeCloseTo(3, 0);
     expect(returnMoments([1, 1, 1])).toMatchObject({ sd: 0, sharpe: 0 });
+    // Closed form: raw (not excess) kurtosis of 1,2,3,4 is 2.5625 / 1.25^2 = 1.64.
+    const small = returnMoments([1, 2, 3, 4]);
+    expect(small.kurtosis).toBeCloseTo(1.64, 12);
+    expect(small.skewness).toBeCloseTo(0, 12);
   });
 
   it('rejects invalid inputs', () => {
