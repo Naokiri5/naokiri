@@ -94,6 +94,24 @@ export const config = {
   webDist: env.MIA_WEB_DIST ? resolve(env.MIA_WEB_DIST) : resolve(REPO_ROOT, 'web', 'dist'),
 };
 
+/**
+ * Every MIA_* environment variable the server reads. Documented in .env.example (a test keeps both in sync with the
+ * source). Unknown MIA_* names are reported at startup, so a typo such as MIA_BACKUP_KEYY is not silently ignored.
+ */
+export const MIA_ENV_VARS = [
+  'MIA_ALLOW_REMOTE_SETUP', 'MIA_AUTH_MODE', 'MIA_BACKUP_DIR', 'MIA_BACKUP_INTERVAL_H', 'MIA_BACKUP_KEEP', 'MIA_BACKUP_KEY',
+  'MIA_CHOICE_SHADOW', 'MIA_CONSENSUS_DETAIL_HOURS', 'MIA_DATA_DIR', 'MIA_DEEP_TIER', 'MIA_DUAL_RESEARCH',
+  'MIA_ENGINE_LEASE_TTL_MS', 'MIA_EVIDENCE_KEY', 'MIA_GIT_SHA', 'MIA_HOST', 'MIA_JOE_MODEL', 'MIA_KB_EMBEDDINGS',
+  'MIA_KB_MAX_UPLOAD_MB', 'MIA_LIVE_TESTS', 'MIA_LOG', 'MIA_MAX_EXEC_BOOK_AGE_MS', 'MIA_OFFLINE', 'MIA_PORT',
+  'MIA_PRIVY_APP_ID', 'MIA_PRIVY_EMBEDDED_WALLETS', 'MIA_PRIVY_OWNER_ID', 'MIA_PRIVY_VERIFICATION_KEY',
+  'MIA_SCAN_INTERVAL_MS', 'MIA_SECURE_COOKIE', 'MIA_TICKER_INTERVAL_MS', 'MIA_WEB_DIST',
+] as const;
+/** MIA_* names present in the environment that the server does not read (likely typos). Names only, never values. */
+export function unknownMiaEnv(source: Record<string, string | undefined> = env): string[] {
+  const known = new Set<string>(MIA_ENV_VARS);
+  return Object.keys(source).filter((name) => name.startsWith('MIA_') && !known.has(name)).sort();
+}
+
 export function ensureDataDir() {
   mkdirSync(config.dataDir, { recursive: true });
 }

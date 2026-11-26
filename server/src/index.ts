@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { config } from './config.js';
+import { config, unknownMiaEnv } from './config.js';
 import { openDb } from './db/db.js';
 import './providers/binance.js'; import './providers/coinbase.js'; import './providers/kraken.js'; import './providers/coingecko.js';
 import './providers/dexscreener.js'; import './providers/frankfurter.js'; import './providers/googlenews.js'; import './providers/pending.js';
@@ -33,6 +33,8 @@ export async function buildApp() {
     if (code >= 500) { req.log.error({ err }, 'unhandled server error'); return reply.code(code).send({ error: 'internal server error', requestId: req.id }); }
     return reply.code(code).send({ error: String(err?.message ?? 'request failed') });
   });
+  const unknownEnv = unknownMiaEnv();
+  if (unknownEnv.length) app.log.warn(`Ignoring unknown MIA_* environment variables (check for typos): ${unknownEnv.join(', ')}`);
   for (const problem of [privyConfigProblem(), privyOwnerConfigProblem()]) {
     if (problem) app.log.warn(problem);
   }
