@@ -1,0 +1,23 @@
+# Dependency update proposals (MIA SECURE Omega, SCA). Dependabot only opens pull requests; nothing merges
+# automatically. Every update must pass CI (typecheck, unit, reconciliation and browser tests, npm audit, secret scan)
+# and owner review before it can merge, and trading-critical packages need the trading-risk review.
+version: 2
+updates:
+  # One lockfile at the root covers the server and web npm workspaces.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
+    commit-message:
+      prefix: deps
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: ci
