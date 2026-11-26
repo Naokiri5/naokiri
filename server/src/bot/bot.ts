@@ -17,6 +17,7 @@ import { refreshBrainSnapshot } from '../knowledge/brain.js';
 import { recordAutonomicObservation, recordLearningEvidence, resetInternalProcesses } from '../knowledge/cognitive/internalProcesses.js';
 import { recentInternalLearningEvidence } from '../ditas/service.js';
 import { verifyDueForecasts } from '../ditas/forecastVerifier.js';
+import { linkClosedTrades } from '../ditas/tradeOutcomes.js';
 import { refreshSettingsCapabilitySnapshot } from '../knowledge/settingsCapabilities.js';
 import { CAPABILITY_REFRESH_INTERVAL_MS } from '../knowledge/capabilitySnapshot.js';
 import { bus } from '../core/bus.js';
@@ -285,6 +286,8 @@ const backgroundLane = () => runLane('background', async (lease) => {
     try {
       await verifyDueForecasts(lease);
       if (!stillLeader(lease)) return;
+      // Closed-trade feedback: link settled positions to their decision, snapshot and verified ledger settlement.
+      linkClosedTrades(Date.now(), { fence: lease });
       recordLearningEvidence(recentInternalLearningEvidence());
     }
     catch (error) { botStatus.lastError = `learning-evidence: ${errorText(error).slice(0, 200)}`; }

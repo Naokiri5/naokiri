@@ -1,13 +1,13 @@
 import { all, P } from '../db/db.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
-function entryReference(json: string | null) {
+export function entryReference(json: string | null) {
   try {
     const price = P<{ entryRef?: number } | null>(json)?.entryRef;
     return typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null;
   } catch { return null; }
 }
-const entrySlippage = (fill: number | null, reference: number | null, side = 'BUY') =>
+export const entrySlippage = (fill: number | null, reference: number | null, side = 'BUY') =>
   fill !== null && reference !== null ? (fill / reference - 1) * 10_000 * (side === 'BUY' ? 1 : -1) : null;
 
 /** Projection of actual paper OMS records, never hypothetical Twin fills. */

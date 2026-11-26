@@ -161,6 +161,16 @@ const MIGRATIONS: string[] = [
   CREATE INDEX consensus_records_created ON consensus_records(created_at);
   CREATE INDEX orders_decision ON orders(decision_id);
   `,
+  /* 10 — Closed-trade learning linker (ditas/tradeOutcomes.ts): one immutable record per settled paper position,
+     linking it to its decision, frozen DITAS snapshot, orders, fills and verified ledger settlement. */ `
+  CREATE TABLE ditas_trade_outcomes (position_id TEXT PRIMARY KEY REFERENCES positions(id), decision_id TEXT,
+    strategy TEXT NOT NULL, strategy_version TEXT, instrument TEXT NOT NULL, decision_event_id TEXT REFERENCES ditas_events(id),
+    opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL, linked_at INTEGER NOT NULL, settlement TEXT NOT NULL,
+    net_pnl REAL NOT NULL, net_r REAL, payload TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE INDEX ditas_trade_outcomes_strategy ON ditas_trade_outcomes(strategy, closed_at);
+  CREATE TRIGGER ditas_trade_outcomes_no_update BEFORE UPDATE ON ditas_trade_outcomes BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  CREATE TRIGGER ditas_trade_outcomes_no_delete BEFORE DELETE ON ditas_trade_outcomes BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
