@@ -100,7 +100,7 @@ describe('backtest evidence integrity', () => {
     freshDb();
     try {
       const definition = STRATEGIES[0];
-      seedBacktestFixture(definition.id);
+      seedBacktestFixture(definition.id, { qualifying: false, legacy: true });
       expect(strategyStats(definition.id)?.trades).toBe(1);
       expect(listBacktests()[0].warnings).toContain('This backtest used the earlier fill model. Rerun it to include the current cost and gap handling.');
 

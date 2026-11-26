@@ -42,6 +42,7 @@ const metrics=()=>({
   datasetHash:'history-sha',independentHoldoutHash:'untouched-holdout-sha',
   walkForwardWindows:5,holdoutSampleCount:100,verifiedHistoricalData:true,
   walkForwardNetSharpe:1.4,holdoutNetSharpe:1.1,maxDrawdownPct:8,
+  walkForwardSampleCount:200,returnSkewness:0,returnKurtosis:3,
   calibrationBrierScore:0.19,costMismatchPct:0.04,
   correlationCreepScore:0.22,driftScore:0.09,experimentId:'experiment-real-001',
 });
@@ -138,6 +139,25 @@ describe('Strategy genomes stay research-only',()=>{
     expect((await runStrategyGenomeFunnel([g],{
       ...base,runWalkForwardAndHoldout:async()=>({...metrics(),independentHoldoutHash:'history-sha'}),
     })).rejected[0].rejectionReason).toBe('INVALID_EVIDENCE');
+  });
+  it('rejects a genome whose edge does not survive the number of trials (deflated Sharpe)',async()=>{
+    const [g1,g2,g3]=genomes();
+    const hooks=(sharpe:(id:string)=>number)=>({getSkillStatus:()=> 'READY' as const,
+      verifiedTimeframes:new Set(['1m','5m','15m','1h','4h']),verifiedVenues:new Set(['FUTURES' as const]),
+      runWalkForwardAndHoldout:async(g:any)=>({...metrics(),walkForwardNetSharpe:sharpe(g.genomeId),walkForwardSampleCount:60})});
+    // A modest per-trade Sharpe from one trial is verified ...
+    expect((await runStrategyGenomeFunnel([g1],hooks(()=>0.3))).verified).toHaveLength(1);
+    // ... but the same Sharpe picked from a 1,000-hypothesis programme is what noise alone would produce.
+    const deflated=await runStrategyGenomeFunnel([g1],hooks(()=>0.3),undefined,{totalTrials:1000});
+    expect(deflated.verified).toHaveLength(0);
+    expect(deflated.rejected[0]).toMatchObject({rejectionReason:'SELECTION_BIAS_UNCONTROLLED',executionAuthority:false});
+    // Cross-trial dispersion in one call raises the bar for the best of the batch.
+    const spread=await runStrategyGenomeFunnel([g1,g2,g3],hooks(id=>id===g1.genomeId?0.35:id===g2.genomeId?-0.4:0.05));
+    expect(spread.verified).toHaveLength(0);
+    expect(spread.rejected.map(x=>x.rejectionReason)).toContain('SELECTION_BIAS_UNCONTROLLED');
+    await expect(runStrategyGenomeFunnel([g1],hooks(()=>0.3),undefined,{totalTrials:0})).rejects.toThrow('INVALID_TOTAL_TRIALS');
+    // Evidence without the sample size or moments needed to deflate is invalid.
+    expect((await runStrategyGenomeFunnel([g1],{...hooks(()=>0.3),runWalkForwardAndHoldout:async()=>({...metrics(),walkForwardSampleCount:10})})).rejected[0].rejectionReason).toBe('INVALID_EVIDENCE');
   });
   it('never evaluates more hypotheses than allowed by a cold lane budget or abort signal',async()=>{
     const g=genomes().slice(0,7);

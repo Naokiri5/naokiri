@@ -39,7 +39,8 @@ export async function runBoundedSgeColdLane(
     const end = Math.min(queue.length, start + options.batchSize);
     for (let i = start; i < end; i++) {
       if (options.signal?.aborted || performance.now() >= deadline) break;
-      const res = await runStrategyGenomeFunnel([queue[i]],hooks,options.signal);
+      // Every queued hypothesis is a trial: deflate against the whole programme, not the one-genome call.
+      const res = await runStrategyGenomeFunnel([queue[i]],hooks,options.signal,{ totalTrials: queue.length });
       verified.push(...res.verified); rejected.push(...res.rejected);
       processedCount++;
     }

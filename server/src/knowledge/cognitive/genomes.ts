@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { deflatedSharpe } from '../../lab/overfitting.js';
 import type {
   BrainSkillId, MarketVenueClass, MiaStrategyGenome, ReadinessStatus, RejectionReasonCode,
 } from './contracts.js';
@@ -73,7 +74,10 @@ export function generateCandidateGenomes(cfg: GenomeGenerationConfig): MiaStrate
   return out;
 }
 
-/** External backtest hooks MUST provide verifiable, independent, real-data experiment metadata. */
+/**
+ * External backtest hooks MUST provide verifiable, independent, real-data experiment metadata.
+ * Sharpe ratios are per observation (per trade or bar), not annualized, so they can be deflated for multiple testing.
+ */
 export interface ValidationMetrics {
   datasetHash: string;
   independentHoldoutHash: string;
@@ -81,6 +85,10 @@ export interface ValidationMetrics {
   holdoutSampleCount: number;
   verifiedHistoricalData: boolean;
   walkForwardNetSharpe: number;
+  /** Observations behind walkForwardNetSharpe, and the raw (non-excess) moments of those returns. */
+  walkForwardSampleCount: number;
+  returnSkewness: number;
+  returnKurtosis: number;
   holdoutNetSharpe: number;
   maxDrawdownPct: number;
   calibrationBrierScore: number;
@@ -107,19 +115,29 @@ const valid = (m:ValidationMetrics,g:MiaStrategyGenome) => Boolean(
   && m.independentHoldoutHash && m.independentHoldoutHash !== m.datasetHash
   && m.experimentId && m.walkForwardWindows >= 4 && m.holdoutSampleCount >= 50
   && [m.walkForwardNetSharpe,m.holdoutNetSharpe,m.maxDrawdownPct,m.calibrationBrierScore,
-      m.costMismatchPct,m.correlationCreepScore,m.driftScore].every(Number.isFinite)
+      m.costMismatchPct,m.correlationCreepScore,m.driftScore,m.returnSkewness,m.returnKurtosis].every(Number.isFinite)
+  && Number.isInteger(m.walkForwardSampleCount) && m.walkForwardSampleCount >= 30 && m.returnKurtosis >= 1
   && m.maxDrawdownPct >= 0 && m.calibrationBrierScore >= 0
   && m.calibrationBrierScore <= 1
 );
+/** Minimum deflated Sharpe for a genome to count as out-of-sample verified (shared with Strategy Lab qualification). */
+export const GENOME_MIN_DEFLATED_SHARPE = 0.95;
 /**
  * Research-only validation; no mutation of the existing strategy registry,
  * no portfolio exposure, no promotions, and no fabricated test outcomes.
+ *
+ * Multiple testing: a genome that passes every gate must also keep a deflated Sharpe of at least
+ * GENOME_MIN_DEFLATED_SHARPE against the best of N no-skill trials. N is the larger of the genomes evaluated in this
+ * call and `options.totalTrials` (the size of the whole research programme), so batching cannot shrink it.
  */
 export async function runStrategyGenomeFunnel(
   candidates: readonly MiaStrategyGenome[], hooks: StrategyEvaluatorHooks,
-  signal?: AbortSignal,
+  signal?: AbortSignal, options: { totalTrials?: number } = {},
 ): Promise<GenomeFunnelResult> {
+  if (options.totalTrials !== undefined && (!Number.isInteger(options.totalTrials) || options.totalTrials < 1)) throw new Error('INVALID_TOTAL_TRIALS');
   const verified: MiaStrategyGenome[] = [], rejects: MiaStrategyGenome[] = [];
+  const survivors: { genome: MiaStrategyGenome; metrics: ValidationMetrics }[] = [];
+  const evaluatedSharpes: number[] = [];
   const seen = new Set<string>();
   for (const raw of candidates) {
     if (signal?.aborted) break;
@@ -140,6 +158,7 @@ export async function runStrategyGenomeFunnel(
     } catch {rejects.push(rejected(g,'EVALUATOR_UNAVAILABLE'));continue;}
     if (signal?.aborted) break;
     if (!m || !valid(m,g)) {rejects.push(rejected(g,'INVALID_EVIDENCE'));continue;}
+    evaluatedSharpes.push(m.walkForwardNetSharpe);
     if (m.costMismatchPct > 0.25) {rejects.push(rejected(g,'COST_OR_FILL_MISMATCH'));continue;}
     if (m.calibrationBrierScore > 0.30) {rejects.push(rejected(g,'PROBABILITY_MISCALIBRATION'));continue;}
     if (m.correlationCreepScore > 0.75) {rejects.push(rejected(g,'CORRELATED_EXPOSURE_CREEP'));continue;}
@@ -147,6 +166,19 @@ export async function runStrategyGenomeFunnel(
     if (m.walkForwardNetSharpe <= 0 || m.holdoutNetSharpe <= 0) {
       rejects.push(rejected(g,'INSUFFICIENT_HOLDOUT_EVIDENCE'));continue;
     }
+    survivors.push({ genome: g, metrics: m });
+  }
+  const trials = Math.max(evaluatedSharpes.length, options.totalTrials ?? 0, 1);
+  const crossTrialVariance = evaluatedSharpes.length >= 2 ? (() => {
+    const mean = evaluatedSharpes.reduce((a, v) => a + v, 0) / evaluatedSharpes.length;
+    return evaluatedSharpes.reduce((a, v) => a + (v - mean) ** 2, 0) / (evaluatedSharpes.length - 1);
+  })() : null;
+  for (const { genome: g, metrics: m } of survivors) {
+    // Without two evaluated trials, use the variance of this genome's own Sharpe estimator.
+    const sr = m.walkForwardNetSharpe;
+    const variance = crossTrialVariance ?? Math.max(0, 1 - m.returnSkewness * sr + ((m.returnKurtosis - 1) / 4) * sr * sr) / (m.walkForwardSampleCount - 1);
+    const { dsr } = deflatedSharpe({ sharpe: sr, n: m.walkForwardSampleCount, skewness: m.returnSkewness, kurtosis: m.returnKurtosis, trials, sharpeVariance: variance });
+    if (!(dsr >= GENOME_MIN_DEFLATED_SHARPE)) { rejects.push(rejected(g,'SELECTION_BIAS_UNCONTROLLED')); continue; }
     verified.push({...g,experimentId:m.experimentId,state:'OUT_OF_SAMPLE_VERIFIED',executionAuthority:false});
   }
   return {verified,rejected:rejects};

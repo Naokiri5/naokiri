@@ -18,20 +18,27 @@ import { closeDb, openDb, run, J } from '../src/db/db.js';
 import { seedStrategies } from '../src/lab/lab.js';
 import type { Instrument } from '../src/market/types.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
-import { stats, type BtResult, type BtTrade } from '../src/lab/backtest.js';
-export function seedBacktestFixture(strategyId = STRATEGIES[0].id) {
+import { BACKTEST_MODEL_VERSION, stats, type BtResult, type BtTrade } from '../src/lab/backtest.js';
+/**
+ * Stored backtest fixture (synthetic, never market evidence). By default its OOS cohort passes strategy qualification
+ * (60 trades: 36 at +1.5R, 24 at -1R, interleaved); `{ qualifying: false }` stores a single trade that does not.
+ * `{ legacy: true }` omits the fill-model version, as results stored before model version 2 did.
+ */
+export function seedBacktestFixture(strategyId = STRATEGIES[0].id, options: { qualifying?: boolean; legacy?: boolean } = {}) {
   const strategy = STRATEGIES.find((s) => s.id === strategyId)!;
-  const trade: BtTrade = {
-    entryT: 1, exitT: 2, entry: 100, exit: 101, r: 0.2, reason: 'SYNTHETIC TEST FIXTURE',
-    regime: 'TREND_UP', segment: 'OOS', bars: 1, mfe: 1, mae: 0,
-  };
+  const count = options.qualifying === false ? 1 : 60;
+  const trades: BtTrade[] = Array.from({ length: count }, (_, i) => {
+    const r = count === 1 ? 0.2 : i % 5 < 3 ? 1.5 : -1;
+    return { entryT: 2 * i + 1, exitT: 2 * i + 2, entry: 100, exit: 100 + r, r, reason: 'SYNTHETIC TEST FIXTURE',
+      regime: 'TREND_UP', segment: 'OOS', bars: 1, mfe: Math.max(r, 0), mae: Math.min(r, 0) };
+  });
   const result: BtResult = {
-    strategyId, strategyVersion: strategy.version, instrument: 'crypto:fixture:SYNTHETIC', interval: strategy.interval,
-    bars: 500, from: 0, to: 3, splitAt: 1, costs: { feeRate: 0.001, slippageBps: 3, spreadBps: 2 },
-    inSample: stats([]), outOfSample: stats([trade]), all: stats([trade]), trades: [trade], equityR: [0.2],
+    strategyId, strategyVersion: strategy.version, ...(options.legacy ? {} : { modelVersion: BACKTEST_MODEL_VERSION }), instrument: 'crypto:fixture:SYNTHETIC', interval: strategy.interval,
+    bars: 500, from: 0, to: 2 * count + 1, splitAt: 1, costs: { feeRate: 0.001, slippageBps: 3, spreadBps: 2 },
+    inSample: stats([]), outOfSample: stats(trades), all: stats(trades), trades, equityR: trades.map((t) => t.r),
     warnings: ['Synthetic test fixture — not market data or performance evidence'],
   };
-  run('INSERT INTO backtests(id,strategy_id,created_at,instrument,interval,result) VALUES (?,?,?,?,?,?)', `bt_fixture_${strategyId}`, strategyId, Date.now(), result.instrument, strategy.interval, J(result));
+  run('INSERT INTO backtests(id,strategy_id,created_at,instrument,interval,result) VALUES (?,?,?,?,?,?)', `bt_fixture_${strategyId}_${count}`, strategyId, Date.now(), options.qualifying === false ? 'crypto:fixture:WEAK' : result.instrument, strategy.interval, J(result));
 }
 export function freshDb(promote = true, file = ':memory:') {
   closeDb(); openDb(file); seedStrategies();

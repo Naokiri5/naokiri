@@ -490,6 +490,10 @@ export async function routes(app: FastifyInstance) {
   // ── strategy lab ──
   app.get('/api/lab', async () => ({ strategies: lab.listStrategies(), backtests: lab.listBacktests(30), universe: lab._universeSymbols() }));
   app.post('/api/lab/backtest', async (req) => { const b = z.object({ strategyId: z.string().max(60), symbol: z.string().min(1).max(20).regex(/^[A-Za-z0-9]+$/), bars: z.number().int().min(500).max(8000).optional() }).parse(req.body); limit(req, 'backtest', 'backtests'); return lab.runBacktest('owner', b.strategyId, b.symbol.toUpperCase(), b.bars); });
+  app.get('/api/lab/strategy/:id/qualification', async (req, reply) => {
+    const id = z.object({ id: z.string().min(1).max(60) }).parse(req.params).id;
+    return lab.listStrategies().some((s: { id: string }) => s.id === id) ? lab.strategyQualification(id) : reply.code(404).send({ error: 'unknown strategy' });
+  });
   app.post('/api/lab/strategy/:id/status', async (req) => {
     const id = idOf(req);
     const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional(), password: PW.optional() }).strict().parse(req.body);

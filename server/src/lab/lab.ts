@@ -1,5 +1,6 @@
 import { STRATEGIES, strategyById } from './strategies.js';
 import { BACKTEST_MODEL_VERSION, backtest, stats, monteCarlo, type BtResult, type BtTrade } from './backtest.js';
+import { qualifyEvidence } from './qualification.js';
 import { fetchProvider } from '../providers/http.js';
 import { all, get, run, tx, J, P } from '../db/db.js';
 import { uid } from '../core/util.js';
@@ -19,7 +20,7 @@ export function seedStrategies() {
   );
 }
 export function listStrategies() {
-  return all<any>('SELECT * FROM strategies ORDER BY id').map((r) => ({ ...r, params: P(r.params), stats: strategyStats(r.id), live: paperStats(r.id) }));
+  return all<any>('SELECT * FROM strategies ORDER BY id').map((r) => ({ ...r, params: P(r.params), stats: strategyStats(r.id), live: paperStats(r.id), qualification: strategyQualification(r.id) }));
 }
 export function setStrategyStatus(actor: string, id: string, status: StrategyStatus, note?: string) {
   if (!strategyById(id)) throw new Error('unknown strategy');
@@ -28,7 +29,13 @@ export function setStrategyStatus(actor: string, id: string, status: StrategySta
   // Lifecycle row, suspension index and audit record must commit together. The
   // existing OMS checks both status and suspension inside its entry transaction.
   tx(() => {
-    if (status === 'PAPER' && !(strategyStats(id)?.trades)) throw new Error('promotion to PAPER requires at least one stored backtest');
+    // PAPER is prospective evaluation with real paper capital, so it needs out-of-sample evidence that survives the
+    // number of trials (deflated Sharpe) and a significant post-cost expectancy. The owner still decides.
+    if (status === 'PAPER') {
+      const q = strategyQualification(id);
+      if (q.reasons.includes('NO_BACKTEST')) throw new Error('promotion to PAPER requires at least one stored backtest');
+      if (q.verdict !== 'QUALIFIED') throw new Error(`promotion to PAPER requires strategy qualification: ${q.reasons.join(', ')}`);
+    }
     run('UPDATE strategies SET status=?, updated_at=?, note=COALESCE(?, note) WHERE id=?', status, Date.now(), note ?? null, id);
     const susp = new Set(getSetting<string[]>('suspendedStrategies', []));
     status === 'SUSPENDED' || status === 'RETIRED' ? susp.add(id) : susp.delete(id);
@@ -75,7 +82,11 @@ const summary = (r: BtResult) => ({
 });
 export function listBacktests(limit = 50) { return all<any>('SELECT id, strategy_id, created_at, instrument, interval, result FROM backtests ORDER BY created_at DESC LIMIT ?', limit).map((r) => ({ id: r.id, created_at: r.created_at, ...summary(P(r.result)) })); }
 /** Aggregate the latest out-of-sample evidence per instrument within one strategy and fill-model version. */
-export function strategyStats(strategyId: string) {
+/**
+ * Out-of-sample evidence for the strategy's current version: OOS trades from the newest backtest per instrument,
+ * preferring the current fill model. `backtestRuns` counts every stored run of this version (all trials, kept or not).
+ */
+export function oosCohort(strategyId: string) {
   const definition = strategyById(strategyId); if (!definition) return null;
   const rows = all<{ instrument: string; result: string }>('SELECT instrument, result FROM backtests WHERE strategy_id=? ORDER BY created_at DESC', strategyId);
   const legacy = { modelVersion: 1, instruments: new Set<string>(), trades: [] as BtTrade[] };
@@ -92,8 +103,20 @@ export function strategyStats(strategyId: string) {
   }
   // Keep existing evidence usable until a run with the current fill model is available for this strategy.
   const { modelVersion, instruments, trades } = current.instruments.size ? current : legacy;
-  if (!trades.length) return null;
-  return { ...stats(trades), modelVersion, instruments: instruments.size, monteCarlo: monteCarlo(trades.map((trade) => trade.r)) };
+  // Every stored run of this version is a trial for multiple-testing purposes, including runs superseded above.
+  const runOosR = rows.map((row) => P<BtResult>(row.result)).filter((r) => r.strategyVersion === definition.version)
+    .map((r) => r.trades.filter((trade) => trade.segment === 'OOS').map((trade) => trade.r));
+  return { strategyVersion: definition.version, modelVersion, instruments: instruments.size, trades, backtestRuns: runOosR.length, runOosR };
+}
+
+/** Qualification verdict for the strategy's current version from its stored out-of-sample evidence. */
+export function strategyQualification(strategyId: string) { return qualifyEvidence(oosCohort(strategyId)); }
+
+export function strategyStats(strategyId: string) {
+  const cohort = oosCohort(strategyId);
+  if (!cohort?.trades.length) return null;
+  const { modelVersion, instruments, trades } = cohort;
+  return { ...stats(trades), modelVersion, instruments, monteCarlo: monteCarlo(trades.map((trade) => trade.r)) };
 }
 const PAPER_OUTCOME_WINDOW = 50;
 

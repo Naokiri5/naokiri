@@ -125,7 +125,14 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     await denied(statusUrl, { status: 'PAPER' });
     const noBacktest = await post(statusUrl, { status: 'PAPER', password });
     expect(noBacktest.statusCode).toBe(400); expect(noBacktest.json().error).toMatch(/backtest/);
+    // A single out-of-sample trade is a backtest but not evidence: promotion is refused with the qualification reasons.
+    seedBacktestFixture(id, { qualifying: false });
+    const weak = await post(statusUrl, { status: 'PAPER', password });
+    expect(weak.statusCode).toBe(400); expect(weak.json().error).toMatch(/requires strategy qualification: .*INSUFFICIENT_SAMPLE/);
+    expect((await app.inject({ url: `/api/lab/strategy/${id}/qualification`, headers: { cookie } })).json()).toMatchObject({ verdict: 'NOT_QUALIFIED', automaticPromotion: false });
     seedBacktestFixture(id);
+    expect((await app.inject({ url: `/api/lab/strategy/${id}/qualification`, headers: { cookie } })).json()).toMatchObject({ verdict: 'QUALIFIED' });
+    expect((await app.inject({ url: '/api/lab/strategy/nope/qualification', headers: { cookie } })).statusCode).toBe(404);
     expect((await post(statusUrl, { status: 'PAPER', password })).statusCode).toBe(200);
     expect((await app.inject({ url: '/api/lab', headers: { cookie } })).json().strategies.find((s: { id: string; status: string }) => s.id === id).status).toBe('PAPER');
     expect((await post(statusUrl, { status: 'PAPER' })).statusCode).toBe(200);
