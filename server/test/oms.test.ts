@@ -458,15 +458,24 @@ describe('Order-book freshness and fill accounting', () => {
     expect(all('SELECT id FROM fills')).toHaveLength(1);
   });
 
-  it('rejects a fill whose depth-walk notional exceeds the policy cap', () => {
+  it('keeps a capped fill that walks the book within the slippage policy inside the notional cap', () => {
+    // The gate sizes a capped position at the worst permitted entry, so a depth walk within maxSlippageBps still fits.
     acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 1 });
     const book = market.deep.get(id)!.book!;
     const ask = market.price(id)!.ask!;
     book.asks = [[ask, 0.05], [ask * 1.0008, 50]];
-    expect(submitEntry(report(id, last), 'bot')).toMatchObject({
-      ok: false,
-      reason: expect.stringContaining('POSITION_NOTIONAL_LIMIT'),
-    });
+    expect(submitEntry(report(id, last), 'bot')).toMatchObject({ ok: true });
+    const fill = all<{ qty: number; price: number }>('SELECT qty, price FROM fills')[0];
+    expect(fill.price).toBeGreaterThan(ask);
+    expect(fill.qty * fill.price).toBeLessThanOrEqual(100 + 1e-9);
+    expect(reconcile().ok).toBe(true);
+  });
+  it('still refuses a depth walk beyond the slippage policy without booking anything', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, maxPositionNotionalPct: 1 });
+    const book = market.deep.get(id)!.book!;
+    const ask = market.price(id)!.ask!;
+    book.asks = [[ask, 0.05], [ask * 1.01, 50]];
+    expect(submitEntry(report(id, last), 'bot')).toMatchObject({ ok: false });
     expect(openPositions()).toHaveLength(0);
     expect(all('SELECT id FROM fills')).toHaveLength(0);
     expect(accountState().cash).toBe(10_000);

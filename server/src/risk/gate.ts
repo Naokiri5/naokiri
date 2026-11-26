@@ -131,7 +131,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const estEntry = px.ask || px.price;
   const conservativeStopFill = p.stopPrice * (1 - pol.stopFillBufferPct / 100);
   // Size from the worst entry permitted by the slippage policy; actual fills are rechecked by the OMS.
-  // Keep the top ask for the separate notional cap, which must be enforced at the executed price.
+  // The notional cap uses it too: the OMS enforces the cap at the executed price, which may be worse than the top ask.
   const worstPermittedEntry = estEntry * (1 + pol.maxSlippageBps / 10_000);
   const perUnitLoss = worstPermittedEntry - conservativeStopFill + pol.feeRate * (worstPermittedEntry + conservativeStopFill);
   // Reduce only; reuse persisted deposit-invariant high-water marks and loss streaks.
@@ -176,7 +176,8 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
     // Use the worst allowed entry to avoid allocating beyond the reserve on a depth walk.
     qty = Math.min(qty, reserveNotional / worstPermittedEntry);
   }
-  if (qty * estEntry > maxNotional) qty = maxNotional / estEntry;
+  // Cap at the worst permitted entry so any fill within the slippage policy also fits the cap the OMS enforces.
+  if (qty * worstPermittedEntry > maxNotional) qty = maxNotional / worstPermittedEntry;
   qty = floorStep(qty, inst.stepSize);
   const notional = qty * estEntry;
   if (qty <= 0 || qty < inst.minQty || notional < Math.max(inst.minNotional, 5)) deny.push(`SIZE_BELOW_VENUE_MINIMUM qty=${qty} notional=${notional.toFixed(2)}`);

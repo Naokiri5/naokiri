@@ -104,16 +104,17 @@ describe('isolated historical session simulation', () => {
     expect(report).toMatchObject({ signals: 1, entries: 0, trades: [], rejections: { [reason]: 1 } });
   });
 
-  it('enforces the position cap at the executed price, like the paper OMS', async () => {
+  it('sizes a capped position at the worst permitted entry, so a fill within the slippage policy still fits the cap', async () => {
     // A 1% stop makes the risk budget ask for more than the 25% notional cap, so the cap sizes the position.
     const tightStop = fixtureStrategy([SIGNAL_INDEX + 1], 1);
     const sizing = simulatedEntrySizing(DEFAULT_POLICY, 10_000, 10_000, askOf(P), P * 0.99);
-    expect(sizing.qty * askOf(P)).toBeCloseTo(sizing.maxNotional, 6);
+    expect(sizing.qty * askOf(P) * (1 + DEFAULT_POLICY.maxSlippageBps / 10_000)).toBeCloseTo(sizing.maxNotional, 6);
+    // 5 bps of modeled slippage is within the 20 bps policy: the entry is no longer refused by the cap.
     const slipped = await run([book(C, P), book(C + 1_000, P)], {}, tightStop);
-    expect(slipped).toMatchObject({ entries: 0, rejections: { POSITION_NOTIONAL_LIMIT: 1 } });
-    expect(slipped.warnings.some((w) => w.includes('enforces the cap at the executed price'))).toBe(true);
-    // Filled exactly at the top ask (no modeled slippage), the capped entry fits.
-    expect(await run([book(C, P), book(C + 1_000, P)], { slippageBps: 0 }, tightStop)).toMatchObject({ entries: 1 });
+    expect(slipped).toMatchObject({ entries: 1, rejections: {} });
+    expect(slipped.warnings.some((w) => w.includes('enforces the cap at the executed price'))).toBe(false);
+    // Slippage beyond the policy is still refused, by the slippage rule.
+    expect(await run([book(C, P), book(C + 1_000, P)], { slippageBps: 25 }, tightStop)).toMatchObject({ entries: 0, rejections: { SLIPPAGE: 1 } });
   });
 
   it('latches the loss limit, keeps managing the open position and refuses later signals', async () => {

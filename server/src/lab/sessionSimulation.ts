@@ -69,7 +69,7 @@ export function simulatedEntrySizing(policy: RiskPolicy, equity: number, cash: n
   const riskBudget = equity * (policy.riskPerTradePct / 100);
   const maxNotional = Math.min(equity * (policy.maxPositionNotionalPct / 100), cash * 0.98);
   let qty = perUnitLoss > 0 ? riskBudget / perUnitLoss : 0;
-  if (qty * ask > maxNotional) qty = maxNotional / ask;
+  if (qty * worstPermittedEntry > maxNotional) qty = maxNotional / worstPermittedEntry;
   if (stepSize && stepSize > 0) qty = Math.floor(qty / stepSize + 1e-9) * stepSize;
   return { qty, riskBudget, maxNotional, perUnitLoss, conservativeStopFill };
 }
@@ -289,9 +289,8 @@ export async function simulateSession(
   if (trades.length < 30) warnings.push(`only ${trades.length} closed trades — not statistically meaningful`);
   if (exitsDeferred) warnings.push(`${exitsDeferred} exit attempts were deferred for lack of displayed bid depth.`);
   if (rejections.POSITION_NOTIONAL_LIMIT) {
-    warnings.push(`${rejections.POSITION_NOTIONAL_LIMIT} entries were refused because the position cap was sized at the ask but the fill `
-      + '(ask plus modeled slippage) exceeded it. The paper OMS enforces the cap at the executed price the same way, so capped '
-      + '(tight-stop) setups are skipped whenever a fill is worse than the top ask.');
+    warnings.push(`${rejections.POSITION_NOTIONAL_LIMIT} entries were refused because the executed notional exceeded the position cap `
+      + '(the cap is sized at the worst permitted entry, so this indicates a fill worse than the slippage policy).');
   }
   const tradeStats = stats(trades.map((t) => ({ entryT: t.entryTs, exitT: t.exitTs, entry: t.entryPrice, exit: t.proceedsUsd,
     r: t.r, reason: t.reason, regime: t.regime, segment: 'OOS' as const, bars: t.heldCandles, mfe: 0, mae: 0 })));
