@@ -34,6 +34,9 @@ export function connectStream() {
   es.onopen = () => { streamState.connected = true; };
   es.onerror = () => { streamState.connected = false; };
   for (const t of TOPICS) es.addEventListener(t, (ev) => { streamState.lastEventAt = Date.now(); let p: any = null; try { p = JSON.parse((ev as MessageEvent).data); } catch { /* */ } handlers.forEach((h) => h(t, p)); });
+  // The browser resends the last event id on reconnect and the server replays what was missed. When it cannot
+  // (server restarted or the gap is too old) it sends `resync`: every live view refetches its authoritative state.
+  es.addEventListener('resync', () => { streamState.lastEventAt = Date.now(); for (const t of TOPICS) handlers.forEach((h) => h(t, null)); });
 }
 export function disconnectStream() { es?.close(); es = null; streamState.connected = false; }
 export function useStream(fn: Handler) { const ref = useRef(fn); ref.current = fn; useEffect(() => { const h: Handler = (t, p) => ref.current(t, p); handlers.add(h); return () => { handlers.delete(h); }; }, []); }

@@ -17,6 +17,7 @@ import * as totp from '../security/totp.js';
 import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
 import { createVerifiedBackup } from '../ops/backup.js';
 import { bus } from '../core/bus.js';
+import { isBusTopic, telemetry, TELEMETRY_SCHEMA_VERSION, type TelemetryEvent } from '../core/telemetry.js';
 import { market } from '../market/store.js';
 import { board, rejections, recentDecisions, analyzeInstrument, dexBoard } from '../market/scanner.js';
 import { bubbleMap } from '../market/bubbles.js';
@@ -248,19 +249,34 @@ export async function routes(app: FastifyInstance) {
   // ── live stream (SSE) ──
   let streams = 0;
   app.get('/api/stream', (req, reply) => {
+    // Read-only telemetry: optional topic filter, ids for gap-free reconnection (Last-Event-ID), resync when impossible.
+    const query = z.object({ topics: z.string().max(400).optional(), lastEventId: z.string().max(64).optional() }).strict().parse(req.query);
+    const topics = query.topics?.split(',').map((t) => t.trim()).filter(Boolean);
+    if (topics && (!topics.length || topics.some((t) => !isBusTopic(t)))) return bad(reply, 400, 'unknown stream topic');
+    const wanted = topics ? new Set(topics) : null;
+    const header = req.headers['last-event-id'];
+    const lastEventId = (typeof header === 'string' ? header : undefined) ?? query.lastEventId;
+    if (lastEventId !== undefined && lastEventId.length > 64) return bad(reply, 400, 'invalid last event id');
     if (streams >= 20) return bad(reply, 503, 'too many open live streams');
     const token = tokenOf(req);
     reply.hijack(); // we own the raw socket from here; Fastify must not try to send a second response
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff', 'x-request-id': String(req.id) });
     streams++;
-    reply.raw.write(': connected\n\n');
     let closed = false; let backlog = 0;
-    const close = () => { if (closed) return; closed = true; streams--; bus.off('*', send); clearInterval(ka); reply.raw.end(); };
+    const close = () => { if (closed) return; closed = true; streams--; unsubscribe(); clearInterval(ka); reply.raw.end(); };
     const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
-    const send = (e: { topic: string; payload: unknown }) => write(`event: ${e.topic}\ndata: ${JSON.stringify(e.payload)}\n\n`);
+    const send = (e: TelemetryEvent) => { if (!wanted || wanted.has(e.topic)) write(`id: ${e.id}\nevent: ${e.topic}\ndata: ${JSON.stringify(e.payload ?? null)}\n\n`); };
+    // Subscribe before replaying so nothing published in between is lost; replayed ids are skipped if seen live.
+    let replayedThrough = 0;
+    const unsubscribe = telemetry.subscribe((e) => { if (e.sequence > replayedThrough) send(e); });
+    reply.raw.write(`: connected\nevent: hello\ndata: ${JSON.stringify({ schemaVersion: TELEMETRY_SCHEMA_VERSION, lastEventId: telemetry.lastId })}\n\n`);
+    if (lastEventId !== undefined) {
+      const replay = telemetry.since(lastEventId);
+      if (replay.resync) write(`event: resync\ndata: ${JSON.stringify({ reason: replay.reason })}\n\n`);
+      else for (const e of replay.events) { send(e); replayedThrough = e.sequence; }
+    }
     // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.
     const ka = setInterval(() => (auth.validSession(token) ? write(': ka\n\n') : close()), 20_000);
-    bus.on('*', send);
     req.raw.on('close', close);
   });
 
