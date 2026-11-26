@@ -29,7 +29,6 @@ export function openDb(file?: string) {
   let path = file;
   if (!path) { ensureDataDir(); path = join(config.dataDir, 'mia.db'); }
   const connection = new DatabaseSync(path);
-  dbPath = path;
   try {
     connection.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}; PRAGMA foreign_keys=ON;`);
     enableWal(connection);
@@ -37,7 +36,8 @@ export function openDb(file?: string) {
     // Explicitly select FULL rather than relying on the SQLite build's default synchronous mode.
     connection.exec('PRAGMA synchronous=FULL');
     migrate(connection);
-    db = connection;
+    // Track the path only once the connection is usable; a failed setup must not leave a path for a closed database.
+    db = connection; dbPath = path;
     return connection;
   } catch (error) {
     connection.close();
@@ -60,6 +60,17 @@ export function tx<T>(fn: () => T): T {
   if (txDepth > 0) return fn();
   const d = getDb();
   d.exec('BEGIN IMMEDIATE'); txDepth = 1;
+  try { const r = fn(); d.exec('COMMIT'); return r; } catch (e) { d.exec('ROLLBACK'); throw e; } finally { txDepth = 0; }
+}
+/**
+ * Run read-only queries against one consistent database snapshot. A deferred transaction in WAL mode reads every
+ * statement from the snapshot taken at its first read, so a commit by another process cannot land between them.
+ * Inside an existing transaction it just runs (that transaction already gives one snapshot). Never write inside it.
+ */
+export function readSnapshot<T>(fn: () => T): T {
+  if (txDepth > 0) return fn();
+  const d = getDb();
+  d.exec('BEGIN DEFERRED'); txDepth = 1;
   try { const r = fn(); d.exec('COMMIT'); return r; } catch (e) { d.exec('ROLLBACK'); throw e; } finally { txDepth = 0; }
 }
 export const J = (v: unknown) => JSON.stringify(v);

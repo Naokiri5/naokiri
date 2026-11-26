@@ -91,6 +91,22 @@ describe('isolated historical session simulation', () => {
     expect(report.trades[0].r).toBeLessThan(-1);
   });
 
+  it('keeps a trail the price activated when the target it reached cannot fill, then exits at the trailed stop', async () => {
+    const trailing: StrategyDef = { ...fixtureStrategy(), generate: (f) => f.n === SIGNAL_INDEX + 1 ? {
+      direction: 'long', entryRef: f.close, stop: f.close * 0.95, targets: [{ r: 1.5, fraction: 0.5 }, { r: 3, fraction: 0.5 }], maxHoldBars: 5,
+      trailAfterR: 1, trigger: 'fixture', invalidation: 'fixture', reasons: ['fixture'] } : null };
+    // 1.08P passes the 1.5R target and the 1R trail trigger, but the bid cannot take the half; then price reverses.
+    const report = await run([book(C, P), book(C + 1_000, P), book(C + 2_000, P * 1.08, { bidQty: 1e-6 }), book(C + 3_000, P * 0.99)], {}, trailing);
+    expect(report.records.map((r) => r.kind)).toEqual(['SIGNAL', 'ENTRY', 'EXIT_DEFERRED', 'EXIT']);
+    expect(report).toMatchObject({ exitsDeferred: 1, openPosition: null });
+    expect(report.trades[0]).toMatchObject({ reason: 'TRAIL_STOP', exitTs: C + 3_000 });
+  });
+
+  it('refuses a policy with cash reserves, which simulated sizing does not model', async () => {
+    await expect(run([book(C, P)], { policy: { ...DEFAULT_POLICY, minUnallocatedReservePct: 10 } })).rejects.toThrow('RESERVE_POLICY_NOT_SIMULATED');
+    await expect(run([book(C, P)], { policy: { ...DEFAULT_POLICY, minSettlementReservePct: 5 } })).rejects.toThrow('RESERVE_POLICY_NOT_SIMULATED');
+  });
+
   it.each([
     ['INSUFFICIENT_DEPTH', { askQty: 0.001 }, {}],
     ['SPREAD', { spreadBps: 40 }, {}],

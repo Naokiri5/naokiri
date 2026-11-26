@@ -1,5 +1,6 @@
 import { get, run, tx } from '../db/db.js';
 import { getControl } from '../core/mode.js';
+import { audit } from '../core/audit.js';
 import { LeaseLostError, ownsLease, type LeaseFence } from './lease.js';
 import { paperSpotSessionPreflight, sessionPreflight, type SessionMind } from './sessionPreflight.js';
 import type { EngineView } from './readiness.js';
@@ -116,6 +117,19 @@ export function openPaperSpotSession(
       lease_acquired_at: fence.acquired_at, fence_epoch: old.fence_epoch + 1,
       suspend_reason: 'NONE', started_at: now, closed_at: null, ...mandate,
     });
+  });
+}
+
+/** Owner authorization of a spot paper session: the session and its audit record commit together or not at all. */
+export function authorizePaperSpotSession(
+  engine: EngineView & { instanceId?: string }, fence: LeaseFence,
+  request: MandateRequest & { authorizedBy: string }, at?: number,
+) {
+  return tx(() => {
+    const opened = openPaperSpotSession(engine, fence, request, at);
+    audit('owner', 'session.paper_spot.run', { capitalCeiling: request.capitalCeiling, durationHours: request.durationHours,
+      expiresAt: opened.expires_at, riskPolicyVersion: opened.risk_policy_version });
+    return opened;
   });
 }
 

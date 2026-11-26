@@ -126,6 +126,9 @@ export async function simulateSession(
       !safe(o.latencyMs, 1, 86_400_000) || !safe(o.maxWaitMs, 0, 86_400_000) || !safe(o.slippageBps, 0, 1_000) ||
       (o.stepSize !== undefined && !(Number.isFinite(o.stepSize) && o.stepSize > 0))) throw new Error('INVALID_SIMULATION_OPTIONS');
   const policy = RiskPolicy.parse(o.policy ?? DEFAULT_POLICY);
+  // Simulated sizing does not model the cash reserves; a policy that sets them would be reported as tradable when the
+  // canonical gate gives it less (or no) headroom. Refuse it rather than report trades the policy prohibits.
+  if ((policy.minUnallocatedReservePct ?? 0) > 0 || (policy.minSettlementReservePct ?? 0) > 0) throw new Error('RESERVE_POLICY_NOT_SIMULATED');
   const limits = LIMITS.parse({ capitalCeilingUsd: o.capitalCeilingUsd, maxSessionLossUsd: o.maxSessionLossUsd });
   if (limits.capitalCeilingUsd > o.startingCashUsd) throw new Error('MANDATE_CAPITAL_EXCEEDS_FUNDS');
   assertStrategyHistory(strategy.interval, candles);
@@ -223,7 +226,11 @@ export async function simulateSession(
     if (sold > book.bidQty + 1e-12) {
       exitsDeferred++;
       record('EXIT_DEFERRED', `${fills.map((f) => f.reason).join('+')} needs ${sold}, bid shows ${book.bidQty}`);
-      return; // never invent a fill: keep the previous state and retry on a later observation
+      // Never invent a fill: quantities, cash and target completion stay as they were. Price-driven protection is not a
+      // fill, so a trail the same observation activated (stop raised to breakeven) and the excursions still apply.
+      pos.st.stop = Math.max(pos.st.stop, next.stop);
+      pos.st.mfe = next.mfe; pos.st.mae = next.mae;
+      return;
     }
     pos.st = next;
     for (const f of fills) {

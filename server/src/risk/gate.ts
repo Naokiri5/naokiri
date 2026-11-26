@@ -159,6 +159,13 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   // Reduce only; reuse persisted deposit-invariant high-water marks and loss streaks.
   let allocationMultiplier = 1;
   if (pol.adaptiveDrawdownSizing === true) {
+    // Drawdown is only as current as the marks behind it: a stale high mark on another open position would hide a
+    // drawdown and leave the multiplier at 1. Require a fresh, not future-dated mark for every open position.
+    const staleMarks = openPositions(account).map((o) => o.instrument).filter((instrument) => {
+      const m = market.price(instrument);
+      return !m || !Number.isFinite(m.ts) || nowTs - m.ts > QUALITY_LIMITS.maxQuoteAgeMs || m.ts - nowTs > QUALITY_LIMITS.clockSkewMs;
+    });
+    if (staleMarks.length) { deny.push(`ADAPTIVE_SIZING_MARKS_STALE:${[...new Set(staleMarks)].join(',')}`); return out(); }
     if (!Number.isFinite(acct.drawdownPct) || acct.drawdownPct < 0 || !Number.isSafeInteger(acct.consecutiveLosses) || acct.consecutiveLosses < 0) {
       deny.push('INVALID_DRAWDOWN_EVIDENCE'); return out();
     }

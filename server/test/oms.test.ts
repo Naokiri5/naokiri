@@ -11,9 +11,12 @@ import { setCrashHook } from '../src/exec/crashpoint.js';
 import * as lifecycle from '../src/ops/shutdown.js';
 import { paperFillEvents } from '../src/exec/fillEvents.js';
 import { paperChoiceOutcomes } from '../src/ditas/execution.js';
-import { reconcile, calendar } from '../src/portfolio/calendar.js';
+import { reconcile, calendar, fillEvidenceMismatches } from '../src/portfolio/calendar.js';
+import { releaseGates } from '../src/qa/gates.js';
+import { unreconciledPaperOrders } from '../src/exec/recovery.js';
 import { verifyAuditChain } from '../src/core/audit.js';
-import { run, all, get, J, closeDb, openDb } from '../src/db/db.js';
+import { run, all, get, J, closeDb, openDb, readSnapshot } from '../src/db/db.js';
+import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -146,6 +149,41 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     ledger(PAPER_ACCOUNT, 'BUY', -25, 'missing-order');
     expect(reconcile()).toMatchObject({ ok: false, orphanPrincipalEntries: 1 });
   });
+  it('fails G05 when a filled order loses its fill row even though ledger and positions still agree', () => {
+    expect(submitEntry(report(id, last), 'bot')).toMatchObject({ ok: true });
+    const p = openPositions()[0];
+    executeExit(p.id, p.qty, 'TEST');
+    const g05 = () => releaseGates(null).gates.find((g) => g.id === 'G05')!;
+    expect(fillEvidenceMismatches()).toBe(0);
+    expect(g05().status).toBe('PASS');
+    const exitOrder = get<{ id: string }>("SELECT id FROM orders WHERE position_id=? AND purpose LIKE 'EXIT_%'", p.id)!.id;
+    run('DELETE FROM fills WHERE order_id=?', exitOrder);
+    expect(reconcile().ok).toBe(true); // ledger and positions alone cannot see it
+    expect(fillEvidenceMismatches()).toBe(1);
+    expect(g05()).toMatchObject({ status: 'FAIL', evidence: expect.stringContaining('1 filled order(s) without matching fill') });
+  });
+  it('flags an unlinked trade fee, while deposits stay unlinked by design', () => {
+    expect(reconcile().ok).toBe(true); // the 10,000 deposit has no order link
+    ledger(PAPER_ACCOUNT, 'FEE', -0.5, 'missing-order');
+    expect(reconcile()).toMatchObject({ ok: false, orphanPrincipalEntries: 1 });
+  });
+  it('reads every reconciliation aggregate from one snapshot, unaffected by a concurrent commit', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mia-snapshot-'));
+    const file = join(dir, 'mia.db');
+    try {
+      freshDb(true, file);
+      const other = new DatabaseSync(file);
+      const count = () => get<{ n: number }>('SELECT COUNT(*) n FROM ledger_entries')!.n;
+      const [before, during] = readSnapshot(() => {
+        const first = count();
+        other.prepare("INSERT INTO ledger_entries(id,account,kind,amount,ref,note,ts) VALUES ('concurrent','paper-bot','DEPOSIT',1,NULL,'concurrent',1)").run();
+        return [first, count()];
+      });
+      expect(during).toBe(before);
+      expect(count()).toBe(before + 1); // visible once the snapshot ends
+      other.close();
+    } finally { closeDb(); rmSync(dir, { recursive: true, force: true }); }
+  });
   it.each(['SUBMITTING', 'AMBIGUOUS', 'PARTIALLY_FILLED', 'RESERVED', 'UNKNOWN_STATE'])(
     'blocks new entries on unresolved %s orders without blocking protection', status => {
       expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
@@ -179,6 +217,34 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
       expect(paperFillEvents(0, 10).events).toHaveLength(2);
       expect(reconcile().ok).toBe(true);
     } finally { setCrashHook(null); draining.mockRestore(); }
+  });
+  it('records the exit fill when a stored decision carries a non-string trace id', () => {
+    const entry = report(id, last);
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      entry.id, entry.candidateId, id, 'crypto', 'LONG', entry.strategy.id, entry.decision, 70, Date.now(), J({ ...entry, traceId: 123 }));
+    expect(submitEntry(entry, 'bot')).toMatchObject({ ok: true });
+    const p = openPositions()[0];
+    executeExit(p.id, p.qty, 'TEST');
+    expect(get<{ status: string }>('SELECT status FROM positions WHERE id=?', p.id)!.status).toBe('CLOSED');
+    expect(paperFillEvents(0, 5).events.map((e: any) => e.traceId)).toContain(p.id);
+  });
+  it('never closes an approval that carries execution evidence; recovery keeps reporting it', () => {
+    updateControl('owner', { mode: 'APPROVAL' });
+    const oid = queueForApproval(report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' }))!;
+    run('UPDATE orders SET filled_qty=1 WHERE id=?', oid);
+    expireApprovals(); cancelPendingEntries('owner');
+    expect(() => decideApproval(oid, false)).not.toThrow();
+    expect(get('SELECT status FROM orders WHERE id=?', oid)).toEqual({ status: 'PENDING_APPROVAL' });
+    expect(unreconciledPaperOrders()).toBe(1);
+  });
+  it('does not accept a protective stop the OMS did not create as protection', () => {
+    expect(submitEntry(report(id, last), 'bot')).toMatchObject({ ok: true });
+    const p = openPositions()[0];
+    expect(unreconciledPaperOrders()).toBe(0);
+    const now = Date.now();
+    run("INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,stop_price,status,purpose,position_id,filled_qty,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+      'fake-stop', 'fake-stop', PAPER_ACCOUNT, 'other', p.instrument, 'SELL', 'MARKET', p.qty, p.stop_price, 'ACTIVE', 'PROTECTIVE_STOP', p.id, 0, now, now);
+    expect(unreconciledPaperOrders()).toBe(1);
   });
   it('rolls back a fill envelope with the failed OMS transaction', () => {
     const entry = report(id, last);

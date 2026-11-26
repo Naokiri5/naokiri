@@ -115,6 +115,22 @@ describe('Risk gate (Part 17)', () => {
     expect(halted.reasonCodes).toContain('ADAPTIVE_DRAWDOWN_HALT');
     expect(halted.reasonCodes.join()).toContain('DRAWDOWN_CAPITAL_PRESERVATION');
   });
+  it('refuses adaptive sizing while another open position has a stale mark', () => {
+    acceptPolicy('owner', { ...DEFAULT_POLICY, adaptiveDrawdownSizing: true });
+    updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10000);
+    const btc = 'crypto:binance:BTCUSDT'; const now = Date.now();
+    run(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,realized_pnl,fees,planned_risk)
+      VALUES ('held','paper-bot',?,'crypto','LONG','trend_pullback',0.001,?,?,?,'[]','OPEN',?,0,0,1)`, btc, 100, 90, 90, now - 60_000);
+    expect(evaluateRisk(prop(id, last), now).reasonCodes.join()).not.toMatch(/ADAPTIVE_SIZING_MARKS_STALE/);
+    market.tickers.get(btc)!.receivedAt = now - 10 * 60_000;
+    const deep = market.deep.get(btc); if (deep?.book) deep.book.ts = now - 10 * 60_000;
+    const r = evaluateRisk(prop(id, last), now);
+    expect(r.decision).toBe('DENY');
+    expect(r.reasonCodes).toContain(`ADAPTIVE_SIZING_MARKS_STALE:${btc}`);
+    // Without adaptive sizing the existing rules apply unchanged.
+    acceptPolicy('owner', DEFAULT_POLICY);
+    expect(evaluateRisk(prop(id, last), now).reasonCodes.join()).not.toMatch(/ADAPTIVE_SIZING_MARKS_STALE/);
+  });
   it('rolls back a risk policy version when audit persistence fails', () => {
     const prior = acceptPolicy('owner', DEFAULT_POLICY);
     run("CREATE TEMP TRIGGER fixture_reject_policy_audit BEFORE INSERT ON audit_log WHEN NEW.action='risk.policy.accept' BEGIN SELECT RAISE(ABORT, 'fixture policy audit failure'); END");

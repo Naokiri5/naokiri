@@ -28,6 +28,12 @@ import { recordPaperFill } from './fillEvents.js';
  * (real spread + depth), with configured fees. Venue = 'binance-paper'. No live venue exists.
  */
 export const VENUE = 'binance-paper';
+/**
+ * The only approval rows that may be closed (rejected, cancelled, expired) without reconciliation: never filled, never
+ * linked to a position, no fill recorded. An approval carrying execution evidence stays in the unresolved set that
+ * recovery reports (exec/recovery.ts) instead of being hidden by a terminal status.
+ */
+const UNFILLED_APPROVAL = "status='PENDING_APPROVAL' AND filled_qty=0 AND position_id IS NULL AND NOT EXISTS (SELECT 1 FROM fills f WHERE f.order_id=orders.id)";
 // Exits and monitoring keep the DEFAULT_POLICY fallback on purpose: a missing policy must never block a protective exit.
 // Entries never use it (submitEntry refuses without the exact policy the gate evaluated).
 const feeRate = () => (currentPolicy()?.policy ?? DEFAULT_POLICY).feeRate;
@@ -276,7 +282,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       const denial = sessionDenial(Date.now(), existing);
       if (denial) return denial;
       if (existing) {
-        const changed = run("UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", reason, Date.now(), existing.id);
+        const changed = run(`UPDATE orders SET status='REJECTED', reject_reason=?, updated_at=? WHERE id=? AND ${UNFILLED_APPROVAL}`, reason, Date.now(), existing.id);
         return Number(changed.changes) === 1;
       }
       if (get('SELECT 1 FROM orders WHERE client_order_id=?', coid)) return false;
@@ -326,7 +332,7 @@ export function decideApproval(orderId: string, approve: boolean, fence?: LeaseF
   if (!o || o.status !== 'PENDING_APPROVAL') throw new OmsError('order is not pending approval');
   audit('owner', approve ? 'order.approve' : 'order.reject', { orderId });
   if (!approve) {
-    const changed = run("UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", Date.now(), orderId);
+    const changed = run(`UPDATE orders SET status='CANCELLED', reject_reason='rejected by owner', updated_at=? WHERE id=? AND ${UNFILLED_APPROVAL}`, Date.now(), orderId);
     if (Number(changed.changes) !== 1) return { ok: false, reason: 'ORDER_STATE_CHANGED: entry is no longer pending approval' };
     journal('INTERVENTION', `Owner rejected entry ${o.instrument}`, orderId);
     return { ok: true };
@@ -348,7 +354,7 @@ export function expireApprovals(fence?: LeaseFence) {
       const expiresAt = report ? Date.parse(report.consensus.expiresAt) : NaN;
       if (Number.isFinite(expiresAt) && expiresAt > now) continue;
       const reason = Number.isFinite(expiresAt) ? 'consensus validity window elapsed' : 'approval evidence is missing or invalid';
-      run("UPDATE orders SET status='EXPIRED', reject_reason=?, updated_at=? WHERE id=? AND status='PENDING_APPROVAL'", reason, now, order.id);
+      run(`UPDATE orders SET status='EXPIRED', reject_reason=?, updated_at=? WHERE id=? AND ${UNFILLED_APPROVAL}`, reason, now, order.id);
     }
   });
 }
@@ -531,7 +537,7 @@ export function autopsy(positionId: string) {
 // ── Part 17.8 emergency semantics — distinct actions with distinct reported states ──
 export function pauseNewOrders(actor: string) { updateControl(actor, { pausedNewOrders: true }); journal('INTERVENTION', `New orders paused by ${actor}`); return { state: 'CONFIRMED' }; }
 export function cancelPendingEntries(actor: string) {
-  const r = run("UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=? WHERE account=? AND venue=? AND purpose='ENTRY' AND status='PENDING_APPROVAL'", `cancelled by ${actor}`, Date.now(), PAPER_ACCOUNT, VENUE);
+  const r = run(`UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=? WHERE account=? AND venue=? AND purpose='ENTRY' AND ${UNFILLED_APPROVAL}`, `cancelled by ${actor}`, Date.now(), PAPER_ACCOUNT, VENUE);
   audit(actor, 'orders.cancelPendingEntries', { count: Number(r.changes) }); journal('INTERVENTION', `${r.changes} pending entries cancelled by ${actor}`);
   return { state: 'CONFIRMED', cancelled: Number(r.changes) };
 }

@@ -13,7 +13,7 @@ import { buildApp } from '../src/index.js';
 import { acquireOrRenewLease, currentLease } from '../src/ops/lease.js';
 import {
   drainExpiredMandate, durableEntryPermission, durableSessionStatus, finishDurableClose,
-  openDurablePaperSession, openPaperSpotSession, paperSpotEntryDenial,
+  authorizePaperSpotSession, openDurablePaperSession, openPaperSpotSession, paperSpotEntryDenial,
   recoverDurableSessionAfterTakeover, requestPaperSpotClose, suspendDurableEntries,
   type BrainosSessionState,
 } from '../src/ops/durableSession.js';
@@ -217,6 +217,19 @@ describe('durable Binance spot paper authorization', () => {
     expect(paperSpotEntryDenial(fence, NOW, NOW - 1)).toBe('ENTRY_EVIDENCE_OUTSIDE_SESSION');
     expect(paperSpotEntryDenial(fence, NOW, NOW + 1)).toBe('ENTRY_EVIDENCE_OUTSIDE_SESSION');
     expect(durableEntryPermission(engine, fence, NOW)).toMatchObject({ allowFastNewEntries: false, allowDeepNewEntries: false });
+  });
+
+  it('rolls the session opening back when its audit record cannot be written', () => {
+    const fence = prepareSpotSession();
+    pendingApproval('kept-approval', NOW);
+    run("CREATE TEMP TRIGGER fixture_reject_session_audit BEFORE INSERT ON audit_log WHEN NEW.action='session.paper_spot.run' BEGIN SELECT RAISE(ABORT, 'fixture audit failure'); END");
+    try {
+      expect(() => authorizePaperSpotSession(engine, fence, { ...MANDATE, authorizedBy: 'owner:test' }, NOW)).toThrow('fixture audit failure');
+    } finally { run('DROP TRIGGER fixture_reject_session_audit'); }
+    expect(durableSessionStatus()?.state ?? 'CLOSED').toBe('CLOSED');
+    expect(get<{ status: string }>("SELECT status FROM orders WHERE id='kept-approval'")?.status).toBe('PENDING_APPROVAL');
+    expect(authorizePaperSpotSession(engine, fence, { ...MANDATE, authorizedBy: 'owner:test' }, NOW)).toMatchObject({ state: 'RUNNING' });
+    expect(get("SELECT 1 FROM audit_log WHERE action='session.paper_spot.run'")).toBeTruthy();
   });
 
   it('keeps a stale session blocked after an owner control change is reversed', () => {

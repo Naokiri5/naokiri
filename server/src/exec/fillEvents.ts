@@ -21,7 +21,8 @@ export function recordPaperFill(input: {
     const json = get<{ report: string }>('SELECT report FROM decisions WHERE id=?', input.decisionId)?.report;
     try { report = P<DecisionReport | undefined>(json, undefined); } catch { /* Old reports may be unreadable. */ }
   }
-  const traceId = report?.traceId && eventId.test(report.traceId) ? report.traceId : input.positionId;
+  // A legacy or malformed trace id must never block the fill (and so an exit): fall back to the position id.
+  const traceId = typeof report?.traceId === 'string' && eventId.test(report.traceId) ? report.traceId : input.positionId;
   const stored = input.decisionId ? get<{ snapshot_id: string | null }>(
     "SELECT snapshot_id FROM ditas_events WHERE dedupe_key=? AND kind='DECISION'", `decision:${input.decisionId}`,
   )?.snapshot_id : null;

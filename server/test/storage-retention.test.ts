@@ -4,13 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { updateControl } from '../src/core/mode.js';
-import { all, closeDb, get, run } from '../src/db/db.js';
+import { all, closeDb, dbFilePath, get, openDb, run } from '../src/db/db.js';
+import { writeFileSync } from 'node:fs';
 import { migrate, SCHEMA_VERSION } from '../src/db/migrations.js';
 import { market } from '../src/market/store.js';
 import { readiness } from '../src/ops/readiness.js';
 import { _storageTest, backupSpaceDenial, classifyStorage, storageBlocksEntries, storageStatus } from '../src/ops/storage.js';
 import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { compactConsensusEvidence } from '../src/qci/retention.js';
+import { setSetting } from '../src/core/settings.js';
 import { evaluateRisk } from '../src/risk/gate.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { freshDb, seedInstrument } from './helpers.js';
@@ -65,6 +67,19 @@ describe('storage capacity guard', () => {
   });
 });
 
+describe('database open failure', () => {
+  it('does not report the path of a database whose setup failed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mia-open-fail-'));
+    const file = join(dir, 'mia.db');
+    try {
+      closeDb();
+      writeFileSync(file, 'this is not a sqlite database'.repeat(100));
+      expect(() => openDb(file)).toThrow();
+      expect(dbFilePath()).toBeNull();
+    } finally { closeDb(); rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
 describe('consensus evidence retention', () => {
   const HOUR = 3_600_000, NOW = Date.UTC(2026, 10, 26, 12);
   const packets = Array.from({ length: 94 }, (_, i) => ({ worker_id: `w${i}`, stance: 'SUPPORT', reason_codes: ['x'.repeat(400)] }));
@@ -107,6 +122,23 @@ describe('consensus evidence retention', () => {
     consensus('later', NOW + HOUR);
     expect(compactConsensusEvidence(NOW + 26 * HOUR, 24 * HOUR)).toMatchObject({ compacted: 1 });
     expect(() => compactConsensusEvidence(NOW, 0)).toThrow('INVALID_RETENTION_PASS');
+  });
+
+  it('does not skip records that share a timestamp across a batch boundary', () => {
+    freshDb(true);
+    for (const id of ['t1', 't2', 't3']) consensus(id, NOW - 30 * HOUR);
+    expect(compactConsensusEvidence(NOW, 24 * HOUR, 2)).toMatchObject({ examined: 2, compacted: 2 });
+    expect(compactConsensusEvidence(NOW, 24 * HOUR, 2)).toMatchObject({ examined: 1, compacted: 1 });
+    expect(record('t3').packetsCompactedAt).toBe(NOW);
+    expect(compactConsensusEvidence(NOW, 24 * HOUR, 2)).toMatchObject({ examined: 0 });
+  });
+
+  it('honours a legacy numeric watermark as strictly after that millisecond', () => {
+    freshDb(true);
+    consensus('at-mark', NOW - 30 * HOUR); consensus('after', NOW - 29 * HOUR);
+    setSetting('qci.consensusCompactedThrough', NOW - 30 * HOUR);
+    expect(compactConsensusEvidence(NOW, 24 * HOUR)).toMatchObject({ examined: 1, compacted: 1 });
+    expect(record('at-mark').packets).toHaveLength(94);
   });
 
   it('adds the retention indexes to a v8 database without changing its rows', () => {

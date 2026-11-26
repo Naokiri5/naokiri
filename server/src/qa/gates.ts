@@ -5,7 +5,7 @@ import { all, get, getDb } from '../db/db.js';
 import { currentPolicy } from '../risk/policy.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { WORKERS } from '../workers/registry.js';
-import { reconcile } from '../portfolio/calendar.js';
+import { fillEvidenceMismatches, reconcile } from '../portfolio/calendar.js';
 import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
@@ -160,9 +160,10 @@ export function releaseGates(report?: unknown) {
   try {
     const rec = reconcile();
     const unresolved = unreconciledPaperOrders();
+    const fillGaps = fillEvidenceMismatches();
     g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile',
-      status: rec.ok && unresolved === 0 ? 'PASS' : 'FAIL',
-      evidence: `${rec.detail}; ${unresolved} unresolved paper order(s). External venue reconciliation is not certified.` });
+      status: rec.ok && unresolved === 0 && fillGaps === 0 ? 'PASS' : 'FAIL',
+      evidence: `${rec.detail}; ${unresolved} unresolved paper order(s); ${fillGaps} filled order(s) without matching fill quantity and fees. External venue reconciliation is not certified.` });
   } catch {
     g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile',
       status: 'FAIL', evidence: 'Canonical ledger or order recovery evidence unavailable.' });

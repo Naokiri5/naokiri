@@ -55,7 +55,7 @@ import { activeEngineFence, botStatus, botStatusView } from '../bot/bot.js';
 import { readiness, staleAfter } from '../ops/readiness.js';
 import { commandStatus } from '../ops/commandStatus.js';
 import { SESSION_ENVIRONMENTS, SESSION_MINDS, paperSpotSessionPreflight, sessionPreflight } from '../ops/sessionPreflight.js';
-import { durableSessionStatus, openPaperSpotSession, requestPaperSpotClose, requirePaperSpotSession, suspendDurableEntries } from '../ops/durableSession.js';
+import { durableSessionStatus, authorizePaperSpotSession, requestPaperSpotClose, requirePaperSpotSession, suspendDurableEntries } from '../ops/durableSession.js';
 import { MANDATE_LIMITS } from '../ops/tradingMandate.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
 import { all, get, P, tx } from '../db/db.js';
@@ -173,8 +173,7 @@ export async function routes(app: FastifyInstance) {
     stepUp(req, proof);
     const fence = activeEngineFence();
     if (!fence) throw httpError(409, 'The active engine must authorize a paper session.');
-    const session = openPaperSpotSession(botStatus, fence, { capitalCeiling, durationHours, authorizedBy: `owner:${stepUpMethod()}` });
-    audit('owner', 'session.paper_spot.run', { capitalCeiling, durationHours, expiresAt: session.expires_at, riskPolicyVersion: session.risk_policy_version });
+    const session = authorizePaperSpotSession(botStatus, fence, { capitalCeiling, durationHours, authorizedBy: `owner:${stepUpMethod()}` });
     bus.publish('bot', botStatusView());
     return { state: session.state };
   });
@@ -250,6 +249,10 @@ export async function routes(app: FastifyInstance) {
 
   // ── live stream (SSE) ──
   let streams = 0;
+  // Hijacked SSE responses never finish on their own; end them when the server closes so graceful shutdown can finish
+  // draining instead of waiting for the forced exit. Finite requests still drain normally.
+  const openStreams = new Set<() => void>();
+  app.addHook('preClose', async () => { for (const close of [...openStreams]) close(); });
   app.get('/api/stream', (req, reply) => {
     // Read-only telemetry: optional topic filter, ids for gap-free reconnection (Last-Event-ID), resync when impossible.
     const query = z.object({ topics: z.string().max(400).optional(), lastEventId: z.string().max(64).optional() }).strict().parse(req.query);
@@ -269,7 +272,8 @@ export async function routes(app: FastifyInstance) {
     // hitting the backlog limit), and a const declared after the replay block
     // would throw a ReferenceError from the temporal dead zone there.
     let ka: ReturnType<typeof setInterval>;
-    const close = () => { if (closed) return; closed = true; streams--; unsubscribe(); clearInterval(ka); reply.raw.end(); };
+    const close = () => { if (closed) return; closed = true; streams--; openStreams.delete(close); unsubscribe(); clearInterval(ka); reply.raw.end(); };
+    openStreams.add(close);
     const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
     const send = (e: TelemetryEvent) => { if (!wanted || wanted.has(e.topic)) write(`id: ${e.id}\nevent: ${e.topic}\ndata: ${JSON.stringify(e.payload ?? null)}\n\n`); };
     // Subscribe before replaying so nothing published in between is lost; replayed ids are skipped if seen live.

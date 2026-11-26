@@ -1,4 +1,4 @@
-import { all, get } from '../db/db.js';
+import { all, get, readSnapshot } from '../db/db.js';
 import { PAPER_ACCOUNT } from './ledger.js';
 import { getSetting } from '../core/settings.js';
 
@@ -27,7 +27,9 @@ export function calendar(month: string /* YYYY-MM */, account = PAPER_ACCOUNT) {
 }
 
 /** Independent reconciliation: positions' realized PnL vs ledger cash flows for the same orders. */
-export function reconcile(account = PAPER_ACCOUNT) {
+/** One verdict from one database snapshot: every aggregate below reads the same committed state. */
+export function reconcile(account = PAPER_ACCOUNT) { return readSnapshot(() => reconcileSnapshot(account)); }
+function reconcileSnapshot(account: string) {
   const closed = get<{ s: number; n: number }>("SELECT COALESCE(SUM(realized_pnl),0) s, COUNT(*) n FROM positions WHERE account=? AND status='CLOSED'", account)!;
   const flows = get<{ s: number }>(`SELECT COALESCE(SUM(l.amount),0) s FROM ledger_entries l JOIN orders o ON o.id=l.ref JOIN positions p ON p.id=o.position_id
     WHERE l.account=? AND p.status='CLOSED' AND l.kind IN ('BUY','SELL','FEE')`, account)!;
@@ -49,9 +51,26 @@ export function reconcile(account = PAPER_ACCOUNT) {
   const orphanPrincipal = get<{ n: number }>(`SELECT COUNT(*) n FROM ledger_entries l
     LEFT JOIN orders o ON o.id=l.ref AND o.account=l.account
     LEFT JOIN positions p ON p.id=o.position_id AND p.account=l.account
-    WHERE l.account=? AND l.kind IN ('BUY','SELL') AND (o.id IS NULL OR p.id IS NULL)`, account)!.n;
+    WHERE l.account=? AND l.kind IN ('BUY','SELL','FEE') AND (o.id IS NULL OR p.id IS NULL)`, account)!.n; // trade fees are always order-linked; deposits and withdrawals need no link
   const ok = Number.isFinite(cash) && Number.isFinite(diff) && diff < 1e-6 && mismatched === 0 && orphanPrincipal === 0;
   return { ok, positionsRealized: closed.s, ledgerFlows: flows.s, difference: diff, closedPositions: closed.n, cash,
     mismatchedClosedPositions: mismatched, orphanPrincipalEntries: orphanPrincipal,
-    detail: `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (Δ ${diff.toExponential(2)}); ${mismatched} mismatched positions, ${orphanPrincipal} unlinked principal entries` };
+    detail: `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (Δ ${diff.toExponential(2)}); ${mismatched} mismatched positions, ${orphanPrincipal} unlinked principal or fee entries` };
 }
+
+/**
+ * Release gate G05 fill evidence: every FILLED paper order must have fill rows whose quantity equals the order's filled
+ * quantity and whose fees equal both the order's recorded fees and its FEE ledger debits. Ledger agreement alone cannot
+ * show this: a lost fill row leaves order and ledger in step.
+ */
+export function fillEvidenceMismatches(account = PAPER_ACCOUNT): number {
+  return get<{ n: number }>(`SELECT COUNT(*) n FROM orders o
+    LEFT JOIN (SELECT order_id, SUM(qty) q, SUM(fee) f, COUNT(*) c FROM fills GROUP BY order_id) fl ON fl.order_id=o.id
+    LEFT JOIN (SELECT ref, SUM(amount) a FROM ledger_entries WHERE account=? AND kind='FEE' GROUP BY ref) le ON le.ref=o.id
+    WHERE o.account=? AND o.status='FILLED' AND (
+      fl.c IS NULL
+      OR ABS(fl.q - o.filled_qty) > 0.000000001 * MAX(1, o.filled_qty)
+      OR ABS(fl.f - COALESCE(o.fees, 0)) > 0.000001
+      OR ABS(COALESCE(le.a, 0) + fl.f) > 0.000001)`, account, account)!.n;
+}
+

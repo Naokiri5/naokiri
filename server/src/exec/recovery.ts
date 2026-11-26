@@ -18,6 +18,8 @@ export function unreconciledPaperOrders(): number {
       ))
       OR (o.status='ACTIVE' AND (
         o.purpose<>'PROTECTIVE_STOP' OR o.side<>'SELL' OR o.filled_qty<>0
+        -- Only the stop the paper OMS itself creates: its venue and monitored stop type.
+        OR o.venue<>'binance-paper' OR o.type<>'STOP_MARKET (OMS-monitored, paper)'
         OR NOT EXISTS (
           SELECT 1 FROM positions p WHERE p.id=o.position_id AND p.account=o.account
             AND p.instrument=o.instrument AND p.status='OPEN'
