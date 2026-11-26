@@ -25,7 +25,8 @@ async function login(p: Page) {
     await pw.first().fill(PW);
   }
   await p.locator('form button').first().click();
-  await expect(p.locator('h1')).toBeVisible();
+  // The login form has its own h1; wait for the authenticated Main navigation so a pending or failed login cannot pass.
+  await expect(p.getByRole('navigation', { name: 'Main' })).toBeVisible();
 }
 test.beforeAll(async ({ browser }) => {
   page = await browser.newPage();

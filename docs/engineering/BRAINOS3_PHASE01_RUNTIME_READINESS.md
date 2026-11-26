@@ -48,7 +48,7 @@ This reduces growth by about 82% per candidate. **It does not shrink the existin
 
 1. Increase the Railway volume (for example to 5 GB) so the database, WAL and at least one backup fit with headroom.
 2. Set `MIA_BACKUP_KEY` (and keep `evidence.key` or set `MIA_EVIDENCE_KEY`) as sealed variables.
-3. Identify the unrecognized 77 MB file in `/data/backups` before deleting anything; take an off-volume copy of `mia.db` first.
+3. Identify the unrecognized 77 MB file in `/data/backups` before deleting anything. First take an off-volume copy of the database that includes the WAL: either SQLite's backup API (for example `sqlite3 /data/mia.db ".backup '/tmp/mia-copy.db'"`), or stop the service and copy `mia.db`, `mia.db-wal` and `mia.db-shm` together. Copying `mia.db` alone can lose committed data. Open and integrity-check the copy before any cleanup.
 4. Deploy #140 with the normal start command, so migrations 7–9 run, then let retention catch up. Confirm `/api/ready` reports storage `pass`.
 5. Optionally run `VACUUM` once enough space is free, to reclaim the compacted pages.
 

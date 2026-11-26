@@ -38,7 +38,21 @@ function fastestReconcileMs(count: number) {
 afterEach(() => closeDb());
 
 describe('ledger reconciliation cost (runs inside the OMS entry transaction)', () => {
-  it('grows linearly, not quadratically, with closed trades', () => {
+  it('reads the per-position join through the reconciliation indexes (deterministic)', () => {
+    closeDb(); openDb(':memory:'); seedClosedTrades(10);
+    expect(reconcile()).toMatchObject({ ok: true, closedPositions: 10 });
+    const raw = new DatabaseSync(':memory:'); migrate(raw);
+    const plan = (raw.prepare(`EXPLAIN QUERY PLAN SELECT p.id FROM positions p
+      LEFT JOIN orders o ON o.position_id=p.id AND o.account=p.account
+      LEFT JOIN ledger_entries l ON l.ref=o.id AND l.account=p.account AND l.kind IN ('BUY','SELL','FEE')
+      WHERE p.account='paper-bot' AND p.status='CLOSED' GROUP BY p.id,p.realized_pnl`).all() as { detail: string }[]).map((r) => r.detail).join(' | ');
+    expect(plan).toMatch(/orders_position/);
+    expect(plan).toMatch(/ledger_entries_ref/);
+    raw.close();
+  });
+
+  // Wall-clock ratios depend on scheduler load, so this stays out of the default suite (MIA_TIMING_TESTS=1 to run).
+  it.skipIf(!process.env.MIA_TIMING_TESTS)('grows linearly, not quadratically, with closed trades (timing benchmark)', () => {
     // Linear growth gives a ratio near 4 for 4× the trades; the unindexed join gave about 16.
     const small = fastestReconcileMs(300);
     const large = fastestReconcileMs(1_200);

@@ -7,6 +7,10 @@ import { assessVolumeSpike } from '../server/src/market/volumeSpike.ts';
 
 const INSTRUMENTS = 1_000;
 const SECONDS = 30;
+// Untimed warm-up so the 5s and 15s windows hold their 20-bar baseline (21 x 15s) before latency is measured;
+// without it every assessment returns INSUFFICIENT_EVIDENCE early and the deeper checks are never timed.
+const WARMUP_SECONDS = 330;
+const WARMUP_EVENTS_PER_SECOND = 2_000;
 const BURST_EVENTS_PER_SECOND = 10_000; // roadmap burst target across all tracked candidates
 const T0 = 1_800_000_000_000;
 const FP = 1_000_000_000n;
@@ -39,11 +43,22 @@ if (process.argv[2] === '--soak') {
 
 const ingest = [], assess = [];
 let id = 0, finalized = 0;
+const verdicts = {};
+let warm = 0;
+for (let s = 0; s < WARMUP_SECONDS; s++) {
+  for (let k = 0; k < WARMUP_EVENTS_PER_SECOND; k++) {
+    const b = builders[Math.floor(random() * INSTRUMENTS)];
+    const at = T0 + s * 1_000 + Math.floor((k / WARMUP_EVENTS_PER_SECOND) * 1_000);
+    b.ingest({ instrumentId: b.config.instrumentId, eventId: `warm${++warm}:0`, eventTimeMs: at, priceFp: FP, baseQtyFp: FP,
+      aggressor: random() < 0.5 ? 'buy' : 'sell', participant: `w${Math.floor(random() * 5_000)}`, finality: 'final' }, at);
+  }
+}
+const T1 = T0 + WARMUP_SECONDS * 1_000;
 const wall = performance.now();
 for (let s = 0; s < SECONDS; s++) {
   for (let k = 0; k < BURST_EVENTS_PER_SECOND; k++) {
     const b = builders[Math.floor(random() * INSTRUMENTS)];
-    const at = T0 + s * 1_000 + Math.floor((k / BURST_EVENTS_PER_SECOND) * 1_000);
+    const at = T1 + s * 1_000 + Math.floor((k / BURST_EVENTS_PER_SECOND) * 1_000);
     const trade = {
       instrumentId: b.config.instrumentId, eventId: `sig${++id}:0`, eventTimeMs: at,
       priceFp: FP + BigInt(Math.floor(random() * 1e6)), baseQtyFp: FP * BigInt(1 + Math.floor(random() * 9)),
@@ -56,8 +71,9 @@ for (let s = 0; s < SECONDS; s++) {
       if (bar.intervalMs !== 1_000) continue;
       finalized++;
       const t = performance.now();
-      assessVolumeSpike({ windows: [1_000, 5_000, 15_000].map((intervalMs) => ({ intervalMs, bars: b.finalBars(intervalMs) })), nowMs: at, launchAgeMs: null });
+      const result = assessVolumeSpike({ windows: [1_000, 5_000, 15_000].map((intervalMs) => ({ intervalMs, bars: b.finalBars(intervalMs) })), nowMs: at, launchAgeMs: null });
       assess.push(performance.now() - t);
+      verdicts[result.verdict] = (verdicts[result.verdict] ?? 0) + 1;
     }
   }
 }
@@ -67,7 +83,7 @@ console.log(JSON.stringify({
   node: process.version, instruments: INSTRUMENTS, events: id, simulatedSeconds: SECONDS,
   throughputEventsPerSec: Math.round(id / (elapsedMs / 1000)),
   ingestIncludingFinalization: summary(ingest), roadmapBudget: { stage: 'incremental chart/feature update', p95ms: 7, p99ms: 10 },
-  volumeAssessment: summary(assess), assessedBars: finalized,
+  volumeAssessment: summary(assess), assessedBars: finalized, verdicts, warmupSeconds: WARMUP_SECONDS,
   rssMb: Math.round(memory.rss / 1e6), heapUsedMb: Math.round(memory.heapUsed / 1e6),
   scope: 'single process, synthetic uniform flow, pure builder and detector; excludes I/O, providers, risk, OMS',
 }, null, 2));

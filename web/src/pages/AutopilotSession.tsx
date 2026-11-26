@@ -282,7 +282,7 @@ function SessionPreflight({ mind, environment, view }: { mind: Mind; environment
         </p>
         <label>
           <span className="mia-field-label">Authorized capital (USD)</span>
-          <input type="number" inputMode="decimal" min="1" max={maxCapital || undefined} step="any" value={capital}
+          <input type="number" inputMode="decimal" max={maxCapital || undefined} step="any" value={capital}
             onChange={(event) => setCapital(event.target.value)} aria-describedby={capitalHint} required autoFocus />
           <span id={capitalHint} className="hint">
             Up to {fmt.usd(maxCapital)} of paper capital. This limit includes positions that are already open.

@@ -124,11 +124,16 @@ export async function replayTradeEvidence(
 ) {
   const finest = options.detectorIntervalsMs[0];
   if (!/^[A-Za-z0-9._:/-]{1,128}$/.test(options.symbol) || options.detectorIntervalsMs.length === 0 ||
-      new Set(options.detectorIntervalsMs).size !== options.detectorIntervalsMs.length ||
+      // Finest first, strictly ascending: the first entry is the assessment cadence, so an unsorted list would skip bars.
+      options.detectorIntervalsMs.some((v, i, a) => i > 0 && !(v > a[i - 1])) ||
       !options.detectorIntervalsMs.every((i) => options.bars.intervalsMs.includes(i)) ||
       (options.launchTsMs !== undefined && !safe(options.launchTsMs, 0, Number.MAX_SAFE_INTEGER)))
     throw new Error('INVALID_TRADE_REPLAY_OPTIONS');
-  const builder = new TradeBarBuilder({ ...options.bars, instrumentId: `${options.venue}:${options.symbol}`.replace(/\//g, '.') });
+  // Every symbol the tape admits (up to 128 characters) must replay: a venue-prefixed id over the builder's 128-character
+  // limit is replaced by a deterministic hash of the symbol.
+  const fullId = `${options.venue}:${options.symbol}`.replace(/\//g, '.');
+  const instrumentId = fullId.length <= 128 ? fullId : `${options.venue}:sha256_${createHash('sha256').update(options.symbol).digest('hex')}`;
+  const builder = new TradeBarBuilder({ ...options.bars, instrumentId });
   const digest = createHash('sha256');
   digest.update(encode({ version: 1, policy: VOLUME_SPIKE_POLICY_V1.version, ...options }) + '\n');
   const verdicts: Record<VolumeSpikeVerdict, number> = { AUTHENTIC_SPIKE: 0, SUSPECT_SPIKE: 0, NO_SPIKE: 0, INSUFFICIENT_EVIDENCE: 0 };

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { all, get, J, run } from '../src/db/db.js';
 import { updateControl } from '../src/core/mode.js';
 import type { DecisionReport } from '../src/decision/engine.js';
@@ -139,7 +139,10 @@ describe('trading mandate entry verdicts', () => {
 describe('mandate enforcement at the paper OMS write boundary', () => {
   let id = ''; let last = 0; let engine: LeaseFence;
   let otherId = ''; let otherLast = 0;
+  // Fixed clock: lease, consensus and quote windows must not depend on how long the runner takes.
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(Date.UTC(2026, 10, 26, 12));
     freshDb(); market.reset();
     ({ inst: { id: otherId }, last: otherLast } = seedInstrument('BTCUSDT') as { inst: { id: string }; last: number });
     ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as { inst: { id: string }; last: number });

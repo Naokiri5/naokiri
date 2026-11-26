@@ -86,7 +86,9 @@ already allow. It never sizes a position, never authorizes an entry by itself an
    match the mandate scope (`MARKET_OUTSIDE_SESSION_MANDATE`), and its strategy version must be in the authorized set.
 2. `paperSpotCapitalDenial()`: open paper cost basis, plus net realized loss of positions opened since authorization,
    plus the actual fill notional and fees, must not exceed `capital_ceiling` (`MANDATE_CAPITAL_CEILING`). Gains offset
-   losses, so a session can never lose more than it was authorized. The check runs under the same SQLite write lock as
+   losses. The ceiling bounds the capital that positions opened under this mandate can use; a loss on a position
+   carried into the session is not counted, so this is not a total session-loss limit (that is tracked as W12, not
+   implemented). The check runs under the same SQLite write lock as
    the fill. Policy-level daily, weekly and drawdown limits still apply independently.
    FAST and DEEP sessions never inherit a previous mandate, and `durableEntryPermission` also checks it.
 3. Sessions upgraded from migration 6 have no mandate. They fail closed with `SESSION_MANDATE_MISSING`, and the owner
@@ -179,7 +181,7 @@ unmet). Production: no verified Railway deployment, and no prospective unattende
 ## 12. Rollback
 
 Migration 7 only adds nullable columns. Reverting the code leaves the columns unused: older code neither reads nor
-requires them, and its upsert leaves them untouched. Never edit migration 7 in place; correct it with migration 8.
+requires them, and its upsert leaves them untouched. Never edit migration 7 (or any released migration) in place; correct it with the next new append-only migration.
 
 ## 13. Evidence for this increment (2026-11-25)
 

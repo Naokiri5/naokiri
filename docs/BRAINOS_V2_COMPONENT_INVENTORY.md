@@ -176,6 +176,12 @@ QHEF and DITAS links behind an owner-only "Operations" section. Low risk, fronte
 
 PAPER and LIVE release items and the rollback procedure are in the master document (sections 11–12) and `qa/gates.ts`.
 Recovery playbook, in order: emergency stop (owner controls) → entries revoked (session drain) → protection lane
-continues → reconcile (`/api/ready`, `exec/recovery`) → restore from a verified encrypted backup (`ops/backup.ts`) →
-restart; takeover always lands in a suspended session and needs a fresh owner authorization. Never roll back a ledger
-by discarding authoritative fills.
+continues -> reconcile (`/api/ready`, `exec/recovery`) -> restore from a verified encrypted backup only if the
+condition below holds -> restart; takeover always lands in a suspended session and needs a fresh owner authorization.
+
+Restore condition: a snapshot returns the ledger to its backup time, and backups can be up to 24 hours apart.
+`ops/backup.ts` creates and verifies snapshots; it has no restore operation, so a restore is a manual owner step.
+Before restoring, every order, fill and ledger entry recorded after the backup's `createdAt` must be exported from the
+live database and re-applied (preserved or replayed) after the restore, then reconciled. If that cannot be shown to be
+complete, do not restore: keep entries suspended and reconcile on the live database. Never roll back a ledger by
+discarding authoritative fills.

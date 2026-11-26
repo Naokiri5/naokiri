@@ -119,6 +119,8 @@ interface Agg {
   buyBase: bigint;
   buyQuote: bigint;
   sellQuote: bigint;
+  /** Unrounded sum of price x quantity (FP^2 scale); VWAP divides it by base volume once, at build time. */
+  notional: bigint;
   byParticipant: Map<string, Side>;
   participantsTruncated: boolean;
   anonymous: number;
@@ -140,7 +142,7 @@ const before = (a: Key, b: Key) => a.t < b.t || (a.t === b.t && a.id < b.id);
 const encode = (value: unknown) => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v);
 const emptyAgg = (): Agg => ({
   trades: 0, open: null, close: null, high: null, low: null, base: 0n, quote: 0n, buyBase: 0n, buyQuote: 0n,
-  sellQuote: 0n, byParticipant: new Map(), participantsTruncated: false, anonymous: 0, provisional: 0,
+  sellQuote: 0n, notional: 0n, byParticipant: new Map(), participantsTruncated: false, anonymous: 0, provisional: 0,
 });
 
 /** Quality records are immutable and few distinct values recur, so they are shared instead of allocated per bar. */
@@ -174,6 +176,7 @@ function addTrade(agg: Agg, trade: TradeEvent, maxParticipants: number) {
   if (agg.low === null || trade.priceFp < agg.low) agg.low = trade.priceFp;
   agg.base += trade.baseQtyFp;
   agg.quote += quote;
+  agg.notional += trade.priceFp * trade.baseQtyFp;
   if (trade.aggressor === 'buy') { agg.buyBase += trade.baseQtyFp; agg.buyQuote += quote; } else agg.sellQuote += quote;
   if (trade.finality === 'provisional') agg.provisional++;
   if (!trade.participant) { agg.anonymous++; return; }
@@ -194,7 +197,7 @@ function mergeInto(target: Agg, source: Agg, maxParticipants: number) {
   if (source.close && (!target.close || before(target.close, source.close))) target.close = source.close;
   if (source.high !== null && (target.high === null || source.high > target.high)) target.high = source.high;
   if (source.low !== null && (target.low === null || source.low < target.low)) target.low = source.low;
-  target.base += source.base; target.quote += source.quote; target.buyBase += source.buyBase;
+  target.base += source.base; target.quote += source.quote; target.notional += source.notional; target.buyBase += source.buyBase;
   target.buyQuote += source.buyQuote; target.sellQuote += source.sellQuote;
   target.anonymous += source.anonymous; target.provisional += source.provisional;
   target.participantsTruncated ||= source.participantsTruncated;
@@ -215,6 +218,8 @@ export class TradeBarBuilder {
   private readonly finals = new Map<number, TradeBar[]>();
   /** Accepted trade id → event time, in receive order. Evicted by time horizon, capped by `maxSeenIds`. */
   private readonly seen = new Map<string, number>();
+  /** The same ids bucketed by base-bar start, so expiry follows event time even when trades arrive out of order. */
+  private readonly seenBuckets = new Map<number, string[]>();
   private readonly gaps: Array<{ fromMs: number; toMs: number }> = [];
   private readonly hash: Hash = createHash('sha256');
   private readonly counts = { accepted: 0, duplicate: 0, late: 0, future: 0, invalid: 0, rebuilt: 0, invalidated: 0, dedupeOverflow: 0 };
@@ -231,7 +236,9 @@ export class TradeBarBuilder {
   /** Advances the receive clock, then applies the trade. Returns bars finalized by the clock advance. */
   ingest(trade: TradeEvent, receiveTimeMs: number): { status: IngestStatus; finalized: TradeBar[] } {
     const finalized = this.advance(receiveTimeMs);
-    return { status: this.apply(trade, receiveTimeMs), finalized };
+    const status = this.apply(trade, receiveTimeMs);
+    // Applying the trade can invalidate a bar the advance just finalized (dedupe overflow); publish the current version.
+    return { status, finalized: finalized.map((bar) => this.finals.get(bar.intervalMs)!.find((b) => b.startMs === bar.startMs) ?? bar) };
   }
 
   /** Moves the monotonic receive clock and finalizes every bar whose end is at or before the watermark. */
@@ -258,9 +265,10 @@ export class TradeBarBuilder {
     }
     // Ids older than the horizon can no longer arrive on time or be retracted exactly; a later copy is quarantined as late.
     const horizon = this.horizonStart();
-    for (const [id, eventTimeMs] of this.seen) {
-      if (eventTimeMs >= horizon) break;
-      this.seen.delete(id);
+    for (const bucket of [...this.seenBuckets.keys()].filter((k) => k < horizon).sort((a, b) => a - b)) {
+      const ids = this.seenBuckets.get(bucket)!;
+      const keep = ids.filter((id) => { const t = this.seen.get(id); if (t === undefined) return false; if (t < horizon) { this.seen.delete(id); return false; } return true; });
+      if (keep.length) this.seenBuckets.set(bucket, keep); else this.seenBuckets.delete(bucket);
     }
     const finalized: TradeBar[] = [];
     for (const interval of this.config.intervalsMs) {
@@ -270,14 +278,12 @@ export class TradeBarBuilder {
       // Only empty ranges are skipped; bars holding trades are always finalized.
       const latestStart = Math.floor(watermark / interval) * interval - interval;
       const floor = latestStart - (this.config.maxFinalBars - 1) * interval;
-      // Finalize through the last bar that holds data before the floor, then jump over the empty remainder.
+      // Below the floor, finalize only the bars that hold data (in start order), never the empty intervals between
+      // them; then continue contiguously from the floor.
       const from = start;
-      let lastData = -Infinity;
-      for (const t of [...this.open.get(interval)!.keys(), ...this.baseBars.keys()]) if (t >= from && t < floor && t > lastData) lastData = t;
-      while (start < floor && start <= lastData && start + interval <= watermark) {
-        finalized.push(this.finalizeBar(interval, start));
-        start += interval;
-      }
+      const dataStarts = [...new Set([...this.open.get(interval)!.keys(), ...[...this.baseBars.keys()].map((t) => Math.floor(t / interval) * interval)])]
+        .filter((t) => t >= from && t < floor && t + interval <= watermark).sort((a, b) => a - b);
+      for (const t of dataStarts) finalized.push(this.finalizeBar(interval, t));
       if (start < floor) start = floor;
       while (start + interval <= watermark) {
         finalized.push(this.finalizeBar(interval, start));
@@ -321,7 +327,12 @@ export class TradeBarBuilder {
   markFeedGap(fromMs: number, toMs: number) {
     if (!Number.isSafeInteger(fromMs) || !Number.isSafeInteger(toMs) || fromMs >= toMs) throw new Error('INVALID_FEED_GAP');
     this.gaps.push({ fromMs, toMs });
-    if (this.gaps.length > 256) this.gaps.shift();
+    // Bounded without losing evidence: the two oldest notices are coalesced into one covering range. That can flag
+    // bars between them as gapped too (conservative), but an open bar can never lose its only outage notice.
+    if (this.gaps.length > 256) {
+      const [a, b] = this.gaps.splice(0, 2);
+      this.gaps.unshift({ fromMs: Math.min(a.fromMs, b.fromMs), toMs: Math.max(a.toMs, b.toMs) });
+    }
     this.hash.update(encode({ event: 'FEED_GAP', fromMs, toMs }) + '\n');
     for (const ring of this.finals.values()) {
       for (let i = 0; i < ring.length; i++) {
@@ -397,7 +408,8 @@ export class TradeBarBuilder {
     let bar = this.baseBars.get(start);
     if (!bar) { bar = { startMs: start, agg: emptyAgg(), trades: new Map(), overflow: false, invalidated: false }; this.baseBars.set(start, bar); }
     addTrade(bar.agg, trade, this.config.maxParticipantsPerBar);
-    if (bar.trades && bar.trades.size < this.config.maxTradesPerBaseBar) bar.trades.set(trade.eventId, trade);
+    // Retain a copy: the caller's object is mutable, and a rebuild must use exactly what was accepted.
+    if (bar.trades && bar.trades.size < this.config.maxTradesPerBaseBar) bar.trades.set(trade.eventId, { ...trade });
     else if (bar.trades) {
       // Over the retention bound: a later retraction invalidates instead of rebuilding.
       bar.trades = null;
@@ -427,6 +439,9 @@ export class TradeBarBuilder {
 
   private remember(eventId: string, eventTimeMs: number) {
     this.seen.set(eventId, eventTimeMs);
+    const bucket = this.baseStart(eventTimeMs);
+    const ids = this.seenBuckets.get(bucket);
+    if (ids) ids.push(eventId); else this.seenBuckets.set(bucket, [eventId]);
     if (this.seen.size <= this.config.maxSeenIds) return;
     const [oldest, oldestTime] = this.seen.entries().next().value as [string, number];
     this.seen.delete(oldest);
@@ -448,7 +463,7 @@ export class TradeBarBuilder {
     return Object.freeze({
       instrumentId: this.config.instrumentId, intervalMs: interval, startMs: start, endMs: end, status, trades: agg.trades,
       openFp: agg.open?.price ?? null, highFp: agg.high, lowFp: agg.low, closeFp: agg.close?.price ?? null,
-      vwapFp: agg.base > 0n ? agg.quote * FP_SCALE / agg.base : null,
+      vwapFp: agg.base > 0n ? agg.notional / agg.base : null,
       baseVolumeFp: agg.base, quoteVolumeFp: agg.quote, buyBaseFp: agg.buyBase, buyQuoteFp: agg.buyQuote, sellQuoteFp: agg.sellQuote,
       participants: agg.byParticipant.size, topParticipantQuoteFp: top, twoSidedQuoteFp: twoSided,
       quality: quality(agg.anonymous === 0, agg.participantsTruncated, agg.provisional,

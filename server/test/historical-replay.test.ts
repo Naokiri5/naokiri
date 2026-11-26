@@ -177,6 +177,15 @@ describe('trade-evidence replay (live/replay parity)', () => {
     expect(live.digest()).toBe(replay.barsDigest);
   });
 
+  it('rejects detector intervals that are not finest first, and replays the longest symbol the tape admits', async () => {
+    write(tape());
+    await expect(replayTradeEvidence(streamCompressedMarketTape(file), { ...options, detectorIntervalsMs: [5_000, 1_000] }))
+      .rejects.toThrow('INVALID_TRADE_REPLAY_OPTIONS');
+    const longest = 'X'.repeat(128);
+    const replay = await replayTradeEvidence([], { ...options, symbol: longest });
+    expect(replay).toMatchObject({ trades: 0, tradingAuthority: false });
+  });
+
   it('rejects malformed trade ticks instead of defaulting them', async () => {
     const valid = { type: 'TRADE_TICK', tsMs: 1, venue: 'SOLANA_JUPITER', symbol: 'MEME/SOL', eventId: 'sig1:0',
       priceFp: '1000000000', baseQtyFp: '1000000000', aggressor: 'buy', finality: 'final' };

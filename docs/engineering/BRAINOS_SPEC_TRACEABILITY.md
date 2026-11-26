@@ -47,7 +47,7 @@ knowledge A–F, audit log). A separate "BrainOS orchestrator" would duplicate t
 | Security verification | `owner-verification` (step-up available), `owner-control`, owner step-up on POST `/run` | Implemented. Exchange credentials: not applicable to paper |
 | Portfolio reconciliation | `paper-account`, `paper-recovery`, `position-protection` | Implemented |
 | Market synchronization | `position-protection`: the protection lane ran recently and every open position has a fresh executable price and book | Partial: no market-wide ticker freshness check before Run; each entry still requires fresh quotes and books in the risk gate and OMS |
-| **Capital and risk boundaries** | **`session-boundaries`** — added in §5 | **Implemented by this increment** |
+| Capital and risk boundaries | Trading mandate capital ceiling (`ops/tradingMandate.ts`); the proposed `session-boundaries` check was removed (see the supersession note) | Partial: session-loss limit pending (W12) |
 | Restricted / recovery state | `ENTRY_SUSPENDED_RISK_HALT`, `RECOVERING_ON_BOOT`, `EMERGENCY_KILL_SWITCH` | Implemented |
 
 ## 4. Position monitoring (brief §8)
@@ -59,7 +59,7 @@ knowledge A–F, audit log). A separate "BrainOS orchestrator" would duplicate t
 | Stop-loss triggered | OMS-monitored protective stop | Implemented |
 | Session closed | `requestPaperSpotClose` → drain → `finishDurableClose` | Implemented |
 | Exchange connection failure | Stale/missing data ⇒ no invented fill, persistent incident, entries blocked | Implemented |
-| Excessive loss in the session | **Session loss REFLEX (§5)** | **Implemented by this increment** |
+| Excessive loss in the session | Session loss REFLEX was removed with that design (see the supersession note) | Pending (W12); policy daily, weekly and drawdown breakers still apply |
 | Strategy invalidation, market reversal | — | Open |
 | Liquidity deterioration | Incidents only; no discretionary protective exit | Partial |
 | Whale selling pressure | `whales/prints.ts` evidence only | Open (draft #111 not wired) |

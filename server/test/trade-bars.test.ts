@@ -129,9 +129,9 @@ describe('trade-built bars: reorgs, gaps and bounds', () => {
     const reference = build();
     reference.ingest({ ...kept }, T0 + 100);
     reference.advance(T0 + 5_000);
-    const { quality: _q, ...bar } = b.finalBars(1_000)[0];
-    const { quality: _r, ...expected } = reference.finalBars(1_000)[0];
-    expect(bar).toEqual(expected);
+    // Compare the whole bar, quality included: a rebuild that kept the retracted trade's provisional flag must fail.
+    expect(b.finalBars(1_000)[0]).toEqual(reference.finalBars(1_000)[0]);
+    expect(b.finalBars(1_000)[0].quality.provisionalTrades).toBe(0);
     expect(b.retract('neverSeen:0', T0 + 100)).toBe('UNKNOWN');
   });
 
@@ -233,3 +233,62 @@ describe('trade-built bars: reorgs, gaps and bounds', () => {
     expect(() => build({ maxFinalBars: 0 })).toThrow('INVALID_TRADE_BAR_CONFIG');
   });
 });
+
+describe('trade-built bars: review regressions', () => {
+  it('computes VWAP from the unrounded notional', () => {
+    const b = build();
+    b.ingest(trade(T0 + 100, 1n, 1n), T0 + 100);
+    b.advance(T0 + 7_000);
+    expect(b.finalBars(1_000)[0]).toMatchObject({ quoteVolumeFp: 0n, vwapFp: 1n });
+  });
+
+  it('rebuilds from the trade as accepted, not from a later mutation of the caller object', () => {
+    const b = build();
+    const kept = trade(T0 + 100, 2n * FP, FP);
+    const gone = trade(T0 + 200, 3n * FP, FP, { finality: 'provisional' });
+    b.ingest(kept, T0 + 100); b.ingest(gone, T0 + 200);
+    kept.priceFp = 999n * FP; // caller mutates its object after ingestion
+    expect(b.retract(gone.eventId, gone.eventTimeMs)).toBe('REBUILT');
+    b.advance(T0 + 7_000);
+    expect(b.finalBars(1_000)[0]).toMatchObject({ trades: 1, highFp: 2n * FP, closeFp: 2n * FP });
+  });
+
+  it('returns a just-finalized bar with the quality it has after the triggering trade is applied', () => {
+    const b = build({ maxSeenIds: 1 });
+    b.ingest(trade(T0 + 100, 2n * FP, FP), T0 + 100);
+    // This receive time finalizes the first bar; admitting the new id evicts the old one inside the horizon.
+    const { finalized } = b.ingest(trade(T0 + 3_000, 2n * FP, FP), T0 + 3_000);
+    const first = finalized.find((bar) => bar.intervalMs === 1_000 && bar.startMs === T0)!;
+    expect(first.quality.invalidated).toBe(true);
+    expect(tradeBarCandle(first)).toBeNull();
+  });
+
+  it('expires accepted ids by event time even when they arrived out of order', () => {
+    const b = build();
+    const later = trade(T0 + 2_100, 2n * FP, FP); const earlier = trade(T0 + 1_900, 2n * FP, FP);
+    b.ingest(later, T0 + 2_100); b.ingest(earlier, T0 + 2_100);
+    b.advance(T0 + 15_000); // horizon is now T0 + 2_000: earlier has expired, later has not
+    expect(b.ingest({ ...earlier }, T0 + 15_000).status).toBe('QUARANTINED_LATE');
+  });
+
+  it('skips the empty intervals between retained data bars after a long silence', () => {
+    const b = build({ intervalsMs: [1_000], allowedLatenessMs: 100_000, maxFinalBars: 5 });
+    b.ingest(trade(T0 + 100, 2n * FP, FP), T0 + 100);
+    b.ingest(trade(T0 + 50_100, 3n * FP, FP), T0 + 50_100);
+    const finalized = b.advance(T0 + 10_000_000);
+    expect(finalized.length).toBeLessThanOrEqual(5 + 2);
+    expect(finalized.filter((bar) => bar.trades > 0).map((bar) => bar.startMs)).toEqual([T0, T0 + 50_000]);
+  });
+
+  it('keeps an open bar flagged when many later outage notices arrive before it finalizes', () => {
+    const b = build();
+    b.ingest(trade(T0 + 100, 2n * FP, FP), T0 + 100);
+    b.markFeedGap(T0 + 200, T0 + 300);
+    for (let i = 0; i < 300; i++) b.markFeedGap(T0 + 100_000 + i * 10, T0 + 100_000 + i * 10 + 5);
+    b.advance(T0 + 7_000);
+    const bar = b.finalBars(1_000)[0];
+    expect(bar.quality.feedGap).toBe(true);
+    expect(tradeBarCandle(bar)).toBeNull();
+  });
+});
+

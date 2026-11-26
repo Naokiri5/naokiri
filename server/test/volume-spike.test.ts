@@ -76,6 +76,24 @@ describe('FAST volume-authenticity assessment', () => {
     }
   });
 
+  it('does not count two fresh but disjoint bursts as persistence', () => {
+    const { builder, input } = scenario();
+    const base = input();
+    // 1s window: latest bar is the final second. 5s window: drop its latest bar, so its newest spiking bar ends 5s
+    // earlier and shares no time with the 1s bar. Both are fresh and both spike.
+    const fiveSecond = builder.finalBars(5_000).slice(0, -1);
+    const result = assessVolumeSpike({ ...base, windows: [{ intervalMs: 1_000, bars: builder.finalBars(1_000) }, { intervalMs: 5_000, bars: fiveSecond }] });
+    expect(result.windows.every((w) => w.status === 'USABLE')).toBe(true);
+    expect(result).toMatchObject({ verdict: 'NO_SPIKE', persistentWindows: 1 });
+    expect(result.flags).toContain('NOT_PERSISTENT');
+  });
+
+  it('treats a launch time after the assessment clock as unusable evidence', () => {
+    expect(assessVolumeSpike(scenario().input({ launchAgeMs: -1 }))).toMatchObject({ verdict: 'INSUFFICIENT_EVIDENCE', tradingAuthority: false });
+    // Unknown stays unknown, not refused.
+    expect(assessVolumeSpike(scenario().input({ launchAgeMs: null })).verdict).toBe('AUTHENTIC_SPIKE');
+  });
+
   it('reports no spike for ordinary organic flow', () => {
     const result = assessVolumeSpike(scenario({ spikeSeconds: 0 }).input());
     expect(result).toMatchObject({ verdict: 'NO_SPIKE', persistentWindows: 0, tradingAuthority: false });

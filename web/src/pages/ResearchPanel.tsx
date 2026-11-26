@@ -218,7 +218,9 @@ function DeepWorkspace({ source, positions, activity, paperPositions }: Workspac
   const command = useApi<ResearchSnapshot>(source === 'command' ? '/api/choice/dual/status' : null,
     { topics: ['bot', 'health'], every: 30_000 });
   return <DeepEvidenceWorkspace symbol={symbol} interval={interval}
-    positions={positions} activity={activity} paperPositions={paperPositions} research={command.error ? null : command.data}
+    positions={positions} activity={activity} paperPositions={paperPositions}
+    // useApi(null) keeps its last data; show command research only while the command source is active and healthy.
+    research={source === 'command' && !command.error ? command.data : null}
     marketPicker={<label className="mia-network-filter">Spot market
       <select value={symbol} onChange={(event) => setSymbol(event.target.value)}>
         {symbols.map((item) => <option key={item} value={item}>{item}</option>)}

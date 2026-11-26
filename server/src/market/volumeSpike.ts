@@ -124,11 +124,13 @@ function assessWindow(intervalMs: number, bars: readonly TradeBar[], nowMs: numb
 export function assessVolumeSpike(input: VolumeSpikeInput, policy: VolumeSpikePolicy = VOLUME_SPIKE_POLICY_V1): VolumeSpikeAssessment {
   if (new Set(input.windows.map((w) => w.intervalMs)).size !== input.windows.length) throw new Error('DUPLICATE_VOLUME_WINDOW');
   const assessed = input.windows.map((w) => assessWindow(w.intervalMs, w.bars, input.nowMs, policy));
+  // A launch timestamp after the assessment clock is future-dated evidence: it can never support a verdict.
+  const launchFromFuture = input.launchAgeMs !== null && Number.isFinite(input.launchAgeMs) && input.launchAgeMs < 0;
   const windows: WindowAssessment[] = assessed.map(({ latest: _latest, flat: _flat, ...rest }) => rest);
   const base = { policyVersion: policy.version, windows, role: 'CANDIDATE_TRIGGER_ONLY' as const, tradingAuthority: false as const };
   const usableWindows = assessed.filter((w) => w.status === 'USABLE');
   // Persistence cannot be judged from fewer usable windows than it requires.
-  if (usableWindows.length < Math.max(1, policy.minPersistentWindows)) {
+  if (launchFromFuture || usableWindows.length < Math.max(1, policy.minPersistentWindows)) {
     return { ...base, verdict: 'INSUFFICIENT_EVIDENCE', confidence: 'LOW', flags: [], persistentWindows: 0 };
   }
   const spiking = usableWindows.filter((w) => w.spike);
@@ -152,7 +154,11 @@ export function assessVolumeSpike(input: VolumeSpikeInput, policy: VolumeSpikePo
     flags.add('VOLUME_EXCEEDS_DEPTH');
   if (spiking.some((w) => w.flat)) flags.add('FLAT_BASELINE');
 
-  const persistent = spiking.length >= policy.minPersistentWindows;
+  // Windows "spike together" only when their latest bars overlap the most recent spiking bar; two fresh but disjoint
+  // bursts are not persistence.
+  const anchor = spiking.reduce((a, b) => (b.latest!.endMs > a.latest!.endMs ? b : a)).latest!;
+  const together = spiking.filter((w) => w.latest!.startMs < anchor.endMs && w.latest!.endMs > anchor.startMs);
+  const persistent = together.length >= policy.minPersistentWindows;
   if (!persistent) flags.add('NOT_PERSISTENT');
   // A flat (often all-empty) baseline makes any small burst look extreme, so it can never confirm authenticity.
   const disqualifying = [...flags].filter((f) => f !== 'NOT_PERSISTENT');
@@ -160,6 +166,6 @@ export function assessVolumeSpike(input: VolumeSpikeInput, policy: VolumeSpikePo
   const young = input.launchAgeMs !== null && (!Number.isFinite(input.launchAgeMs) || input.launchAgeMs < policy.youngLaunchMs);
   const shortHistory = spiking.some((w) => w.baselineBars < policy.recommendedBaselineBars);
   const confidence = young || shortHistory || flags.has('FLAT_BASELINE') ? 'LOW'
-    : spiking.length === usableWindows.length && usableWindows.length === assessed.length ? 'HIGH' : 'MEDIUM';
-  return { ...base, verdict, confidence, flags: [...flags].sort(), persistentWindows: spiking.length };
+    : together.length === usableWindows.length && usableWindows.length === assessed.length ? 'HIGH' : 'MEDIUM';
+  return { ...base, verdict, confidence, flags: [...flags].sort(), persistentWindows: together.length };
 }
