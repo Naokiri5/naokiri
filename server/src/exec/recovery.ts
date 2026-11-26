@@ -16,6 +16,8 @@ export function unreconciledPaperOrders(): number {
       o.status NOT IN ('FILLED','CANCELLED','CANCELED','REJECTED','EXPIRED','PENDING_APPROVAL','ACTIVE')
       OR (o.status='PENDING_APPROVAL' AND (
         o.purpose<>'ENTRY' OR o.side<>'BUY' OR o.filled_qty<>0 OR o.position_id IS NOT NULL
+        -- A recorded fill is execution evidence even when filled_qty was never updated.
+        OR EXISTS (SELECT 1 FROM fills f WHERE f.order_id=o.id)
       ))
       OR (o.status='ACTIVE' AND (
         o.purpose<>'PROTECTIVE_STOP' OR o.side<>'SELL' OR o.filled_qty<>0

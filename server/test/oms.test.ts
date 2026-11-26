@@ -237,6 +237,18 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     expect(get('SELECT status FROM orders WHERE id=?', oid)).toEqual({ status: 'PENDING_APPROVAL' });
     expect(unreconciledPaperOrders()).toBe(1);
   });
+  it('counts a pending approval with a fill row as unresolved even when filled_qty is still 0', () => {
+    updateControl('owner', { mode: 'APPROVAL' });
+    const oid = queueForApproval(report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' }))!;
+    expect(unreconciledPaperOrders()).toBe(0);
+    run("INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES ('orphan-fill',?,1,100,0.1,'TAKER',1)", oid);
+    expect(unreconciledPaperOrders()).toBe(1);
+    expireApprovals(); cancelPendingEntries('owner');
+    expect(get('SELECT status FROM orders WHERE id=?', oid)).toEqual({ status: 'PENDING_APPROVAL' });
+    // The risk gate reads the same count: automatic entries stay blocked until the fill is reconciled.
+    updateControl('owner', { mode: 'PAPER' });
+    expect(submitEntry(report(id, last), 'bot')).toMatchObject({ ok: false, reason: expect.stringContaining('UNRECONCILED_PAPER_ORDERS') });
+  });
   it('fails G05 for a non-filled order that carries fill evidence', () => {
     updateControl('owner', { mode: 'APPROVAL' });
     const oid = queueForApproval(report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' }))!;
