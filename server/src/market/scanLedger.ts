@@ -6,7 +6,8 @@
  * cash or open risk exhausted) was never reconsidered on that candle, even right after a settlement freed capacity.
  *
  * Now a key whose risk denial consists only of capacity codes is held as WAITING_CAPACITY instead of processed:
- *  - it is re-evaluated only after the capacity epoch changes (a paper position settled), never on every scan;
+ *  - it is re-evaluated only after the capacity epoch changes (a paper position settled), never on every scan, and at
+ *    most MAX_REEVALUATIONS_PER_SCAN waiting keys per scan;
  *  - it expires when its candle is superseded, so an old signal cannot re-enter later;
  *  - re-evaluation builds a fresh candidate, fresh QCI and a fresh risk decision; nothing old is reused;
  *  - any other denial (safety, data, strategy, breaker, cooldown, mode...) or any approval ends the key as before.
@@ -19,13 +20,26 @@ import type { RiskDecision } from '../risk/gate.js';
 /** Risk denial prefixes that a settlement can clear. Everything else is terminal for the candle. */
 export const CAPACITY_CODES = ['MAX_CONCURRENT_POSITIONS', 'CORRELATION_LIMIT', 'INSUFFICIENT_BUYING_POWER', 'CASH_RESERVE_FLOOR_REACHED', 'AGGREGATE_OPEN_RISK'] as const;
 export const MAX_WAITING = 500;
+/** Waiting keys re-evaluated per scan; the rest wait for the next scan (their epoch is still behind, so they stay due). */
+export const MAX_REEVALUATIONS_PER_SCAN = 20;
 
-const isCapacityCode = (code: string) => CAPACITY_CODES.some((c) => code === c || code.startsWith(`${c} `) || code.startsWith(`${c}:`));
+/**
+ * A size that rounds below the venue minimum is a consequence of capacity when capacity squeezed the size (no cash
+ * headroom left); on its own it is terminal (for example an allocation too small for the instrument).
+ */
+export const CAPACITY_CONSEQUENCE_CODES = ['SIZE_BELOW_VENUE_MINIMUM'] as const;
 
-/** True only for a DENY whose every reason is a capacity code. Missing, approved or mixed decisions are false. */
+const matches = (codes: readonly string[], code: string) => codes.some((c) => code === c || code.startsWith(`${c} `) || code.startsWith(`${c}:`));
+
+/**
+ * True only for a DENY whose every reason is a capacity code, or a capacity consequence accompanied by at least one
+ * capacity code. Missing, approved or mixed decisions are false.
+ */
 export function isCapacityOnlyDenial(risk: Pick<RiskDecision, 'decision' | 'reasonCodes'> | null | undefined): boolean {
-  return !!risk && risk.decision === 'DENY' && Array.isArray(risk.reasonCodes) && risk.reasonCodes.length > 0
-    && risk.reasonCodes.every((c) => typeof c === 'string' && isCapacityCode(c));
+  if (!risk || risk.decision !== 'DENY' || !Array.isArray(risk.reasonCodes) || !risk.reasonCodes.length) return false;
+  if (!risk.reasonCodes.every((c) => typeof c === 'string')) return false;
+  return risk.reasonCodes.some((c) => matches(CAPACITY_CODES, c))
+    && risk.reasonCodes.every((c) => matches(CAPACITY_CODES, c) || matches(CAPACITY_CONSEQUENCE_CODES, c));
 }
 
 /** Changes whenever a paper position settles (closes), which is what frees slots, cash and open risk. */
@@ -39,6 +53,10 @@ export type EvaluationVerdict = 'EVALUATE' | 'PROCESSED' | 'WAITING_CAPACITY' | 
 export class ScanLedger {
   private processed = new Set<string>();
   private waiting = new Map<string, WaitingCandidate>();
+  private reevaluationsLeft = MAX_REEVALUATIONS_PER_SCAN;
+
+  /** Call at the start of every scan. */
+  beginScan() { this.reevaluationsLeft = MAX_REEVALUATIONS_PER_SCAN; }
 
   /** Whether the full pipeline should run for this key now. */
   verdict(key: string, nowTs: number, epoch: number): EvaluationVerdict {
@@ -46,7 +64,9 @@ export class ScanLedger {
     const w = this.waiting.get(key);
     if (!w) return 'EVALUATE';
     if (nowTs >= w.expiresAt) { this.waiting.delete(key); this.processed.add(key); return 'EXPIRED'; }
-    return epoch === w.epoch ? 'WAITING_CAPACITY' : 'EVALUATE';
+    if (epoch === w.epoch || this.reevaluationsLeft <= 0) return 'WAITING_CAPACITY';
+    this.reevaluationsLeft--;
+    return 'EVALUATE';
   }
 
   /** Records the outcome of a completed evaluation. Returns true when the key is held for capacity. */
@@ -85,11 +105,10 @@ export class ScanLedger {
  * An unreadable stored report counts as terminal.
  */
 export function storedDecisionsEndKey(instrumentId: string, strategyId: string, sinceTs: number): boolean {
-  const rows = all<{ risk_decision: string | null; report: string }>(
-    'SELECT risk_decision, report FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? LIMIT 50', instrumentId, strategyId, sinceTs);
-  if (!rows.length) return false;
-  return rows.some((r) => {
-    if (r.risk_decision !== 'DENY') return true;
-    try { return !isCapacityOnlyDenial(JSON.parse(r.report)?.risk); } catch { return true; }
-  });
+  // Any stored outcome that is not a risk DENY (approval, review, rejection before the gate) is terminal on its own.
+  if (get(`SELECT 1 FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? AND (risk_decision IS NULL OR risk_decision<>'DENY') LIMIT 1`,
+    instrumentId, strategyId, sinceTs)) return true;
+  // Every DENY is checked (bounded by one evaluation per settlement per key within one candle); no row can be missed.
+  return all<{ report: string }>("SELECT report FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? AND risk_decision='DENY'", instrumentId, strategyId, sinceTs)
+    .some((r) => { try { return !isCapacityOnlyDenial(JSON.parse(r.report)?.risk); } catch { return true; } });
 }

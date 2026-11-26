@@ -77,6 +77,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
   const ctl = getControl();
   let candidates = 0;
   const epoch = capacityEpoch();
+  ledger.beginScan();
   for (const id of market.universe) {
     // Scheduled scans give due protection timers a turn between instruments.
     if (continueScan) {

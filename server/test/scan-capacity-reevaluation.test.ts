@@ -12,7 +12,11 @@ import { all, run, J } from '../src/db/db.js';
 import { market } from '../src/market/store.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
 import { scanOnce, waitingCandidates, _scanTest } from '../src/market/scanner.js';
-import { ScanLedger, capacityEpoch, isCapacityOnlyDenial, storedDecisionsEndKey, MAX_WAITING } from '../src/market/scanLedger.js';
+import { ScanLedger, capacityEpoch, isCapacityOnlyDenial, storedDecisionsEndKey, MAX_WAITING, MAX_REEVALUATIONS_PER_SCAN } from '../src/market/scanLedger.js';
+import { evaluateRisk } from '../src/risk/gate.js';
+import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
+import { updateControl } from '../src/core/mode.js';
+import { ledger as postLedger } from '../src/portfolio/ledger.js';
 import { PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 
 const risk = (decision: RiskDecision['decision'], reasonCodes: string[]): RiskDecision =>
@@ -26,6 +30,9 @@ describe('capacity-only denial classification', () => {
     expect(isCapacityOnlyDenial(risk('DENY', ['MAX_CONCURRENT_POSITIONS 4', 'DAILY_LOSS_BREAKER 3.00%']))).toBe(false);
     expect(isCapacityOnlyDenial(risk('DENY', ['ASSET_POST_EXIT_COOLDOWN']))).toBe(false);
     expect(isCapacityOnlyDenial(risk('DENY', ['MAX_CONCURRENT_POSITIONSX']))).toBe(false);
+    expect(isCapacityOnlyDenial(risk('DENY', ['CASH_RESERVE_FLOOR_REACHED', 'SIZE_BELOW_VENUE_MINIMUM qty=0 after rounding to step 0.0001']))).toBe(true);
+    expect(isCapacityOnlyDenial(risk('DENY', ['SIZE_BELOW_VENUE_MINIMUM qty=0 after rounding to step 0.0001']))).toBe(false);
+    expect(isCapacityOnlyDenial(risk('DENY', ['CASH_RESERVE_FLOOR_REACHED', 'SIZE_ABOVE_VENUE_MAXIMUM qty=9 > maxQty 1']))).toBe(false);
     expect(isCapacityOnlyDenial(risk('DENY', []))).toBe(false);
     expect(isCapacityOnlyDenial(risk('ALLOW', ['MAX_CONCURRENT_POSITIONS 4']))).toBe(false);
     expect(isCapacityOnlyDenial(null)).toBe(false);
@@ -57,6 +64,17 @@ describe('ScanLedger', () => {
     expect(l.verdict('k', 1001, 2)).toBe('PROCESSED');
     expect(l.record('late', meta, risk('DENY', ['MAX_CONCURRENT_POSITIONS 4']), 0, 1000, 1000)).toBe(false);
   });
+  it('re-evaluates at most MAX_REEVALUATIONS_PER_SCAN waiting keys per scan; the rest stay due for the next scan', () => {
+    const l = new ScanLedger();
+    const n = MAX_REEVALUATIONS_PER_SCAN + 5;
+    for (let i = 0; i < n; i++) l.record(`k${i}`, meta, risk('DENY', ['MAX_CONCURRENT_POSITIONS 4']), 0, 1000, 0);
+    l.beginScan();
+    const first = Array.from({ length: n }, (_, i) => l.verdict(`k${i}`, 1, 1));
+    expect(first.filter((v) => v === 'EVALUATE')).toHaveLength(MAX_REEVALUATIONS_PER_SCAN);
+    l.beginScan();
+    const second = Array.from({ length: n }, (_, i) => l.verdict(`k${i}`, 2, 1));
+    expect(second.filter((v) => v === 'EVALUATE')).toHaveLength(MAX_REEVALUATIONS_PER_SCAN); // none were re-recorded
+  });
   it('caps the waiting queue; overflow is treated as terminal rather than growing without bound', () => {
     const l = new ScanLedger();
     for (let i = 0; i < MAX_WAITING; i++) expect(l.record(`k${i}`, meta, risk('DENY', ['MAX_CONCURRENT_POSITIONS 4']), 0, 1000, 0)).toBe(true);
@@ -78,6 +96,12 @@ describe('restart guard and capacity epoch', () => {
     expect(storedDecisionsEndKey('I', 'S', 1000)).toBe(false);
     expect(storedDecisionsEndKey('I', 'S', 9000)).toBe(false);
     storeDecision(null, { risk: null });
+    expect(storedDecisionsEndKey('I', 'S', 1000)).toBe(true);
+  });
+  it('finds a terminal decision however many capacity denials are stored for the key', () => {
+    for (let i = 0; i < 80; i++) storeDecision('DENY', { risk: risk('DENY', ['MAX_CONCURRENT_POSITIONS 4']) }, 5000 + i);
+    expect(storedDecisionsEndKey('I', 'S', 1000)).toBe(false);
+    storeDecision('ALLOW', { risk: risk('ALLOW', []) }, 9999);
     expect(storedDecisionsEndKey('I', 'S', 1000)).toBe(true);
   });
   it('treats an unreadable stored report as terminal', () => {
@@ -166,5 +190,36 @@ describe('scanOnce re-evaluates a capacity-blocked signal after a settlement (CT
     await scanOnce();
     expect(decideMock).toHaveBeenCalledTimes(2);
     expect(all('SELECT 1 FROM decisions').length).toBe(2);
+  });
+});
+
+describe('capacity codes match what the real risk gate emits', () => {
+  beforeEach(() => { freshDb(); market.reset(); });
+  it('a full slot set (with every other check passing) is a capacity-only denial', () => {
+    seedInstrument('BTCUSDT');
+    const { inst, last } = seedInstrument('ETHUSDT', { seed: 2 });
+    acceptPolicy('owner', { ...DEFAULT_POLICY, maxConcurrentPositions: 1 }); updateControl('owner', { mode: 'PAPER' });
+    postLedger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const prop = { instrumentId: inst.id, strategyId: 'trend_pullback', side: 'buy' as const, entryPrice: last, stopPrice: last * 0.97, idempotencyKey: 'k-cap', traceId: 't' };
+    expect(evaluateRisk(prop).decision).toBe('ALLOW');
+    run(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,planned_risk)
+      VALUES ('open1',?,'crypto:binance:BTCUSDT','crypto','LONG','trend_pullback',0.0001,100,99.9,99.9,'[]','OPEN',1,0.01)`, PAPER_ACCOUNT);
+    const denied = evaluateRisk({ ...prop, idempotencyKey: 'k-cap-2' });
+    expect(denied.decision).toBe('DENY');
+    expect(denied.reasonCodes.some((c) => c.startsWith('MAX_CONCURRENT_POSITIONS'))).toBe(true);
+    expect(isCapacityOnlyDenial(denied)).toBe(true);
+  });
+  it('the cash reserve floor and a price that drifted away are classified correctly', () => {
+    const { inst, last } = seedInstrument('ETHUSDT', { seed: 2 });
+    acceptPolicy('owner', { ...DEFAULT_POLICY, minUnallocatedReservePct: 95, minSettlementReservePct: 5 }); updateControl('owner', { mode: 'PAPER' });
+    postLedger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    const prop = { instrumentId: inst.id, strategyId: 'trend_pullback', side: 'buy' as const, entryPrice: last, stopPrice: last * 0.97, idempotencyKey: 'k-res', traceId: 't' };
+    const floor = evaluateRisk(prop);
+    expect(floor.reasonCodes).toContain('CASH_RESERVE_FLOOR_REACHED');
+    expect(isCapacityOnlyDenial(floor)).toBe(true);
+    // A signal whose reference price has drifted from the market is a terminal (non-capacity) denial.
+    const drifted = evaluateRisk({ ...prop, idempotencyKey: 'k-res-2', entryPrice: last * 1.05, stopPrice: last * 1.02 });
+    expect(drifted.reasonCodes.some((c) => c.startsWith('PRICE_DEVIATION'))).toBe(true);
+    expect(isCapacityOnlyDenial(drifted)).toBe(false);
   });
 });

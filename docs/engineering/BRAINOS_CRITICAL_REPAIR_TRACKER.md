@@ -62,12 +62,15 @@ Scanner repair (roadmap 27 Nov, CT01-04 "capacity-blocked candidate revalidated 
 scanner used to mark an instrument/strategy/candle as processed whatever the outcome, so a signal denied only for
 capacity was never reconsidered on that candle and the settlement rescan found nothing to do. Now a risk denial made
 only of capacity codes (`MAX_CONCURRENT_POSITIONS`, `CORRELATION_LIMIT`, `INSUFFICIENT_BUYING_POWER`,
-`CASH_RESERVE_FLOOR_REACHED`, `AGGREGATE_OPEN_RISK`) is held as waiting for capacity. It is re-evaluated, with a fresh
-candidate, QCI and risk decision, only after a paper position settles; it expires when its candle is superseded; the
-queue is capped at 500. Any other denial or an approval ends the key as before, and a restart keeps that rule using
+`CASH_RESERVE_FLOOR_REACHED`, `AGGREGATE_OPEN_RISK`; `SIZE_BELOW_VENUE_MINIMUM` counts only alongside one of these, as
+it is what a squeezed size produces) is held as waiting for capacity. It is re-evaluated, with a fresh candidate, QCI
+and risk decision, only after a paper position settles, at most 20 waiting signals per scan; it expires when its
+candle is superseded; the queue is capped at 500. Any other denial or an approval ends the key as before, and a restart keeps that rule using
 the stored decisions. `/api/scanner` returns `waitingCapacity`; the Intel page Rejected tab lists it
-(`market/scanLedger.ts`, `market/scanner.ts`, `scan-capacity-reevaluation.test.ts`, 11 tests, mutation-checked).
-Not yet: a durable candidate queue across restarts, and re-evaluation after owner funding (only settlements count).
+(`market/scanLedger.ts`, `market/scanner.ts`, `scan-capacity-reevaluation.test.ts`, 15 tests including the real risk gate,
+mutation-checked). Independent trading-risk review: no blockers; its restart-guard and re-evaluation-volume findings are
+fixed. Not yet: a durable candidate queue across restarts, and re-evaluation after owner funding, partial exits or a
+tightened stop (only full settlements advance the capacity epoch, which can miss an opportunity but never adds one).
 
 ## The 30 repairs
 
