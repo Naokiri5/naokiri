@@ -22,6 +22,7 @@ export interface FuturesResearchSnapshot {
 }
 
 registerProvider({
+  hosts: ['fapi.binance.com'],
   id: 'binance-usdm-research',
   name: 'Binance USD-M Perpetual (public research only)',
   sourceClass: 'cex',

@@ -14,7 +14,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 const register = (id: string) => registerProvider({
-  id, name: id, sourceClass: 'cex', markets: ['crypto'], license: 'fixture',
+  id, name: id, sourceClass: 'cex', markets: ['crypto'], license: 'fixture', hosts: ['example.invalid'],
   realtime: 'REALTIME', requiresCredentials: false,
 });
 const url = 'https://example.invalid/market';

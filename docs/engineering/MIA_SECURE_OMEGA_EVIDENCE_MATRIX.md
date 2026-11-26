@@ -41,7 +41,7 @@ log redaction of cookies, tokens and passwords (`index.ts`); hash-chained audit 
 | 06 | SQL injection prevention | Implemented | Parameterized SQL; metadata-column allowlist test. |
 | 07 | XSS prevention | Implemented | React escaping; CSP header test in `security-boundaries.test.ts`. |
 | 08 | CSRF protection | Implemented | SameSite=Strict cookie plus required CSRF header (API tests). |
-| 09 | SSRF prevention | Partial | Provider URLs are built from code constants, but `fetchProvider` does not check the host against the registered provider and follows redirects. Fix: enforce a per-provider host allowlist and refuse cross-host redirects. |
+| 09 | SSRF prevention | Implemented | `providers/http.ts` `providerDestinationDenial`: HTTPS only, exact per-provider registered hosts, no credentials or port, every redirect hop re-checked (max 3); providers without hosts cannot fetch. `provider-destination.test.ts` (mutation-checked). |
 | 10 | Request validation | Implemented | Zod on route bodies, queries and params; 256 KiB body limit. |
 | 11 | Cloud posture monitoring | Owner action | Railway and Cloudflare settings are not readable from the repository. |
 | 12 | IaC scanning | Not applicable | No infrastructure-as-code files in the repository. |
@@ -84,6 +84,6 @@ log redaction of cookies, tokens and passwords (`index.ts`); hash-chained audit 
 | 49 | Security audit evidence | Implemented | This matrix, `GUARDIAN_SHIELD_SECURITY_AUDIT.md`, hash-chained audit log. |
 | 50 | Incident response and recovery | Partial | Protection incidents, emergency controls, backups; no written incident runbook. |
 
-Totals (counted from the table): 24 implemented (one by absence of the capability's attack surface), 9 partial,
+Totals (counted from the table): 25 implemented (one by absence of the capability's attack surface), 8 partial,
 6 missing, 8 owner action, 3 not applicable. Two implemented rows also need an owner setting (20 backup key, 26 paper
 scope only). Nothing here authorizes LIVE trading.

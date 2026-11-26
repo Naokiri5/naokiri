@@ -15,7 +15,7 @@ P('evm_rpc', 'EVM RPC + explorer (contract analysis, holders)', 'onchain', ['cry
 P('solana_rpc', 'Solana RPC (mint/freeze authority checks)', 'onchain', ['crypto-dex'], 'Provider ToS (Helius/QuickNode).', 'Needed for Part 2.2 Solana checks.');
 P('x_api', 'X (Twitter) API', 'social', ['all'], 'X Developer Agreement; paid tier for read access.', 'OAuth 2.0 PKCE linking not configured.');
 registerProvider({
-  id: 'telegram', name: 'Telegram Bot API', sourceClass: 'messaging', markets: ['notifications'],
+  id: 'telegram', hosts: ['api.telegram.org'], name: 'Telegram Bot API', sourceClass: 'messaging', markets: ['notifications'],
   license: 'Telegram Bot API Terms.', realtime: 'REALTIME', requiresCredentials: true,
   status: config.telegramBotToken ? 'IDLE' : 'PENDING_CREDENTIALS',
   note: config.telegramBotToken ? 'Bot token configured (server-side only).' : 'Set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID; host api.telegram.org must be allow-listed.',

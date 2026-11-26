@@ -20,6 +20,8 @@ export interface ProviderInfo {
   errorCount: number;
   lastLatencyMs: number | null;
   note?: string;
+  /** Exact HTTPS hostnames this provider may call. A provider without hosts cannot fetch (fail closed). */
+  hosts?: readonly string[];
 }
 
 const registry = new Map<string, ProviderInfo>();
@@ -73,11 +75,33 @@ function enforceCooldown(id: string) {
   cooldowns.delete(id);
 }
 
+const MAX_REDIRECTS = 3;
+const REDIRECT = new Set([301, 302, 303, 307, 308]);
+
+/**
+ * Destination check (SSRF guard): HTTPS only, no credentials or explicit port in the URL, and an exact match with one of
+ * the provider's registered hostnames. IP-literal and unregistered hosts are refused. Messages name the host only,
+ * because some provider URLs carry a token in their path.
+ */
+export function providerDestinationDenial(id: string, url: string | URL): string | null {
+  const hosts = registry.get(id)?.hosts;
+  if (!hosts?.length) return 'no allowed hosts registered';
+  let u: URL;
+  try { u = new URL(url); } catch { return 'invalid URL'; }
+  if (u.protocol !== 'https:') return `refused non-HTTPS destination ${u.host}`;
+  if (u.username || u.password || u.port) return `refused destination with credentials or port ${u.hostname}`;
+  if (!hosts.includes(u.hostname)) return `refused destination ${u.hostname} (not registered for this provider)`;
+  return null;
+}
+
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
 export async function fetchProvider(id: string, url: string, opts: { timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string> } = {}): Promise<any> {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
   if (config.offline) throw new ProviderError(id, 'offline mode');
+  // Checked before rate limiting or health accounting: a refused destination is a code defect, not a provider outage.
+  const denial = providerDestinationDenial(id, url);
+  if (denial) throw new ProviderError(id, denial);
   enforceCooldown(id);
   await buckets.get(id)?.take();
   // Another caller may have received a 429 while this one waited for a token.
@@ -86,7 +110,17 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
   try {
-    const res = await fetch(url, { signal: ctl.signal, redirect: 'follow', headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } });
+    const init = { signal: ctl.signal, redirect: 'manual' as const, headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } };
+    // Redirects are followed manually so every hop is checked against the same allowlist.
+    let res = await fetch(url, init), target = new URL(url);
+    for (let hop = 0; REDIRECT.has(res.status); hop++) {
+      const location = res.headers.get('location');
+      if (!location || hop >= MAX_REDIRECTS) throw new ProviderError(id, 'redirect refused (missing location or too many hops)', res.status);
+      target = new URL(location, target);
+      const redirectDenial = providerDestinationDenial(id, target);
+      if (redirectDenial) throw new ProviderError(id, `redirect ${redirectDenial}`, res.status);
+      res = await fetch(target, init);
+    }
     if (res.status === 429 || (id === 'binance' && res.status === 418)) {
       const until = performance.now() + retryDelayMs(res.headers.get('retry-after'), res.status);
       const prior = cooldowns.get(id);

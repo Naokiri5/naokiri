@@ -1,5 +1,6 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
 registerProvider({
+  hosts: ['api.dexscreener.com'],
   id: 'dexscreener', name: 'DEX Screener (public API)', sourceClass: 'dex', markets: ['crypto-dex'],
   license: 'DEX Screener API Terms — rate-limited public use.', realtime: 'NEAR_REALTIME', requiresCredentials: false,
 });

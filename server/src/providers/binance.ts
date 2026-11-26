@@ -4,6 +4,7 @@ import { INTERVAL_MS, type Candle, type Interval } from '../market/types.js';
 /** Binance public market-data mirror (data-api.binance.vision). Read-only, no key. */
 const BASE = 'https://data-api.binance.vision/api/v3';
 registerProvider({
+  hosts: ['data-api.binance.vision'],
   id: 'binance', name: 'Binance Spot (public market-data mirror)', sourceClass: 'cex', markets: ['crypto'],
   license: 'Binance public market data API — subject to Binance Terms of Use; no redistribution.',
   realtime: 'NEAR_REALTIME', requiresCredentials: false,
