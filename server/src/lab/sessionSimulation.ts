@@ -4,6 +4,7 @@ import { FeatureEngine } from '../features/indicators.js';
 import { INTERVAL_MS, type Candle } from '../market/types.js';
 import { classifyRegime } from '../regime/regime.js';
 import { DEFAULT_POLICY, RiskPolicy } from '../risk/policy.js';
+import { floorToStep } from '../risk/quantity.js';
 import { assertStrategyHistory, stats, type BtStats } from './backtest.js';
 import { newExitState, stepExit, type ExitState } from './exits.js';
 import type { StrategyDef } from './strategies.js';
@@ -59,7 +60,8 @@ export interface SimulatedEntrySizing {
 /**
  * Same formula as risk/gate.ts sizing for a policy without adaptive drawdown sizing or cash reserves:
  * risk budget = equity × riskPerTrade; per-unit loss from the worst permitted entry (ask + maxSlippage) to the buffered
- * stop plus round-trip fees; capped by maxPositionNotional and 98% of cash; floored to the lot size.
+ * stop plus round-trip fees; capped by maxPositionNotional and 98% of cash; floored exactly to the lot size. Venue minQty/minNotional are not
+ * modeled here (the simulator applies its own $5 floor).
  * server/test/session-simulation.test.ts asserts parity with evaluateRisk.
  */
 export function simulatedEntrySizing(policy: RiskPolicy, equity: number, cash: number, ask: number, stop: number, stepSize?: number): SimulatedEntrySizing {
@@ -70,7 +72,8 @@ export function simulatedEntrySizing(policy: RiskPolicy, equity: number, cash: n
   const maxNotional = Math.min(equity * (policy.maxPositionNotionalPct / 100), cash * 0.98);
   let qty = perUnitLoss > 0 ? riskBudget / perUnitLoss : 0;
   if (qty * worstPermittedEntry > maxNotional) qty = maxNotional / worstPermittedEntry;
-  if (stepSize && stepSize > 0) qty = Math.floor(qty / stepSize + 1e-9) * stepSize;
+  // Exact lot floor shared with the gate (never rounds up); without a step the quantity stays continuous.
+  if (stepSize !== undefined) qty = floorToStep(qty, stepSize) ?? 0;
   return { qty, riskBudget, maxNotional, perUnitLoss, conservativeStopFill };
 }
 

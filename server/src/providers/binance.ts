@@ -11,7 +11,25 @@ registerProvider({
 setRateLimit('binance', 600); // well below the documented 6000 weight/min
 
 export interface Ticker24 { symbol: string; lastPrice: number; priceChangePercent: number; quoteVolume: number; volume: number; highPrice: number; lowPrice: number; openPrice: number; count: number; closeTime: number; bidPrice: number; askPrice: number }
-export interface SymbolRules { symbol: string; base: string; quote: string; status: string; tickSize: number; stepSize: number; minQty: number; minNotional: number }
+export interface SymbolRules { symbol: string; base: string; quote: string; status: string; tickSize: number; stepSize: number; minQty: number; minNotional: number; maxQty?: number }
+/** Filter value as a number: undefined when absent, NaN when present but malformed (which fails closed downstream). */
+const filterNum = (v: unknown): number | undefined => v === undefined || v === null ? undefined : typeof v === 'string' && v.trim() !== '' ? Number(v) : typeof v === 'number' ? v : Number.NaN;
+/**
+ * Entry quantity rules for a paper MARKET order: LOT_SIZE combined with MARKET_LOT_SIZE (the stricter of each limit).
+ * A missing LOT_SIZE step yields NaN so the risk gate refuses the instrument instead of skipping lot rounding.
+ * NOTIONAL.maxNotional is not modeled; paper fills are capped by the risk gate's own notional limit.
+ */
+export function quantityRules(filters: Array<Record<string, unknown>>) {
+  const f = (t: string) => filters.find((x) => x.filterType === t) ?? {};
+  const lot = f('LOT_SIZE'), mkt = f('MARKET_LOT_SIZE');
+  const lotStep = filterNum(lot.stepSize) ?? Number.NaN, mktStep = filterNum(mkt.stepSize);
+  const stepSize = mktStep !== undefined && mktStep !== 0 ? Math.max(lotStep, mktStep) : lotStep;
+  const minQty = Math.max(filterNum(lot.minQty) ?? 0, filterNum(mkt.minQty) ?? 0);
+  // 0 means "no maximum" on Binance; any other non-positive or malformed value fails closed.
+  const maxes = [filterNum(lot.maxQty), filterNum(mkt.maxQty)].filter((v): v is number => v !== undefined && v !== 0);
+  const maxQty = maxes.length ? Math.min(...maxes) : undefined;
+  return { stepSize, minQty, ...(maxQty === undefined ? {} : { maxQty }) };
+}
 
 export async function tickers24h(): Promise<Ticker24[]> {
   const raw: any[] = await fetchProvider('binance', `${BASE}/ticker/24hr`, { timeoutMs: 15_000 });
@@ -27,7 +45,7 @@ export async function exchangeInfo(): Promise<SymbolRules[]> {
     const f = (t: string) => s.filters.find((x: any) => x.filterType === t) ?? {};
     return {
       symbol: s.symbol, base: s.baseAsset, quote: s.quoteAsset, status: s.status,
-      tickSize: +(f('PRICE_FILTER').tickSize ?? 0), stepSize: +(f('LOT_SIZE').stepSize ?? 0), minQty: +(f('LOT_SIZE').minQty ?? 0),
+      tickSize: +(f('PRICE_FILTER').tickSize ?? 0), ...quantityRules(s.filters),
       minNotional: +(f('NOTIONAL').minNotional ?? f('MIN_NOTIONAL').minNotional ?? 0),
     };
   });

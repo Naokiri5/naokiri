@@ -4,6 +4,8 @@ export interface Instrument {
   id: string; // canonical: crypto:binance:BTCUSDT
   symbol: string; base: string; quote: string; market: Market; venue: string;
   tickSize: number; stepSize: number; minQty: number; minNotional: number;
+  /** Venue maximum entry quantity when known (Binance LOT_SIZE / MARKET_LOT_SIZE). */
+  maxQty?: number;
 }
 export type Interval = '15m' | '1h' | '4h';
 export const INTERVAL_MS: Record<Interval, number> = { '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 };

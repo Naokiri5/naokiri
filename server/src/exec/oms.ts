@@ -3,7 +3,8 @@ import { uid, iso } from '../core/util.js';
 import { market } from '../market/store.js';
 import { bookAge, bookFreshForExecution, walkBook, QUALITY_LIMITS } from '../market/quality.js';
 import { evaluateRisk } from '../risk/gate.js';
-import { currentPolicy, DEFAULT_POLICY } from '../risk/policy.js';
+import { currentPolicy, DEFAULT_POLICY, RiskPolicy } from '../risk/policy.js';
+import { entryExecutionDenial, issueEntryAuthorization } from './authorization.js';
 import { ledger, cashBalance, openPositions, PAPER_ACCOUNT, type PositionRow } from '../portfolio/ledger.js';
 import { journal } from '../journal/journal.js';
 import { notify } from '../notify/notify.js';
@@ -27,6 +28,8 @@ import { recordPaperFill } from './fillEvents.js';
  * (real spread + depth), with configured fees. Venue = 'binance-paper'. No live venue exists.
  */
 export const VENUE = 'binance-paper';
+// Exits and monitoring keep the DEFAULT_POLICY fallback on purpose: a missing policy must never block a protective exit.
+// Entries never use it (submitEntry refuses without the exact policy the gate evaluated).
 const feeRate = () => (currentPolicy()?.policy ?? DEFAULT_POLICY).feeRate;
 
 export class OmsError extends Error {}
@@ -169,11 +172,22 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       const fresh = evaluateRisk(proposal, nowTs);
       const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');
       if (!allowed || !fresh.sizing) return { reason: `LAST_MOMENT_RISK_${fresh.decision}: ${fresh.reasonCodes.join('; ')}` };
-      const qty = fresh.sizing.qty;
+      // Bind the gate decision to this exact order before touching the book; nothing below can widen it.
+      const issued = issueEntryAuthorization(fresh, { account: PAPER_ACCOUNT, instrumentId: s.instrumentId, decisionId: s.id,
+        actor, mode: authority.mode, issuedAt: nowTs, expiresAt });
+      if ('reason' in issued) return { reason: issued.reason };
+      const authorization = issued.authorization;
+      // The entry is priced with the exact policy the gate evaluated. No default may stand in for a missing or changed one.
+      const pv = currentPolicy();
+      if (!pv) return { reason: 'POLICY_UNAVAILABLE: no accepted risk policy at execution' };
+      if (pv.version !== authorization.policyVersion) return { reason: `POLICY_VERSION_MISMATCH: authorized v${authorization.policyVersion}, current v${pv.version}` };
+      const parsedPolicy = RiskPolicy.safeParse(pv.policy);
+      if (!parsedPolicy.success) return { reason: 'POLICY_INVALID: stored risk policy fails validation' };
+      const pol = parsedPolicy.data;
+      const qty = authorization.qty;
       const sim = simulateEntryFill(s.instrumentId, qty, nowTs);
       if (!sim.fill) return { reason: sim.reason! };
       const fill = sim.fill;
-      const pol = currentPolicy()?.policy ?? DEFAULT_POLICY;
       if (fill.impactBps > pol.maxSlippageBps) return { reason: `SLIPPAGE ${fill.impactBps.toFixed(1)}bps at submission` };
       if (fill.price <= s.stopLoss) return { reason: 'PRICE_THROUGH_STOP' };
       if (s.takeProfit.some((t) => !Number.isFinite(t?.price) || !Number.isFinite(t?.fraction) || t.fraction <= 0) ||
@@ -195,6 +209,9 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
         return { reason: 'EXECUTED_AGGREGATE_RISK_LIMIT: depth-walk fill exceeds the account risk budget' };
       }
       const fee = notional * pol.feeRate;
+      const unauthorized = entryExecutionDenial(authorization, { account: PAPER_ACCOUNT, instrumentId: s.instrumentId, side: 'buy',
+        mode: getControl().mode, qty, price: fill.price, fee, policyVersion: currentPolicy()?.version ?? null, nowTs });
+      if (unauthorized) return { reason: unauthorized };
       const R = fill.price - s.stopLoss;
       const tgts = s.takeProfit.map((t) => ({ r: (t.price - fill.price) / R, fraction: t.fraction }));
       const st = newExitState(fill.price, s.stopLoss, qty, tgts, null, 0);

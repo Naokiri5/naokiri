@@ -55,6 +55,20 @@ export function quantityRulesDenial(rules: QuantityRules): string | null {
 }
 
 /**
+ * Exact floor of `rawQty` to `stepSize` with no venue-limit checks. Returns null when either value cannot be expressed
+ * exactly. The session simulator uses it so its lot rounding matches the gate without adopting venue minimums it does
+ * not model.
+ */
+export function floorToStep(rawQty: number, stepSize: number): number | null {
+  if (!(Number.isFinite(rawQty) && rawQty >= 0 && Number.isFinite(stepSize) && stepSize > 0)) return null;
+  const step = decimalParts(stepSize);
+  if (!step || step.scale > MAX_STEP_DECIMALS) return null;
+  const stepUnits = toUnits(stepSize, step.scale)!;
+  const rawUnits = toUnits(rawQty, step.scale);
+  return rawUnits === null ? null : fromUnits((rawUnits / stepUnits) * stepUnits, step.scale);
+}
+
+/**
  * Floor `rawQty` to the lot step and validate it against the venue limits. `refPrice` prices the minimum-notional
  * check; callers pass the best ask, the lowest price an entry can fill at, so the minimum is never overstated.
  */

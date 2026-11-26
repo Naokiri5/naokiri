@@ -5,6 +5,10 @@
  * An authorization is issued solely from an allowed gate decision with sizing, and is verified against the actual fill
  * before any order, position or ledger row is written. Anything missing, expired, malformed or mismatched refuses the
  * entry. There is no default: no fallback policy, environment or quantity can stand in for a refused authorization.
+ *
+ * Scope: in the paper OMS, issue and verification run inside one synchronous SQLite write transaction against one
+ * market snapshot. Here the record is an invariant assertion that the booked order is exactly the order the gate
+ * sized; it is not a capability token that survives across time or processes.
  */
 import type { RiskDecision } from '../risk/gate.js';
 import type { Mode } from '../core/mode.js';
@@ -31,6 +35,8 @@ export interface EntryAuthorization {
 
 export interface EntryAuthorizationRequest {
   account: string; instrumentId: string; decisionId: string;
+  /** NEEDS_REVIEW decisions are authorizable only for an owner-approved entry, as in submitEntry. */
+  actor: 'bot' | 'owner';
   /** Control mode at issue time; only paper modes can be authorized. */
   mode: Mode;
   issuedAt: number;
@@ -49,8 +55,10 @@ export interface ExecutedEntry {
 const positive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
 
 /** Issue an authorization from an allowed gate decision, or explain why none can be issued. */
-export function issueEntryAuthorization(decision: RiskDecision, allowed: boolean, req: EntryAuthorizationRequest):
+export function issueEntryAuthorization(decision: RiskDecision, req: EntryAuthorizationRequest):
   { authorization: EntryAuthorization } | { reason: string } {
+  // Decided here from the gate's own verdict, never from a caller-supplied flag.
+  const allowed = decision.decision === 'ALLOW' || (decision.decision === 'NEEDS_REVIEW' && req.actor === 'owner');
   if (!allowed) return { reason: `AUTHORIZATION_REFUSED: risk gate decision ${decision.decision}` };
   const sizing = decision.sizing;
   if (!sizing) return { reason: 'AUTHORIZATION_REFUSED: gate returned no sizing' };

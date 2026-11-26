@@ -1,5 +1,6 @@
 import { storageBlocksEntries, storageStatus } from '../ops/storage.js';
-import { currentPolicy, type RiskPolicy } from './policy.js';
+import { currentPolicy, RiskPolicy } from './policy.js';
+import { normalizeEntryQty } from './quantity.js';
 import { accountState, openPositions, PAPER_ACCOUNT, type AccountState } from '../portfolio/ledger.js';
 import { controlAuthority } from '../core/mode.js';
 import { market } from '../market/store.js';
@@ -31,13 +32,15 @@ export function evaluateRisk(p: RiskProposal, nowTs = Date.now()): RiskDecision 
 }
 const currentPolicySafe = () => { try { return currentPolicy()?.version ?? null; } catch { return null; } };
 
-function floorStep(q: number, step: number) { if (!step) return q; const n = Math.floor(q / step + 1e-9); return Number((n * step).toFixed(12)); }
 
 function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   const deny: string[] = []; const review: string[] = []; const ev: RiskDecision['evaluated'] = {};
   const pv = currentPolicy();
   if (!pv) return { decision: 'DENY', reasonCodes: ['POLICY_NOT_ACCEPTED: owner must review and accept a risk policy'], evaluated: {}, sizing: null, policyVersion: null, ts: iso(nowTs), traceId: p.traceId };
-  const pol: RiskPolicy = pv.policy; const account = PAPER_ACCOUNT;
+  // Stored policies are re-validated on every read: an out-of-bounds row must never size an order.
+  const parsed = RiskPolicy.safeParse(pv.policy);
+  if (!parsed.success) return { decision: 'DENY', reasonCodes: ['POLICY_INVALID: stored risk policy fails validation'], evaluated: {}, sizing: null, policyVersion: pv.version, ts: iso(nowTs), traceId: p.traceId };
+  const pol: RiskPolicy = parsed.data; const account = PAPER_ACCOUNT;
   const authority = controlAuthority(), ctl = authority.control;
   ev.mode = ctl.mode;
   if (ctl.emergency) deny.push('EMERGENCY_STOP_ACTIVE');
@@ -132,7 +135,9 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
 
   // Sizing (Part 17.3) — conservative execution assumptions
   const d = market.deep.get(p.instrumentId);
-  const estEntry = px.ask || px.price;
+  // Entries buy at the ask. Without a positive ask there is no executable price to bound the order with.
+  if (!(px.ask > 0)) { deny.push('NO_ASK_QUOTE'); return out(); }
+  const estEntry = px.ask;
   const conservativeStopFill = p.stopPrice * (1 - pol.stopFillBufferPct / 100);
   // Size from the worst entry permitted by the slippage policy; actual fills are rechecked by the OMS.
   // The notional cap uses it too: the OMS enforces the cap at the executed price, which may be worse than the top ask.
@@ -182,10 +187,17 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   }
   // Cap at the worst permitted entry so any fill within the slippage policy also fits the cap the OMS enforces.
   if (qty * worstPermittedEntry > maxNotional) qty = maxNotional / worstPermittedEntry;
-  qty = floorStep(qty, inst.stepSize);
+  // Exact lot-step floor plus venue limits after rounding; never rounded up to meet a minimum.
+  const normalized = normalizeEntryQty(qty, inst, estEntry);
+  if (!normalized.ok) deny.push(normalized.reason);
+  qty = normalized.qty;
   const notional = qty * estEntry;
-  if (qty <= 0 || qty < inst.minQty || notional < Math.max(inst.minNotional, 5)) deny.push(`SIZE_BELOW_VENUE_MINIMUM qty=${qty} notional=${notional.toFixed(2)}`);
   const plannedMaxLoss = qty * perUnitLoss;
+  // Conservative cost: every unit at the worst permitted entry plus the entry fee. The notional cap already keeps this
+  // under cash for a valid policy; the check is the backstop the authorization's maxCost is bound to.
+  const maxEntryFee = qty * worstPermittedEntry * pol.feeRate;
+  const maxCost = qty * worstPermittedEntry + maxEntryFee;
+  if (!(maxCost <= acct.cash)) deny.push(`INSUFFICIENT_BUYING_POWER: worst-case cost ${maxCost.toFixed(2)} > cash ${acct.cash.toFixed(2)}`);
   const remainingOpenRisk = acct.equity * (pol.maxOpenRiskPct / 100) - acct.openRiskUsd;
   // NaN compares false against every limit, so a non-finite input would otherwise slip through as ALLOW.
   if (![acct.equity, acct.cash, acct.dailyPnlPct, acct.weeklyPnlPct, acct.drawdownPct, estEntry, perUnitLoss, qty, notional, maxNotional, riskBudget, remainingOpenRisk, plannedMaxLoss].every(Number.isFinite)) deny.push('NON_FINITE_INPUT (risk cannot be computed)');
@@ -202,7 +214,7 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
     ev.costR = round(costR, 4);
     if (costR > pol.maxCostR) deny.push(`COST_R ${costR.toFixed(3)} > ${pol.maxCostR}`);
   }
-  const sizing: Sizing = { qty, notional: round(notional, 2), maxNotional, riskBudget, remainingOpenRisk, plannedMaxLoss: round(plannedMaxLoss, 2), perUnitLoss, conservativeStopFill, estEntry, estFees: round(pol.feeRate * notional * 2, 4), limitPrice: worstPermittedEntry, maxEntryFee: qty * worstPermittedEntry * pol.feeRate, maxCost: qty * worstPermittedEntry * (1 + pol.feeRate) };
+  const sizing: Sizing = { qty, notional: round(notional, 2), maxNotional, riskBudget, remainingOpenRisk, plannedMaxLoss: round(plannedMaxLoss, 2), perUnitLoss, conservativeStopFill, estEntry, estFees: round(pol.feeRate * notional * 2, 4), limitPrice: worstPermittedEntry, maxEntryFee, maxCost };
   return out(sizing);
 
   function out(sz: Sizing | null = null): RiskDecision {

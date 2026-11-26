@@ -35,7 +35,7 @@ export async function refreshRules() {
   const rules = await binance.exchangeInfo();
   for (const r of rules) {
     if (r.status !== 'TRADING' || r.quote !== 'USDT') continue;
-    const inst: Instrument = { id: `crypto:binance:${r.symbol}`, symbol: r.symbol, base: r.base, quote: r.quote, market: 'crypto', venue: 'binance', tickSize: r.tickSize, stepSize: r.stepSize, minQty: r.minQty, minNotional: r.minNotional };
+    const inst: Instrument = { id: `crypto:binance:${r.symbol}`, symbol: r.symbol, base: r.base, quote: r.quote, market: 'crypto', venue: 'binance', tickSize: r.tickSize, stepSize: r.stepSize, minQty: r.minQty, minNotional: r.minNotional, ...(r.maxQty === undefined ? {} : { maxQty: r.maxQty }) };
     market.instruments.set(inst.id, inst);
   }
   rulesFetchedAt = Date.now();
