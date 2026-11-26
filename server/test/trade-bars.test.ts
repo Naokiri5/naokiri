@@ -263,6 +263,15 @@ describe('trade-built bars: review regressions', () => {
     expect(tradeBarCandle(first)).toBeNull();
   });
 
+  it('flags a just-finalized bar invalidated after the same advance evicted it from the ring', () => {
+    const b = build({ intervalsMs: [1_000], maxFinalBars: 1, maxSeenIds: 1 });
+    b.ingest(trade(T0 + 100, 2n * FP, FP), T0 + 100);
+    const { finalized } = b.ingest(trade(T0 + 4_000, 2n * FP, FP), T0 + 4_000);
+    const first = finalized.find((bar) => bar.startMs === T0)!;
+    expect(first.quality.invalidated).toBe(true);
+    expect(tradeBarCandle(first)).toBeNull();
+  });
+
   it('expires accepted ids by event time even when they arrived out of order', () => {
     const b = build();
     const later = trade(T0 + 2_100, 2n * FP, FP); const earlier = trade(T0 + 1_900, 2n * FP, FP);

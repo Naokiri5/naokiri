@@ -221,6 +221,8 @@ export class TradeBarBuilder {
   /** The same ids bucketed by base-bar start, so expiry follows event time even when trades arrive out of order. */
   private readonly seenBuckets = new Map<number, string[]>();
   private readonly gaps: Array<{ fromMs: number; toMs: number }> = [];
+  /** Event times invalidated while ingest applies its trade; null outside ingest. */
+  private pendingInvalidations: number[] | null = null;
   private readonly hash: Hash = createHash('sha256');
   private readonly counts = { accepted: 0, duplicate: 0, late: 0, future: 0, invalid: 0, rebuilt: 0, invalidated: 0, dedupeOverflow: 0 };
 
@@ -236,9 +238,15 @@ export class TradeBarBuilder {
   /** Advances the receive clock, then applies the trade. Returns bars finalized by the clock advance. */
   ingest(trade: TradeEvent, receiveTimeMs: number): { status: IngestStatus; finalized: TradeBar[] } {
     const finalized = this.advance(receiveTimeMs);
-    const status = this.apply(trade, receiveTimeMs);
-    // Applying the trade can invalidate a bar the advance just finalized (dedupe overflow); publish the current version.
-    return { status, finalized: finalized.map((bar) => this.finals.get(bar.intervalMs)!.find((b) => b.startMs === bar.startMs) ?? bar) };
+    // Applying the trade can invalidate a bar the advance just finalized (dedupe overflow). Publish the current ring
+    // version; a bar the same advance already evicted from the ring is flagged here from the recorded invalidation times.
+    const invalidatedTimes: number[] = [];
+    this.pendingInvalidations = invalidatedTimes;
+    let status: IngestStatus;
+    try { status = this.apply(trade, receiveTimeMs); } finally { this.pendingInvalidations = null; }
+    const flagged = (bar: TradeBar) => !bar.quality.invalidated && invalidatedTimes.some((t) => bar.startMs <= t && t < bar.endMs)
+      ? Object.freeze({ ...bar, quality: Object.freeze({ ...bar.quality, invalidated: true }) }) : bar;
+    return { status, finalized: finalized.map((bar) => flagged(this.finals.get(bar.intervalMs)!.find((b) => b.startMs === bar.startMs) ?? bar)) };
   }
 
   /** Moves the monotonic receive clock and finalizes every bar whose end is at or before the watermark. */
@@ -499,6 +507,7 @@ export class TradeBarBuilder {
       }
     }
     this.counts.invalidated++;
+    this.pendingInvalidations?.push(eventTimeMs);
     this.hash.update(encode({ event: 'INVALIDATED', eventTimeMs }) + '\n');
   }
 }
