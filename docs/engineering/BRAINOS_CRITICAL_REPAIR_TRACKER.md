@@ -58,6 +58,17 @@ the next scheduled scan (`MIA_SCAN_INTERVAL_MS`, default 60 s), so freed capital
 At most one early scan per 10 s; it runs on the scan lane, never inside protection, and every entry still passes the
 full risk gate (`bot/bot.ts` `requestSettlementRescan`; test in `ops-lease-hardening.test.ts`, mutation-checked).
 
+Scanner repair (roadmap 27 Nov, CT01-04 "capacity-blocked candidate revalidated after confirmed settlement"): the
+scanner used to mark an instrument/strategy/candle as processed whatever the outcome, so a signal denied only for
+capacity was never reconsidered on that candle and the settlement rescan found nothing to do. Now a risk denial made
+only of capacity codes (`MAX_CONCURRENT_POSITIONS`, `CORRELATION_LIMIT`, `INSUFFICIENT_BUYING_POWER`,
+`CASH_RESERVE_FLOOR_REACHED`, `AGGREGATE_OPEN_RISK`) is held as waiting for capacity. It is re-evaluated, with a fresh
+candidate, QCI and risk decision, only after a paper position settles; it expires when its candle is superseded; the
+queue is capped at 500. Any other denial or an approval ends the key as before, and a restart keeps that rule using
+the stored decisions. `/api/scanner` returns `waitingCapacity`; the Intel page Rejected tab lists it
+(`market/scanLedger.ts`, `market/scanner.ts`, `scan-capacity-reevaluation.test.ts`, 11 tests, mutation-checked).
+Not yet: a durable candidate queue across restarts, and re-evaluation after owner funding (only settlements count).
+
 ## The 30 repairs
 
 | # | Pri | Repair | Status | Evidence or remaining work |

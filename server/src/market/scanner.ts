@@ -17,7 +17,7 @@ import { strategyStats } from '../lab/lab.js';
 import { readIndicators } from '../workers/indicators.js';
 import { getControl } from '../core/mode.js';
 import { uid } from '../core/util.js';
-import { get } from '../db/db.js';
+import { ScanLedger, capacityEpoch, storedDecisionsEndKey } from './scanLedger.js';
 import { INTERVAL_MS } from './types.js';
 import { timed, record } from '../core/latency.js';
 import { bus } from '../core/bus.js';
@@ -32,7 +32,10 @@ export interface BoardRow {
 }
 export const board = new Map<string, BoardRow>();
 export const rejections: { at: number; symbol: string; stage: string; reason: string }[] = [];
-const processed = new Set<string>();
+const ledger = new ScanLedger();
+/** Signals denied only for capacity, held until a settlement frees capacity or their candle is superseded. */
+export const waitingCandidates = (nowTs = Date.now()) => ledger.waitingList(nowTs);
+export const _scanTest = { reset: () => ledger.clear() };
 const lastDecisions: DecisionReport[] = [];
 export const recentDecisions = () => lastDecisions.slice(-100).reverse();
 
@@ -73,6 +76,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
   const t0 = performance.now();
   const ctl = getControl();
   let candidates = 0;
+  const epoch = capacityEpoch();
   for (const id of market.universe) {
     // Scheduled scans give due protection timers a turn between instruments.
     if (continueScan) {
@@ -96,9 +100,11 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
     for (const s of STRATEGIES) {
       if (ctl.disabledStrategies.includes(s.id)) continue;
       const key = `${id}:${s.id}:${f1.t}`;
-      if (processed.has(key)) { continue; }
-      // survive restarts: a decision for this instrument/strategy after this candle closed already exists
-      if (get('SELECT 1 FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? LIMIT 1', id, s.id, f1.t + INTERVAL_MS[s.interval])) continue;
+      const verdict = ledger.verdict(key, Date.now(), epoch);
+      if (verdict !== 'EVALUATE') continue;
+      // survive restarts: a terminal decision for this instrument/strategy after this candle closed already exists
+      // (a capacity-only denial is not terminal; it is re-evaluated once and then waits for a settlement)
+      if (storedDecisionsEndKey(id, s.id, f1.t + INTERVAL_MS[s.interval])) { ledger.markProcessed(key); continue; }
       if (q.status === 'FAIL') { recordOpportunity({ kind: 'REJECTED', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Data quality: ${q.issues.join('; ')}` }); rejectLog(inst.symbol, 'data-quality', q.issues.join('; ')); continue; }
       if (!s.suitableRegimes.includes(reg.regime)) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Regime ${reg.regime} unsuitable for strategy ${s.version}` }); continue; }
       const sig = s.generate(f1);
@@ -120,15 +126,16 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
       row.lastDecision = { id: rep.id, decision: rep.decision, score: rep.opportunity.score, at: Date.now() };
       if (rep.decision === 'REJECTED' || rep.decision === 'INSUFFICIENT_DATA') rejectLog(inst.symbol, 'decision', `${s.id}: ${rep.decision} — ${[...qci.reason_codes, ...(rep.risk?.reasonCodes ?? [])].slice(0, 3).join('; ')}`);
       lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
-      processed.add(key);
+      // A capacity-only denial waits for a settlement; any other outcome ends this key for the candle.
+      ledger.record(key, { instrumentId: id, strategyId: s.id }, rep.risk, epoch, f1.t + 2 * INTERVAL_MS['1h'], Date.now());
       onDecision?.(rep, ctx.memorySnapshotId);
       } catch (e: any) {
         // One failing candidate must not abort the scan for the rest of the universe; it is retried next cycle.
-        processed.delete(key); rejectLog(inst.symbol, 'error', `${s.id}: ${String(e?.message ?? e).slice(0, 200)}`);
+        ledger.forget(key); rejectLog(inst.symbol, 'error', `${s.id}: ${String(e?.message ?? e).slice(0, 200)}`);
       }
     }
   }
-  if (processed.size > 50_000) processed.clear();
+  ledger.prune(Date.now());
   record('scan.cycle', performance.now() - t0);
   market.lastScanAt = Date.now();
   bus.publish('scan', { at: market.lastScanAt, universe: market.universe.length, candidates });

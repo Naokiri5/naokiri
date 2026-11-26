@@ -20,7 +20,7 @@ import { createVerifiedBackup } from '../ops/backup.js';
 import { bus } from '../core/bus.js';
 import { isBusTopic, telemetry, TELEMETRY_SCHEMA_VERSION, type TelemetryEvent } from '../core/telemetry.js';
 import { market } from '../market/store.js';
-import { board, rejections, recentDecisions, analyzeInstrument, dexBoard } from '../market/scanner.js';
+import { board, rejections, recentDecisions, analyzeInstrument, dexBoard, waitingCandidates } from '../market/scanner.js';
 import { bubbleMap } from '../market/bubbles.js';
 import { isEligibleSpot } from '../market/fabric.js';
 import { assessQuality, bookImpact } from '../market/quality.js';
@@ -340,7 +340,7 @@ export async function routes(app: FastifyInstance) {
   app.get('/api/dex', async () => ({ pairs: dexBoard(), asOf: market.dexFetchedAt, note: 'DEX tokens are never automation-eligible: contract-level honeypot checks require an on-chain provider (pending).' }));
 
   // ── scanner / decisions ──
-  app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
+  app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), waitingCapacity: waitingCandidates(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
   // Authenticated research and replay views.
   app.get('/api/fabric/catalog', async () => catalogSummary());
   app.get('/api/fabric/events', async (req) => {
