@@ -1,3 +1,4 @@
+import { backupSpaceDenial, storageStatus } from './storage.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -158,5 +159,7 @@ export function maybeScheduledBackup(nowTs = Date.now()): BackupManifest | null 
   const requireEncryption = encryptionRequired();
   const last = listBackups().find(backup => backup.createdAt <= nowTs && (!requireEncryption || backup.encrypted));
   if (last && nowTs - last.createdAt < every) return null;
+  // Never start a full-database copy that could fill the volume the live database needs.
+  const space = backupSpaceDenial(storageStatus(nowTs)); if (space) throw new Error(space);
   const { manifest } = createVerifiedBackup({ nowTs }); pruneBackups(undefined, undefined, nowTs); return manifest;
 }

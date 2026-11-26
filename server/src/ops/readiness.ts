@@ -1,3 +1,4 @@
+import { storageBlocksEntries, storageStatus } from './storage.js';
 import { get } from '../db/db.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { QUALITY_LIMITS } from '../market/quality.js';
@@ -70,6 +71,12 @@ export function readiness(e: EngineView, nowTs = Date.now()) {
   try {
     checks.push({ name: 'risk policy', status: 'info', detail: currentPolicy() ? 'accepted' : 'not accepted (no paper entries until accepted)' });
   } catch { checks.push({ name: 'risk policy', status: 'fail', detail: 'risk policy unavailable' }); }
+  const storage = storageStatus(nowTs);
+  if (storage.level !== 'NOT_APPLICABLE') {
+    const pct = storage.freeBytes !== null && storage.totalBytes ? `${Math.round((storage.freeBytes / storage.totalBytes) * 100)}% free` : 'free space unknown';
+    checks.push({ name: 'storage', status: storage.level === 'OK' ? 'pass' : storage.level === 'LOW' ? 'info' : 'fail',
+      detail: storage.level === 'OK' ? pct : `${storage.level.toLowerCase()}: ${pct}; new entries ${storageBlocksEntries(storage) ? 'blocked' : 'allowed'}` });
+  }
   return { ready: !checks.some((c) => c.status === 'fail'), at: nowTs, schema: SCHEMA_VERSION, role: config.offline ? 'OFFLINE' : e.role, checks };
 }
 

@@ -28,6 +28,7 @@ import { takeoverIntegrity } from '../ops/integrity.js';
 import { isShuttingDown } from '../ops/shutdown.js';
 import { drainExpiredMandate, durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
+import { compactConsensusEvidence } from '../qci/retention.js';
 import { record } from '../core/latency.js';
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -274,6 +275,8 @@ const backgroundLane = () => runLane('background', async (lease) => {
   if (!stillLeader(lease)) return;
   try { refreshBrainSnapshot(); } catch (error) { botStatus.lastError = `brain: ${errorText(error).slice(0, 200)}`; }
   try { refreshSettingsCapabilitySnapshot(); } catch (error) { botStatus.lastError = `settings-brain: ${errorText(error).slice(0, 200)}`; }
+  // Bounded evidence retention before the backup, so the copy and the live database stay within the volume.
+  try { compactConsensusEvidence(); } catch (error) { botStatus.lastError = `retention: ${errorText(error).slice(0, 200)}`; }
   backupPass();
   if (!stillLeader(lease)) return;
   const suspended = checkStrategyHealth(lease);

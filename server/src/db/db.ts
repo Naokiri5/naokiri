@@ -4,6 +4,9 @@ import { config, ensureDataDir } from '../config.js';
 import { migrate } from './migrations.js';
 
 let db: DatabaseSync | null = null;
+let dbPath: string | null = null;
+/** File backing the open database; null when closed or in memory (no disk capacity applies). */
+export const dbFilePath = () => (dbPath && dbPath !== ':memory:' ? dbPath : null);
 const BUSY_TIMEOUT_MS = 5_000;
 
 function enableWal(connection: DatabaseSync) {
@@ -26,6 +29,7 @@ export function openDb(file?: string) {
   let path = file;
   if (!path) { ensureDataDir(); path = join(config.dataDir, 'mia.db'); }
   const connection = new DatabaseSync(path);
+  dbPath = path;
   try {
     connection.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}; PRAGMA foreign_keys=ON;`);
     enableWal(connection);
@@ -43,7 +47,7 @@ export function openDb(file?: string) {
 export function getDb() { return db ?? openDb(); }
 /** Non-opening probe for optional background research; keeps isolated tests and offline tasks file-free. */
 export function isDbOpen() { return db !== null; }
-export function closeDb() { db?.close(); db = null; }
+export function closeDb() { db?.close(); db = null; dbPath = null; }
 
 export function all<T = any>(sql: string, ...p: any[]): T[] { return getDb().prepare(sql).all(...p) as T[]; }
 export function get<T = any>(sql: string, ...p: any[]): T | undefined { return getDb().prepare(sql).get(...p) as T | undefined; }

@@ -157,6 +157,10 @@ const MIGRATIONS: string[] = [
   CREATE INDEX ledger_entries_ref ON ledger_entries(ref, account);
   CREATE INDEX orders_position ON orders(position_id, account);
   `,
+  /* 9 — Evidence retention: consensus records are compacted by age (qci/retention.ts), so they need a time index. */ `
+  CREATE INDEX consensus_records_created ON consensus_records(created_at);
+  CREATE INDEX orders_decision ON orders(decision_id);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */

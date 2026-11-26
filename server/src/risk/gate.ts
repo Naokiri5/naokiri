@@ -1,3 +1,4 @@
+import { storageBlocksEntries, storageStatus } from '../ops/storage.js';
 import { currentPolicy, type RiskPolicy } from './policy.js';
 import { accountState, openPositions, PAPER_ACCOUNT, type AccountState } from '../portfolio/ledger.js';
 import { controlAuthority } from '../core/mode.js';
@@ -41,6 +42,9 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   else if (ctl.mode === 'OBSERVE') deny.push('MODE_READ_ONLY');
   else if (ctl.mode !== 'PAPER' && ctl.mode !== 'APPROVAL') deny.push('MODE_NOT_PAPER');
   if (unreconciledPaperOrders()) deny.push('UNRECONCILED_PAPER_ORDERS');
+  // A nearly full volume could reject the fills, settlements and stop updates a new position would need.
+  const storage = storageStatus(nowTs); ev.storage = storage.level;
+  if (storageBlocksEntries(storage)) deny.push(`STORAGE_${storage.level}: database volume too full to accept new exposure safely`);
   if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
   const suspended = getSetting<string[]>('suspendedStrategies', []);
   if (suspended.includes(p.strategyId)) deny.push(`STRATEGY_SUSPENDED:${p.strategyId}`);
