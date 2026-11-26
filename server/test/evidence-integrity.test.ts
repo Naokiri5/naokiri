@@ -7,7 +7,7 @@ import { ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js
 import { evaluateRisk } from '../src/risk/gate.js';
 import { submitEntry, executeExit, monitorPositions } from '../src/exec/oms.js';
 import { linkClosedTrades, LINK_BACKOFF } from '../src/ditas/tradeOutcomes.js';
-import { ACK_KEY, HASH_CHECK_KEY, LINK_GRACE_MS, acknowledgeEvidenceFindings, evaluateEvidenceIntegrity, refreshOutcomeHashCheck } from '../src/ditas/evidenceIntegrity.js';
+import { ACK_KEY, HASH_CHECK_KEY, HASH_CHECK_MAX_AGE_MS, LINK_GRACE_MS, acknowledgeEvidenceFindings, evaluateEvidenceIntegrity, refreshOutcomeHashCheck } from '../src/ditas/evidenceIntegrity.js';
 import { setSetting } from '../src/core/settings.js';
 import { all, get, getDb, run, J } from '../src/db/db.js';
 import { migrate, SCHEMA_VERSION } from '../src/db/migrations.js';
@@ -136,14 +136,27 @@ describe('evidence integrity pauses new entries, never exits', () => {
 
   it('denies when the last hash check could not run, keeping the last completed result', () => {
     closedTrade(id, last); linkClosedTrades(Date.now() + 1);
-    expect(refreshOutcomeHashCheck(1_000).lastError).toBeNull();
+    const t = Date.now();
+    expect(refreshOutcomeHashCheck(t - 2).lastError).toBeNull();
     run('ALTER TABLE ditas_trade_outcomes RENAME TO ditas_trade_outcomes_moved');
-    const failed = refreshOutcomeHashCheck(2_000);
+    const failed = refreshOutcomeHashCheck(t - 1);
     run('ALTER TABLE ditas_trade_outcomes_moved RENAME TO ditas_trade_outcomes');
-    expect(failed).toMatchObject({ checkedAt: 1_000, lastAttemptAt: 2_000, lastError: expect.stringMatching(/no such table/) });
+    expect(failed).toMatchObject({ checkedAt: t - 2, lastAttemptAt: t - 1, lastError: expect.stringMatching(/no such table/) });
     expect(integrityDenial(id, last)[0]).toMatch(/HASH_CHECK_FAILED/);
-    expect(refreshOutcomeHashCheck(3_000).lastError).toBeNull();
+    expect(refreshOutcomeHashCheck(t).lastError).toBeNull();
     expect(integrityDenial(id, last)).toEqual([]);
+  });
+
+  it('denies when the hash check has stopped running, and only once a check exists', () => {
+    closedTrade(id, last); linkClosedTrades(Date.now() + 1);
+    const t = Date.now();
+    expect(evaluateEvidenceIntegrity(t + HASH_CHECK_MAX_AGE_MS * 10).ok).toBe(true); // never run yet: nothing to trust or distrust
+    refreshOutcomeHashCheck(t);
+    expect(evaluateEvidenceIntegrity(t + HASH_CHECK_MAX_AGE_MS).ok).toBe(true); // exactly at the limit
+    const late = evaluateEvidenceIntegrity(t + HASH_CHECK_MAX_AGE_MS + 1);
+    expect(late.reasons.join()).toMatch(/HASH_CHECK_STALE/);
+    refreshOutcomeHashCheck(t + HASH_CHECK_MAX_AGE_MS + 1);
+    expect(evaluateEvidenceIntegrity(t + HASH_CHECK_MAX_AGE_MS + 2).ok).toBe(true);
   });
 
   it('writes the hash check only with the engine lease', () => {

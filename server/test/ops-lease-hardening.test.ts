@@ -91,6 +91,20 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(count('positions')).toBe(0);
   });
 
+  it('re-evaluates opportunities right after a position settles, at most once per window', async () => {
+    botStatus.lastSettlementRescanAt = 0;
+    const before = botStatus.settlementRescans;
+    await _test.protectionLane(); // nothing open: nothing settles, no early scan
+    expect(botStatus.settlementRescans).toBe(before);
+    expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+    setBook(id, last * 0.96); // through the stop
+    await _test.protectionLane();
+    expect(openPositions()).toHaveLength(0);
+    expect(botStatus.settlementRescans).toBe(before + 1);
+    expect(_test.requestSettlementRescan()).toBe(false); // bounded: a second request inside the window is refused
+    expect(_test.requestSettlementRescan(botStatus.lastSettlementRescanAt + 10_000)).toBe(true);
+  });
+
   it('fences protective exits at the write lock and leaves the position for the successor', async () => {
     expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
     setBook(id, last * 0.96);

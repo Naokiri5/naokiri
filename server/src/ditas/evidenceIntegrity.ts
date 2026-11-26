@@ -31,6 +31,12 @@ export const ACK_KEY = 'evidence.integrity.acknowledged';
 /** A closed position must be linked within this window; the linker runs on every background pass. */
 export const LINK_GRACE_MS = 30 * 60_000;
 export const MAX_ACKNOWLEDGE = 100;
+/**
+ * The background lane attempts the hash check every pass (about once a minute). Once a check exists, an attempt older
+ * than this means the check stopped running: entries pause rather than trust an old clean result. Ten passes of slack
+ * keep a single slow pass from pausing trading.
+ */
+export const HASH_CHECK_MAX_AGE_MS = 10 * 60_000;
 
 export type FindingKind = 'MISMATCH' | 'TAMPERED';
 /** One record as the owner reviews it; an acknowledgement must name exactly this. */
@@ -92,6 +98,8 @@ export function evaluateEvidenceIntegrity(nowTs = Date.now()): EvidenceIntegrity
   if (vanished.length) reasons.push(`TAMPERED_RECORD_MISSING: ${vanished.length} flagged outcome record(s) no longer exist`);
   if (tampered.length) reasons.push(`OUTCOME_RECORDS_ALTERED: ${tampered.length} unacknowledged outcome record(s) fail hash verification`);
   if (check.value?.lastError) reasons.push(`HASH_CHECK_FAILED: the last outcome hash check could not run (${check.value.lastError})`);
+  if (check.value && nowTs - check.value.lastAttemptAt > HASH_CHECK_MAX_AGE_MS)
+    reasons.push(`HASH_CHECK_STALE: the outcome hash check has not run for more than ${HASH_CHECK_MAX_AGE_MS / 60_000} minutes`);
   return { ok: reasons.length === 0, reasons, findings: { mismatched, tampered, unlinked },
     hashCheck: { checkedAt: check.value?.checkedAt ?? null, lastAttemptAt: check.value?.lastAttemptAt ?? null, lastError: check.value?.lastError ?? null }, evaluatedAt: nowTs };
 }

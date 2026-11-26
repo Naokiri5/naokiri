@@ -40,15 +40,23 @@ Two blockers found and fixed, then confirmed resolved on re-review:
 Confirmed: the support discount can never raise support or lower opposition (500-case property test), vetoes and the
 challenge panel see the original packets, and exits never pass through the gate.
 
-**Owner decision needed:** a maximum age for the stored hash check. If the background lane stops reaching the check
-entirely, the last result stays in force. Denying entries when it is older than, say, a few background passes would
-close that gap but could pause trading during a lane stall; it was not added without your approval.
+**Decided 2026-11-26 (owner: "fix all of the problem"):** a maximum age for the stored hash check. Once a check
+exists, an attempt older than 10 minutes (about ten background passes) denies new entries with `HASH_CHECK_STALE`, so a
+stalled background lane can no longer leave an old clean result in force. Exits are unaffected. Test:
+`evidence-integrity.test.ts` ("denies when the hash check has stopped running"), mutation-checked.
 
 Follow-ups done: append-only migration 11 indexes the gate's evidence queries (`positions(account,status,closed_at)`,
 `ditas_trade_outcomes(settlement,closed_at)`; upgrade and query-plan test); positions that keep failing to link get
 exponential backoff (1 minute doubling to 1 hour, in memory) so newer positions still link (mutation-checked).
 Still known and fail-closed: a CLOSED position without a close time pauses entries until repaired; per-evaluation
 work still grows with the number of acknowledged mismatch records.
+
+## Continuous multi-trade: settlement-triggered re-evaluation
+
+When the protection lane closes a position, the bot starts an opportunity scan immediately instead of waiting for
+the next scheduled scan (`MIA_SCAN_INTERVAL_MS`, default 60 s), so freed capital and slots are reconsidered at once.
+At most one early scan per 10 s; it runs on the scan lane, never inside protection, and every entry still passes the
+full risk gate (`bot/bot.ts` `requestSettlementRescan`; test in `ops-lease-hardening.test.ts`, mutation-checked).
 
 ## The 30 repairs
 

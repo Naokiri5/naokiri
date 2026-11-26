@@ -43,6 +43,8 @@ export const botStatus = {
   lastError: null as string | null, entriesToday: 0, decisionsTotal: 0,
   /** Last position-monitor pass that completed without an error; monitorFailing is true while the latest pass threw. */
   lastMonitorAt: 0, monitorFailing: false,
+  /** Early opportunity scans started because a position settled (continuous multi-trade). */
+  settlementRescans: 0, lastSettlementRescanAt: 0,
   /** Single-runner lock: only the LEADER (holder of the 'engine' lease) runs the lanes; a STANDBY copy keeps retrying. */
   role: 'STOPPED' as 'STOPPED' | 'LEADER' | 'STANDBY', instanceId: `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`,
 };
@@ -171,7 +173,21 @@ function onDecision(r: DecisionReport, lease: LeaseFence | null = activeLease) {
   }
 }
 
+/**
+ * Continuous multi-trade: a settled position frees a slot and capital, so opportunities are re-evaluated now rather
+ * than at the next scheduled scan (up to MIA_SCAN_INTERVAL_MS later). Bounded to one early scan per window; the scan
+ * runs on its own lane, never inside protection, and every entry still passes the full risk gate.
+ */
+export const SETTLEMENT_RESCAN_MIN_MS = 10_000;
+function requestSettlementRescan(nowTs = Date.now()) {
+  if (nowTs - botStatus.lastSettlementRescanAt < SETTLEMENT_RESCAN_MIN_MS) return false;
+  botStatus.lastSettlementRescanAt = nowTs; botStatus.settlementRescans++;
+  setImmediate(() => { void scanLane(); });
+  return true;
+}
+
 const protectionLane = () => runLane('protection', (lease) => {
+  const openBefore = openPositions().length;
   try {
     monitorPositions(undefined, lease);
     botStatus.lastMonitorAt = Date.now();
@@ -180,6 +196,7 @@ const protectionLane = () => runLane('protection', (lease) => {
     if (!(error instanceof LeaseLostError)) botStatus.monitorFailing = true;
     throw error;
   }
+  if (openPositions().length < openBefore && stillLeader(lease)) requestSettlementRescan();
   // An expired mandate revokes entry authority without the owner present; exits keep running.
   // Contained so a clock regression cannot skip the drain completion or the watchdog below; entries stay denied.
   try {
@@ -369,4 +386,4 @@ export function botStatusView(acct = accountState()) {
     state: ctl.emergency ? 'EMERGENCY' : ctl.pausedNewOrders ? 'PAUSED' : ctl.mode === 'OBSERVE' ? 'OBSERVING' : ctl.mode === 'PAPER' ? 'PAPER_TRADING' : ctl.mode === 'APPROVAL' ? 'AWAITING_APPROVAL' : 'BOUNDED_LIVE',
   };
 }
-export const _test = { onDecision, holdEngine: () => !!holdEngine(), hotLane, protectionLane, scanLane, backgroundLane, resetTakeoverRefusal: () => { takeoverRefused = false; } };
+export const _test = { requestSettlementRescan, onDecision, holdEngine: () => !!holdEngine(), hotLane, protectionLane, scanLane, backgroundLane, resetTakeoverRefusal: () => { takeoverRefused = false; } };
