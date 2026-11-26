@@ -2,6 +2,7 @@ import { storageBlocksEntries, storageStatus } from '../ops/storage.js';
 import { currentPolicy, RiskPolicy } from './policy.js';
 import { normalizeEntryQty } from './quantity.js';
 import { strategyQualification } from '../lab/evidence.js';
+import { evaluateEvidenceIntegrity } from '../ditas/evidenceIntegrity.js';
 import { accountState, openPositions, PAPER_ACCOUNT, type AccountState } from '../portfolio/ledger.js';
 import { controlAuthority } from '../core/mode.js';
 import { market } from '../market/store.js';
@@ -53,6 +54,10 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   // A nearly full volume could reject the fills, settlements and stop updates a new position would need.
   const storage = storageStatus(nowTs); ev.storage = storage.level;
   if (storageBlocksEntries(storage)) deny.push(`STORAGE_${storage.level}: database volume too full to accept new exposure safely`);
+  // Owner-approved: no new exposure while the closed-trade evidence the learning loop relies on is broken (settlement
+  // mismatch, linker failing, altered records). Computed here, not read from a background status, so it cannot be stale.
+  const integrity = evaluateEvidenceIntegrity(nowTs);
+  if (!integrity.ok) deny.push(`EVIDENCE_INTEGRITY_FAILED: ${integrity.reasons.join('; ')}`);
   if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
   const suspended = getSetting<string[]>('suspendedStrategies', []);
   if (suspended.includes(p.strategyId)) deny.push(`STRATEGY_SUSPENDED:${p.strategyId}`);

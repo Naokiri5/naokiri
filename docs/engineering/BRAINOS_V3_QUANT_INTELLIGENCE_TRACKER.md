@@ -55,8 +55,9 @@ lane, after the closed-trade linker so it uses the newest evidence. It only redu
 action and requires strategy qualification. Tests: `strategy-health-verified.test.ts` (fires once, minimum sample,
 non-significant mean, altered records excluded and mutation-checked, other versions, non-PAPER untouched).
 
-Not made active (owner chose not to, for now): blocking unqualified PAPER strategies, halting entries on broken
-evidence, and worker reliability adjusting QCI weights.
+Made active later the same day at the owner's request: blocking unqualified PAPER strategies at the risk gate,
+pausing entries on broken closed-trade evidence, and discounting measured-unreliable worker SUPPORT in QCI. See
+`BRAINOS_CRITICAL_REPAIR_TRACKER.md`.
 
 ## Section 05: accuracy made measurable
 
@@ -79,9 +80,8 @@ Documented rather than fixed: pooled cross-instrument trades are not independent
 backtest model, not measured depth; a resumed genome programme must pass its full size; no strategy code hash yet, so a
 logic change without a version bump keeps old evidence.
 
-**Owner decision needed:** strategies already in PAPER before this rule keep their status. The Lab now shows their
-verdict (for example `NOT_QUALIFIED: NO_BACKTEST`). Demoting them, or adding a risk-gate denial for unqualified PAPER
-strategies, would stop current paper trading, so it is left to the owner.
+**Owner decision (taken 2026-11-26):** strategies already in PAPER keep their status, but the risk gate now refuses
+new entries for any whose evidence does not qualify (`STRATEGY_NOT_QUALIFIED`). Open positions keep their protection.
 
 ## Not claimed
 

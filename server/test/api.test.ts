@@ -265,6 +265,15 @@ describe('HTTP hardening (auth gate, validation, error classes, step-up limits)'
     expect((await app.inject({ method: 'POST', url: '/api/emergency/launch', headers: H(), payload: {} })).statusCode).toBe(404);
     expect((await app.inject({ method: 'POST', url: '/api/analyze', headers: H(), payload: { symbol: 'NOPEUSDT' } })).statusCode).toBe(404);
   });
+  it('acknowledging evidence-integrity findings needs step-up and an exact open finding', async () => {
+    const url = '/api/evidence-integrity/acknowledge';
+    expect((await app.inject({ url: '/api/evidence-integrity', headers: { cookie } })).json()).toMatchObject({ ok: true, findings: { mismatched: [] } });
+    expect((await app.inject({ method: 'POST', url, headers: H(), payload: { records: [{ positionId: 'pos_x', kind: 'MISMATCH', storedHash: 'x', contentHash: null }] } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url, headers: H(), payload: { records: [], password: PW } })).statusCode).toBe(400);
+    const r = await app.inject({ method: 'POST', url, headers: H(), payload: { records: [{ positionId: 'pos_x', kind: 'MISMATCH', storedHash: 'x', contentHash: 'a'.repeat(64) }], password: PW } });
+    expect(r.statusCode).toBe(400); expect(r.json().error).toMatch(/not an open finding/);
+    failureGate.reset();
+  });
   it('resuming after a pause needs the passphrase', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { pausedNewOrders: true } })).statusCode).toBe(200);
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { pausedNewOrders: false } })).statusCode).toBe(403);

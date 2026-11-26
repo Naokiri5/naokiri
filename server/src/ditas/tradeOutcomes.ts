@@ -13,7 +13,7 @@
 import { all, get, run, tx, J, P } from '../db/db.js';
 import { sha256 } from '../core/util.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
-import { assertWriteFence, type LeaseFence } from '../ops/lease.js';
+import { assertWriteFence, LeaseLostError, type LeaseFence } from '../ops/lease.js';
 import { entryReference, entrySlippage } from './execution.js';
 import type { PositionRow } from '../portfolio/ledger.js';
 
@@ -118,9 +118,11 @@ export function linkClosedTrades(nowTs = Date.now(), options: { batch?: number; 
   const pending = all<PositionRow>(`SELECT p.* FROM positions p LEFT JOIN ditas_trade_outcomes t ON t.position_id=p.id
     WHERE p.account=? AND p.status='CLOSED' AND p.closed_at IS NOT NULL AND p.closed_at<=? AND t.position_id IS NULL
     ORDER BY p.closed_at, p.id LIMIT ?`, PAPER_ACCOUNT, nowTs, batch);
-  const result = { linked: 0, verified: 0, mismatched: 0 };
+  const result = { linked: 0, verified: 0, mismatched: 0, failed: [] as string[] };
   for (const position of pending) {
-    const written = tx(() => {
+    // One malformed position must not stop the rest from linking; a lost lease stops the pass.
+    let written: string | null;
+    try { written = tx(() => {
       assertWriteFence(options.fence);
       if (get('SELECT 1 FROM ditas_trade_outcomes WHERE position_id=?', position.id)) return null;
       const outcome = buildTradeOutcome(position, nowTs);
@@ -131,7 +133,11 @@ export function linkClosedTrades(nowTs = Date.now(), options: { batch?: number; 
         outcome.positionId, outcome.decisionId, outcome.strategy, outcome.strategyVersion, outcome.instrument, outcome.decisionEventId,
         outcome.openedAt, outcome.closedAt, outcome.linkedAt, outcome.settlement, outcome.netPnl, outcome.netR, payload, hash);
       return outcome.settlement;
-    });
+    }); } catch (error) {
+      if (error instanceof LeaseLostError) throw error;
+      result.failed.push(position.id);
+      continue;
+    }
     if (!written) continue;
     result.linked++;
     if (written === 'VERIFIED') result.verified++; else result.mismatched++;
@@ -165,14 +171,26 @@ export function verifiedStrategyReturns(strategy: string, version: string, limit
   if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('limit must be an integer from 1 to 1000');
   return all<any>(`SELECT * FROM ditas_trade_outcomes WHERE settlement='VERIFIED' AND strategy=? AND strategy_version=? AND net_r IS NOT NULL
     ORDER BY closed_at DESC, position_id DESC LIMIT ?`, strategy, version, limit)
-    .filter((r) => hashOf({ ...outcomeRow(r), payload: r.payload }) === r.hash && Number.isFinite(r.net_r))
+    .filter((r) => storedContentHash(r) === r.hash && Number.isFinite(r.net_r))
     .map((r) => r.net_r as number).reverse();
 }
 
-/** Recompute every record hash; any difference means a record no longer matches what was linked. */
+/**
+ * Hash of a stored row's content, from its raw columns. The payload is hashed as stored and never parsed, so a corrupt
+ * row cannot throw here; equal to the stored hash exactly when the record is intact.
+ */
+export function storedContentHash(r: { position_id: string; decision_id: string | null; strategy: string; strategy_version: string | null; instrument: string;
+  decision_event_id: string | null; opened_at: number; closed_at: number; linked_at: number; settlement: string; net_pnl: number; net_r: number | null; payload: string }): string {
+  return hashOf({ positionId: r.position_id, decisionId: r.decision_id, strategy: r.strategy, strategyVersion: r.strategy_version, instrument: r.instrument,
+    decisionEventId: r.decision_event_id, openedAt: r.opened_at, closedAt: r.closed_at, linkedAt: r.linked_at, settlement: r.settlement as SettlementStatus,
+    netPnl: r.net_pnl, netR: r.net_r, payload: r.payload });
+}
+
+/** Recompute every record hash; any difference, or a row that cannot be hashed, means it no longer matches what was linked. */
 export function verifyTradeOutcomes() {
   const rows = all<any>('SELECT * FROM ditas_trade_outcomes ORDER BY closed_at, position_id');
-  const tampered = rows.filter((r) => hashOf({ ...outcomeRow(r), payload: r.payload }) !== r.hash).map((r) => r.position_id);
+  const intact = (r: any) => { try { return storedContentHash(r) === r.hash; } catch { return false; } };
+  const tampered = rows.filter((r) => !intact(r)).map((r) => r.position_id);
   return { ok: tampered.length === 0, checked: rows.length, tampered };
 }
 

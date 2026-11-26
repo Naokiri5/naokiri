@@ -1,4 +1,5 @@
 import { ditasRoutes } from '../ditas/routes.js';
+import { acknowledgeEvidenceFindings, evaluateEvidenceIntegrity, MAX_ACKNOWLEDGE } from '../ditas/evidenceIntegrity.js';
 import { recentChoiceShadows } from '../ditas/memory.js';
 import { paperChoiceOutcomes } from '../ditas/execution.js';
 import { assessFastMemecoinResearch, reconstructDeepFuturesResearch } from '../choice/dualResearch.js';
@@ -400,6 +401,16 @@ export async function routes(app: FastifyInstance) {
       note: 'Workers are deterministic, versioned evaluators running in a bounded pool — not LLM agents. Confidence is NOT_CALIBRATED until walk-forward calibration is performed.' };
   });
   app.get('/api/consensus/:id', async (req, reply) => { const r = get<any>('SELECT record FROM consensus_records WHERE id=?', idOf(req)); return r ? P(r.record) : bad(reply, 404, 'not found'); });
+  // Evidence integrity: entries pause while closed-trade evidence is broken; acknowledging re-enables risk, so step-up.
+  app.get('/api/evidence-integrity', async () => evaluateEvidenceIntegrity());
+  app.post('/api/evidence-integrity/acknowledge', async (req) => {
+    const hash = z.string().regex(/^[0-9a-f]{64}$/);
+    // The client sends each record exactly as reviewed; the server acknowledges it only if it is still that version.
+    const reviewed = z.object({ positionId: z.string().min(1).max(150), kind: z.enum(['MISMATCH', 'TAMPERED']), storedHash: z.string().min(1).max(128), contentHash: hash.nullable() }).strict();
+    const b = z.object({ records: z.array(reviewed).min(1).max(MAX_ACKNOWLEDGE), password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional() }).strict().parse(req.body ?? {});
+    stepUp(req, b);
+    return acknowledgeEvidenceFindings('owner', b.records);
+  });
   app.post('/api/workers/:id/release', async (req) => {
     const id = idOf(req); const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
     stepUp(req, b); releaseQuarantine('owner', id); audit('owner', 'worker.release', { id }); return { ok: true };

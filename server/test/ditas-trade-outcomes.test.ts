@@ -42,7 +42,7 @@ describe('closed-trade learning linker', () => {
 
   it('links a settled trade to its decision, DITAS snapshot, orders and ledger-verified settlement', () => {
     const { decision, positionId, event } = closedTrade(id, last, [1], true);
-    expect(linkClosedTrades(Date.now() + 1)).toEqual({ linked: 1, verified: 1, mismatched: 0 });
+    expect(linkClosedTrades(Date.now() + 1)).toEqual({ linked: 1, verified: 1, mismatched: 0, failed: [] });
     const [outcome] = tradeOutcomes();
     const position = get<any>('SELECT * FROM positions WHERE id=?', positionId);
     const ledgerNet = get<{ n: number }>(`SELECT SUM(amount) n FROM ledger_entries WHERE ref IN (SELECT id FROM orders WHERE position_id=?)`, positionId)!.n;
@@ -71,7 +71,7 @@ describe('closed-trade learning linker', () => {
   it('is idempotent and its records are immutable', () => {
     closedTrade(id, last);
     linkClosedTrades(Date.now() + 1);
-    expect(linkClosedTrades(Date.now() + 1)).toEqual({ linked: 0, verified: 0, mismatched: 0 });
+    expect(linkClosedTrades(Date.now() + 1)).toEqual({ linked: 0, verified: 0, mismatched: 0, failed: [] });
     expect(() => run("UPDATE ditas_trade_outcomes SET net_pnl=1")).toThrow(/immutable/);
     expect(() => run('DELETE FROM ditas_trade_outcomes')).toThrow(/immutable/);
     expect(verifyTradeOutcomes()).toEqual({ ok: true, checked: 1, tampered: [] });
@@ -92,7 +92,7 @@ describe('closed-trade learning linker', () => {
     const { positionId } = closedTrade(id, last);
     const exitOrder = get<{ id: string }>("SELECT id FROM orders WHERE position_id=? AND purpose LIKE 'EXIT_%'", positionId)!.id;
     ledger(PAPER_ACCOUNT, 'SELL', 25, exitOrder, 'unexplained credit', Date.now());
-    expect(linkClosedTrades(Date.now() + 1)).toEqual({ linked: 1, verified: 0, mismatched: 1 });
+    expect(linkClosedTrades(Date.now() + 1)).toEqual({ linked: 1, verified: 0, mismatched: 1, failed: [] });
     const [outcome] = tradeOutcomes();
     expect(outcome.settlement).toBe('MISMATCH');
     expect(outcome.payload.settlement.issues).toEqual(expect.arrayContaining(['LEDGER_SELL_MISMATCH', 'RECORDED_PNL_MISMATCH']));

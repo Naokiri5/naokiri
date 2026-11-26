@@ -6,9 +6,10 @@ import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js';
 import { submitEntry, executeExit } from '../src/exec/oms.js';
 import { linkClosedTrades } from '../src/ditas/tradeOutcomes.js';
-import { workerReliability } from '../src/workers/reliability.js';
+import { workerReliability, refreshSupportDiscounts } from '../src/workers/reliability.js';
+import { storedSupportDiscounts } from '../src/qci/supportDiscount.js';
 import { WORKERS } from '../src/workers/registry.js';
-import { run, J } from '../src/db/db.js';
+import { run, J, get } from '../src/db/db.js';
 import type { DecisionReport } from '../src/decision/engine.js';
 
 const dataDriven = WORKERS.filter((w) => w.capability === 'DATA_DRIVEN');
@@ -26,7 +27,7 @@ function report(id: string, last: number, consensusId: string): DecisionReport {
     decision: 'PAPER_TRADE', opportunity: { score: 70, version: 'v', factors: [], missing: [] } as any } as DecisionReport;
 }
 
-const packet = (w: { id: string; dependencyGroup: string }, stance: string) => ({ worker_id: w.id, stance, dependency_group: w.dependencyGroup });
+const packet = (w: { id: string; dependencyGroup: string; version: string }, stance: string, version = w.version) => ({ worker_id: w.id, worker_version: version, stance, dependency_group: w.dependencyGroup });
 
 describe('worker reliability from verified outcomes', () => {
   let id = ''; let last = 0;
@@ -93,5 +94,34 @@ describe('worker reliability from verified outcomes', () => {
     for (let i = 0; i < 4; i++) trade(i % 2 === 0, [packet(loner, 'SUPPORT')]);
     linkClosedTrades(Date.now() + 1);
     expect(workerReliability().workers.find((w) => w.id === loner.id)).toMatchObject({ status: 'NEEDS_EVIDENCE', votes: 4, stanceAccuracy: null });
+  });
+  it('discounts the SUPPORT of a worker whose supported trades lose significantly more than the base, and no other', () => {
+    // 60 alternating trades (base win rate 0.5): `bad` supports only the losers, `steady` supports every trade.
+    const bad = loner, steady = group[0];
+    for (let i = 0; i < 60; i++) { const win = i % 2 === 0; trade(win, [packet(bad, win ? 'OPPOSE' : 'SUPPORT'), packet(steady, 'SUPPORT')]); }
+    linkClosedTrades(Date.now() + 1, { batch: 100 });
+    const r = workerReliability();
+    const measured = r.workers.find((w) => w.id === bad.id)!;
+    expect(measured).toMatchObject({ status: 'MEASURED', supports: 30, supportDiscounted: true });
+    expect(measured.winRateWhenSupporting!.upper).toBeLessThan(r.sample.baseWinRate!.lower);
+    expect(r.workers.find((w) => w.id === steady.id)!.supportDiscounted).toBe(false);
+    expect(r.workers.filter((w) => w.supportDiscounted).map((w) => w.id)).toEqual([bad.id]);
+    expect(refreshSupportDiscounts(5).workers).toEqual([expect.objectContaining({ workerId: bad.id, workerVersion: bad.version, supports: 30 })]);
+    expect(storedSupportDiscounts()).toMatchObject({ computedAt: 5, workers: [{ workerId: bad.id }] });
+    expect(() => refreshSupportDiscounts(6, { name: 'engine', holder: 'not-the-leader', acquired_at: 1 } as any)).toThrow();
+    expect(storedSupportDiscounts()!.computedAt).toBe(5);
+  });
+
+  it('counts only votes of the current worker version and only hash-intact records', () => {
+    for (let i = 0; i < 30; i++) trade(i % 2 === 0, [packet(loner, 'OPPOSE', '0.0.0-old')]);
+    trade(true, [packet(group[0], 'SUPPORT')]);
+    linkClosedTrades(Date.now() + 1);
+    expect(workerReliability().workers.find((w) => w.id === loner.id)).toMatchObject({ status: 'NEEDS_EVIDENCE', votes: 0 });
+    const last = get<{ position_id: string }>('SELECT position_id FROM ditas_trade_outcomes ORDER BY closed_at DESC, position_id DESC LIMIT 1')!.position_id;
+    run('DROP TRIGGER ditas_trade_outcomes_no_update');
+    run('UPDATE ditas_trade_outcomes SET net_pnl=net_pnl+1 WHERE position_id=?', last);
+    const r = workerReliability();
+    expect(r.sample.verifiedTradesWithEvidence).toBe(30);
+    expect(r.workers.find((w) => w.id === group[0].id)!.votes).toBe(0);
   });
 });

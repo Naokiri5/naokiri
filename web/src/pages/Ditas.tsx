@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
-import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
+import { Action, Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
+import { StepUp } from './Trading';
 
 const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Intelligence evaluation', 'Foundation coverage'];
 const count = (v: unknown) => Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0;
 
-/** Read-only DITAS evidence. No control, strategy promotion, simulation or execution authority. */
+/** DITAS evidence. No strategy promotion, simulation or execution authority; the only action is the owner's step-up
+ * acknowledgement of investigated evidence-integrity findings, which lets new paper entries resume. */
 export function Ditas() {
   const [cohort, setCohort] = useState('');
   const { data, error, loading, reload } = useApi(`/api/ditas${cohort ? `?cohort=${encodeURIComponent(cohort)}` : ''}`, { topics: ['scan', 'decision', 'order', 'position', 'mode'], every: 30_000 });
@@ -72,7 +74,7 @@ export function Ditas() {
       <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
     {tab === 'Execution quality' && <ExecutionQuality refreshKey={refreshKey} />}
-    {tab === 'Intelligence evaluation' && <div className="col" style={{ gap: 14 }}><IntelligenceEvaluation refreshKey={refreshKey} /><EvidenceCoverage refreshKey={refreshKey} /></div>}
+    {tab === 'Intelligence evaluation' && <div className="col" style={{ gap: 14 }}><EvidenceIntegrity refreshKey={refreshKey} /><IntelligenceEvaluation refreshKey={refreshKey} /><EvidenceCoverage refreshKey={refreshKey} /></div>}
     {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibrationStatus} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
@@ -146,6 +148,31 @@ function IntelligenceEvaluation({ refreshKey }: { refreshKey: number }) {
         <td>{a.metrics ? <>{evaluationSummary(a)}<details><summary className="hint">Details</summary><pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(a.metrics, null, 2)}</pre></details></> : <span className="hint">{a.note}</span>}</td></tr>)}
     </tbody></table></div>}
     {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
+  </Card>;
+}
+
+/** Entry pause on broken closed-trade evidence. Exits never pause. Acknowledging re-enables entries, so it needs step-up. */
+function EvidenceIntegrity({ refreshKey }: { refreshKey: number }) {
+  const { data, error, loading, reload } = useApi<any>('/api/evidence-integrity', { topics: ['position'], every: 60_000 });
+  useEffect(() => { if (refreshKey) reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the page Refresh button also reloads this panel
+  const [credential, setCredential] = useState('');
+  // Sent back exactly as shown, so the server acknowledges only the version the owner reviewed.
+  const acknowledgeable: { positionId: string; kind: string; storedHash: string; contentHash: string | null }[] = data ? [...data.findings.mismatched, ...data.findings.tampered] : [];
+  return <Card title="Evidence integrity" right={data && <Badge v={data.ok ? 'ENTRIES ALLOWED' : 'NEW ENTRIES PAUSED'} tone={data.ok ? 'b-good' : 'b-bad'} />}>
+    <ErrorLine e={error} />
+    {!data && loading && <div role="status" aria-live="polite"><Empty>Loading evidence integrity...</Empty></div>}
+    {data && <div className="col" style={{ gap: 8 }}>
+      <div className="hint">New paper entries pause while a settlement disagrees with the ledger, a closed trade stays unlinked, or an outcome record fails its hash check. Exits and stops keep running.</div>
+      {data.reasons.map((r: string) => <div key={r}>{r}</div>)}
+      {data.findings.unlinked.length > 0 && <div className="hint">Unlinked trades clear when the linker succeeds; they cannot be acknowledged: <span className="mono">{data.findings.unlinked.join(', ')}</span></div>}
+      {acknowledgeable.length > 0 && <div className="col" style={{ gap: 6 }}>
+        <div className="hint">Records to investigate (see the trade chain in the Decision ledger): <span className="mono">{acknowledgeable.map((f) => `${f.positionId} (${f.kind})`).join(', ')}</span></div>
+        <div className="row"><StepUp value={credential} onChange={setCredential} />
+          <Action className="primary" label="Acknowledge investigated records (step-up)" confirm="Acknowledging lets new paper entries resume. Continue?"
+            run={async () => { await api('/api/evidence-integrity/acknowledge', { body: { records: acknowledgeable, password: credential } }); setCredential(''); reload(); }} /></div>
+      </div>}
+      <div className="hint">Hash check: {data.hashCheck.checkedAt ? fmt.time(data.hashCheck.checkedAt) : 'not run yet'}{data.hashCheck.lastError ? ` (last attempt failed: ${data.hashCheck.lastError})` : ''}</div>
+    </div>}
   </Card>;
 }
 

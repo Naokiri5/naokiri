@@ -18,6 +18,8 @@ import { recordAutonomicObservation, recordLearningEvidence, resetInternalProces
 import { recentInternalLearningEvidence } from '../ditas/service.js';
 import { verifyDueForecasts } from '../ditas/forecastVerifier.js';
 import { linkClosedTrades } from '../ditas/tradeOutcomes.js';
+import { refreshOutcomeHashCheck } from '../ditas/evidenceIntegrity.js';
+import { refreshSupportDiscounts } from '../workers/reliability.js';
 import { refreshSettingsCapabilitySnapshot } from '../knowledge/settingsCapabilities.js';
 import { CAPABILITY_REFRESH_INTERVAL_MS } from '../knowledge/capabilitySnapshot.js';
 import { bus } from '../core/bus.js';
@@ -282,7 +284,15 @@ const backgroundLane = () => runLane('background', async (lease) => {
   if (!stillLeader(lease)) return;
   // Closed-trade feedback first: link settled positions to their decision, snapshot and verified ledger settlement, so
   // the health check below decides on the newest verified evidence. A linking failure never skips the health check.
-  try { linkClosedTrades(Date.now(), { fence: lease }); } catch (error) { botStatus.lastError = `trade-outcomes: ${errorText(error).slice(0, 200)}`; }
+  try {
+    const linked = linkClosedTrades(Date.now(), { fence: lease });
+    if (linked.failed.length) botStatus.lastError = `trade-outcomes: could not link ${linked.failed.slice(0, 5).join(', ')}`;
+  } catch (error) { botStatus.lastError = `trade-outcomes: ${errorText(error).slice(0, 200)}`; }
+  if (!stillLeader(lease)) return;
+  // Hash verification of every outcome record; the risk gate pauses new entries on an unacknowledged failure.
+  try { refreshOutcomeHashCheck(Date.now(), lease); } catch (error) { botStatus.lastError = `evidence-integrity: ${errorText(error).slice(0, 200)}`; }
+  if (!stillLeader(lease)) return;
+  try { refreshSupportDiscounts(Date.now(), lease); } catch (error) { botStatus.lastError = `worker-reliability: ${errorText(error).slice(0, 200)}`; }
   if (!stillLeader(lease)) return;
   const suspended = checkStrategyHealth(lease);
   // Reuse the background lane and canonical memory; never delay protective exits.
