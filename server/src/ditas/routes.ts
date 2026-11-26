@@ -2,6 +2,7 @@ import { executionQuality } from './execution.js';
 import { strategyOutcomeSummary, tradeOutcomes, verifyTradeOutcomes } from './tradeOutcomes.js';
 import { intelligenceEvaluation } from './evaluation.js';
 import { reconstructTradeChain } from './evidenceChain.js';
+import { evidenceCoverage } from './evidenceCoverage.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../core/audit.js';
@@ -16,6 +17,7 @@ export async function ditasRoutes(app: FastifyInstance) {
   app.get('/api/ditas/trade-outcomes/summary', async () => strategyOutcomeSummary());
   app.get('/api/ditas/trade-outcomes/verify', async () => verifyTradeOutcomes());
   app.get('/api/ditas/evaluation', async () => intelligenceEvaluation());
+  app.get('/api/ditas/evidence-coverage', async req => { const q = z.object({ decisions: z.coerce.number().int().min(1).max(1000).default(200), trades: z.coerce.number().int().min(1).max(1000).default(200) }).parse(req.query); return evidenceCoverage(q); });
   const id = z.string().min(1).max(150);
   const params = (r: any) => z.object({ id }).parse(r.params).id;
   app.get('/api/ditas/trade-outcomes/:id/chain', async (req, reply) => { const chain = reconstructTradeChain(params(req)); return chain ?? reply.code(404).send({ error: 'position not found' }); });

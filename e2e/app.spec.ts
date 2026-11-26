@@ -353,6 +353,8 @@ test('DITAS intelligence evaluation reports areas without evidence honestly', as
   await expect(page.getByText('PROBABILITY', { exact: true })).toBeVisible();
   await expect(page.getByText('NEEDS_EVIDENCE').first()).toBeVisible();
   await expect(page.getByText(/Research scores and QCI votes are not probabilities/)).toBeVisible();
+  await expect(page.getByText('Evidence coverage')).toBeVisible();
+  await expect(page.getByText(/Session to settled outcome, every link checked/)).toBeVisible();
 });
 
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });

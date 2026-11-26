@@ -72,7 +72,7 @@ export function Ditas() {
       <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
     {tab === 'Execution quality' && <ExecutionQuality refreshKey={refreshKey} />}
-    {tab === 'Intelligence evaluation' && <IntelligenceEvaluation refreshKey={refreshKey} />}
+    {tab === 'Intelligence evaluation' && <div className="col" style={{ gap: 14 }}><IntelligenceEvaluation refreshKey={refreshKey} /><EvidenceCoverage refreshKey={refreshKey} /></div>}
     {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibrationStatus} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
@@ -144,6 +144,27 @@ function IntelligenceEvaluation({ refreshKey }: { refreshKey: number }) {
         <td><Badge v={a.status} tone={a.status === 'MEASURED' ? undefined : 'b-warn'} /></td>
         <td className="mono">{a.sample} / {a.minimumSample}</td>
         <td>{a.metrics ? <>{evaluationSummary(a)}<details><summary className="hint">Details</summary><pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(a.metrics, null, 2)}</pre></details></> : <span className="hint">{a.note}</span>}</td></tr>)}
+    </tbody></table></div>}
+    {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
+  </Card>;
+}
+
+/** How much of what BrainOS decided and traded is backed by complete, classified evidence (EVIDENCE Omega). */
+function EvidenceCoverage({ refreshKey }: { refreshKey: number }) {
+  const { data, error, loading, reload } = useApi<any>('/api/ditas/evidence-coverage', { topics: ['decision', 'position'] });
+  useEffect(() => { if (refreshKey) reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the page Refresh button also reloads this panel
+  const classes = (counts: Record<string, number>) => Object.entries(counts).map(([k, n]) => `${k} ${n}`).join(' | ') || 'none';
+  return <Card title="Evidence coverage" right={<Badge v={data?.label ?? 'PAPER'} tone="b-violet" />} flush>
+    <ErrorLine e={error} />
+    {!data && loading && <div role="status" aria-live="polite"><Empty>Loading evidence coverage...</Empty></div>}
+    {data && <div className="tablewrap"><table><thead><tr><th>Records</th><th>Sample</th><th>Complete</th><th>Classification</th></tr></thead><tbody>
+      <tr><td><b>Decisions</b><div className="hint">Snapshot, worker findings, risk decision and decision record</div></td>
+        <td className="mono">{data.decisions.sample}</td><td className="mono">{data.decisions.fullyEvidenced}</td>
+        <td>{Object.entries(data.decisions.byKind).map(([k, v]) => <div key={k}><span className="hint">{k}:</span> {classes(v as Record<string, number>)}</div>)}</td></tr>
+      <tr><td><b>Closed trades</b><div className="hint">Session to settled outcome, every link checked</div></td>
+        <td className="mono">{data.closedTrades.sample}</td><td className="mono">{data.closedTrades.completeChains}</td>
+        <td><div><span className="hint">Settlement:</span> {classes(data.closedTrades.settlement)}</div>
+          {data.closedTrades.gaps.map((g: any) => <div key={g.gap} className="hint">{g.gap}: {g.count}</div>)}</td></tr>
     </tbody></table></div>}
     {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
   </Card>;
