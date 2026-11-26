@@ -29,6 +29,7 @@ import { readIndicators, INDICATOR_SPECIALISTS } from '../workers/indicators.js'
 import { WORKERS, DOMAINS, REQUIRED_DOMAINS } from '../workers/registry.js';
 import { POOL, quarantined, releaseQuarantine } from '../workers/runtime.js';
 import { workerEffectiveness } from '../workers/effectiveness.js';
+import { workerReliability } from '../workers/reliability.js';
 import { activityFeed, overviewSnapshot } from '../dashboard/overview.js';
 import { QCI_POLICY, DOMAIN_WEIGHTS } from '../qci/coordinator.js';
 import { providers } from '../providers/http.js';
@@ -387,6 +388,8 @@ export async function routes(app: FastifyInstance) {
   app.post('/api/analyze', async (req) => { const { symbol, strategyId } = z.object({ symbol: z.string().min(1).max(20), strategyId: z.string().max(60).optional() }).parse(req.body); const i = market.bySymbol(symbol); if (!i) throw httpError(404, 'unknown symbol'); limit(req, 'analyze', 'analysis'); return analyzeInstrument(i.id, strategyId); });
 
   // ── AI intelligence (workers / QCI) ──
+  // Outcome-linked worker reliability (performance memory): read-only, never changes weights or thresholds.
+  app.get('/api/intelligence/reliability', async () => workerReliability());
   app.get('/api/intelligence', async () => {
     const stats = new Map(all<any>('SELECT * FROM worker_stats').map((s) => [s.worker_id, s]));
     const recs = all<any>('SELECT id, instrument, state, created_at, record FROM consensus_records ORDER BY created_at DESC LIMIT 40').map((r) => { const x = P<any>(r.record); delete x.packets; return x; });
