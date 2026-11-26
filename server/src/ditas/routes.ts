@@ -1,6 +1,7 @@
 import { executionQuality } from './execution.js';
 import { strategyOutcomeSummary, tradeOutcomes, verifyTradeOutcomes } from './tradeOutcomes.js';
 import { intelligenceEvaluation } from './evaluation.js';
+import { reconstructTradeChain } from './evidenceChain.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../core/audit.js';
@@ -17,6 +18,7 @@ export async function ditasRoutes(app: FastifyInstance) {
   app.get('/api/ditas/evaluation', async () => intelligenceEvaluation());
   const id = z.string().min(1).max(150);
   const params = (r: any) => z.object({ id }).parse(r.params).id;
+  app.get('/api/ditas/trade-outcomes/:id/chain', async (req, reply) => { const chain = reconstructTradeChain(params(req)); return chain ?? reply.code(404).send({ error: 'position not found' }); });
   const candle = z.object({ t: z.number().int().nonnegative(), o: z.number().positive(), h: z.number().positive(), l: z.number().positive(), c: z.number().positive(), v: z.number().nonnegative(), closeTime: z.number().optional() });
   app.get('/api/ditas', async req => ditasOverview(z.object({ cohort: z.string().max(1000).optional() }).parse(req.query).cohort));
   app.get('/api/ditas/verify', async () => verifyMemory());

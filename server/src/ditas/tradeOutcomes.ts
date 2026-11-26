@@ -150,6 +150,13 @@ export function tradeOutcomes(limit = 100) {
   return all<any>('SELECT * FROM ditas_trade_outcomes ORDER BY closed_at DESC, position_id LIMIT ?', limit).map(outcomeRow);
 }
 
+/** One outcome record by position, with whether its stored hash still matches its content. */
+export function tradeOutcome(positionId: string): { outcome: TradeOutcome; intact: boolean } | null {
+  const r = get<any>('SELECT * FROM ditas_trade_outcomes WHERE position_id=?', positionId);
+  if (!r) return null;
+  return { outcome: outcomeRow(r), intact: hashOf({ ...outcomeRow(r), payload: r.payload }) === r.hash };
+}
+
 /** Recompute every record hash; any difference means a record no longer matches what was linked. */
 export function verifyTradeOutcomes() {
   const rows = all<any>('SELECT * FROM ditas_trade_outcomes ORDER BY closed_at, position_id');
