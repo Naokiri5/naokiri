@@ -135,11 +135,12 @@ Not modeled: worker/QCI consensus, the decision engine, cross-venue checks, cool
 multiple instruments and funding settlement. Results are research evidence about a strategy capsule and its execution
 costs. No real dataset has been supplied, so no strategy performance has been measured.
 
-Finding from the first synthetic run: when the 25% notional cap sizes a position (tight stops), the risk gate sizes it at
-the top ask while the OMS enforces the cap at the executed price. Any fill worse than the top ask is then refused with
-`POSITION_NOTIONAL_LIMIT`. This is deliberate fail-closed behavior on the paper path, but it means capped setups are
-skipped whenever an order walks the book. Sizing the cap against the worst permitted entry in `risk/gate.ts` would
-fix it; that change needs its own trading-risk review.
+Finding from the first synthetic run (resolved, inventory W11): when the 25% notional cap sized a position (tight
+stops), the risk gate sized it at the top ask while the OMS enforced the cap at the executed price, so any fill worse
+than the top ask was refused with `POSITION_NOTIONAL_LIMIT`. Since `c98c8c1` the gate sizes the cap at the worst
+permitted entry (top ask plus `maxSlippageBps`), so a fill within the slippage policy fits the cap. The OMS check
+remains as a backstop and has its own test (`oms-notional-backstop.test.ts`). An independent trading-risk review found
+no blockers; its test-coverage findings were addressed in the follow-up commit.
 
 ## 6. Remaining gaps, in recommended order
 

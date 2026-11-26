@@ -112,7 +112,8 @@ describe('isolated historical session simulation', () => {
     // 5 bps of modeled slippage is within the 20 bps policy: the entry is no longer refused by the cap.
     const slipped = await run([book(C, P), book(C + 1_000, P)], {}, tightStop);
     expect(slipped).toMatchObject({ entries: 1, rejections: {} });
-    expect(slipped.warnings.some((w) => w.includes('enforces the cap at the executed price'))).toBe(false);
+    const open = slipped.openPosition!;
+    expect(open.qtyLeft * open.entryPrice).toBeLessThanOrEqual(sizing.maxNotional + 1e-9);
     // Slippage beyond the policy is still refused, by the slippage rule.
     expect(await run([book(C, P), book(C + 1_000, P)], { slippageBps: 25 }, tightStop)).toMatchObject({ entries: 0, rejections: { SLIPPAGE: 1 } });
   });
@@ -165,17 +166,24 @@ describe('isolated historical session simulation', () => {
 });
 
 describe('sizing parity with the canonical risk gate', () => {
-  it('matches evaluateRisk sizing for the default policy on a funded, flat paper account', () => {
+  // 5% stop: the risk budget sizes the position. 1% stop: the notional cap sizes it at the worst permitted entry.
+  it.each([['risk budget', 0.95, false], ['notional cap', 0.99, true]] as const)(
+    'matches evaluateRisk sizing when the %s binds on a funded, flat paper account', (_label, stopFraction, capBinds) => {
     freshDb();
     market.reset();
     const { inst, last } = seedInstrument('ETHUSDT');
     acceptPolicy('owner', DEFAULT_POLICY);
     ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
-    const stop = last * 0.95;
+    const stop = last * stopFraction;
     const gate = evaluateRisk({ instrumentId: inst.id, strategyId: 'trend_pullback', side: 'buy', entryPrice: last, stopPrice: stop,
       idempotencyKey: 'parity', traceId: 'parity' }).sizing!;
-    const sim = simulatedEntrySizing(DEFAULT_POLICY, 10_000, 10_000, market.price(inst.id)!.ask, stop, inst.stepSize);
+    const ask = market.price(inst.id)!.ask;
+    const sim = simulatedEntrySizing(DEFAULT_POLICY, 10_000, 10_000, ask, stop, inst.stepSize);
     for (const key of ['qty', 'riskBudget', 'maxNotional', 'perUnitLoss', 'conservativeStopFill'] as const)
       expect(sim[key], key).toBeCloseTo(gate[key], 9);
+    const cappedNotional = gate.qty * ask * (1 + DEFAULT_POLICY.maxSlippageBps / 10_000);
+    // Step rounding keeps the capped notional within one step of the cap.
+    if (capBinds) expect(gate.maxNotional - cappedNotional).toBeLessThan(inst.stepSize * ask * 1.01);
+    else expect(cappedNotional).toBeLessThan(gate.maxNotional * 0.9);
   });
 });

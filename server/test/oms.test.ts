@@ -475,7 +475,9 @@ describe('Order-book freshness and fill accounting', () => {
     const book = market.deep.get(id)!.book!;
     const ask = market.price(id)!.ask!;
     book.asks = [[ask, 0.05], [ask * 1.01, 50]];
-    expect(submitEntry(report(id, last), 'bot')).toMatchObject({ ok: false });
+    const result = submitEntry(report(id, last), 'bot');
+    expect(result).toMatchObject({ ok: false });
+    expect(result.reason).toMatch(/^LAST_MOMENT_RISK_DENY: SLIPPAGE/);
     expect(openPositions()).toHaveLength(0);
     expect(all('SELECT id FROM fills')).toHaveLength(0);
     expect(accountState().cash).toBe(10_000);
