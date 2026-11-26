@@ -48,9 +48,13 @@ Extends the existing stream instead of adding a second gateway (`server/src/core
 - Every bus event is journaled with id `<bootId>:<sequence>` in a bounded ring (512 events). SSE frames carry `id:`.
 - On reconnect the browser resends `Last-Event-ID`; the server replays exactly the missed events, in order, without
   duplicates. If it cannot (another process booted, the gap is older than the ring, malformed or future id) it sends
-  `event: resync` and every live view refetches authoritative state from the REST API.
+  `event: resync`, and every live view whose `useApi` hook declares the resync topic refetches authoritative state
+  from the REST API. Views whose hooks declare no topics do not refetch on resync — for example
+  `useApi('/api/settings')` in `web/src/pages/Account.tsx` waits for a manual reload — so "every live view
+  refetches" does not hold for them.
 - `?topics=order,position` subscribes to listed topics only; unknown topics are refused (400).
-- A `hello` frame announces the schema version and current id.
+- A `hello` frame announces the schema version and current id, and carries that id as its SSE `id:` so a
+  reconnecting browser resends it as `Last-Event-ID`.
 - Telemetry stays notification-only and read-only: it says *what changed*; state is always reread from its owner, so
   a lost or reordered event can never alter orders, positions or balances. A failing subscriber cannot affect others.
 

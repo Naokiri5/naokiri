@@ -263,20 +263,29 @@ export async function routes(app: FastifyInstance) {
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff', 'x-request-id': String(req.id) });
     streams++;
     let closed = false; let backlog = 0;
+    // Declared before close(): close() can run during replay (a stalled client
+    // hitting the backlog limit), and a const declared after the replay block
+    // would throw a ReferenceError from the temporal dead zone there.
+    let ka: ReturnType<typeof setInterval>;
     const close = () => { if (closed) return; closed = true; streams--; unsubscribe(); clearInterval(ka); reply.raw.end(); };
     const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
     const send = (e: TelemetryEvent) => { if (!wanted || wanted.has(e.topic)) write(`id: ${e.id}\nevent: ${e.topic}\ndata: ${JSON.stringify(e.payload ?? null)}\n\n`); };
     // Subscribe before replaying so nothing published in between is lost; replayed ids are skipped if seen live.
     let replayedThrough = 0;
     const unsubscribe = telemetry.subscribe((e) => { if (e.sequence > replayedThrough) send(e); });
-    reply.raw.write(`: connected\nevent: hello\ndata: ${JSON.stringify({ schemaVersion: TELEMETRY_SCHEMA_VERSION, lastEventId: telemetry.lastId })}\n\n`);
+    // The hello frame carries an SSE id: so a reconnecting browser resends it
+    // as Last-Event-ID (EventSource only resends ids from SSE frames, it does
+    // not read the lastEventId in this JSON body) and the server can replay
+    // exactly what was missed, or send resync when the id cannot be replayed.
+    reply.raw.write(`: connected\nid: ${telemetry.lastId}\nevent: hello\ndata: ${JSON.stringify({ schemaVersion: TELEMETRY_SCHEMA_VERSION, lastEventId: telemetry.lastId })}\n\n`);
+    // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.
+    // Started before replay so close() during replay has a live interval to clear.
+    ka = setInterval(() => (auth.validSession(token) ? write(': ka\n\n') : close()), 20_000);
     if (lastEventId !== undefined) {
       const replay = telemetry.since(lastEventId);
       if (replay.resync) write(`event: resync\ndata: ${JSON.stringify({ reason: replay.reason })}\n\n`);
       else for (const e of replay.events) { send(e); replayedThrough = e.sequence; }
     }
-    // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.
-    const ka = setInterval(() => (auth.validSession(token) ? write(': ka\n\n') : close()), 20_000);
     req.raw.on('close', close);
   });
 

@@ -34,7 +34,8 @@ describe('telemetry journal', () => {
   });
 
   it('keeps the ring bounded and isolates failing subscribers', () => {
-    const journal = new TelemetryJournal(4);
+    const errors: unknown[] = [];
+    const journal = new TelemetryJournal(4, (error) => { errors.push(error); });
     const seen: number[] = [];
     journal.subscribe(() => { throw new Error('closed socket'); });
     const stop = journal.subscribe((e) => seen.push(e.sequence));
@@ -42,8 +43,21 @@ describe('telemetry journal', () => {
     stop();
     journal.record('ticker', null);
     expect(seen).toHaveLength(100);
+    // Subscriber isolation is kept, but the failures are reported, not swallowed.
+    // 101, not 100: the failing subscriber is still attached for the final record after stop().
+    expect(errors).toHaveLength(101);
+    expect(errors[0]).toBeInstanceOf(Error);
     expect(journal.since(`${journal.bootId}:97`)).toMatchObject({ resync: false, events: [{ sequence: 98 }, { sequence: 99 }, { sequence: 100 }, { sequence: 101 }] });
     expect(() => new TelemetryJournal(0)).toThrow('TELEMETRY_CAPACITY_INVALID');
+  });
+
+  it('snapshots payloads so later mutation cannot corrupt replayed events', () => {
+    const journal = new TelemetryJournal(10);
+    const payload = { n: 1 };
+    const event = journal.record('order', payload);
+    payload.n = 99;
+    const replay = journal.since(`${journal.bootId}:0`);
+    expect(replay).toMatchObject({ resync: false, events: [{ sequence: event.sequence, payload: { n: 1 } }] });
   });
 
   it('journals every bus event', () => {
@@ -110,6 +124,16 @@ describe('live stream (authenticated, read-only, gap-free reconnection)', () => 
     expect(replayed).not.toContain('"orderId":"o1"');
     expect(replayed.indexOf('"positionId":"p1"')).toBeLessThan(replayed.indexOf('"orderId":"o2"'));
     expect(replayed.match(/"orderId":"o2"/g)).toHaveLength(1);
+  });
+
+  it('hello carries a replayable SSE id, so a reconnect with no cursor loses nothing', async () => {
+    const live = stream('/api/stream');
+    expect(await live.response).toBe(200);
+    const text = await live.until((t) => t.includes('event: hello'));
+    const helloId = /id: ([0-9a-f]{8}:\d+)\nevent: hello/.exec(text)![1];
+    // The hello id is a journal id the server can replay from (not malformed,
+    // restarted or in the future): a reconnect resending it gets replay, not resync.
+    expect(telemetry.since(helloId)).toMatchObject({ resync: false });
   });
 
   it('tells a client to resync when its last id cannot be replayed', async () => {

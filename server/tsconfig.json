@@ -9,6 +9,12 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "types": ["node"],
+    // Vercel's TypeScript 7 builder type-checks from a tsconfig inherited in a
+    // temporary directory, so the default @types search no longer finds
+    // @types/node (TS2688) even though it is installed. Pin the search to the
+    // workspace install (../node_modules, where npm workspaces hoist it) and
+    // to a server-local install (./node_modules, when server/ is the root).
+    "typeRoots": ["./node_modules/@types", "../node_modules/@types"],
     "noEmit": true
   },
   "include": ["src", "test"]
