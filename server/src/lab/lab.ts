@@ -1,6 +1,7 @@
 import { STRATEGIES, strategyById } from './strategies.js';
 import { BACKTEST_MODEL_VERSION, backtest, stats, monteCarlo, type BtResult, type BtTrade } from './backtest.js';
 import { qualifyEvidence } from './qualification.js';
+import { verifiedStrategyReturns } from '../ditas/tradeOutcomes.js';
 import { fetchProvider } from '../providers/http.js';
 import { all, get, run, tx, J, P } from '../db/db.js';
 import { uid } from '../core/util.js';
@@ -159,25 +160,57 @@ export function paperStats(strategyId: string, nowTs = Date.now()) {
   const expectancyR = scale === 0 ? 0 : (returns.reduce((total, result) => total + result / scale, 0) / trades) * scale;
   return { trades, expectancyR, winRate: returns.filter(result => result > 0).length / trades };
 }
-/** Strategy health (Part 18.5): suspend when paper expectancy decays well below backtest after enough trades. */
+/** Evidence rule for automatic suspension: ledger-verified trades, minimum sample, one-sided 95% upper bound. */
+export const VERIFIED_LOSS_RULE = Object.freeze({ minTrades: 30, window: 100, z: 1.96 });
+
+/**
+ * Statistically significant loss on ledger-verified paper trades of the current version: the upper end of the 95%
+ * interval on mean net R is below zero. Returns the evidence when the rule fires, otherwise null. Risk-reducing only.
+ */
+export function verifiedLossEvidence(strategyId: string) {
+  const version = strategyById(strategyId)?.version;
+  if (!version) return null;
+  const rs = verifiedStrategyReturns(strategyId, version, VERIFIED_LOSS_RULE.window);
+  if (rs.length < VERIFIED_LOSS_RULE.minTrades) return null;
+  const mean = rs.reduce((a, r) => a + r, 0) / rs.length;
+  const sd = Math.sqrt(rs.reduce((a, r) => a + (r - mean) ** 2, 0) / (rs.length - 1));
+  const upper = mean + VERIFIED_LOSS_RULE.z * sd / Math.sqrt(rs.length);
+  return Number.isFinite(upper) && upper < 0 ? { trades: rs.length, meanNetR: mean, upperNetR: upper } : null;
+}
+
+/**
+ * Strategy health (Part 18.5). Suspends a PAPER strategy when either rule fires:
+ *  1. paper expectancy decays well below backtest after enough trades (heuristic, position records);
+ *  2. ledger-verified paper trades show a statistically significant net loss (verifiedLossEvidence).
+ * Suspension only reduces risk; re-enabling stays an owner action and requires strategy qualification.
+ */
 export function checkStrategyHealth(fence?: LeaseFence) {
   const flagged: string[] = [];
   const nowTs = Date.now();
   const hasPaperStatus = (id: string) => !!get("SELECT 1 FROM strategies WHERE id=? AND status='PAPER'", id);
   for (const s of STRATEGIES) {
     if (!hasPaperStatus(s.id)) continue;
-    const p = paperStats(s.id, nowTs);
-    if (!p || p.trades < 15 || p.expectancyR >= -0.3) continue;
-    const b = strategyStats(s.id);
-    if (b && b.expectancyR <= p.expectancyR + 0.3) continue;
+    const note = decayNote(s.id, nowTs) ?? verifiedLossNote(s.id);
+    if (!note) continue;
     const suspended = tx(() => {
       assertWriteFence(fence);
       if (!hasPaperStatus(s.id)) return false;
-      setStrategyStatus('strategy-health-monitor', s.id, 'SUSPENDED', `auto-suspended: paper expectancy ${p.expectancyR.toFixed(2)}R over ${p.trades} trades`);
+      setStrategyStatus('strategy-health-monitor', s.id, 'SUSPENDED', note);
       return true;
     });
     if (suspended) flagged.push(s.id);
   }
   return flagged;
+}
+function decayNote(strategyId: string, nowTs: number) {
+  const p = paperStats(strategyId, nowTs);
+  if (!p || p.trades < 15 || p.expectancyR >= -0.3) return null;
+  const b = strategyStats(strategyId);
+  if (b && b.expectancyR <= p.expectancyR + 0.3) return null;
+  return `auto-suspended: paper expectancy ${p.expectancyR.toFixed(2)}R over ${p.trades} trades`;
+}
+function verifiedLossNote(strategyId: string) {
+  const e = verifiedLossEvidence(strategyId);
+  return e ? `auto-suspended: verified net loss ${e.meanNetR.toFixed(2)}R (95% upper ${e.upperNetR.toFixed(2)}R) over ${e.trades} ledger-verified trades` : null;
 }
 export function _universeSymbols() { return market.universe.map((id) => market.instruments.get(id)?.symbol).filter(Boolean) as string[]; }

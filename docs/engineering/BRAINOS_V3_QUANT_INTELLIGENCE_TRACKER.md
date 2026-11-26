@@ -23,7 +23,7 @@ done only when reproducible evidence in this repository shows it. Updated 2026-1
 | P2 Strategy evolution | **First slice done** | See below. | Wire the genome funnel to real Strategy Lab experiments (needs real datasets); champion-challenger; CSCV PBO over genome return matrices. |
 | P3 Decision quality and metacognition | Not started | QCI dependency groups, Choice shadow arbitration exist. | Specialist reliability, knowledge-gap detection, counterfactuals. |
 | P4 Trade lifecycle intelligence | Partial | Closed-trade linker (`ditas/tradeOutcomes.ts`), execution quality (`ditas/execution.ts`). | Entry quality and exit effectiveness from linked outcomes. |
-| P5 Persistent adaptive learning | Partial | Immutable outcome-linked records with ledger-verified settlement. | Error memory, drift, research updates from verified outcomes. |
+| P5 Persistent adaptive learning | Partial | Immutable outcome-linked records with ledger-verified settlement; verified losses now suspend strategies automatically. | Error memory, drift, research updates from verified outcomes. |
 | P6 Portfolio intelligence | Existing, incomplete | `portfolio/correlation.ts`, risk gate concentration rules. | Stress tests, downside dependence, durable reservations (P0.3). |
 | P7 Prospective PAPER validation | Not started | - | Frozen-baseline comparison on Railway (volume resize and backup key first). |
 
@@ -44,6 +44,19 @@ done only when reproducible evidence in this repository shows it. Updated 2026-1
 - Tests: `overfitting.test.ts`, `qualification.test.ts`, additions to `brainos7-cognitive.test.ts` and `api.test.ts`.
   The shared backtest fixture is still labelled synthetic; it now carries a 60-trade cohort that qualifies, with
   explicit weak and legacy variants.
+
+## Active: automatic suspension on verified losses (P5, owner-approved 2026-11-26)
+
+The owner chose to make one evidence module act on its own. `lab/lab.ts` `checkStrategyHealth` now suspends a PAPER
+strategy when either rule fires: the existing decay heuristic, or `verifiedLossEvidence`, which requires at least 30
+ledger-verified, hash-intact trades of the current version (most recent 100) whose 95% upper bound on mean net R is
+below zero. The suspension note records the evidence; the bot notifies the owner. It runs on the existing background
+lane, after the closed-trade linker so it uses the newest evidence. It only reduces risk: re-enabling stays an owner
+action and requires strategy qualification. Tests: `strategy-health-verified.test.ts` (fires once, minimum sample,
+non-significant mean, altered records excluded and mutation-checked, other versions, non-PAPER untouched).
+
+Not made active (owner chose not to, for now): blocking unqualified PAPER strategies, halting entries on broken
+evidence, and worker reliability adjusting QCI weights.
 
 ## Section 05: accuracy made measurable
 

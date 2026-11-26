@@ -157,6 +157,18 @@ export function tradeOutcome(positionId: string): { outcome: TradeOutcome; intac
   return { outcome: outcomeRow(r), intact: hashOf({ ...outcomeRow(r), payload: r.payload }) === r.hash };
 }
 
+/**
+ * Net R of the most recent ledger-verified, untampered trades of one strategy version, oldest first. Records whose
+ * hash no longer matches are excluded, so an altered record can never count as evidence for or against a strategy.
+ */
+export function verifiedStrategyReturns(strategy: string, version: string, limit = 100): number[] {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw new Error('limit must be an integer from 1 to 1000');
+  return all<any>(`SELECT * FROM ditas_trade_outcomes WHERE settlement='VERIFIED' AND strategy=? AND strategy_version=? AND net_r IS NOT NULL
+    ORDER BY closed_at DESC, position_id DESC LIMIT ?`, strategy, version, limit)
+    .filter((r) => hashOf({ ...outcomeRow(r), payload: r.payload }) === r.hash && Number.isFinite(r.net_r))
+    .map((r) => r.net_r as number).reverse();
+}
+
 /** Recompute every record hash; any difference means a record no longer matches what was linked. */
 export function verifyTradeOutcomes() {
   const rows = all<any>('SELECT * FROM ditas_trade_outcomes ORDER BY closed_at, position_id');

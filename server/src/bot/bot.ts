@@ -280,14 +280,16 @@ const backgroundLane = () => runLane('background', async (lease) => {
   try { compactConsensusEvidence(); } catch (error) { botStatus.lastError = `retention: ${errorText(error).slice(0, 200)}`; }
   backupPass();
   if (!stillLeader(lease)) return;
+  // Closed-trade feedback first: link settled positions to their decision, snapshot and verified ledger settlement, so
+  // the health check below decides on the newest verified evidence. A linking failure never skips the health check.
+  try { linkClosedTrades(Date.now(), { fence: lease }); } catch (error) { botStatus.lastError = `trade-outcomes: ${errorText(error).slice(0, 200)}`; }
+  if (!stillLeader(lease)) return;
   const suspended = checkStrategyHealth(lease);
   // Reuse the background lane and canonical memory; never delay protective exits.
   if (stillLeader(lease)) {
     try {
       await verifyDueForecasts(lease);
       if (!stillLeader(lease)) return;
-      // Closed-trade feedback: link settled positions to their decision, snapshot and verified ledger settlement.
-      linkClosedTrades(Date.now(), { fence: lease });
       recordLearningEvidence(recentInternalLearningEvidence());
     }
     catch (error) { botStatus.lastError = `learning-evidence: ${errorText(error).slice(0, 200)}`; }
