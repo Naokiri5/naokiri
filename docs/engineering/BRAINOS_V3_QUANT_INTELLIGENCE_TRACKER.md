@@ -19,7 +19,7 @@ done only when reproducible evidence in this repository shows it. Updated 2026-1
 | Phase | Status | Evidence | Remaining |
 |---|---|---|---|
 | P0 Architecture and accuracy baseline | In progress | Risk hardening (`RISK_AUTHORIZATION_HARDENING.md`); component ownership (`BRAINOS_V2_COMPONENT_INVENTORY.md`). | Exact-head CI; recorded strategy and forecast performance baseline on real data (none supplied). |
-| P1 Forecast and evidence intelligence | Existing, incomplete | `ditas/calibration.ts` (Brier, log loss, reliability bins), `ditas/forecastVerifier.ts`. | Connect verified outcomes per regime and horizon; `chart/scenarios.ts` weights stay labelled uncalibrated. |
+| P1 Forecast and evidence intelligence | Partial | `ditas/calibration.ts` (Brier, log loss, reliability bins), `ditas/forecastVerifier.ts`. | Connect verified outcomes per regime and horizon; `chart/scenarios.ts` weights stay labelled uncalibrated. |
 | P2 Strategy evolution | **First slice done** | See below. | Wire the genome funnel to real Strategy Lab experiments (needs real datasets); champion-challenger; CSCV PBO over genome return matrices. |
 | P3 Decision quality and metacognition | Not started | QCI dependency groups, Choice shadow arbitration exist. | Specialist reliability, knowledge-gap detection, counterfactuals. |
 | P4 Trade lifecycle intelligence | Partial | Closed-trade linker (`ditas/tradeOutcomes.ts`), execution quality (`ditas/execution.ts`). | Entry quality and exit effectiveness from linked outcomes. |
@@ -44,6 +44,18 @@ done only when reproducible evidence in this repository shows it. Updated 2026-1
 - Tests: `overfitting.test.ts`, `qualification.test.ts`, additions to `brainos7-cognitive.test.ts` and `api.test.ts`.
   The shared backtest fixture is still labelled synthetic; it now carries a 60-trade cohort that qualifies, with
   explicit weak and legacy variants.
+
+## Section 05: accuracy made measurable
+
+`server/src/ditas/evaluation.ts`, `GET /api/ditas/evaluation`, DITAS page tab "Intelligence evaluation". Six areas
+(directional, probability, entry, exit, regime, trading performance) computed only from ledger-verified closed-trade
+records and provider-verified forecast cohorts. Each area stays `NEEDS_EVIDENCE` with no metrics until it reaches its
+minimum sample (30 verified trades; 100 per forecast cohort; 30 per regime). Proportions use Wilson intervals, means
+use 95% intervals. PAPER only; read-only; no authority. Tests: `ditas-evaluation.test.ts`, e2e tab check.
+
+Deferred on purpose: a genome compiler. Genome entry and exit rule ids have no executable implementation, and the
+evaluator contract asks for Brier and drift values a rule backtest cannot honestly produce. Mapping genomes onto the
+three existing capsules would mislabel results, so it needs a design decision first.
 
 ## Independent trading-risk review
 

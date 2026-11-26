@@ -346,6 +346,15 @@ test('DITAS execution quality tab lists actual paper orders only', async () => {
   await expect(page.getByText(/Actual paper OMS records only/)).toBeVisible();
 });
 
+test('DITAS intelligence evaluation reports areas without evidence honestly', async () => {
+  await page.goto('/ditas');
+  await page.getByRole('tab', { name: 'Intelligence evaluation' }).click();
+  await expect(page.getByText('BrainOS intelligence evaluation')).toBeVisible();
+  await expect(page.getByText('PROBABILITY', { exact: true })).toBeVisible();
+  await expect(page.getByText('NEEDS_EVIDENCE').first()).toBeVisible();
+  await expect(page.getByText(/Research scores and QCI votes are not probabilities/)).toBeVisible();
+});
+
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });
 
 test('mobile layout has no horizontal overflow', async ({ browser }) => {

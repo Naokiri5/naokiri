@@ -1,5 +1,6 @@
 import { executionQuality } from './execution.js';
 import { strategyOutcomeSummary, tradeOutcomes, verifyTradeOutcomes } from './tradeOutcomes.js';
+import { intelligenceEvaluation } from './evaluation.js';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { audit } from '../core/audit.js';
@@ -13,6 +14,7 @@ export async function ditasRoutes(app: FastifyInstance) {
   app.get('/api/ditas/trade-outcomes', async req => tradeOutcomes(z.object({ limit: z.coerce.number().int().min(1).max(500).default(100) }).parse(req.query).limit));
   app.get('/api/ditas/trade-outcomes/summary', async () => strategyOutcomeSummary());
   app.get('/api/ditas/trade-outcomes/verify', async () => verifyTradeOutcomes());
+  app.get('/api/ditas/evaluation', async () => intelligenceEvaluation());
   const id = z.string().min(1).max(150);
   const params = (r: any) => z.object({ id }).parse(r.params).id;
   const candle = z.object({ t: z.number().int().nonnegative(), o: z.number().positive(), h: z.number().positive(), l: z.number().positive(), c: z.number().positive(), v: z.number().nonnegative(), closeTime: z.number().optional() });

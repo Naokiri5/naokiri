@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
 import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
 
-const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Foundation coverage'];
+const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Intelligence evaluation', 'Foundation coverage'];
 const count = (v: unknown) => Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0;
 
 /** Read-only DITAS evidence. No control, strategy promotion, simulation or execution authority. */
@@ -72,6 +72,7 @@ export function Ditas() {
       <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
     {tab === 'Execution quality' && <ExecutionQuality refreshKey={refreshKey} />}
+    {tab === 'Intelligence evaluation' && <IntelligenceEvaluation refreshKey={refreshKey} />}
     {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibrationStatus} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
@@ -111,6 +112,39 @@ function ExecutionQuality({ refreshKey }: { refreshKey: number }) {
         <td className="mono">{o.firstFillDelayMs == null ? '—' : `${o.firstFillDelayMs} ms`}</td></tr>)}
     </tbody></table></div>
     {data && !rows.length && <Empty>No paper orders yet.</Empty>}
+    {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
+  </Card>;
+}
+
+/** One-line summary of a measured area; the full metrics stay available under "Details". */
+function evaluationSummary(a: any): string {
+  const m = a.metrics; if (!m) return '';
+  const pct = (x: number) => `${fmt.num(x * 100, 1)}%`, ci = (v: any, f: (x: number) => string) => `${f(v.mean ?? v.rate)} (95% ${f(v.lower)} to ${f(v.upper)})`;
+  const r = (x: number) => `${fmt.num(x, 2)}R`;
+  switch (a.area) {
+    case 'DIRECTIONAL': return `Gross win rate ${ci(m.grossWinRate, pct)}`;
+    case 'PROBABILITY': return m.cohorts.map((c: any) => `${c.cohort}: Brier ${fmt.num(c.brierScore, 3)} (n=${c.sample})`).join(' | ');
+    case 'ENTRY': return `Adverse slippage ${ci(m.adverseSlippageBps, (x) => `${fmt.num(x, 1)} bps`)}, p90 ${fmt.num(m.p90Bps, 1)} bps`;
+    case 'EXIT': return `Captured ${ci(m.meanCaptureOfFavourableMove, pct)} of the favourable move`;
+    case 'REGIME': return m.regimes.map((g: any) => `${g.regime}: ${g.netR ? r(g.netR.mean) : 'needs evidence'} (n=${g.sample})`).join(' | ');
+    case 'PERFORMANCE': return `Net expectancy ${ci(m.netExpectancyR, r)}, max drawdown ${r(m.maxDrawdownR)}`;
+    default: return '';
+  }
+}
+
+/** Six kinds of accuracy from verified evidence only; areas below their minimum sample say so instead of guessing. */
+function IntelligenceEvaluation({ refreshKey }: { refreshKey: number }) {
+  const { data, error, loading, reload } = useApi<any>('/api/ditas/evaluation', { topics: ['position'] });
+  useEffect(() => { if (refreshKey) reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the page Refresh button also reloads this panel
+  return <Card title="BrainOS intelligence evaluation" right={<Badge v={data?.label ?? 'PAPER'} tone="b-violet" />} flush>
+    <ErrorLine e={error} />
+    {!data && loading && <div role="status" aria-live="polite"><Empty>Loading evaluation evidence...</Empty></div>}
+    {data && <div className="tablewrap"><table><thead><tr><th>Accuracy</th><th>Status</th><th>Evidence</th><th>Result</th></tr></thead><tbody>
+      {data.areas.map((a: any) => <tr key={a.area}><td><b>{a.area}</b><div className="hint">{a.question}</div></td>
+        <td><Badge v={a.status} tone={a.status === 'MEASURED' ? undefined : 'b-warn'} /></td>
+        <td className="mono">{a.sample} / {a.minimumSample}</td>
+        <td>{a.metrics ? <>{evaluationSummary(a)}<details><summary className="hint">Details</summary><pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(a.metrics, null, 2)}</pre></details></> : <span className="hint">{a.note}</span>}</td></tr>)}
+    </tbody></table></div>}
     {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
   </Card>;
 }
