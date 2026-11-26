@@ -171,6 +171,11 @@ const MIGRATIONS: string[] = [
   CREATE TRIGGER ditas_trade_outcomes_no_update BEFORE UPDATE ON ditas_trade_outcomes BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
   CREATE TRIGGER ditas_trade_outcomes_no_delete BEFORE DELETE ON ditas_trade_outcomes BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
   `,
+  /* 11 - Evidence integrity runs on every risk-gate evaluation (ditas/evidenceIntegrity.ts): closed positions waiting
+     for a link and settlement mismatches must be found without scanning the whole history. */ `
+  CREATE INDEX positions_account_status_closed ON positions(account, status, closed_at);
+  CREATE INDEX ditas_trade_outcomes_settlement ON ditas_trade_outcomes(settlement, closed_at);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */

@@ -6,10 +6,12 @@ import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js';
 import { evaluateRisk } from '../src/risk/gate.js';
 import { submitEntry, executeExit, monitorPositions } from '../src/exec/oms.js';
-import { linkClosedTrades } from '../src/ditas/tradeOutcomes.js';
+import { linkClosedTrades, LINK_BACKOFF } from '../src/ditas/tradeOutcomes.js';
 import { ACK_KEY, HASH_CHECK_KEY, LINK_GRACE_MS, acknowledgeEvidenceFindings, evaluateEvidenceIntegrity, refreshOutcomeHashCheck } from '../src/ditas/evidenceIntegrity.js';
 import { setSetting } from '../src/core/settings.js';
 import { all, get, getDb, run, J } from '../src/db/db.js';
+import { migrate, SCHEMA_VERSION } from '../src/db/migrations.js';
+import { DatabaseSync } from 'node:sqlite';
 import type { DecisionReport } from '../src/decision/engine.js';
 
 function report(id: string, last: number): DecisionReport {
@@ -171,5 +173,37 @@ describe('evidence integrity pauses new entries, never exits', () => {
     getDb().exec(`CREATE TRIGGER fail_one BEFORE INSERT ON ditas_trade_outcomes WHEN NEW.position_id='${bad}' BEGIN SELECT RAISE(ABORT, 'injected'); END`);
     expect(linkClosedTrades(Date.now() + 1)).toMatchObject({ linked: 1, failed: [bad] });
     expect(all<{ position_id: string }>('SELECT position_id FROM ditas_trade_outcomes').map((r) => r.position_id)).toEqual([good]);
+  });
+
+  it('backs off a position that keeps failing so newer positions still link', () => {
+    const bad = closedTrade(id, last); const good = closedTrade(id, last);
+    getDb().exec(`CREATE TRIGGER fail_one BEFORE INSERT ON ditas_trade_outcomes WHEN NEW.position_id='${bad}' BEGIN SELECT RAISE(ABORT, 'injected'); END`);
+    const t0 = Date.now() + 1;
+    expect(linkClosedTrades(t0, { batch: 1 })).toMatchObject({ linked: 0, failed: [bad] }); // oldest first
+    expect(linkClosedTrades(t0 + 1, { batch: 1 })).toMatchObject({ linked: 1, failed: [] }); // bad is waiting; good links
+    expect(get('SELECT 1 FROM ditas_trade_outcomes WHERE position_id=?', good)).toBeTruthy();
+    expect(linkClosedTrades(t0 + 2, { batch: 1 })).toMatchObject({ linked: 0, failed: [] });
+    expect(linkClosedTrades(t0 + LINK_BACKOFF.baseMs, { batch: 1 })).toMatchObject({ failed: [bad] }); // retried after backoff
+    expect(linkClosedTrades(t0 + LINK_BACKOFF.baseMs + 1, { batch: 1 }).failed).toEqual([]); // doubled backoff
+    getDb().exec('DROP TRIGGER fail_one');
+    expect(linkClosedTrades(t0 + 3 * LINK_BACKOFF.baseMs, { batch: 1 })).toMatchObject({ linked: 1, failed: [] });
+    expect(all('SELECT 1 FROM ditas_trade_outcomes')).toHaveLength(2);
+  });
+});
+
+describe('evidence integrity indexes (migration 11)', () => {
+  it('upgrades a v10 database without changing data, and the gate queries use the new indexes', () => {
+    const raw = new DatabaseSync(':memory:');
+    migrate(raw, 10);
+    raw.prepare(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,realized_pnl,fees,planned_risk)
+      VALUES ('keep','paper-bot','crypto:binance:ETHUSDT','crypto','LONG','trend_pullback',0,100,97,97,'{}','CLOSED',1,2,-1.5,0.2,3)`).run();
+    migrate(raw);
+    expect((raw.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number }).v).toBe(SCHEMA_VERSION);
+    expect(raw.prepare("SELECT realized_pnl FROM positions WHERE id='keep'").get()).toEqual({ realized_pnl: -1.5 });
+    const plan = (sql: string) => (raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as { detail: string }[]).map((r) => r.detail).join(' | ');
+    expect(plan("SELECT p.id FROM positions p LEFT JOIN ditas_trade_outcomes t ON t.position_id=p.id WHERE p.account='paper-bot' AND p.status='CLOSED' AND (p.closed_at IS NULL OR p.closed_at<1) AND t.position_id IS NULL"))
+      .toMatch(/positions_account_status_closed/);
+    expect(plan("SELECT position_id FROM ditas_trade_outcomes WHERE settlement='MISMATCH' ORDER BY closed_at, position_id")).toMatch(/ditas_trade_outcomes_settlement/);
+    raw.close();
   });
 });

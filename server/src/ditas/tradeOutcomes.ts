@@ -111,13 +111,23 @@ export function buildTradeOutcome(p: PositionRow, linkedAt: number): Omit<TradeO
  * Link settled positions that have no outcome record yet, oldest first, in bounded batches. Each record is written in
  * its own transaction under the leader fence. Idempotent: a position is linked once and its record is immutable.
  */
+/**
+ * Positions whose link attempt threw, with when to retry (exponential backoff, capped). In memory only: a restart
+ * retries everything, which is safe because linking is idempotent. Without it, a batch of permanently failing old
+ * positions would be retried first on every pass and newer positions would never link.
+ */
+const linkRetry = new Map<string, { failures: number; retryAt: number }>();
+const LINK_RETRY_MAX = 1000;
+export const LINK_BACKOFF = { baseMs: 60_000, maxMs: 60 * 60_000 };
+
 export function linkClosedTrades(nowTs = Date.now(), options: { batch?: number; fence?: LeaseFence } = {}) {
   const batch = options.batch ?? 50;
   if (!Number.isSafeInteger(nowTs) || nowTs <= 0) throw new Error('INVALID_LINK_TIME');
   if (!Number.isSafeInteger(batch) || batch < 1 || batch > 500) throw new Error('INVALID_LINK_BATCH');
+  const waiting = (id: string) => (linkRetry.get(id)?.retryAt ?? 0) > nowTs;
   const pending = all<PositionRow>(`SELECT p.* FROM positions p LEFT JOIN ditas_trade_outcomes t ON t.position_id=p.id
     WHERE p.account=? AND p.status='CLOSED' AND p.closed_at IS NOT NULL AND p.closed_at<=? AND t.position_id IS NULL
-    ORDER BY p.closed_at, p.id LIMIT ?`, PAPER_ACCOUNT, nowTs, batch);
+    ORDER BY p.closed_at, p.id LIMIT ?`, PAPER_ACCOUNT, nowTs, batch + linkRetry.size).filter((p) => !waiting(p.id)).slice(0, batch);
   const result = { linked: 0, verified: 0, mismatched: 0, failed: [] as string[] };
   for (const position of pending) {
     // One malformed position must not stop the rest from linking; a lost lease stops the pass.
@@ -136,8 +146,12 @@ export function linkClosedTrades(nowTs = Date.now(), options: { batch?: number; 
     }); } catch (error) {
       if (error instanceof LeaseLostError) throw error;
       result.failed.push(position.id);
+      const failures = (linkRetry.get(position.id)?.failures ?? 0) + 1;
+      if (linkRetry.size < LINK_RETRY_MAX || linkRetry.has(position.id))
+        linkRetry.set(position.id, { failures, retryAt: nowTs + Math.min(LINK_BACKOFF.maxMs, LINK_BACKOFF.baseMs * 2 ** (failures - 1)) });
       continue;
     }
+    linkRetry.delete(position.id);
     if (!written) continue;
     result.linked++;
     if (written === 'VERIFIED') result.verified++; else result.mismatched++;
@@ -185,6 +199,9 @@ export function storedContentHash(r: { position_id: string; decision_id: string 
     decisionEventId: r.decision_event_id, openedAt: r.opened_at, closedAt: r.closed_at, linkedAt: r.linked_at, settlement: r.settlement as SettlementStatus,
     netPnl: r.net_pnl, netR: r.net_r, payload: r.payload });
 }
+
+/** Test seam: forget link backoff state (a fresh process starts empty). */
+export function resetLinkBackoff() { linkRetry.clear(); }
 
 /** Recompute every record hash; any difference, or a row that cannot be hashed, means it no longer matches what was linked. */
 export function verifyTradeOutcomes() {

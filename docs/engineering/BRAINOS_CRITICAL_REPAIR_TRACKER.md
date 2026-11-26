@@ -44,9 +44,11 @@ challenge panel see the original packets, and exits never pass through the gate.
 entirely, the last result stays in force. Denying entries when it is older than, say, a few background passes would
 close that gap but could pause trading during a lane stall; it was not added without your approval.
 
-Known, fail-closed, left as follow-ups: per-evaluation SQL grows with the number of mismatch records (an append-only
-index migration would help); 50 or more positions that keep failing to link starve newer ones in the batch (this only
-prolongs the pause); a CLOSED position without a close time pauses entries until repaired.
+Follow-ups done: append-only migration 11 indexes the gate's evidence queries (`positions(account,status,closed_at)`,
+`ditas_trade_outcomes(settlement,closed_at)`; upgrade and query-plan test); positions that keep failing to link get
+exponential backoff (1 minute doubling to 1 hour, in memory) so newer positions still link (mutation-checked).
+Still known and fail-closed: a CLOSED position without a close time pauses entries until repaired; per-evaluation
+work still grows with the number of acknowledged mismatch records.
 
 ## The 30 repairs
 
@@ -54,7 +56,7 @@ prolongs the pause); a CLOSED position without a close time pauses entries until
 |---|---|---|---|---|
 | 01 | P0 | Consolidate overlapping PRs | Owner action | #140 is stacked on #137 and #139 (per the V3 tracker). Choosing the merge candidate and closing superseded PRs is the owner's decision; exact-head CI on #140 is the evidence to use. |
 | 02 | P0 | One component ownership map | Done | `docs/BRAINOS_V2_COMPONENT_INVENTORY.md`; this increment added no parallel engine (impact table above). |
-| 03 | P0 | Wire `deepCycle.ts` and `coldLane.ts` to scheduler lanes | Open | Both export entry points (`runDeepCognitiveCycle`, `runBoundedSgeColdLane`) that nothing imports. Needs a bounded research lane with its own budget so it cannot delay protection. |
+| 03 | P0 | Wire `deepCycle.ts` and `coldLane.ts` to scheduler lanes | Gated | Checked 2026-11-26: `runDeepCognitiveCycle` returns NO_TRADE unless a FUTURES venue is certified (repair 19), and `runBoundedSgeColdLane` needs genome evaluator hooks that have no executable rule implementation (repair 14). Scheduling either now would only spend CPU and record invocations that test nothing. Wire after 14 and 19, on a bounded research lane that cannot delay protection. |
 | 04 | P0 | Capability graph with dependency health and invocation evidence | Partial | `knowledge/capabilityGraph.ts` feeds session preflight and the brain snapshot. Per-capability freshness and last-invocation evidence not recorded. |
 | 05 | P0 | Durable session and trading mandate as canonical owners | Done | `ops/durableSession.ts`, `ops/tradingMandate.ts` used by the OMS, preflight and routes; no second policy store was added. |
 | 06 | P0 | Streaming feeds with sequence validation and recovery | Open | Provider transport is HTTPS polling (`providers/http.ts`). |
@@ -83,7 +85,7 @@ prolongs the pause); a CLOSED position without a close time pauses entries until
 | 29 | P0 | Railway storage and deployment blockers | Owner action | Resize the volume, set `MIA_BACKUP_KEY`, then deploy. Cloudflare Workers Builds fails on every branch because the repository has no Worker configuration; disable that check or add a config. |
 | 30 | P0 | Production certification | Gated | Needs 25, 27, 29 and prospective PAPER results. LIVE stays locked. |
 
-Totals (counted from the table): 4 done, 11 partial, 5 open, 6 owner action, 7 gated. One row counts as done for the
+Totals (counted from the table): 4 done, 10 partial, 3 open, 5 owner action, 8 gated. One row counts as done for the
 gate only (13); profitability is still unproven.
 
 ## Not claimed

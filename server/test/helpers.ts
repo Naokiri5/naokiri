@@ -19,6 +19,7 @@ import { seedStrategies } from '../src/lab/lab.js';
 import type { Instrument } from '../src/market/types.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
 import { BACKTEST_MODEL_VERSION, stats, type BtResult, type BtTrade } from '../src/lab/backtest.js';
+import { resetLinkBackoff } from '../src/ditas/tradeOutcomes.js';
 /**
  * Stored backtest fixture (synthetic, never market evidence). By default its OOS cohort passes strategy qualification
  * (60 trades: 36 at +1.5R, 24 at -1R, interleaved); `{ qualifying: false }` stores a single trade that does not.
@@ -49,7 +50,7 @@ export function promoteStrategiesWithEvidence() {
   for (const s of STRATEGIES) seedBacktestFixture(s.id, { id: `bt_baseline_${s.id}`, instrument: 'crypto:fixture:BASELINE' });
 }
 export function freshDb(promote = true, file = ':memory:') {
-  closeDb(); openDb(file); seedStrategies();
+  closeDb(); openDb(file); seedStrategies(); resetLinkBackoff();
   if (promote) promoteStrategiesWithEvidence();
 }
 /** Seed an instrument with synthetic candles on all intervals plus a deep book and cross-venue quote. */
