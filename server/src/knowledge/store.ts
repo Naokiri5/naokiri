@@ -173,9 +173,12 @@ export function reprocessDocument(actor: string, id: string) {
   enqueue(id);
   return { id, status: 'INGESTION_PENDING' as DocStatus };
 }
+const EDITABLE_METADATA = new Set(['title', 'authors', 'edition', 'publisher', 'published', 'discipline', 'evidence_class']);
 /** Owner metadata correction. Recorded as an event so the extracted value is not silently lost. */
 export function updateDocumentMeta(actor: string, id: string, patch: Partial<Record<'title' | 'authors' | 'edition' | 'publisher' | 'published' | 'discipline' | 'evidence_class', string>>) {
   if (actor !== 'owner') throw new Error('only the owner may edit metadata');
+  // Column names cannot be SQL parameters: allowlist them here too, not only in the route schema.
+  if (Object.keys(patch).some((c) => !EDITABLE_METADATA.has(c))) throw new Error('unknown metadata field');
   const doc = get<any>('SELECT * FROM kb_documents WHERE id=?', id); if (!doc) throw new Error('document not found');
   if (patch.discipline && !disciplineIds.includes(patch.discipline)) throw new Error('unknown discipline');
   if (patch.evidence_class && !EVIDENCE_CLASSES.includes(patch.evidence_class as EvidenceClass)) throw new Error('unknown evidence class');

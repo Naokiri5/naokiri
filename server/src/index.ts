@@ -20,6 +20,8 @@ export async function buildApp() {
     reply.header('x-request-id', req.id);
     reply.header('x-content-type-options', 'nosniff'); reply.header('x-frame-options', 'DENY'); reply.header('referrer-policy', 'no-referrer');
     reply.header('content-security-policy', contentSecurityPolicy());
+    // Served over HTTPS (secure cookies on): tell browsers never to downgrade to plain HTTP.
+    if (config.secureCookie) reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
     // API responses (balances, positions, CSV exports) must not be cached by the browser or an intermediary.
     if (req.url.startsWith('/api/')) reply.header('cache-control', 'no-store');
     return payload;

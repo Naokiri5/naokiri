@@ -10,3 +10,13 @@ test-results/
 e2e/.data/
 test-results/
 playwright-report/
+# Secrets and key material (only the placeholder template is tracked)
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+wallet-backups/
