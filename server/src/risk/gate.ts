@@ -1,6 +1,7 @@
 import { storageBlocksEntries, storageStatus } from '../ops/storage.js';
 import { currentPolicy, RiskPolicy } from './policy.js';
 import { normalizeEntryQty } from './quantity.js';
+import { strategyQualification } from '../lab/evidence.js';
 import { accountState, openPositions, PAPER_ACCOUNT, type AccountState } from '../portfolio/ledger.js';
 import { controlAuthority } from '../core/mode.js';
 import { market } from '../market/store.js';
@@ -60,6 +61,13 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   if (!st) deny.push(`STRATEGY_NOT_REGISTERED:${p.strategyId}`);
   else if (!['PAPER', 'LIVE_CANDIDATE'].includes(st.status)) deny.push(`STRATEGY_NOT_PROMOTED:${p.strategyId} is ${st.status} (promote to PAPER in Strategy Lab)`);
   else if (p.strategyVersion !== undefined && p.strategyVersion !== st.version) deny.push('STRATEGY_VERSION_MISMATCH');
+  else {
+    // Owner-approved: a PAPER strategy trades only while its out-of-sample evidence still qualifies (deflated Sharpe,
+    // significant post-cost expectancy, current fill model). A strategy that stops qualifying stops opening positions;
+    // its open positions keep their protection, which never passes through this gate.
+    const q = strategyQualification(p.strategyId);
+    if (q.verdict !== 'QUALIFIED') deny.push(`STRATEGY_NOT_QUALIFIED: ${q.reasons.join(', ')}`);
+  }
 
   const inst = market.instruments.get(p.instrumentId);
   if (!inst) { deny.push('INSTRUMENT_UNKNOWN'); return out(); }

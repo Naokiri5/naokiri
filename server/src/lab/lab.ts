@@ -1,6 +1,5 @@
 import { STRATEGIES, strategyById } from './strategies.js';
 import { BACKTEST_MODEL_VERSION, backtest, stats, monteCarlo, type BtResult, type BtTrade } from './backtest.js';
-import { qualifyEvidence } from './qualification.js';
 import { verifiedStrategyReturns } from '../ditas/tradeOutcomes.js';
 import { fetchProvider } from '../providers/http.js';
 import { all, get, run, tx, J, P } from '../db/db.js';
@@ -82,41 +81,8 @@ const summary = (r: BtResult) => ({
   equityR: r.equityR, costs: r.costs, trades: r.trades.slice(-200),
 });
 export function listBacktests(limit = 50) { return all<any>('SELECT id, strategy_id, created_at, instrument, interval, result FROM backtests ORDER BY created_at DESC LIMIT ?', limit).map((r) => ({ id: r.id, created_at: r.created_at, ...summary(P(r.result)) })); }
-/** Aggregate the latest out-of-sample evidence per instrument within one strategy and fill-model version. */
-/**
- * Out-of-sample evidence for the strategy's current version: OOS trades from the newest backtest per instrument,
- * preferring the current fill model. `backtestRuns` counts every stored run of this version (all trials, kept or not).
- */
-export function oosCohort(strategyId: string) {
-  const definition = strategyById(strategyId); if (!definition) return null;
-  const rows = all<{ instrument: string; result: string }>('SELECT instrument, result FROM backtests WHERE strategy_id=? ORDER BY created_at DESC', strategyId);
-  const legacy = { modelVersion: 1, instruments: new Set<string>(), trades: [] as BtTrade[] };
-  const current = { modelVersion: BACKTEST_MODEL_VERSION, instruments: new Set<string>(), trades: [] as BtTrade[] };
-  for (const row of rows) {
-    const result = P<BtResult>(row.result);
-    if (result.strategyVersion !== definition.version) continue;
-    const modelVersion = result.modelVersion ?? legacy.modelVersion;
-    if (modelVersion !== current.modelVersion && modelVersion !== legacy.modelVersion) continue;
-    const cohort = modelVersion === current.modelVersion ? current : legacy;
-    if (cohort.instruments.has(row.instrument)) continue;
-    cohort.instruments.add(row.instrument);
-    cohort.trades.push(...result.trades.filter((trade) => trade.segment === 'OOS'));
-  }
-  // Keep existing evidence usable until a run with the current fill model is available for this strategy.
-  const { modelVersion, instruments, trades } = current.instruments.size ? current : legacy;
-  // Every distinct configuration run for this version is a trial, including runs superseded above. Identical re-runs
-  // (same instrument, window, bar count and fill model) are one trial, so repeating a run cannot dilute the benchmark.
-  const trials = new Map<string, number[]>();
-  for (const r of rows.map((row) => P<BtResult>(row.result)).filter((r) => r.strategyVersion === definition.version)) {
-    const key = J([r.instrument, r.interval, r.from, r.to, r.bars, r.modelVersion ?? 1]);
-    if (!trials.has(key)) trials.set(key, r.trades.filter((trade) => trade.segment === 'OOS').map((trade) => trade.r));
-  }
-  const runOosR = [...trials.values()];
-  return { strategyVersion: definition.version, modelVersion, instruments: instruments.size, trades, backtestRuns: runOosR.length, runOosR };
-}
-
-/** Qualification verdict for the strategy's current version from its stored out-of-sample evidence. */
-export function strategyQualification(strategyId: string) { return qualifyEvidence(oosCohort(strategyId)); }
+export { oosCohort, strategyQualification } from './evidence.js';
+import { oosCohort, strategyQualification } from './evidence.js';
 
 export function strategyStats(strategyId: string) {
   const cohort = oosCohort(strategyId);

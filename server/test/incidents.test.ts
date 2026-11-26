@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { freshDb, seedInstrument, setBook } from './helpers.js';
+import { freshDb, promoteStrategiesWithEvidence, seedInstrument, setBook } from './helpers.js';
 import { closeDb, openDb, get, run } from '../src/db/db.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
@@ -104,7 +104,7 @@ describe('protection incidents survive a restart', () => {
     const folder = mkdtempSync(join(tmpdir(), 'mia-incidents-')); folders.push(folder); const dbPath = join(folder, 'mia.sqlite');
     closeDb(); openDb(dbPath); market.reset();
     const { inst, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
-    seedStrategies(); run("UPDATE strategies SET status='PAPER'"); acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    seedStrategies(); promoteStrategiesWithEvidence(); acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     expect(submitEntry(report(inst.id, last), 'bot').ok).toBe(true);
     stale(inst.id); monitorPositions();
     closeDb(); openDb(dbPath); // restart

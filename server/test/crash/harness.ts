@@ -17,7 +17,7 @@ import { ledger, PAPER_ACCOUNT } from '../../src/portfolio/ledger.js';
 import { queueForApproval, submitEntry } from '../../src/exec/oms.js';
 import type { CrashPoint } from '../../src/exec/crashpoint.js';
 import type { DecisionReport } from '../../src/decision/engine.js';
-import { seedInstrument } from '../helpers.js';
+import { promoteStrategiesWithEvidence, seedInstrument } from '../helpers.js';
 
 const SERVER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CHILD = join(SERVER_DIR, 'test', 'crash', 'child.ts');
@@ -65,7 +65,7 @@ export function buildStage(stage: Stage) {
   const rep = report(inst.id, last, stage === 'pending' ? 'APPROVED_FOR_USER_CONFIRMATION' : 'PAPER_TRADE');
   writeFileSync(join(dir, 'report.json'), J(rep));
   withDb(db, () => {
-    seedStrategies(); run("UPDATE strategies SET status='PAPER'");
+    seedStrategies(); promoteStrategiesWithEvidence();
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: stage === 'pending' ? 'APPROVAL' : 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', DEPOSIT);
     run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', rep.id, rep.candidateId, inst.id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
     if (stage === 'pending' && !queueForApproval(rep)) throw new Error('approval was not queued');

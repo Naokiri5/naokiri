@@ -97,7 +97,7 @@ describe('backtest evidence integrity', () => {
   });
 
   it('keeps legacy results readable and excludes them from current-model aggregates', () => {
-    freshDb();
+    freshDb(false); // no baseline evidence: this test counts only the backtests it stores
     try {
       const definition = STRATEGIES[0];
       seedBacktestFixture(definition.id, { qualifying: false, legacy: true });

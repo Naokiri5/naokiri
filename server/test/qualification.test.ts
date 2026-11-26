@@ -104,7 +104,8 @@ describe('Strategy Lab qualification and PAPER promotion', () => {
   });
 
   it('shows a strategy already in PAPER as NOT_QUALIFIED without demoting it', () => {
-    freshDb(true); // every strategy promoted directly, as before this rule existed
+    freshDb(false);
+    run("UPDATE strategies SET status='PAPER'"); // promoted directly with no evidence, as before this rule existed
     const listed = listStrategies().find((s: { id: string }) => s.id === id);
     expect(listed).toMatchObject({ status: 'PAPER', qualification: { verdict: 'NOT_QUALIFIED', reasons: ['NO_BACKTEST'] } });
   });
