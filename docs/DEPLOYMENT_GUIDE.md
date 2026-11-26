@@ -8,6 +8,33 @@
   `x-mia-csrf` header.
 - Secrets only via environment variables (`.env.example`). They never reach the browser, logs (redacted), or LLM prompts.
 
+## Hosting: Railway only (Vercel retired 2026-11-26)
+
+MIA is one long-running Node process with a SQLite database on a persistent volume, so it runs on Railway, not on
+serverless hosting. Owner decision 2026-11-26: do not deploy on Vercel.
+
+State on 2026-11-26:
+- Vercel: builds disabled on all three projects (`naokiri`, `miaai`, `naokiri-server`) with the ignored build step
+  `exit 0`. Nothing was deleted; they stay as a rollback until Railway has run cleanly. Vercel held no environment
+  variables, Edge Config or data to migrate. `miaai.trade` and `www.miaai.trade` are still attached to the Vercel
+  `miaai` project; DNS is managed in Cloudflare.
+- Railway: project `mia-privy-preview`, service `mia-web-api`, volume `mia-persistent-data` mounted at `/data`
+  (database `mia.db` about 362 MB, plus an unidentified 77 MB file in `/data/backups`). `www.miaai.trade` is attached
+  as a custom domain on port 8787. The service currently runs a maintenance stub, not MIA, and has no GitHub source.
+
+Cutover steps (in order):
+1. Grant the Railway GitHub app access to `Naokiri5/naokiri` (GitHub settings, Applications, Railway, repository
+   access), then connect the service to the branch to deploy (owner chose the PR #140 branch,
+   `naokiri/jolly-wozniak-8q7ial`, until it merges).
+2. Resize the volume in the Railway dashboard (5 GB suggested) so the database, its WAL, the migrations' new indexes
+   and at least one backup fit. Take an off-volume copy first (SQLite backup API, or stop the service and copy
+   `mia.db`, `mia.db-wal` and `mia.db-shm` together). Identify the 77 MB file before deleting anything.
+3. Set `MIA_BACKUP_KEY` as a sealed variable and keep a protected copy elsewhere.
+4. Replace the maintenance start command with `npm start` and the health check with `/api/health`; deploy and
+   confirm `/api/ready` reports storage `pass`.
+5. In Cloudflare, point `miaai.trade` and `www.miaai.trade` at Railway (add the apex as a Railway custom domain too),
+   then remove both domains from the Vercel project.
+
 ## Backup & restore
 - Data lives in `$MIA_DATA_DIR/mia.db` (SQLite WAL). Set `MIA_BACKUP_KEY` in the server environment before the first Privy owner binding and before creating online or production backups. Set a 32-byte key as hex or base64 and retain a protected copy separate from backup files.
 - Run `npm run backup -- create` to create and verify an encrypted snapshot before retention. Run `npm run backup -- verify <snapshot>` with the original backup key to verify a stored snapshot. Legacy plaintext snapshots remain readable for recovery. The backup and data volumes must support hard links for atomic publication. Use a service-account-private temporary directory on protected storage for local snapshot and verification work files.
