@@ -16,6 +16,7 @@ export const TELEMETRY_RING_SIZE = 512;
 export interface TelemetryEvent { id: string; sequence: number; topic: BusTopic; emittedAtMs: number; payload: unknown }
 export type TelemetryReplay = { resync: false; events: TelemetryEvent[] } | { resync: true; reason: string };
 type Listener = (event: TelemetryEvent) => void;
+type SubscriberErrorHandler = (error: unknown, event: TelemetryEvent) => void;
 
 const TOPICS = new Set<string>(BUS_TOPICS);
 export const isBusTopic = (topic: string): topic is BusTopic => TOPICS.has(topic);
@@ -25,18 +26,29 @@ export class TelemetryJournal {
   private sequence = 0;
   private readonly ring: TelemetryEvent[] = [];
   private readonly listeners = new Set<Listener>();
-  constructor(private readonly capacity = TELEMETRY_RING_SIZE) {
+  constructor(
+    private readonly capacity = TELEMETRY_RING_SIZE,
+    // A failing subscriber must never affect the publisher or other subscribers,
+    // but its exception must not disappear either: report it through this
+    // injected handler (default: console.error, the logging already used in
+    // server/src/main.ts) instead of silently swallowing it.
+    private readonly onSubscriberError: SubscriberErrorHandler = (error) => { console.error('telemetry subscriber failed', error); },
+  ) {
     if (!Number.isSafeInteger(capacity) || capacity < 1) throw new Error('TELEMETRY_CAPACITY_INVALID');
   }
   get lastId() { return `${this.bootId}:${this.sequence}`; }
 
   record(topic: BusTopic, payload: unknown, at = Date.now()): TelemetryEvent {
-    const event = Object.freeze({ id: `${this.bootId}:${++this.sequence}`, sequence: this.sequence, topic, emittedAtMs: at, payload });
+    // Snapshot the payload, not just the envelope: Object.freeze on the event
+    // does not stop a publisher mutating the payload object afterwards, which
+    // would corrupt replayed events. Non-cloneable payloads keep the original.
+    let snapshot: unknown = payload;
+    try { snapshot = structuredClone(payload); } catch { /* keep the original payload */ }
+    const event = Object.freeze({ id: `${this.bootId}:${++this.sequence}`, sequence: this.sequence, topic, emittedAtMs: at, payload: snapshot });
     this.ring.push(event);
     if (this.ring.length > this.capacity) this.ring.shift();
     for (const listener of this.listeners) {
-      // A failing subscriber (e.g. a closed socket) must never affect the publisher or other subscribers.
-      try { listener(event); } catch { /* subscriber's own close path handles it */ }
+      try { listener(event); } catch (error) { this.onSubscriberError(error, event); }
     }
     return event;
   }
