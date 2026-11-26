@@ -22,18 +22,13 @@ import { classifyEntryScope } from '../ops/tradingMandate.js';
 import { unreconciledPaperOrders } from './recovery.js';
 import { isShuttingDown } from '../ops/shutdown.js';
 import { recordPaperFill } from './fillEvents.js';
+import { PAPER_STOP_TYPE, UNFILLED_APPROVAL, VENUE } from './paperOrders.js';
+export { VENUE };
 
 /**
  * Paper OMS (Part 26 / 32.6). Fills are simulated by walking the LIVE Binance order book
  * (real spread + depth), with configured fees. Venue = 'binance-paper'. No live venue exists.
  */
-export const VENUE = 'binance-paper';
-/**
- * The only approval rows that may be closed (rejected, cancelled, expired) without reconciliation: never filled, never
- * linked to a position, no fill recorded. An approval carrying execution evidence stays in the unresolved set that
- * recovery reports (exec/recovery.ts) instead of being hidden by a terminal status.
- */
-const UNFILLED_APPROVAL = "status='PENDING_APPROVAL' AND filled_qty=0 AND position_id IS NULL AND NOT EXISTS (SELECT 1 FROM fills f WHERE f.order_id=orders.id)";
 // Exits and monitoring keep the DEFAULT_POLICY fallback on purpose: a missing policy must never block a protective exit.
 // Entries never use it (submitEntry refuses without the exact policy the gate evaluated).
 const feeRate = () => (currentPolicy()?.policy ?? DEFAULT_POLICY).feeRate;
@@ -243,7 +238,7 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
         posId, PAPER_ACCOUNT, s.instrumentId, s.market, 'LONG', strat, qty, fill.price, s.stopLoss, s.stopLoss, J({ qtyInit: qty, trailAfterR, targets: st.targets, lastPx: fill.price }), 'OPEN', nowTs, -fee, fee, maxHoldMs, s.id, actualPlannedMaxLoss);
       crashpoint('entry.position');
       // Protective stop: paper venue has no exchange-native stop; OMS monitors it. Recorded explicitly.
-      insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: 'STOP_MARKET (OMS-monitored, paper)', qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId, at: nowTs });
+      insertOrder({ clientOrderId: `stop-${posId}`, instrument: s.instrumentId, side: 'SELL', type: PAPER_STOP_TYPE, qty, stop: s.stopLoss, status: 'ACTIVE', purpose: 'PROTECTIVE_STOP', positionId: posId, at: nowTs });
       crashpoint('entry.stop');
       ledger(PAPER_ACCOUNT, 'BUY', -notional, oid, `${s.asset} entry`, nowTs);
       crashpoint('entry.buy');

@@ -4,7 +4,7 @@ import { audit } from '../core/audit.js';
 import { LeaseLostError, ownsLease, type LeaseFence } from './lease.js';
 import { paperSpotSessionPreflight, sessionPreflight, type SessionMind } from './sessionPreflight.js';
 import type { EngineView } from './readiness.js';
-import { VENUE } from '../exec/oms.js';
+import { UNFILLED_APPROVAL, VENUE } from '../exec/paperOrders.js';
 import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { reconcile } from '../portfolio/calendar.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
@@ -77,8 +77,9 @@ function persist(
 }
 
 function cancelPaperPendingApprovals(reason: string, at: number) {
+  // Same rule as the OMS: an approval carrying execution evidence is never closed here; recovery keeps reporting it.
   run(`UPDATE orders SET status='CANCELLED', reject_reason=?, updated_at=?
-    WHERE account=? AND venue=? AND side='BUY' AND purpose='ENTRY' AND status='PENDING_APPROVAL'`,
+    WHERE account=? AND venue=? AND side='BUY' AND purpose='ENTRY' AND ${UNFILLED_APPROVAL}`,
   reason, at, PAPER_ACCOUNT, VENUE);
 }
 

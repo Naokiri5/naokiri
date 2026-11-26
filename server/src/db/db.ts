@@ -54,13 +54,20 @@ export function get<T = any>(sql: string, ...p: any[]): T | undefined { return g
 export function run(sql: string, ...p: any[]) { return getDb().prepare(sql).run(...p); }
 /** Transaction depth tracked here, not via DatabaseSync.isTransaction (that property needs Node >= 22.16; we support 22.13). */
 let txDepth = 0;
-export const inTransaction = () => txDepth > 0;
+/** What kind of transaction is open: write guards (OMS fills, engine fence) must not pass inside a read snapshot. */
+let txKind: 'read' | 'write' | null = null;
+/** True only inside a write transaction (tx). A read snapshot does not count: it holds no write lock. */
+export const inTransaction = () => txDepth > 0 && txKind === 'write';
 /** Atomic block. Nested calls join the outer transaction, so an inner failure still rolls back everything. */
 export function tx<T>(fn: () => T): T {
-  if (txDepth > 0) return fn();
+  if (txDepth > 0) {
+    // Joining a deferred read snapshot would write without the IMMEDIATE lock (and can fail with BUSY_SNAPSHOT).
+    if (txKind === 'read') throw new Error('WRITE_TRANSACTION_INSIDE_READ_SNAPSHOT');
+    return fn();
+  }
   const d = getDb();
-  d.exec('BEGIN IMMEDIATE'); txDepth = 1;
-  try { const r = fn(); d.exec('COMMIT'); return r; } catch (e) { d.exec('ROLLBACK'); throw e; } finally { txDepth = 0; }
+  d.exec('BEGIN IMMEDIATE'); txDepth = 1; txKind = 'write';
+  try { const r = fn(); d.exec('COMMIT'); return r; } catch (e) { d.exec('ROLLBACK'); throw e; } finally { txDepth = 0; txKind = null; }
 }
 /**
  * Run read-only queries against one consistent database snapshot. A deferred transaction in WAL mode reads every
@@ -70,8 +77,8 @@ export function tx<T>(fn: () => T): T {
 export function readSnapshot<T>(fn: () => T): T {
   if (txDepth > 0) return fn();
   const d = getDb();
-  d.exec('BEGIN DEFERRED'); txDepth = 1;
-  try { const r = fn(); d.exec('COMMIT'); return r; } catch (e) { d.exec('ROLLBACK'); throw e; } finally { txDepth = 0; }
+  d.exec('BEGIN DEFERRED'); txDepth = 1; txKind = 'read';
+  try { const r = fn(); d.exec('COMMIT'); return r; } catch (e) { d.exec('ROLLBACK'); throw e; } finally { txDepth = 0; txKind = null; }
 }
 export const J = (v: unknown) => JSON.stringify(v);
 export const P = <T = any>(s: string | null | undefined, d: T = null as T): T => (s ? JSON.parse(s) : d);

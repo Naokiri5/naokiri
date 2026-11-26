@@ -154,3 +154,16 @@ describe('consensus evidence retention', () => {
     raw.close();
   });
 });
+
+describe('read snapshots hold no write authority', () => {
+  it('refuses a write transaction inside a read snapshot and does not report one as open', async () => {
+    const { readSnapshot, tx, inTransaction } = await import('../src/db/db.js');
+    freshDb(true);
+    readSnapshot(() => {
+      expect(inTransaction()).toBe(false);
+      expect(() => tx(() => run("INSERT INTO settings(key,value,updated_at) VALUES ('x','1',1)"))).toThrow('WRITE_TRANSACTION_INSIDE_READ_SNAPSHOT');
+    });
+    expect(tx(() => inTransaction())).toBe(true);
+    expect(get("SELECT 1 FROM settings WHERE key='x'")).toBeUndefined();
+  });
+});

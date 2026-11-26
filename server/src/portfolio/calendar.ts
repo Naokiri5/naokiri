@@ -60,17 +60,21 @@ function reconcileSnapshot(account: string) {
 
 /**
  * Release gate G05 fill evidence: every FILLED paper order must have fill rows whose quantity equals the order's filled
- * quantity and whose fees equal both the order's recorded fees and its FEE ledger debits. Ledger agreement alone cannot
+ * quantity and whose fees equal both the order's recorded fees and its FEE ledger debits; an order in any other status
+ * must have no fill row, filled quantity or fee debit. Ledger agreement alone cannot
  * show this: a lost fill row leaves order and ledger in step.
  */
 export function fillEvidenceMismatches(account = PAPER_ACCOUNT): number {
   return get<{ n: number }>(`SELECT COUNT(*) n FROM orders o
     LEFT JOIN (SELECT order_id, SUM(qty) q, SUM(fee) f, COUNT(*) c FROM fills GROUP BY order_id) fl ON fl.order_id=o.id
     LEFT JOIN (SELECT ref, SUM(amount) a FROM ledger_entries WHERE account=? AND kind='FEE' GROUP BY ref) le ON le.ref=o.id
-    WHERE o.account=? AND o.status='FILLED' AND (
-      fl.c IS NULL
-      OR ABS(fl.q - o.filled_qty) > 0.000000001 * MAX(1, o.filled_qty)
-      OR ABS(fl.f - COALESCE(o.fees, 0)) > 0.000001
-      OR ABS(COALESCE(le.a, 0) + fl.f) > 0.000001)`, account, account)!.n;
+    WHERE o.account=? AND (
+      (o.status='FILLED' AND (
+        fl.c IS NULL
+        OR ABS(fl.q - o.filled_qty) > 0.000000001 * MAX(1, o.filled_qty)
+        OR ABS(fl.f - COALESCE(o.fees, 0)) > 0.000001
+        OR ABS(COALESCE(le.a, 0) + fl.f) > 0.000001))
+      -- Any other status must carry no execution evidence at all: no fill row, no filled quantity, no fee debit.
+      OR (o.status<>'FILLED' AND (fl.c IS NOT NULL OR o.filled_qty<>0 OR le.a IS NOT NULL)))`, account, account)!.n;
 }
 

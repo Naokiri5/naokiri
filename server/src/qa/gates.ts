@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { config, REPO_ROOT } from '../config.js';
-import { all, get, getDb } from '../db/db.js';
+import { all, get, getDb, readSnapshot } from '../db/db.js';
 import { currentPolicy } from '../risk/policy.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { WORKERS } from '../workers/registry.js';
@@ -158,9 +158,8 @@ export function releaseGates(report?: unknown) {
   const joe = testGate('G04');
   g.push({ id: 'G04', name: 'Trader Joe factuality & authorization tests', ...joe, status: 'PENDING', evidence: `${joe.evidence}; authorization checks do not certify LLM factuality; human review is required` });
   try {
-    const rec = reconcile();
-    const unresolved = unreconciledPaperOrders();
-    const fillGaps = fillEvidenceMismatches();
+    // One snapshot for all three checks, so a commit between them cannot produce a mixed verdict.
+    const { rec, unresolved, fillGaps } = readSnapshot(() => ({ rec: reconcile(), unresolved: unreconciledPaperOrders(), fillGaps: fillEvidenceMismatches() }));
     g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile',
       status: rec.ok && unresolved === 0 && fillGaps === 0 ? 'PASS' : 'FAIL',
       evidence: `${rec.detail}; ${unresolved} unresolved paper order(s); ${fillGaps} filled order(s) without matching fill quantity and fees. External venue reconciliation is not certified.` });

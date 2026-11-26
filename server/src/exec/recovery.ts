@@ -1,5 +1,6 @@
 import { get } from '../db/db.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
+import { PAPER_STOP_TYPE, VENUE } from './paperOrders.js';
 
 /**
  * PAPER fills settle atomically. Any surviving transitional or unknown state is
@@ -19,7 +20,7 @@ export function unreconciledPaperOrders(): number {
       OR (o.status='ACTIVE' AND (
         o.purpose<>'PROTECTIVE_STOP' OR o.side<>'SELL' OR o.filled_qty<>0
         -- Only the stop the paper OMS itself creates: its venue and monitored stop type.
-        OR o.venue<>'binance-paper' OR o.type<>'STOP_MARKET (OMS-monitored, paper)'
+        OR o.venue<>? OR o.type<>?
         OR NOT EXISTS (
           SELECT 1 FROM positions p WHERE p.id=o.position_id AND p.account=o.account
             AND p.instrument=o.instrument AND p.status='OPEN'
@@ -27,7 +28,7 @@ export function unreconciledPaperOrders(): number {
             AND ABS(o.qty-p.qty)<0.000000001 AND o.stop_price=p.stop_price
         )
       ))
-    )`, PAPER_ACCOUNT)?.count;
+    )`, PAPER_ACCOUNT, VENUE, PAPER_STOP_TYPE)?.count;
   if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0)
     throw new Error('PAPER_ORDER_RECOVERY_UNAVAILABLE');
   return count;

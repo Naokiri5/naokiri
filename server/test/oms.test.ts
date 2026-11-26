@@ -237,6 +237,15 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     expect(get('SELECT status FROM orders WHERE id=?', oid)).toEqual({ status: 'PENDING_APPROVAL' });
     expect(unreconciledPaperOrders()).toBe(1);
   });
+  it('fails G05 for a non-filled order that carries fill evidence', () => {
+    updateControl('owner', { mode: 'APPROVAL' });
+    const oid = queueForApproval(report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' }))!;
+    expect(fillEvidenceMismatches()).toBe(0);
+    run("INSERT INTO fills(id,order_id,qty,price,fee,liquidity,ts) VALUES ('stray-fill',?,1,100,0.1,'TAKER',1)", oid);
+    run("UPDATE orders SET status='CANCELLED' WHERE id=?", oid);
+    expect(fillEvidenceMismatches()).toBe(1);
+    expect(releaseGates(null).gates.find((g) => g.id === 'G05')!.status).toBe('FAIL');
+  });
   it('does not accept a protective stop the OMS did not create as protection', () => {
     expect(submitEntry(report(id, last), 'bot')).toMatchObject({ ok: true });
     const p = openPositions()[0];

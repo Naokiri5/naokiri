@@ -232,6 +232,16 @@ describe('durable Binance spot paper authorization', () => {
     expect(get("SELECT 1 FROM audit_log WHERE action='session.paper_spot.run'")).toBeTruthy();
   });
 
+  it('never cancels an approval carrying execution evidence when the session closes', () => {
+    const fence = prepareSpotSession();
+    openPaperSpotSession(engine, fence, MANDATE, NOW);
+    pendingApproval('clean-approval', NOW); pendingApproval('filled-approval', NOW);
+    run("UPDATE orders SET filled_qty=1 WHERE id='filled-approval'");
+    requestPaperSpotClose(NOW + 1);
+    expect(get<{ status: string }>("SELECT status FROM orders WHERE id='clean-approval'")?.status).toBe('CANCELLED');
+    expect(get<{ status: string }>("SELECT status FROM orders WHERE id='filled-approval'")?.status).toBe('PENDING_APPROVAL');
+  });
+
   it('keeps a stale session blocked after an owner control change is reversed', () => {
     const fence = prepareSpotSession();
     openPaperSpotSession(engine, fence, MANDATE, NOW);
