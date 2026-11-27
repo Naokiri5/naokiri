@@ -14,7 +14,7 @@ function shell(over: Partial<ShellDto> = {}): ShellDto {
     ...over,
   };
 }
-const base: JoeSignals = { shell: shell(), shellUnavailable: false, streamConnected: true, sessionState: 'CLOSED', chat: 'idle', lastEvent: null, now: NOW };
+const base: JoeSignals = { shell: shell(), shellUnavailable: false, streamConnected: true, sessionState: 'CLOSED', openIncidents: 0, chat: 'idle', lastEvent: null, now: NOW };
 const state = (over: Partial<JoeSignals>) => mapJoeState({ ...base, ...over }).state;
 
 describe('Trader Joe state mapping', () => {
@@ -42,7 +42,7 @@ describe('Trader Joe state mapping', () => {
     expect(state({ lastEvent: scan, sessionState: 'RUNNING' })).toBe('SCANNING');
     expect(state({ lastEvent: { ...scan, at: NOW - EVENT_WINDOW_MS - 1 }, sessionState: 'RUNNING' })).toBe('MONITORING');
     expect(state({ lastEvent: { ...scan, at: NOW + 5000 } })).toBe('STANDBY'); // future-dated events are ignored
-    expect(state({ lastEvent: { kind: 'decision', at: NOW, rejected: true } })).toBe('RISK_ALERT');
+    expect(state({ lastEvent: { kind: 'decision', at: NOW, rejected: true } })).toBe('REJECTION');
     expect(state({ lastEvent: { kind: 'decision', at: NOW, rejected: false, asset: 'BTC' } })).toBe('RESEARCHING');
     expect(state({ lastEvent: { kind: 'protection', at: NOW } })).toBe('RISK_ALERT');
     expect(state({ lastEvent: { kind: 'position-closed', at: NOW } })).toBe('POSITION_REVIEW');
@@ -50,6 +50,22 @@ describe('Trader Joe state mapping', () => {
   it('shows a running session as monitoring, and a risk halt as an alert', () => {
     expect(state({ sessionState: 'RUNNING' })).toBe('MONITORING');
     expect(state({ sessionState: 'ENTRY_SUSPENDED_RISK_HALT' })).toBe('RISK_ALERT');
+  });
+  it('keeps safety states above chat and events', () => {
+    const emergency = shell({ control: { emergency: true, pausedNewOrders: true } });
+    for (const chat of ['composing', 'waiting'] as const) {
+      expect(state({ shell: emergency, chat })).toBe('RISK_ALERT');
+      expect(state({ streamConnected: false, chat })).toBe('DISCONNECTED');
+      expect(state({ openIncidents: 1, chat })).toBe('RISK_ALERT');
+    }
+    expect(state({ sessionState: 'ENTRY_SUSPENDED_RISK_HALT', lastEvent: { kind: 'scan', at: NOW } })).toBe('RISK_ALERT');
+  });
+  it('keeps an open protection incident visible after the stream event window', () => {
+    expect(state({ openIncidents: 1, sessionState: 'RUNNING', lastEvent: { kind: 'protection', at: NOW - EVENT_WINDOW_MS - 1 } })).toBe('RISK_ALERT');
+  });
+  it('never claims there is no session when the session state is unknown or recovering', () => {
+    expect(mapJoeState({ ...base, sessionState: null })).toEqual({ state: 'SYSTEM_ERROR', caption: expect.stringContaining('could not be read') });
+    expect(state({ sessionState: 'RECOVERING_ON_BOOT' })).toBe('RECOVERING');
   });
 });
 

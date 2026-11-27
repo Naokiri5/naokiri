@@ -37,7 +37,7 @@ export default function TraderJoeScene({ state, reducedMotion, onMonitor }: {
     seen.observe(el);
     const vis = () => { visible = document.visibilityState === 'visible'; if (visible) schedule(); else stop(); };
     document.addEventListener('visibilitychange', vis);
-    const lost = (event: Event) => { event.preventDefault(); stop(); setFailed(true); };
+    const lost = (event: Event) => { event.preventDefault(); stop(); kick.current = () => {}; onScreen = false; setFailed(true); };
     el.addEventListener('webglcontextlost', lost);
     resize(); schedule();
     kick.current = () => { draw(); schedule(); };

@@ -149,6 +149,40 @@ test('Trader Joe and the portfolio use the recorded paper balance', async () => 
   await expect(page.getByText('PASS', { exact: true })).toBeVisible();
 });
 
+test('swipe authorization: Enter in a field, a repeated key or a plain click never authorizes; one explicit press sends one request', async () => {
+  // The offline server never enables Run Session, so only the paper-session read model and the run command are
+  // stubbed here; this test exercises the browser control, while server rejection is covered in durable-session tests.
+  let runs = 0;
+  await page.route('**/api/session/paper-spot', (route) => route.fulfill({ json: {
+    state: 'CLOSED', canRun: true, canClose: false, checks: [], mandate: null,
+    authorization: { maxCapital: 1000, minDurationHours: 1, maxDurationHours: 720 } } }));
+  await page.route('**/api/session/paper-spot/run', (route) => { runs++; return route.fulfill({ json: { state: 'RUNNING' } }); });
+  try {
+    await page.goto('/autopilot');
+    const session = page.getByRole('region', { name: 'MIA Autopilot' });
+    await session.getByRole('button', { name: 'Run Session' }).click();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet.getByText('Withdrawal permission')).toBeVisible();
+    await sheet.getByLabel('Authorized capital (USD)').fill('100');
+    const credential = sheet.getByPlaceholder('Owner passphrase (step-up)');
+    await credential.fill('any passphrase');
+    await expect(sheet.getByText('$100.00')).toBeVisible();
+    await credential.press('Enter'); await credential.press('Enter');
+    await expect(credential).toBeFocused(); // focus never jumps to the handle
+    const handle = sheet.getByRole('button', { name: /Swipe to authorize: swipe right, or press Enter/ });
+    await handle.click(); // a plain mouse click is not a swipe
+    await page.waitForTimeout(300);
+    expect(runs).toBe(0);
+    const sent = page.waitForRequest('**/api/session/paper-spot/run');
+    await handle.focus(); await page.keyboard.press('Enter');
+    expect((await sent).postDataJSON()).toMatchObject({ password: 'any passphrase', capitalCeiling: 100, durationHours: 24 });
+    await page.waitForTimeout(300);
+    expect(runs).toBe(1);
+  } finally {
+    await page.unroute('**/api/session/paper-spot/run'); await page.unroute('**/api/session/paper-spot');
+  }
+});
+
 test('Trader Joe studio reports the real offline state and keeps accessible monitor links', async () => {
   await page.goto('/trader-joe');
   const studio = page.getByRole('region', { name: 'Trader Joe studio' });

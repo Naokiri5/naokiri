@@ -347,3 +347,4 @@
 .mia-joe-monitor-links { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
 .mia-joe-monitor-links a { font-size: 12px; font-weight: 750; }
 .mia-joe-profile > .mia-joe-studio + div { border-top: 1px solid var(--line); }
+.mia-swipe-alt { justify-self: start; }

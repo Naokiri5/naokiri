@@ -19,7 +19,8 @@ const STATE_LABELS: Record<JoeState, { label: string; tone: string }> = {
   STANDBY: { label: 'Standby', tone: 'b-neutral' }, LISTENING: { label: 'Listening', tone: 'b-info' },
   TYPING: { label: 'Answering', tone: 'b-info' }, SCANNING: { label: 'Scan completed', tone: 'b-info' },
   RESEARCHING: { label: 'Decision recorded', tone: 'b-info' }, MONITORING: { label: 'Session running', tone: 'b-good' },
-  RISK_ALERT: { label: 'Risk attention', tone: 'b-warn' }, DISCONNECTED: { label: 'Data disconnected', tone: 'b-warn' },
+  RISK_ALERT: { label: 'Risk attention', tone: 'b-warn' }, REJECTION: { label: 'Candidate rejected', tone: 'b-neutral' },
+  RECOVERING: { label: 'Session recovering', tone: 'b-info' }, DISCONNECTED: { label: 'Data disconnected', tone: 'b-warn' },
   POSITION_REVIEW: { label: 'Position closed', tone: 'b-info' }, SESSION_CLOSING: { label: 'Session closing', tone: 'b-warn' },
   SYSTEM_ERROR: { label: 'Status unavailable', tone: 'b-warn' },
 };
@@ -44,7 +45,19 @@ function default3d(): boolean {
   } catch { /* storage can be blocked */ }
   const nav = navigator as Navigator & { connection?: { saveData?: boolean } };
   if (nav.connection?.saveData || (nav.hardwareConcurrency ?? 4) <= 2) return false;
-  try { return !!document.createElement('canvas').getContext('webgl2'); } catch { return false; }
+  return webglAvailable();
+}
+
+/** Probe once per page load and release the probe context at once: browsers cap live WebGL contexts. */
+let webglProbe: boolean | null = null;
+function webglAvailable(): boolean {
+  if (webglProbe !== null) return webglProbe;
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    webglProbe = !!gl;
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+  } catch { webglProbe = false; }
+  return webglProbe;
 }
 
 /**
@@ -55,6 +68,8 @@ function default3d(): boolean {
 export function TraderJoeStudio({ shell, chat }: { shell: ShellState; chat: 'idle' | 'composing' | 'waiting' }) {
   const ribbon = useRibbon(shell); // also re-renders once a second, which expires event reactions on time
   const session = useApi<{ state?: unknown }>('/api/session/paper-spot', { topics: ['bot', 'mode', 'risk', 'position'], every: 30_000 });
+  // Open protection incidents persist until data recovers, so Joe keeps the alert instead of only reacting to the event.
+  const incidents = useApi<{ status?: unknown }[]>('/api/risk/incidents', { topics: ['risk', 'position'], every: 60_000 });
   const [lastEvent, setLastEvent] = useState<JoeEvent | null>(null);
   const [show3d, setShow3d] = useState(default3d);
   const reducedMotion = useReducedMotion();
@@ -64,6 +79,7 @@ export function TraderJoeStudio({ shell, chat }: { shell: ShellState; chat: 'idl
   const view = mapJoeState({
     shell: shell.data, shellUnavailable: ribbon.stale || !!shell.error, streamConnected: streamState.connected,
     sessionState: !session.error && typeof session.data?.state === 'string' ? session.data.state : null,
+    openIncidents: !incidents.error && Array.isArray(incidents.data) ? incidents.data.filter((i) => i?.status === 'OPEN').length : null,
     chat, lastEvent, now: Date.now(),
   });
   const label = STATE_LABELS[view.state];

@@ -277,9 +277,9 @@ function SessionPreflight({ mind, environment, view }: { mind: Mind; environment
     </details>
     {showStepUp && <Modal title="Authorize Binance spot paper session" onClose={dismissStepUp}>
       <form className="mia-mandate-form" onSubmit={(event) => {
-        // Pressing Enter in a field moves focus to the swipe handle; only the swipe (or Enter on its handle) authorizes.
+        // Enter in a field never authorizes and never moves focus to the handle (a held key would then repeat on it).
+        // Only the swipe control's own explicit paths authorize.
         event.preventDefault();
-        event.currentTarget.querySelector<HTMLButtonElement>('.mia-swipe-handle')?.focus();
       }}>
         <p>
           MIA may open Binance spot positions with simulated funds, within the current risk policy and the capital you

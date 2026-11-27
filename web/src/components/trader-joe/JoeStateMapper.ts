@@ -14,7 +14,7 @@ import { isShellDto, type ShellDto } from '../../status';
 
 export type JoeState =
   | 'STANDBY' | 'LISTENING' | 'TYPING' | 'SCANNING' | 'RESEARCHING' | 'MONITORING'
-  | 'RISK_ALERT' | 'DISCONNECTED' | 'POSITION_REVIEW' | 'SESSION_CLOSING' | 'SYSTEM_ERROR';
+  | 'RISK_ALERT' | 'REJECTION' | 'DISCONNECTED' | 'POSITION_REVIEW' | 'RECOVERING' | 'SESSION_CLOSING' | 'SYSTEM_ERROR';
 
 /** A stream event Joe reacts to, reduced to what the mapper needs (see server bus.publish payloads). */
 export type JoeEvent =
@@ -28,8 +28,10 @@ export interface JoeSignals {
   shell: unknown;
   shellUnavailable: boolean;
   streamConnected: boolean;
-  /** Paper session state from /api/session/paper-spot, when known. */
+  /** Paper session state from /api/session/paper-spot; null when it could not be read. */
   sessionState: string | null;
+  /** Protection incidents still OPEN (/api/risk/incidents); null when unknown. Persistent, unlike stream events. */
+  openIncidents: number | null;
   chat: 'idle' | 'composing' | 'waiting';
   lastEvent: JoeEvent | null;
   now: number;
@@ -55,24 +57,29 @@ export function joeEventFrom(topic: string, payload: unknown, at: number): JoeEv
 export function mapJoeState(s: JoeSignals): JoeView {
   const shell: ShellDto | null = !s.shellUnavailable && isShellDto(s.shell) ? s.shell : null;
   if (!shell) return { state: 'SYSTEM_ERROR', caption: 'MIA status is unavailable. Joe waits until the server reports in again.' };
-  if (s.chat === 'waiting') return { state: 'TYPING', caption: 'Preparing an answer from recorded evidence.' };
-  if (s.chat === 'composing') return { state: 'LISTENING', caption: 'Listening to your question.' };
+  // Safety states first: a chat message or a passing event must never hide them.
   if (shell.control.emergency || s.sessionState === 'EMERGENCY_KILL_SWITCH') {
     return { state: 'RISK_ALERT', caption: 'Emergency stop is active. New orders are blocked; open positions stay monitored.' };
   }
   if (!s.streamConnected || shell.dataHealth.stale) {
     return { state: 'DISCONNECTED', caption: 'Market data is stale or the live feed is disconnected. New entries are blocked.' };
   }
+  if ((s.openIncidents ?? 0) > 0) return { state: 'RISK_ALERT', caption: 'A position could not be verified as protected. Review it in the Risk Center.' };
+  if (s.sessionState === 'ENTRY_SUSPENDED_RISK_HALT') return { state: 'RISK_ALERT', caption: 'Paper entries are suspended by a risk halt.' };
   if (s.sessionState === 'CLOSING_DRAINING_ENTRIES') return { state: 'SESSION_CLOSING', caption: 'The paper session is closing: no new entries, open positions protected.' };
+  if (s.sessionState === 'RECOVERING_ON_BOOT') return { state: 'RECOVERING', caption: 'The paper session is recovering after a restart and reconciling its records.' };
+
+  if (s.chat === 'waiting') return { state: 'TYPING', caption: 'Preparing an answer from recorded evidence.' };
+  if (s.chat === 'composing') return { state: 'LISTENING', caption: 'Listening to your question.' };
 
   const e = s.lastEvent && s.now - s.lastEvent.at >= 0 && s.now - s.lastEvent.at <= EVENT_WINDOW_MS ? s.lastEvent : null;
   if (e?.kind === 'protection') return { state: 'RISK_ALERT', caption: 'A position could not be verified as protected. Review it in the Risk Center.' };
-  if (e?.kind === 'decision' && e.rejected) return { state: 'RISK_ALERT', caption: `A candidate${e.asset ? ` (${e.asset})` : ''} was rejected by the decision and risk gates.` };
+  if (e?.kind === 'decision' && e.rejected) return { state: 'REJECTION', caption: `A candidate${e.asset ? ` (${e.asset})` : ''} was not approved. The decision record explains why.` };
   if (e?.kind === 'position-closed') return { state: 'POSITION_REVIEW', caption: 'A paper position closed. Reviewing the recorded outcome.' };
   if (e?.kind === 'decision') return { state: 'RESEARCHING', caption: `A decision record was written${e.asset ? ` for ${e.asset}` : ''}.` };
   if (e?.kind === 'scan') return { state: 'SCANNING', caption: 'A market scan just completed.' };
 
   if (s.sessionState === 'RUNNING') return { state: 'MONITORING', caption: 'A paper session is running within its authorized mandate.' };
-  if (s.sessionState === 'ENTRY_SUSPENDED_RISK_HALT') return { state: 'RISK_ALERT', caption: 'Paper entries are suspended by a risk halt.' };
+  if (s.sessionState === null) return { state: 'SYSTEM_ERROR', caption: 'The paper session state could not be read. Joe does not assume a session is running.' };
   return { state: 'STANDBY', caption: 'No paper session is running. Joe is on standby.' };
 }

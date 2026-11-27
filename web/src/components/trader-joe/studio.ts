@@ -225,7 +225,8 @@ export class JoeStudio {
     else if (s === 'SCANNING') { headYaw = Math.sin(t * .9) * .55; }
     else if (s === 'RESEARCHING') { lean = .12; headPitch = -.02; }
     else if (s === 'MONITORING') { headYaw = Math.sin(t * .35) * .3; }
-    else if (s === 'RISK_ALERT') { headYaw = .45; armRX = -1.75; armRZ = -.5; }
+    else if (s === 'RISK_ALERT' || s === 'REJECTION') { headYaw = .45; armRX = -1.75; armRZ = -.5; }
+    else if (s === 'RECOVERING') { headYaw = Math.sin(t * .25) * .2; headPitch = .12; }
     else if (s === 'DISCONNECTED') { headYaw = -.45; headPitch = .1; lean = .05; }
     else if (s === 'POSITION_REVIEW') { headYaw = .4; lean = .1; }
     else if (s === 'SESSION_CLOSING') { armLX = -.7; armRX = -.7; chairYaw = Math.sin(t * .5) * .15; }

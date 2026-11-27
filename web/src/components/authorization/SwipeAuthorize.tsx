@@ -1,15 +1,18 @@
-import { useEffect, useId, useReducer, useRef, type CSSProperties, type PointerEvent } from 'react';
+import { useEffect, useId, useReducer, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react';
 import { Icon } from '../../brand';
 import { SWIPE_IDLE, swipeProgress, swipeReducer } from './swipe';
 
 /**
  * Reusable "swipe to authorize" control (MIA Atelier, section 3).
  *
- * Drag the handle to the end of the track, or focus it and press Enter or Space: activation from a keyboard or an
- * assistive technology is the accessible alternative to the gesture. A mouse click without a drag does nothing, so a
- * stray click cannot authorize. The action fires once; the parent changes `resetKey` to allow another attempt
- * (for example after the server rejected the request). Emergency and protective controls must not use this
- * component: they stay one direct action away.
+ * Ways to authorize, each a deliberate act:
+ *  - drag the handle to the end of the track;
+ *  - focus the handle and press Enter or Space (a fresh key press on the handle itself; a held or repeating key, or
+ *    an Enter that started in a form field, never counts);
+ *  - "Can't swipe?" opens a second, explicit "Confirm" button for touch screen readers and switch users.
+ * A plain mouse click on the handle does nothing. The action fires once; the parent changes `resetKey` to allow
+ * another attempt. Emergency and protective controls must not use this component: they stay one direct action away.
+ * The control only expresses intent: the server still verifies the owner and re-checks every limit.
  */
 export function SwipeAuthorize({ label, onAuthorize, disabled = false, busy = false, resetKey = 0, describedBy }: {
   label: string;
@@ -20,6 +23,7 @@ export function SwipeAuthorize({ label, onAuthorize, disabled = false, busy = fa
   describedBy?: string;
 }) {
   const [state, dispatch] = useReducer(swipeReducer, SWIPE_IDLE);
+  const [alternate, setAlternate] = useState(false);
   const track = useRef<HTMLDivElement>(null);
   const handle = useRef<HTMLButtonElement>(null);
   const startX = useRef(0);
@@ -27,13 +31,15 @@ export function SwipeAuthorize({ label, onAuthorize, disabled = false, busy = fa
   const hintId = useId();
   const inactive = disabled || busy;
 
-  useEffect(() => { dispatch({ type: 'reset' }); }, [resetKey]);
+  useEffect(() => { dispatch({ type: 'reset' }); setAlternate(false); }, [resetKey]);
+  // Becoming disabled mid-gesture cancels it, so a release after the inputs changed cannot fire.
+  useEffect(() => { if (inactive) dispatch({ type: 'reset' }); }, [inactive]);
   useEffect(() => {
     // One action per reset key, even if the component re-renders while the request is in flight.
-    if (state.phase !== 'fired' || firedFor.current === resetKey) return;
+    if (state.phase !== 'fired' || inactive || firedFor.current === resetKey) return;
     firedFor.current = resetKey;
     onAuthorize();
-  }, [state.phase, resetKey, onAuthorize]);
+  }, [state.phase, inactive, resetKey, onAuthorize]);
 
   const progressAt = (clientX: number) => swipeProgress(startX.current, clientX,
     track.current?.clientWidth ?? 0, (handle.current?.offsetWidth ?? 0) + 12);
@@ -43,6 +49,13 @@ export function SwipeAuthorize({ label, onAuthorize, disabled = false, busy = fa
     event.currentTarget.setPointerCapture(event.pointerId);
     startX.current = event.clientX;
     dispatch({ type: 'start' });
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    // Handle the key here and suppress the browser's synthetic click, so only this explicit path can authorize.
+    event.preventDefault();
+    if (!event.repeat && !inactive) dispatch({ type: 'keyboard' });
   }
 
   const status = busy ? 'Verifying with the server...' : state.phase === 'fired' ? 'Authorization sent' : label;
@@ -57,8 +70,7 @@ export function SwipeAuthorize({ label, onAuthorize, disabled = false, busy = fa
         onPointerMove={(event) => { if (state.phase === 'dragging') dispatch({ type: 'move', progress: progressAt(event.clientX) }); }}
         onPointerUp={() => dispatch({ type: 'release' })}
         onPointerCancel={() => dispatch({ type: 'reset' })}
-        // detail === 0: activated by Enter/Space or an assistive technology, never by a plain mouse click.
-        onClick={(event) => { if (event.detail === 0 && !inactive) dispatch({ type: 'keyboard' }); }}>
+        onKeyDown={onKeyDown}>
         <Icon name={busy ? 'shield' : 'arrow'} size={20} />
       </button>
     </div>
@@ -66,5 +78,15 @@ export function SwipeAuthorize({ label, onAuthorize, disabled = false, busy = fa
       {busy ? 'MIA is verifying this request. Success is shown only after the server confirms it.'
         : 'Slide all the way to the right, or focus the handle and press Enter.'}
     </p>
+    {!alternate
+      ? <button type="button" className="sm ghost mia-swipe-alt" disabled={inactive || state.phase === 'fired'} onClick={() => setAlternate(true)}>
+        Can't swipe? Confirm with a button
+      </button>
+      : <div className="row mia-swipe-alt">
+        <button type="button" className="primary" disabled={inactive || state.phase === 'fired'} onClick={() => dispatch({ type: 'keyboard' })}>
+          Confirm authorization
+        </button>
+        <button type="button" className="sm ghost" onClick={() => setAlternate(false)}>Back to swipe</button>
+      </div>}
   </div>;
 }
