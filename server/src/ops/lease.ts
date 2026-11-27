@@ -22,7 +22,7 @@ export function validLeaseAt(lease: Lease, at: number): boolean {
   return Number.isSafeInteger(at) && at >= 0 &&
     typeof lease.name === 'string' && lease.name.length > 0 &&
     typeof lease.holder === 'string' && lease.holder.length > 0 &&
-    [lease.acquired_at, lease.renewed_at, lease.expires_at].every(Number.isSafeInteger) &&
+    [lease.acquired_at, lease.renewed_at, lease.expires_at, lease.epoch].every(Number.isSafeInteger) && lease.epoch >= 0 &&
     lease.acquired_at >= 0 && lease.acquired_at <= lease.renewed_at &&
     lease.renewed_at <= at && lease.expires_at > lease.renewed_at;
 }

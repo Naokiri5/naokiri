@@ -69,6 +69,13 @@ describe('lease fencing epoch', () => {
     expect(() => tx(() => assertWriteFence(old))).toThrow(LeaseLostError);
     expect(() => tx(() => assertWriteFence({ ...old, epoch: old.epoch + 1 }))).not.toThrow();
   });
+  it('a corrupted epoch makes the lease invalid (fail closed) instead of being trusted', () => {
+    const l = acquireOrRenewLease('epoch-corrupt', 'a', 1000, 1000)!;
+    run("UPDATE runtime_leases SET epoch=-1 WHERE name='epoch-corrupt'");
+    expect(acquireOrRenewLease('epoch-corrupt', 'b', 1000, 5000)).toBeNull(); // malformed row: no takeover
+    expect(() => tx(() => assertWriteFence({ ...l, epoch: -1 }))).toThrow(LeaseLostError);
+  });
+
   it('upgrades from the previous schema, keeping existing leases', () => {
     const raw = new DatabaseSync(':memory:');
     migrate(raw, SCHEMA_VERSION - 1);

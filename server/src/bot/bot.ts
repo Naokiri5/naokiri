@@ -119,7 +119,7 @@ function takeoverAllowed(lease: LeaseFence): boolean {
   return false;
 }
 function stillLeader(lease: LeaseFence): boolean {
-  if (!botStatus.running || activeLease?.acquired_at !== lease.acquired_at) return false;
+  if (!botStatus.running || activeLease?.acquired_at !== lease.acquired_at || activeLease?.epoch !== lease.epoch) return false;
   try { if (ownsLease(lease)) return true; } catch (error) { botStatus.lastError = `lease: ${errorText(error)}`; }
   activeLease = null;
   setEngineRole('STANDBY');

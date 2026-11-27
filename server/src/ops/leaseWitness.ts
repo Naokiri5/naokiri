@@ -26,7 +26,9 @@ export function inspectLeaseWitness(file: string, at = Date.now()): LeaseWitness
   const db = new DatabaseSync(file, { readOnly: true });
   try {
     db.exec('PRAGMA query_only=ON; PRAGMA busy_timeout=1000; BEGIN');
-    const row = db.prepare("SELECT name,holder,acquired_at,renewed_at,expires_at FROM runtime_leases WHERE name='engine'").get() as Lease | undefined;
+    // SELECT * so the fencing epoch is read when present; a database from before schema 12 has none (epoch 0).
+    const raw = db.prepare("SELECT * FROM runtime_leases WHERE name='engine'").get() as (Omit<Lease, 'epoch'> & { epoch?: number }) | undefined;
+    const row: Lease | undefined = raw ? { name: raw.name, holder: raw.holder, acquired_at: raw.acquired_at, renewed_at: raw.renewed_at, expires_at: raw.expires_at, epoch: raw.epoch ?? 0 } : undefined;
     const checkpoint = db.prepare("SELECT * FROM brainos_sessions WHERE session_id='brainos-autopilot'").get() as DurableBrainosSession | undefined;
     const lease: LeaseObservation = !row ? 'ABSENT' : !validLeaseAt(row, at) ? 'INVALID' :
       row.expires_at < at ? 'EXPIRED' : 'CURRENT';

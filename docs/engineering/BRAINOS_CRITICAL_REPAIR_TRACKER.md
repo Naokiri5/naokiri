@@ -152,6 +152,12 @@ invariant was mapped to the existing owner.
 | Bounded workers | Already in place | `workers/runtime.ts`: 16 concurrent, 250 ms deadline, quarantine. |
 | Fixed-point money | Open | Repair 21. |
 
+Independent trading-risk review: no blockers. Applied: the engine also compares the epoch when checking it is still
+leader, and a lease row with a corrupted epoch is treated as invalid (fail closed); the read-only lease witness now
+reads the epoch (a pre-12 database counts as epoch 0). Known and open, pre-existing: an invalid lease row (for example
+after the clock moves backwards) leaves every process on standby, so open paper positions are not monitored until
+the owner intervenes; this should surface as a critical readiness state.
+
 ## Not claimed
 
 Nothing here makes a strategy profitable. The new controls reduce risk when evidence is missing, broken or measured
