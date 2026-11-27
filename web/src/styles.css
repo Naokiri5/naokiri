@@ -9,6 +9,12 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
+  --radius: var(--mia-radius-card);
+}
+:root[data-theme="light"] .card { box-shadow: var(--mia-shadow); }
+:root[data-theme="light"] :is(.top, .side) { background: color-mix(in srgb, var(--mia-panel) 82%, transparent); backdrop-filter: blur(14px); }
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-theme="light"] button:not(:disabled):active { transform: scale(.98); }
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }

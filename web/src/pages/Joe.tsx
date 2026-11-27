@@ -4,6 +4,8 @@ import { api, fmt, useApi } from '../api';
 import { Icon } from '../brand';
 import { Badge, Card, ErrorLine, Page } from '../ui';
 import joeImage from '../assets/trader-joe.webp';
+import type { ShellState } from '../StatusRibbon';
+import { TraderJoeStudio } from '../components/trader-joe/TraderJoeStudio';
 
 type Message = { id: number; ts: number; role: 'user' | 'assistant'; content: string };
 type JoeState = { history: Message[]; llm: boolean; model: string };
@@ -20,7 +22,9 @@ function JoeAvatar({ thinking = false }: { thinking?: boolean }) {
   return <span className="mia-joe-avatar" data-thinking={thinking} aria-hidden="true"><img src={joeImage} alt="" width="800" height="800" /></span>;
 }
 
-function Chat({ context, compact = false }: { context?: string; compact?: boolean }) {
+type ChatActivity = 'idle' | 'composing' | 'waiting';
+
+function Chat({ context, compact = false, onActivity }: { context?: string; compact?: boolean; onActivity?: (activity: ChatActivity) => void }) {
   const { data, error, reload } = useApi<JoeState>('/api/joe');
   const [message, setMessage] = useState('');
   const [pending, setPending] = useState<string | null>(null);
@@ -33,6 +37,8 @@ function Chat({ context, compact = false }: { context?: string; compact?: boolea
   useEffect(() => {
     if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
   }, [latest, pending]);
+  const activity: ChatActivity = pending ? 'waiting' : message.trim() ? 'composing' : 'idle';
+  useEffect(() => { onActivity?.(activity); }, [activity, onActivity]);
 
   async function send(text: string) {
     const question = text.trim();
@@ -83,12 +89,13 @@ function Chat({ context, compact = false }: { context?: string; compact?: boolea
   </div>;
 }
 
-export function JoePage() {
+export function JoePage({ shell }: { shell: ShellState }) {
+  const [activity, setActivity] = useState<ChatActivity>('idle');
   return <Page title="Trader Joe" sub="Ask about the evidence behind decisions, market conditions, and paper-account risk.">
     <div className="mia-joe-layout">
-      <Card className="mia-joe-conversation"><Chat /></Card>
+      <Card className="mia-joe-conversation"><Chat onActivity={setActivity} /></Card>
       <aside className="card mia-joe-profile" aria-label="Trader Joe workspace context">
-        <img src={joeImage} alt="Trader Joe with an amber visor and a holographic notebook" width="800" height="800" />
+        <TraderJoeStudio shell={shell} chat={activity} />
         <div>
           <Badge v="Evidence assistant" tone="b-warn" />
           <h2>Review the source</h2>

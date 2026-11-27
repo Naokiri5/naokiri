@@ -233,6 +233,15 @@ describe('durable Binance spot paper authorization', () => {
     expect(get("SELECT 1 FROM audit_log WHERE action='session.paper_spot.run'")).toBeTruthy();
   });
 
+  it('rejects a duplicate authorization (a repeated swipe or retried request) without a second mandate or audit row', () => {
+    const fence = prepareSpotSession();
+    const first = authorizePaperSpotSession(engine, fence, { ...MANDATE, authorizedBy: 'owner:test' }, NOW);
+    expect(() => authorizePaperSpotSession(engine, fence, { ...MANDATE, capitalCeiling: MANDATE.capitalCeiling / 2, authorizedBy: 'owner:test' }, NOW + 1))
+      .toThrow('SESSION_NOT_CLOSED');
+    expect(durableSessionStatus()).toMatchObject({ state: 'RUNNING', capital_ceiling: first.capital_ceiling, started_at: NOW });
+    expect(get<{ n: number }>("SELECT COUNT(*) n FROM audit_log WHERE action='session.paper_spot.run'")!.n).toBe(1);
+  });
+
   it('never cancels an approval carrying execution evidence when the session closes', () => {
     const fence = prepareSpotSession();
     openPaperSpotSession(engine, fence, MANDATE, NOW);

@@ -142,9 +142,9 @@ function Shell({ onLogout }: { onLogout: () => void | Promise<void> }) {
         <Route path="/terminal" element={<P.Terminal />} /><Route path="/terminal/:symbol" element={<P.Terminal />} />
         <Route path="/scanner" element={<P.Scanner />} /><Route path="/intelligence" element={<P.Intelligence />} />
         <Route path="/autopilot" element={<P.Bot shell={shell} />} />
-        <Route path="/trader-joe" element={<P.JoePage />} />
+        <Route path="/trader-joe" element={<P.JoePage shell={shell} />} />
         <Route path="/smart-portfolio" element={<P.Portfolio />} />
-        <Route path="/joe" element={<P.JoePage />} /><Route path="/bubbles" element={<P.Bubbles />} /><Route path="/whales" element={<P.Whales />} />
+        <Route path="/joe" element={<P.JoePage shell={shell} />} /><Route path="/bubbles" element={<P.Bubbles />} /><Route path="/whales" element={<P.Whales />} />
         <Route path="/holders" element={<P.Holders />} /><Route path="/news" element={<P.News />} /><Route path="/bot" element={<P.Bot shell={shell} legacy />} />
         <Route path="/risk" element={<P.Risk />} /><Route path="/portfolio" element={<P.Portfolio />} /><Route path="/journal" element={<P.Journal />} />
         <Route path="/calendar" element={<P.Calendar />} /><Route path="/lab" element={<P.Lab />} /><Route path="/wallet" element={<P.Wallet />} />

@@ -212,7 +212,7 @@
 .mia-exposure-list .bar { margin-top: 6px; }
 .mia-exposure-list .bar i { background: var(--mia-lavender); }
 
-.mia-joe-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, 275px); align-items: start; gap: 16px; }
+.mia-joe-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 400px); align-items: start; gap: 16px; }
 .mia-joe-conversation > .bd { padding: 0; }
 .mia-chat { display: flex; flex-direction: column; gap: 11px; min-width: 0; padding: 0 14px 14px; }
 .mia-chat-header { display: flex; align-items: center; gap: 9px; min-height: 61px; margin-inline: -14px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
@@ -302,3 +302,48 @@
 @media (prefers-reduced-motion: reduce) {
   .shell *, .shell *::before, .shell *::after { animation: none !important; transition: none !important; }
 }
+
+/* MIA Atelier: swipe-to-authorize (components/authorization/SwipeAuthorize.tsx) */
+.mia-swipe { --swipe-progress: 0; display: grid; gap: 8px; }
+.mia-swipe-track {
+  position: relative; height: 64px; border-radius: 999px; overflow: hidden; touch-action: none; user-select: none;
+  background: var(--mia-coral-wash); border: 1px solid color-mix(in srgb, var(--mia-coral) 55%, transparent);
+}
+.mia-swipe-fill {
+  position: absolute; inset: 0 auto 0 0; width: calc(64px + var(--swipe-progress) * (100% - 64px));
+  background: color-mix(in srgb, var(--mia-coral) 45%, transparent); border-radius: inherit;
+}
+.mia-swipe-label {
+  position: absolute; inset: 0; display: grid; place-items: center; padding-left: 56px;
+  font-weight: 800; color: var(--mia-fast-ink); opacity: calc(1 - var(--swipe-progress) * 1.4);
+}
+.mia-swipe-handle {
+  position: absolute; top: 6px; left: calc(6px + var(--swipe-progress) * (100% - 64px));
+  width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; padding: 0;
+  background: var(--mia-fast-ink); border-color: var(--mia-fast-ink); color: #fff; cursor: grab; touch-action: none;
+}
+.mia-swipe-handle:active { cursor: grabbing; }
+.mia-swipe[data-phase='fired'] .mia-swipe-handle:disabled { opacity: 1; }
+.mia-swipe[data-disabled] .mia-swipe-track { filter: grayscale(.6); opacity: .6; }
+@media (prefers-reduced-motion: no-preference) {
+  .mia-swipe:not([data-phase='dragging']) :is(.mia-swipe-handle, .mia-swipe-fill) { transition: left .28s cubic-bezier(.2, 1.4, .4, 1), width .28s cubic-bezier(.2, 1.4, .4, 1); }
+}
+.mia-auth-preview { margin: 0 0 14px; display: grid; }
+.mia-auth-preview > div { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.mia-auth-preview dt { color: var(--muted); } .mia-auth-preview dd { margin: 0; font-weight: 800; text-align: right; }
+
+/* MIA Atelier: Trader Joe 3D studio (components/trader-joe). A dark miniature room inside the white workspace. */
+.mia-joe-studio { display: grid; gap: 10px; margin-bottom: 10px; }
+.mia-joe-stage {
+  position: relative; aspect-ratio: 1 / 1; border-radius: 18px; overflow: hidden;
+  background: radial-gradient(ellipse at 50% 40%, #2a1517, #0d0e11 72%);
+}
+.mia-joe-canvas { display: block; width: 100%; height: 100%; cursor: pointer; }
+.mia-joe-fallback { display: grid; place-items: center; gap: 6px; height: 100%; padding: 10px; text-align: center; }
+.mia-joe-profile .mia-joe-fallback img { width: min(100%, 300px); }
+.mia-joe-fallback .hint { color: #c9ccd2; }
+.mia-joe-studio-status { display: grid; gap: 4px; }
+.mia-joe-studio-status p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.mia-joe-monitor-links { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.mia-joe-monitor-links a { font-size: 12px; font-weight: 750; }
+.mia-joe-profile > .mia-joe-studio + div { border-top: 1px solid var(--line); }

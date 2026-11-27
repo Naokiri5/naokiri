@@ -2,12 +2,13 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 
 type Theme = 'dark' | 'light';
 
-const MiaTheme = createContext<readonly [Theme, () => void]>(['dark', () => {}]);
+const MiaTheme = createContext<readonly [Theme, () => void]>(['light', () => {}]);
 
 export function MiaThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    try { return localStorage.getItem('mia-theme') === 'light' ? 'light' : 'dark'; }
-    catch { return 'dark'; }
+    // MIA Atelier: the soft-white workspace is the default; an explicit dark choice is remembered.
+    try { return localStorage.getItem('mia-theme') === 'dark' ? 'dark' : 'light'; }
+    catch { return 'light'; }
   });
 
   useEffect(() => {

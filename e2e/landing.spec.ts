@@ -41,9 +41,11 @@ test('public landing has no overflow on mobile and menu opens with keyboard', as
   await page.keyboard.press('Escape');
   await expect(page.getByRole('navigation', { name: 'Mobile landing navigation' })).toHaveCount(0);
   await expect(menu).toBeFocused();
-  await page.getByRole('button', { name: 'Switch to light theme' }).click();
-  await page.reload();
+  // The soft-white Atelier theme is the default; an explicit dark choice persists across reloads.
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+  await page.getByRole('button', { name: 'Switch to dark theme' }).click();
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });
 
 test('public page does not depend on authenticated API data', async ({ page }) => {

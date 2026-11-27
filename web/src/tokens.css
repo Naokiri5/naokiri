@@ -43,31 +43,51 @@
   --mia-fast-ink: #f48bb8;
   --mia-deep-ink: #a5d8ff;
   --mia-cream: #fff8f1;
+  --mia-coral: #f0aba3;
+  --mia-coral-wash: rgba(240, 171, 163, .14);
+  --mia-powder: #bdd7ee;
+  --mia-powder-wash: rgba(189, 215, 238, .12);
+  --mia-sage: #c5dcd0;
+  --mia-sage-wash: rgba(197, 220, 208, .12);
+  --mia-shadow: none;
+  --mia-radius-card: 14px;
   --mia-graphite: #302d39;
 }
 
 :root[data-theme='light'] {
-  --mia-ink: #f8f7fc;
-  --mia-navy: #f0edf7;
-  --mia-panel: #fff;
-  --mia-elevated: #ece7f7;
-  --mia-text: #211a34;
-  --mia-muted: #534963;
-  --mia-faint: #645873;
-  --mia-line: #dfd7ea;
-  --mia-edge: #cfc2de;
-  --mia-lavender: #6239a0;
-  --mia-azure: #10627d;
-  --mia-lime: #426514;
-  --mia-gold: #79551f;
-  --mia-gain: #096a4c;
-  --mia-loss: #a72442;
-  --mia-warning: #805212;
-  --mia-on-action: #f7ffeb;
-  --mia-action: #355b1e;
-  --mia-action-hover: #244412;
-  --mia-fast-ink: #a3245f;
-  --mia-deep-ink: #1b5e87;
+  /* MIA Atelier: soft-white workspace. Coral and powder blue are decorative accents; gain/loss stay semantic
+     green/red so a coral surface is never read as a loss. Text-safe `*-ink` forms meet WCAG AA on white. */
+  --mia-ink: #f6f7f9;            /* Cloud White page */
+  --mia-navy: #eef0f3;
+  --mia-panel: #ffffff;          /* Pure White cards */
+  --mia-elevated: #f2f3f6;
+  --mia-text: #252b31;           /* Graphite */
+  --mia-muted: #545c66;
+  --mia-faint: #66707b;
+  --mia-line: #e5e8ed;
+  --mia-edge: #d4d9e0;
+  --mia-lavender: #2b6386;       /* links and focus: powder-blue ink, never coral */
+  --mia-azure: #2b6386;
+  --mia-lime: #b4473b;           /* brand point: coral ink */
+  --mia-gold: #7a5418;
+  --mia-gain: #1b7a50;
+  --mia-loss: #b3261e;
+  --mia-warning: #8a5410;
+  --mia-on-action: #ffffff;
+  --mia-action: #252b31;         /* primary actions are Graphite, as in the Run Session control */
+  --mia-action-hover: #3a424b;
+  --mia-fast: #f0aba3;           /* Soft Coral */
+  --mia-deep: #bdd7ee;           /* Powder Blue */
+  --mia-fast-ink: #a3402f;
+  --mia-deep-ink: #1f5b85;
+  --mia-coral: #f0aba3;
+  --mia-coral-wash: #fce8e5;
+  --mia-powder: #bdd7ee;
+  --mia-powder-wash: #e8f1f9;
+  --mia-sage: #c5dcd0;
+  --mia-sage-wash: #e6f0ea;
+  --mia-shadow: 0 1px 2px rgba(37, 43, 49, .04), 0 10px 28px rgba(37, 43, 49, .06);
+  --mia-radius-card: 20px;
 }
 
 .mia-wordmark {

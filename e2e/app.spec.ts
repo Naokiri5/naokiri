@@ -149,6 +149,20 @@ test('Trader Joe and the portfolio use the recorded paper balance', async () => 
   await expect(page.getByText('PASS', { exact: true })).toBeVisible();
 });
 
+test('Trader Joe studio reports the real offline state and keeps accessible monitor links', async () => {
+  await page.goto('/trader-joe');
+  const studio = page.getByRole('region', { name: 'Trader Joe studio' });
+  // Offline server: market data is stale, so Joe must not look busy or connected.
+  await expect(studio.getByRole('status')).toContainText('Data disconnected');
+  await expect(studio).toHaveAttribute('data-state', 'DISCONNECTED');
+  // The lazy 3D chunk loads, or the scene reports that WebGL is unavailable; either way the page stays usable.
+  await expect(studio.locator('.mia-joe-canvas').or(studio.getByText('3D view unavailable on this device.'))).toBeVisible();
+  if (process.env.MIA_E2E_SCREENSHOTS) await studio.screenshot({ path: process.env.MIA_E2E_SCREENSHOTS + '/joe-studio.png' });
+  for (const name of ['Decision records', 'Market terminal', 'Portfolio']) await expect(studio.getByRole('link', { name })).toBeVisible();
+  await studio.getByRole('link', { name: 'Market terminal' }).click();
+  await expect(page).toHaveURL(/\/terminal$/);
+});
+
 test('Trader Joe explains the real preflight and Academy exposes the capability contracts', async () => {
   await page.goto('/trader-joe');
   await page.getByRole('button', { name: 'FAST paper readiness' }).click();

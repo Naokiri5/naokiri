@@ -4,6 +4,7 @@ import { api, authInfo, fmt, useApi } from '../api';
 import miaImage from '../assets/mia-companion.webp';
 import { Icon } from '../brand';
 import { Badge, Card, Empty, ErrorLine, Freshness, Meter, Modal } from '../ui';
+import { SwipeAuthorize } from '../components/authorization/SwipeAuthorize';
 
 export type Mind = 'FAST' | 'DEEP';
 type Environment = 'PAPER' | 'LIVE';
@@ -275,7 +276,11 @@ function SessionPreflight({ mind, environment, view }: { mind: Mind; environment
       </div>
     </details>
     {showStepUp && <Modal title="Authorize Binance spot paper session" onClose={dismissStepUp}>
-      <form className="mia-mandate-form" onSubmit={(event) => { event.preventDefault(); void changeSession('run'); }}>
+      <form className="mia-mandate-form" onSubmit={(event) => {
+        // Pressing Enter in a field moves focus to the swipe handle; only the swipe (or Enter on its handle) authorizes.
+        event.preventDefault();
+        event.currentTarget.querySelector<HTMLButtonElement>('.mia-swipe-handle')?.focus();
+      }}>
         <p>
           MIA may open Binance spot positions with simulated funds, within the current risk policy and the capital you
           authorize. When the mandate expires, new entries stop and existing positions stay protected until they close.
@@ -309,8 +314,17 @@ function SessionPreflight({ mind, environment, view }: { mind: Mind; environment
             required
           />
         </label>
+        <dl className="mia-auth-preview" aria-label="Permissions you are authorizing">
+          <div><dt>Environment</dt><dd>PAPER (simulated funds)</dd></div>
+          <div><dt>Market</dt><dd>Binance Spot</dd></div>
+          <div><dt>Capital ceiling</dt><dd>{fmt.usd(capitalValid ? capitalValue : null)}</dd></div>
+          <div><dt>Session duration</dt><dd>{DURATIONS.find((option) => option.hours === durationHours)?.label}</dd></div>
+          <div><dt>Withdrawal permission</dt><dd>Not granted</dd></div>
+        </dl>
+        <SwipeAuthorize label="Swipe to authorize" busy={pending}
+          disabled={!credential || !capitalValid || !canRun}
+          onAuthorize={() => void changeSession('run')} />
         <div className="row">
-          <button type="submit" className="primary" disabled={!credential || !capitalValid || !canRun || pending}>Authorize and run</button>
           <button type="button" onClick={dismissStepUp}>Cancel</button>
         </div>
       </form>
