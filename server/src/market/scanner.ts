@@ -2,6 +2,8 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import { recordOpportunity } from '../ditas/memory.js';
 import { marketBreadth } from './bubbles.js';
 import { market } from './store.js';
+import { config } from '../config.js';
+import { durableSessionStatus } from '../ops/paperSpotEntry.js';
 import { assessQuality, bookImpact, bookFreshForExecution } from './quality.js';
 import { assessCexAsset, assessDexPair, type SafetyResult } from '../safety/safety.js';
 import { classifyRegime, type Regime } from '../regime/regime.js';
@@ -76,6 +78,9 @@ export function buildContext(cand: Candidate): WorkerContext {
 export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: string) => void, continueScan?: () => boolean) {
   const t0 = performance.now();
   const ctl = getControl();
+  const duringOnlinePaper = !config.offline && (ctl.mode === 'PAPER' || ctl.mode === 'APPROVAL');
+  const session = duringOnlinePaper ? durableSessionStatus() : null;
+  const awaitingPaperSession = duringOnlinePaper && (session?.state !== 'RUNNING' || session.environment !== 'PAPER' || session.mind !== 'SPOT_PAPER');
   let candidates = 0;
   const epoch = capacityEpoch();
   ledger.beginScan();
@@ -114,6 +119,8 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
       const sig = s.generate(f1);
       if (!sig) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Strategy ${s.version}: no entry condition` }); continue; }
       row.signals.push(s.id);
+      // Board signals remain visible while awaiting authorization. Do not consume their candle as a decision.
+      if (awaitingPaperSession) continue;
       if (!safety.eligibleForAutomation) { recordOpportunity({ kind: 'REJECTED', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Safety: ${safety.reasons.join('; ')}` }); rejectLog(inst.symbol, 'safety', `${s.id}: ${safety.status} — ${safety.reasons.join('; ')}`); continue; }
       candidates++;
       try {

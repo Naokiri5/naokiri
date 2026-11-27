@@ -10,6 +10,8 @@ vi.mock('../src/decision/engine.js', () => ({ decide: decideMock }));
 import { freshDb, seedInstrument } from './helpers.js';
 import { all, run, J } from '../src/db/db.js';
 import { market } from '../src/market/store.js';
+import { config } from '../src/config.js';
+import { BRAINOS_SESSION_ID } from '../src/ops/paperSpotEntry.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
 import { scanOnce, waitingCandidates, _scanTest } from '../src/market/scanner.js';
 import { ScanLedger, capacityEpoch, isCapacityOnlyDenial, storedDecisionsEndKey, MAX_WAITING, MAX_REEVALUATIONS_PER_SCAN } from '../src/market/scanLedger.js';
@@ -173,6 +175,26 @@ describe('scanOnce re-evaluates a capacity-blocked signal after a settlement (CT
     eng.history.splice(0, eng.history.length - 1); // one candle of history: regime not yet confirmed
     await scanOnce();
     expect(decideMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the current candle eligible when an online PAPER session starts after a scan', async () => {
+    const offline = config.offline;
+    config.offline = false;
+    try {
+      updateControl('owner', { mode: 'PAPER' });
+      const dispatch = vi.fn();
+      await scanOnce(dispatch);
+      expect(decideMock).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+
+      const now = Date.now();
+      run(`INSERT INTO brainos_sessions(session_id,version,state,environment,mind,fence_epoch,suspend_reason,started_at,updated_at)
+        VALUES (?,1,'RUNNING','PAPER','SPOT_PAPER',1,'NONE',?,?)`, BRAINOS_SESSION_ID, now, now);
+      decideMock.mockReturnValueOnce(report(risk('ALLOW', [])));
+      await scanOnce(dispatch);
+      expect(decideMock).toHaveBeenCalledOnce();
+      expect(dispatch).toHaveBeenCalledOnce();
+    } finally { config.offline = offline; }
   });
 
   it('does not re-evaluate a signal denied for a non-capacity reason, even after a settlement', async () => {
