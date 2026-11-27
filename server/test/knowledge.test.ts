@@ -16,6 +16,7 @@ import { memoryOverview } from '../src/knowledge/memory.js';
 import { strategyKnowledge, knowledgeForAssistant } from '../src/knowledge/integration.js';
 import { PRIORITY_CATALOG, DISCIPLINES, CONCEPT_CARDS } from '../src/knowledge/taxonomy.js';
 import { evaluateRisk } from '../src/risk/gate.js';
+import { BACKTEST_MODEL_VERSION } from '../src/lab/backtest.js';
 
 // Synthetic study text written for these tests (no copyrighted material).
 const VOL_TEXT = `# Volatility Notes
@@ -315,7 +316,7 @@ describe('research laboratory', () => {
   it('walk-forward experiment purges boundary trades and reports out-of-sample metrics per window', async () => {
     seedHistory(3000);
     const e = await runExperiment('owner', { kind: 'strategy_walkforward', symbol: 'TESTUSDT', interval: '1h', bars: 3000, strategyId: 'trend_pullback' });
-    expect(experimentDetail(e.id)!.results.backtestModelVersion).toBe(2);
+    expect(experimentDetail(e.id)!.results.backtestModelVersion).toBe(BACKTEST_MODEL_VERSION);
     expect(e.results.windows).toHaveLength(6); expect(e.results.windows.slice(1).every((w: any) => w.role === 'OUT_OF_SAMPLE')).toBe(true);
     expect(e.results.embargoBars).toBe(24); expect(typeof e.results.purgedTrades).toBe('number');
     expect(['SUPPORTED', 'INCONCLUSIVE', 'NOT_SUPPORTED', 'INSUFFICIENT_EVIDENCE']).toContain(e.verdict);

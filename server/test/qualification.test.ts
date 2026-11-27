@@ -6,7 +6,7 @@ import { listStrategies, oosCohort, setStrategyStatus, strategyQualification } f
 import { get, run, J, P } from '../src/db/db.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
 
-const trade = (r: number, i: number): BtTrade => ({ entryT: i, exitT: i + 1, entry: 100, exit: 100 + r, r, reason: 'TEST', regime: 'TREND_UP', segment: 'OOS', bars: 1, mfe: 0, mae: 0 });
+const trade = (r: number, i: number, costR: number | undefined = 0.05): BtTrade => ({ entryT: i, exitT: i + 1, entry: 100, exit: 100 + r, r, reason: 'TEST', regime: 'TREND_UP', segment: 'OOS', bars: 1, mfe: 0, mae: 0, ...(costR === undefined ? {} : { costR }) });
 /** Deterministic cohort: `wins` of every 5 trades win `win` R, the rest lose 1R. */
 const cohort = (n: number, wins = 3, win = 1.5) => Array.from({ length: n }, (_, i) => trade(i % 5 < wins ? win : -1, i));
 const evidence = (trades: BtTrade[], over: Partial<QualificationEvidence> = {}): QualificationEvidence =>
@@ -70,6 +70,85 @@ describe('strategy qualification verdict', () => {
     expect(q.metrics).toMatchObject({ trials: 200, sharpeVarianceSource: 'CROSS_TRIAL' });
     expect(q.reasons).toEqual(['DEFLATED_SHARPE_TOO_LOW']);
     expect(q.metrics!.deflatedSharpeBenchmark).toBeGreaterThan(q.metrics!.sharpePerTrade);
+  });
+});
+
+/** `n` trades around mean `m` (alternating m+0.3 / m-0.3), placed from index `from` so exit order is chronological. */
+const block = (n: number, m: number, from: number, costR = 0.01) => Array.from({ length: n }, (_, i) => trade(i % 2 ? m - 0.3 : m + 0.3, from + i, costR));
+const periods = (...means: number[]) => means.flatMap((m, j) => block(20, m, j * 20));
+
+describe('qualification rulebook gates (Q6-Q10)', () => {
+  it('profit factor must be at least 1.2', () => {
+    const pf = (w: number) => Array.from({ length: 60 }, (_, i) => trade(i % 2 ? -1 : w, i));
+    expect(qualifyEvidence(evidence(pf(1.19))).reasons).toContain('PROFIT_FACTOR_TOO_LOW');
+    expect(qualifyEvidence(evidence(pf(1.21))).reasons).not.toContain('PROFIT_FACTOR_TOO_LOW');
+    expect(qualifyEvidence(evidence(pf(1.21))).metrics!.profitFactor).toBeCloseTo(1.21, 9);
+  });
+
+  it('max drawdown must not exceed 10R', () => {
+    expect(QUALIFICATION_RULES.maxDrawdownR).toBe(10);
+    const streak = (losses: number) => Array.from({ length: 60 }, (_, i) => trade(i >= 25 && i < 25 + losses ? -1 : 2, i));
+    const ok = qualifyEvidence(evidence(streak(10)));
+    expect(ok.metrics!.maxDrawdownR).toBeCloseTo(10, 9);
+    expect(ok.reasons).not.toContain('DRAWDOWN_TOO_LARGE');
+    const bad = qualifyEvidence(evidence(streak(11)));
+    expect(bad.metrics!.maxDrawdownR).toBeCloseTo(11, 9);
+    expect(bad.reasons).toContain('DRAWDOWN_TOO_LARGE');
+  });
+
+  it('rejects the owner example: strong first period, negative later periods, positive pooled edge', () => {
+    const q = qualifyEvidence(evidence(periods(1.1, -0.1, -0.1)));
+    expect(q.metrics!.expectancyR).toBeGreaterThan(0);
+    expect(q.metrics!.expectancyLowerR).toBeGreaterThan(0);
+    expect(q.metrics!.periodExpectancyR.map((v) => Math.round(v * 10) / 10)).toEqual([1.1, -0.1, -0.1]);
+    expect(q.reasons).toContain('PERIOD_INCONSISTENT');
+    expect(q.verdict).toBe('NOT_QUALIFIED');
+  });
+
+  it('rejects a negative most recent period even when earlier periods are strong', () => {
+    const q = qualifyEvidence(evidence(periods(1, 1, -0.2)));
+    expect(q.metrics!.expectancyLowerR).toBeGreaterThan(0);
+    expect(q.reasons).toContain('PERIOD_INCONSISTENT');
+  });
+
+  it('allows one weak early period when the recent period is positive', () => {
+    const q = qualifyEvidence(evidence(periods(-0.2, 0.9, 0.9)));
+    expect(q.reasons).not.toContain('PERIOD_INCONSISTENT');
+    expect(q.verdict).toBe('QUALIFIED');
+  });
+
+  it('orders periods by exit time, not input order', () => {
+    const shuffled = [...periods(1.1, -0.1, -0.1)].reverse();
+    expect(qualifyEvidence(evidence(shuffled)).reasons).toContain('PERIOD_INCONSISTENT');
+  });
+
+  it('fails the 2x cost stress when extra cost removes the edge, passes when it is small', () => {
+    const withCost = (c: number) => cohort(60).map((t) => ({ ...t, costR: c }));
+    const bad = qualifyEvidence(evidence(withCost(0.6)));
+    expect(bad.reasons).toContain('COST_STRESS_FAILED');
+    expect(bad.metrics!.stressedExpectancyR).toBeCloseTo(-0.1, 9);
+    const ok = qualifyEvidence(evidence(withCost(0.05)));
+    expect(ok.reasons).not.toContain('COST_STRESS_FAILED');
+    expect(ok.metrics!.stressedExpectancyR).toBeCloseTo(0.45, 9);
+  });
+
+  it('fails closed when any trade lacks a finite non-negative costR', () => {
+    const base = cohort(60);
+    const missing = base.map((t, i) => (i === 7 ? (({ costR: _omit, ...rest }) => rest)(t) : t));
+    const q = qualifyEvidence(evidence(missing));
+    expect(q.reasons).toContain('COST_STRESS_FAILED');
+    expect(q.metrics!.stressedExpectancyR).toBeNull();
+    for (const bad of [NaN, Infinity, -0.1]) {
+      expect(qualifyEvidence(evidence(base.map((t, i) => (i === 3 ? { ...t, costR: bad } : t)))).reasons).toContain('COST_STRESS_FAILED');
+    }
+  });
+
+  it('qualifies the default seeded 60-trade fixture under every rule', () => {
+    freshDb(false);
+    seedBacktestFixture(STRATEGIES[0].id);
+    const q = strategyQualification(STRATEGIES[0].id);
+    expect(q.reasons).toEqual([]);
+    expect(q.verdict).toBe('QUALIFIED');
   });
 });
 

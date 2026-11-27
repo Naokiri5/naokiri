@@ -158,6 +158,29 @@ reads the epoch (a pre-12 database counts as epoch 0). Known and open, pre-exist
 after the clock moves backwards) leaves every process on standby, so open paper positions are not monitored until
 the owner intervenes; this should surface as a critical readiness state.
 
+## Strategy qualification pipeline (owner PDF Part II, 27 Nov 2026)
+
+Mapped by the architecture subagent against the existing Lab, then built by two full-stack subagents in separate
+file sets. Every change makes qualification stricter; nothing was loosened, and no second backtester was added.
+
+| Rulebook item | Status | Evidence or remaining work |
+|---|---|---|
+| Chronological out-of-sample holdout, no look-ahead | Already in place | `lab/backtest.ts` 60/40 split, incremental feature engine. |
+| Net expectancy after costs, confidence lower bound > 0, deflated Sharpe | Already in place | `lab/qualification.ts` (1.96 z; DSR >= 0.95 with trials counted). |
+| Exact strategy version | Already in place | `lab/evidence.ts` skips other versions. |
+| Health monitoring and suspension | Already in place | `lab/lab.ts` `checkStrategyHealth` (verified-loss and decay). |
+| Profit factor >= 1.2 | **Done (new)** | `PROFIT_FACTOR_TOO_LOW`. |
+| Drawdown within envelope | **Done (new)** | `DRAWDOWN_TOO_LARGE`, max 10R out-of-sample: placeholder pending owner confirmation (may only be tightened). |
+| Walk-forward consistency | **Done (new)** | `PERIOD_INCONSISTENT`: out-of-sample trades in exit order split into 3 equal periods; the most recent must be positive and at most one may be non-positive. The PDF's own breakout example (good in 2024, losing in both 2025 halves) is rejected. |
+| Cost stress | **Done (new)** | `COST_STRESS_FAILED`: still positive with a positive lower bound at 2x modeled costs; trades carry `costR`; evidence without it fails closed. |
+| Backtest matches live entry rules | **Done (new)** | Backtest and historical session simulation now require the confirmed (STABLE) regime, as live does. `BACKTEST_MODEL_VERSION` is 3. |
+| Sample size 200 | Not changed | Minimum stays 30 out-of-sample trades; raising it is an owner decision. |
+| Dataset provenance hash, parameter-stability sweep, champion/challenger, PAPER forward validation as a promotion precondition | Open | Not built. |
+
+**Operational consequence:** stored backtests from model version 2 no longer qualify. Until each strategy is re-run
+under version 3 in the Strategy Lab, the risk gate refuses new entries for it (open positions stay protected). No
+strategy had qualified on real data before this change either.
+
 ## Not claimed
 
 Nothing here makes a strategy profitable. The new controls reduce risk when evidence is missing, broken or measured

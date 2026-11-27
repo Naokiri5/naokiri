@@ -70,6 +70,13 @@ describe('isolated historical session simulation', () => {
     for (const table of ['orders', 'fills', 'positions', 'ledger_entries']) expect(all(`SELECT * FROM ${table}`)).toEqual([]);
   });
 
+  it('refuses a signal on a candle whose regime is not yet confirmed, as live entries do', async () => {
+    // n 218 (candle 217) sits in a regime transition for this fixture series; n 215 is STABLE.
+    const unstable = await run([book(C + 3 * HOUR, P), book(C + 3 * HOUR + 1_000, P)], {}, fixtureStrategy([SIGNAL_INDEX + 4]));
+    expect(unstable).toMatchObject({ signals: 0, entries: 0 });
+    expect(await run([book(C, P), book(C + 1_000, P)], {}, fixtureStrategy([SIGNAL_INDEX + 1]))).toMatchObject({ signals: 1, entries: 1 });
+  });
+
   it('never uses the signal observation, a future candle or an expired signal', async () => {
     // An unrelated symbol advances the clock but cannot execute the pending entry; it then expires.
     const expired = await run([book(C, P), book(C + 1_000, P, { symbol: 'BTCUSDT' }), book(C + 7_000, P)]);
@@ -140,8 +147,8 @@ describe('isolated historical session simulation', () => {
       book(C, P), book(C + 1_000, P),
       book(C + 2_000, P * 0.5, { bidQty: qty / 4 }), // gap: exit deferred, loss far beyond the $200 limit
       book(C + 3_000, P * 0.5), // the position still exits
-      book(C + 3 * HOUR + 500, P), // a later signal is evaluated but never traded
-    ], {}, fixtureStrategy([SIGNAL_INDEX + 1, SIGNAL_INDEX + 4]));
+      book(C + 5 * HOUR + 500, P), // a later signal is evaluated but never traded
+    ], {}, fixtureStrategy([SIGNAL_INDEX + 1, SIGNAL_INDEX + 6]));
     expect(report.lossLimit).toMatchObject({ reachedAt: C + 2_000 });
     expect(report.lossLimit!.sessionPnlUsd).toBeLessThanOrEqual(-200);
     expect(report).toMatchObject({ signals: 2, entries: 1, rejections: { SESSION_LOSS_LIMIT_REACHED: 1 }, openPosition: null });
@@ -153,8 +160,8 @@ describe('isolated historical session simulation', () => {
   it('models today\'s live mandate when no loss limit is given: realized losses count against the capital ceiling', async () => {
     const qty = simulatedEntrySizing(DEFAULT_POLICY, 10_000, 10_000, askOf(P), P * 0.95).qty;
     const tape = [book(C, P), book(C + 1_000, P), book(C + 2_000, P * 0.5, { bidQty: qty / 4 }), book(C + 3_000, P * 0.5),
-      book(C + 3 * HOUR + 500, P), book(C + 3 * HOUR + 1_500, P)];
-    const strategy = fixtureStrategy([SIGNAL_INDEX + 1, SIGNAL_INDEX + 4]);
+      book(C + 5 * HOUR + 500, P), book(C + 5 * HOUR + 1_500, P)];
+    const strategy = fixtureStrategy([SIGNAL_INDEX + 1, SIGNAL_INDEX + 6]);
     // No session loss limit: the second signal trades because realized loss + its cost still fits the ceiling.
     expect(await run(tape, { maxSessionLossUsd: undefined }, strategy)).toMatchObject({ lossLimit: null, entries: 2 });
     // A ceiling that the realized loss has used up refuses it.

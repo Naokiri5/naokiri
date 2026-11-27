@@ -31,7 +31,7 @@ export function seedBacktestFixture(strategyId = STRATEGIES[0].id, options: { qu
   const trades: BtTrade[] = Array.from({ length: count }, (_, i) => {
     const r = count === 1 ? 0.2 : i % 5 < 3 ? 1.5 : -1;
     return { entryT: 2 * i + 1, exitT: 2 * i + 2, entry: 100, exit: 100 + r, r, reason: 'SYNTHETIC TEST FIXTURE',
-      regime: 'TREND_UP', segment: 'OOS', bars: 1, mfe: Math.max(r, 0), mae: Math.min(r, 0) };
+      regime: 'TREND_UP', segment: 'OOS', bars: 1, mfe: Math.max(r, 0), mae: Math.min(r, 0), costR: 0.05 };
   });
   const result: BtResult = {
     strategyId, strategyVersion: strategy.version, ...(options.legacy ? {} : { modelVersion: BACKTEST_MODEL_VERSION }), instrument: 'crypto:fixture:SYNTHETIC', interval: strategy.interval,

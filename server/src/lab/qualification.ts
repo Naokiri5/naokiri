@@ -13,11 +13,21 @@ export const QUALIFICATION_RULES = Object.freeze({
   /** z for a one-sided 97.5% / two-sided 95% interval on mean trade R. */
   confidenceZ: 1.96,
   minDeflatedSharpe: MIN_DEFLATED_SHARPE,
+  minProfitFactor: 1.2,
+  /** Placeholder envelope pending owner confirmation; tighter is allowed, looser is not. Max OOS drawdown in R. */
+  maxDrawdownR: 10,
+  /** Walk-forward consistency: OOS trades in exit order are split into this many equal-count periods. */
+  periods: 3,
+  /** At most this many periods may have mean R <= 0, and the most recent period must be positive. */
+  maxNonPositivePeriods: 1,
+  /** Cost stress: one extra unit of modeled cost per trade (2x total costs). */
+  costStressMultiple: 2,
 });
 
 export type QualificationReason =
   | 'NO_BACKTEST' | 'LEGACY_FILL_MODEL' | 'INSUFFICIENT_SAMPLE' | 'NON_POSITIVE_EXPECTANCY'
-  | 'EXPECTANCY_NOT_SIGNIFICANT' | 'DEFLATED_SHARPE_TOO_LOW';
+  | 'EXPECTANCY_NOT_SIGNIFICANT' | 'DEFLATED_SHARPE_TOO_LOW'
+  | 'PROFIT_FACTOR_TOO_LOW' | 'DRAWDOWN_TOO_LARGE' | 'PERIOD_INCONSISTENT' | 'COST_STRESS_FAILED';
 
 export interface QualificationEvidence {
   strategyVersion: string;
@@ -41,6 +51,11 @@ export interface QualificationReport {
     maxDrawdownR: number;
     /** Extra cost per trade, in R, that would remove the measured edge. */
     breakevenExtraCostR: number;
+    /** Mean R of each chronological OOS period (exit order, equal counts); empty when fewer trades than periods. */
+    periodExpectancyR: number[];
+    /** Mean R after one extra cost unit per trade (2x modeled costs); null when any trade lacks a finite costR >= 0. */
+    stressedExpectancyR: number | null;
+    stressedExpectancyLowerR: number | null;
   };
   rules: typeof QUALIFICATION_RULES;
   limitations: readonly string[];
@@ -72,6 +87,22 @@ function sharpeVariance(evidence: QualificationEvidence, moments: ReturnType<typ
   return { variance: floor, source: 'ESTIMATOR' as const };
 }
 
+const mean = (xs: readonly number[]) => xs.reduce((s, v) => s + v, 0) / xs.length;
+
+/** Mean R of each of `k` chronological equal-count periods (sizes differ by at most one). */
+function periodMeans(rs: readonly number[], k: number): number[] {
+  if (rs.length < k) return [];
+  return Array.from({ length: k }, (_, j) => mean(rs.slice(Math.floor(j * rs.length / k), Math.floor((j + 1) * rs.length / k))));
+}
+
+/** Cost stress at 2x modeled costs. Fails closed (null) when any trade has no finite non-negative costR. */
+function costStress(trades: readonly BtTrade[]): { mean: number; lower: number } | null {
+  if (trades.length < 2) return null;
+  if (!trades.every((t) => typeof t.costR === 'number' && Number.isFinite(t.costR) && t.costR >= 0)) return null;
+  const m = returnMoments(trades.map((t) => t.r - (t.costR as number)));
+  return { mean: m.mean, lower: m.mean - QUALIFICATION_RULES.confidenceZ * m.sd / Math.sqrt(m.n) };
+}
+
 export function qualifyEvidence(evidence: QualificationEvidence | null): QualificationReport {
   if (!evidence || !evidence.trades.length) return report(['NO_BACKTEST'], evidence?.strategyVersion ?? null);
   const reasons: QualificationReason[] = [];
@@ -88,11 +119,21 @@ export function qualifyEvidence(evidence: QualificationEvidence | null): Qualifi
   if (!(moments.mean > 0)) reasons.push('NON_POSITIVE_EXPECTANCY');
   else if (!(lower > 0)) reasons.push('EXPECTANCY_NOT_SIGNIFICANT');
   if (!(dsr >= QUALIFICATION_RULES.minDeflatedSharpe)) reasons.push('DEFLATED_SHARPE_TOO_LOW');
-  const s = stats([...evidence.trades].sort((a, b) => a.exitT - b.exitT));
+  const ordered = [...evidence.trades].sort((a, b) => a.exitT - b.exitT || a.entryT - b.entryT);
+  const s = stats(ordered);
+  if (!(s.profitFactor >= QUALIFICATION_RULES.minProfitFactor)) reasons.push('PROFIT_FACTOR_TOO_LOW');
+  if (!(s.maxDrawdownR <= QUALIFICATION_RULES.maxDrawdownR)) reasons.push('DRAWDOWN_TOO_LARGE');
+  const periodExpectancyR = periodMeans(ordered.map((t) => t.r), QUALIFICATION_RULES.periods);
+  const weak = periodExpectancyR.filter((v) => !(v > 0)).length;
+  const recent = periodExpectancyR[periodExpectancyR.length - 1];
+  if (periodExpectancyR.length && (!(recent > 0) || weak > QUALIFICATION_RULES.maxNonPositivePeriods)) reasons.push('PERIOD_INCONSISTENT');
+  const stress = costStress(ordered);
+  if (!stress || !(stress.mean > 0) || !(stress.lower > 0)) reasons.push('COST_STRESS_FAILED');
   return report(reasons, evidence.strategyVersion, {
     oosTrades: moments.n, instruments: evidence.instruments, trials, expectancyR: moments.mean, expectancyLowerR: lower,
     sharpePerTrade: moments.sharpe, skewness: moments.skewness, kurtosis: moments.kurtosis, deflatedSharpe: dsr,
     deflatedSharpeBenchmark: benchmark, sharpeVarianceSource: variance.source, profitFactor: s.profitFactor,
     maxDrawdownR: s.maxDrawdownR, breakevenExtraCostR: Math.max(0, moments.mean),
+    periodExpectancyR, stressedExpectancyR: stress?.mean ?? null, stressedExpectancyLowerR: stress?.lower ?? null,
   });
 }

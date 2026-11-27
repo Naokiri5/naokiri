@@ -5,6 +5,7 @@ import type { StrategyDef } from './strategies.js';
 import { INTERVAL_MS, type Candle } from '../market/types.js';
 import { newExitState, stepExit } from './exits.js';
 import { quantile } from '../core/util.js';
+import { assessRegimeStability } from '../regime/transition.js';
 
 /**
  * Part 18.2 / 32.5 backtester: point-in-time features (incremental engine, no look-ahead),
@@ -16,7 +17,8 @@ export interface BtTrade { entryT: number; exitT: number; entry: number; exit: n
   /** Total modeled execution cost of this trade in R (fees, spread, slippage both sides); set from model version 3. */
   costR?: number }
 export interface BtStats { trades: number; winRate: number; avgR: number; expectancyR: number; profitFactor: number; maxDrawdownR: number; totalR: number; avgBars: number }
-export const BACKTEST_MODEL_VERSION = 2;
+// v3: entries also require a STABLE regime (as live does) and trades carry costR; v2 evidence is legacy and must not qualify.
+export const BACKTEST_MODEL_VERSION = 3;
 // Stored results produced before model versioning omit modelVersion.
 export interface BtResult { strategyId: string; strategyVersion: string; modelVersion?: number; instrument: string; interval: string; bars: number; from: number; to: number; costs: BtCosts; splitAt: number; inSample: BtStats; outOfSample: BtStats; all: BtStats; trades: BtTrade[]; equityR: number[]; warnings: string[] }
 
@@ -36,7 +38,7 @@ export function backtest(strat: StrategyDef, instrument: string, candles: Candle
   assertStrategyHistory(strat.interval, candles);
   const eng = new FeatureEngine(); const trades: BtTrade[] = [];
   const splitAt = candles[Math.floor(candles.length * isFraction)]?.t ?? Infinity;
-  let pos: { st: ReturnType<typeof newExitState>; entryT: number; regime: string; cost: number; proceeds: number; fees: number } | null = null;
+  let pos: { st: ReturnType<typeof newExitState>; entryT: number; regime: string; cost: number; proceeds: number; fees: number; slipCost: number } | null = null;
   const slip = (costs.slippageBps + costs.spreadBps / 2) / 1e4;
   for (let i = 0; i < candles.length - 1; i++) {
     eng.ingest([candles[i]]);
@@ -47,12 +49,14 @@ export function backtest(strat: StrategyDef, instrument: string, candles: Candle
       if (!f || f.n < 210) continue;
       const { regime } = classifyRegime(f);
       if (!strat.suitableRegimes.includes(regime)) continue;
+      // Same entry gate as live trading; history holds only closed candles up to bar i (no look-ahead).
+      if (assessRegimeStability(eng.history).stability !== 'STABLE') continue;
       const sig = strat.generate(f);
       if (!sig) continue;
       const entry = next.o * (1 + slip);
       if (sig.stop >= entry) continue;
       const st = newExitState(entry, sig.stop, 1, sig.targets, sig.trailAfterR, sig.maxHoldBars);
-      pos = { st, entryT: next.t, regime, cost: entry, proceeds: 0, fees: entry * costs.feeRate };
+      pos = { st, entryT: next.t, regime, cost: entry, proceeds: 0, fees: entry * costs.feeRate, slipCost: next.o * slip };
     }
     // Stops and targets can execute on the entry candle without counting a held bar.
     const fills = stepExit(pos.st, next, slip, !entering);
@@ -61,12 +65,14 @@ export function backtest(strat: StrategyDef, instrument: string, candles: Candle
       const price = fill.reason === 'TARGET' || fill.reason === 'TIME' ? fill.price * (1 - slip) : fill.price;
       pos.proceeds += price * fill.qty;
       pos.fees += price * fill.qty * costs.feeRate;
+      pos.slipCost += (price / (1 - slip)) * slip * fill.qty; // price is post-slippage here, so undo it to get the raw fill
     }
     if (pos.st.qtyLeft <= 1e-12) {
       const risk = pos.st.entry - pos.st.initialStop;
       trades.push({
         entryT: pos.entryT, exitT: next.t, entry: pos.st.entry, exit: pos.proceeds,
         r: (pos.proceeds - pos.cost - pos.fees) / risk,
+        costR: (pos.fees + pos.slipCost) / risk,
         reason: fills[fills.length - 1].reason, regime: pos.regime,
         segment: pos.entryT < splitAt ? 'IS' : 'OOS',
         bars: pos.st.barsHeld, mfe: pos.st.mfe, mae: pos.st.mae,

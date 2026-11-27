@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { FeatureEngine } from '../features/indicators.js';
 import { INTERVAL_MS, type Candle } from '../market/types.js';
 import { classifyRegime } from '../regime/regime.js';
+import { assessRegimeStability } from '../regime/transition.js';
 import { DEFAULT_POLICY, RiskPolicy } from '../risk/policy.js';
 import { floorToStep } from '../risk/quantity.js';
 import { assertStrategyHistory, stats, type BtStats } from './backtest.js';
@@ -169,6 +170,8 @@ export async function simulateSession(
     if (!features || features.n < 210) return;
     const { regime } = classifyRegime(features);
     if (!strategy.suitableRegimes.includes(regime)) return;
+    // Same entry gate as live trading; engine.history holds only closed candles up to this one.
+    if (assessRegimeStability(engine.history).stability !== 'STABLE') return;
     const signal = strategy.generate(features);
     if (!signal) return;
     const signalTs = candle.t + duration;
