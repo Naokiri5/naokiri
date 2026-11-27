@@ -78,7 +78,7 @@ describe('lease fencing epoch', () => {
 
   it('upgrades from the previous schema, keeping existing leases', () => {
     const raw = new DatabaseSync(':memory:');
-    migrate(raw, SCHEMA_VERSION - 1);
+    migrate(raw, 11); // the schema just before the lease-epoch migration (12)
     raw.prepare("INSERT INTO runtime_leases(name,holder,acquired_at,renewed_at,expires_at) VALUES ('engine','old',1,1,2)").run();
     migrate(raw);
     expect(raw.prepare("SELECT holder, epoch FROM runtime_leases WHERE name='engine'").get()).toMatchObject({ holder: 'old', epoch: 0 });

@@ -139,7 +139,8 @@ describe('BrainOS spot paper evidence flow', () => {
     expect(sell.qty).toBe(buy.qty);
     const netPnl = sell.price * sell.qty - buy.price * buy.qty - buy.fee - sell.fee;
     expect(reconcile()).toMatchObject({ ok: true, closedPositions: 1 });
-    expect(cashBalance()).toBeCloseTo(initialCash + netPnl, 8);
+    // Cash is exact 1e-8 units rounded per ledger row, so it differs from the unrounded float by up to a few units.
+    expect(cashBalance()).toBeCloseTo(initialCash + netPnl, 7);
     const outcomes = paperChoiceOutcomes([decision.id, nextDecision.id]);
     expect(outcomes).toMatchObject([{ decisionId: decision.id, positionId: position.id, status: 'CLOSED' }]);
     expect(outcomes[0].netPnl).toBeCloseTo(netPnl, 8);

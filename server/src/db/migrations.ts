@@ -182,6 +182,12 @@ const MIGRATIONS: string[] = [
   ALTER TABLE runtime_leases ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;
   INSERT INTO runtime_lease_epochs(name, epoch) SELECT name, epoch FROM runtime_leases;
   `,
+  /* 13 - Exact cash authority (portfolio/money.ts): integer base units (1e-8 USDT) beside the legacy REAL amount.
+     The backfill uses SQLite ROUND (half away from zero), so an exact decimal tie in an old row may differ from the
+     half-even rule used for new writes by at most 1 unit. Reconcile accepts a REAL/units gap of up to 1 unit. */ `
+  ALTER TABLE ledger_entries ADD COLUMN amount_units INTEGER;
+  UPDATE ledger_entries SET amount_units = CAST(ROUND(amount * 100000000) AS INTEGER);
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */

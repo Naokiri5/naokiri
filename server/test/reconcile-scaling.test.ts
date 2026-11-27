@@ -2,12 +2,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { closeDb, openDb, run, tx } from '../src/db/db.js';
 import { migrate, SCHEMA_VERSION } from '../src/db/migrations.js';
+import { toUnits } from '../src/portfolio/money.js';
 import { reconcile } from '../src/portfolio/calendar.js';
 
 /** Closed paper positions, each with a filled entry and exit order and their principal and fee ledger entries. */
 function seedClosedTrades(count: number) {
   tx(() => {
-    run("INSERT INTO ledger_entries(id,account,ts,kind,amount) VALUES ('deposit','paper-bot',1,'DEPOSIT',1000000)");
+    run("INSERT INTO ledger_entries(id,account,ts,kind,amount,amount_units) VALUES ('deposit','paper-bot',1,'DEPOSIT',1000000,100000000000000)");
     for (let i = 0; i < count; i++) {
       run(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,
         status,opened_at,closed_at,realized_pnl,fees,planned_risk) VALUES (?,'paper-bot','crypto:binance:X','crypto','LONG','s',1,100,95,95,'[]',
@@ -15,8 +16,8 @@ function seedClosedTrades(count: number) {
       for (const [order, side, purpose, amount] of [[`b${i}`, 'BUY', 'ENTRY', -100], [`s${i}`, 'SELL', 'EXIT_TARGET', 101]] as const) {
         run(`INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,status,purpose,position_id,created_at,updated_at)
           VALUES (?,?,'paper-bot','binance-paper','crypto:binance:X',?,'MARKET',1,'FILLED',?,?,?,?)`, order, `c-${order}`, side, purpose, `p${i}`, i, i);
-        run("INSERT INTO ledger_entries(id,account,ts,kind,amount,ref) VALUES (?,'paper-bot',?,?,?,?)", `l-${order}`, i, side, amount, order);
-        run("INSERT INTO ledger_entries(id,account,ts,kind,amount,ref) VALUES (?,'paper-bot',?,'FEE',-0.1,?)", `f-${order}`, i, order);
+        run("INSERT INTO ledger_entries(id,account,ts,kind,amount,amount_units,ref) VALUES (?,'paper-bot',?,?,?,?,?)", `l-${order}`, i, side, amount, toUnits(amount), order);
+        run("INSERT INTO ledger_entries(id,account,ts,kind,amount,amount_units,ref) VALUES (?,'paper-bot',?,'FEE',-0.1,-10000000,?)", `f-${order}`, i, order);
       }
     }
   });

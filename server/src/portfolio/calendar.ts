@@ -1,5 +1,6 @@
 import { all, get, readSnapshot } from '../db/db.js';
 import { PAPER_ACCOUNT } from './ledger.js';
+import { MONEY_TOLERANCE, checkedUnits, fromUnits } from './money.js';
 import { getSetting } from '../core/settings.js';
 
 /** Part 27 profit calendar — a projection over closed positions; NOT a second PnL source of truth. */
@@ -34,7 +35,11 @@ function reconcileSnapshot(account: string) {
   const flows = get<{ s: number }>(`SELECT COALESCE(SUM(l.amount),0) s FROM ledger_entries l JOIN orders o ON o.id=l.ref JOIN positions p ON p.id=o.position_id
     WHERE l.account=? AND p.status='CLOSED' AND l.kind IN ('BUY','SELL','FEE')`, account)!;
   const diff = Math.abs(closed.s - flows.s);
-  const cash = get<{ s: number }>('SELECT COALESCE(SUM(amount),0) s FROM ledger_entries WHERE account=?', account)!.s;
+  // Cash is the exact integer-unit sum. Rows lacking units, or whose REAL amount drifts from units by more than 1 unit, break the dual-write.
+  const cashRow = get<{ s: unknown; missing: unknown; diverged: unknown }>(`SELECT COALESCE(SUM(amount_units),0) s, COUNT(*)-COUNT(amount_units) missing,
+    COALESCE(SUM(CASE WHEN amount_units IS NOT NULL AND ABS(amount*100000000 - amount_units) > 1 THEN 1 ELSE 0 END),0) diverged FROM ledger_entries WHERE account=?`, account)!;
+  const unitsMissing = checkedUnits(cashRow.missing); const unitsDivergence = checkedUnits(cashRow.diverged);
+  const cash = fromUnits(checkedUnits(cashRow.s));
   // Aggregate agreement is necessary but insufficient: opposite errors can cancel.
   // Compare every closed position against its own linked cash flows, and detect
   // unlinked principal movements rather than silently excluding them from the join.
@@ -44,7 +49,7 @@ function reconcileSnapshot(account: string) {
     LEFT JOIN ledger_entries l ON l.ref=o.id AND l.account=p.account AND l.kind IN ('BUY','SELL','FEE')
     WHERE p.account=? AND p.status='CLOSED'
     GROUP BY p.id,p.realized_pnl
-    HAVING ABS(p.realized_pnl-COALESCE(SUM(l.amount),0)) >= 0.000001
+    HAVING ABS(p.realized_pnl-COALESCE(SUM(l.amount),0)) >= ${MONEY_TOLERANCE}
       OR COUNT(CASE WHEN l.kind='BUY' THEN 1 END)=0
       OR COUNT(CASE WHEN l.kind='SELL' THEN 1 END)=0
   )`, account)!.n;
@@ -52,10 +57,10 @@ function reconcileSnapshot(account: string) {
     LEFT JOIN orders o ON o.id=l.ref AND o.account=l.account
     LEFT JOIN positions p ON p.id=o.position_id AND p.account=l.account
     WHERE l.account=? AND l.kind IN ('BUY','SELL','FEE') AND (o.id IS NULL OR p.id IS NULL)`, account)!.n; // trade fees are always order-linked; deposits and withdrawals need no link
-  const ok = Number.isFinite(cash) && Number.isFinite(diff) && diff < 1e-6 && mismatched === 0 && orphanPrincipal === 0;
+  const ok = Number.isFinite(cash) && Number.isFinite(diff) && diff < MONEY_TOLERANCE && mismatched === 0 && orphanPrincipal === 0 && unitsMissing === 0 && unitsDivergence === 0;
   return { ok, positionsRealized: closed.s, ledgerFlows: flows.s, difference: diff, closedPositions: closed.n, cash,
-    mismatchedClosedPositions: mismatched, orphanPrincipalEntries: orphanPrincipal,
-    detail: `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (Δ ${diff.toExponential(2)}); ${mismatched} mismatched positions, ${orphanPrincipal} unlinked principal or fee entries` };
+    mismatchedClosedPositions: mismatched, orphanPrincipalEntries: orphanPrincipal, unitsMissing, unitsDivergence,
+    detail: `${closed.n} closed positions: realized ${closed.s.toFixed(6)} vs ledger ${flows.s.toFixed(6)} (diff ${diff.toExponential(2)}); ${mismatched} mismatched positions, ${orphanPrincipal} unlinked principal or fee entries; ${unitsMissing} ledger rows without units, ${unitsDivergence} rows where REAL amount and integer units diverge` };
 }
 
 /**
@@ -72,8 +77,8 @@ export function fillEvidenceMismatches(account = PAPER_ACCOUNT): number {
       (o.status='FILLED' AND (
         fl.c IS NULL
         OR ABS(fl.q - o.filled_qty) > 0.000000001 * MAX(1, o.filled_qty)
-        OR ABS(fl.f - COALESCE(o.fees, 0)) > 0.000001
-        OR ABS(COALESCE(le.a, 0) + fl.f) > 0.000001))
+        OR ABS(fl.f - COALESCE(o.fees, 0)) > ${MONEY_TOLERANCE}
+        OR ABS(COALESCE(le.a, 0) + fl.f) > ${MONEY_TOLERANCE}))
       -- Any other status must carry no execution evidence at all: no fill row, no filled quantity, no fee debit.
       OR (o.status<>'FILLED' AND (fl.c IS NOT NULL OR o.filled_qty<>0 OR le.a IS NOT NULL)))`, account, account)!.n;
 }
