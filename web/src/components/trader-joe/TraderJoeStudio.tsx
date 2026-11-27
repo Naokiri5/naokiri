@@ -1,8 +1,9 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { streamState, useApi, useStream } from '../../api';
+import { Icon } from '../../brand';
 import { useRibbon, type ShellState } from '../../StatusRibbon';
-import { Badge } from '../../ui';
+import { Badge, Card } from '../../ui';
 import { joeEventFrom, mapJoeState, type JoeEvent, type JoeState } from './JoeStateMapper';
 import { JoeFallback } from './JoeFallback';
 import type { MonitorId } from './studio';
@@ -15,6 +16,11 @@ const MONITORS: Record<MonitorId, { to: string; label: string }> = {
   market: { to: '/terminal', label: 'Market terminal' },
   portfolio: { to: '/smart-portfolio', label: 'Portfolio' },
 };
+const WORKSPACES = [
+  { to: '/autopilot', label: 'Session readiness' },
+  ...Object.values(MONITORS),
+  { to: '/risk', label: 'Risk Center' },
+];
 const STATE_LABELS: Record<JoeState, { label: string; tone: string }> = {
   STANDBY: { label: 'Standby', tone: 'b-neutral' }, LISTENING: { label: 'Listening', tone: 'b-info' },
   TYPING: { label: 'Answering', tone: 'b-info' }, SCANNING: { label: 'Scan completed', tone: 'b-info' },
@@ -89,20 +95,30 @@ export function TraderJoeStudio({ shell, chat }: { shell: ShellState; chat: 'idl
   });
 
   return <section className="mia-joe-studio" aria-label="Trader Joe studio" data-state={view.state}>
-    <div className="mia-joe-stage">
-      {show3d
-        ? <Suspense fallback={<JoeFallback caption="Loading the 3D studio..." />}>
-          <TraderJoeScene state={view.state} reducedMotion={reducedMotion} onMonitor={(m) => nav(MONITORS[m].to)} />
-        </Suspense>
-        : <JoeFallback />}
-    </div>
-    <div className="mia-joe-studio-status" role="status" aria-live="polite">
-      <Badge v={label.label} tone={label.tone} />
-      <p>{view.caption}</p>
-    </div>
-    <nav className="mia-joe-monitor-links" aria-label="Joe's monitors">
-      {(Object.keys(MONITORS) as MonitorId[]).map((id) => <Link key={id} to={MONITORS[id].to}>{MONITORS[id].label}</Link>)}
-      <button type="button" className="sm ghost" onClick={toggle} aria-pressed={show3d}>{show3d ? 'Use still image' : 'Show 3D studio'}</button>
-    </nav>
+    <Card className="mia-joe-studio-panel">
+      <div className="mia-joe-studio-heading">
+        <h2>Studio</h2>
+        <button type="button" className="sm ghost" onClick={toggle} aria-pressed={show3d}>
+          {show3d ? 'Use still image' : 'Show 3D studio'}
+        </button>
+      </div>
+      <div className="mia-joe-stage">
+        {show3d
+          ? <Suspense fallback={<JoeFallback caption="Loading the 3D studio..." />}>
+            <TraderJoeScene state={view.state} reducedMotion={reducedMotion} onMonitor={(m) => nav(MONITORS[m].to)} />
+          </Suspense>
+          : <JoeFallback />}
+      </div>
+      <div className="mia-joe-studio-status" role="status">
+        <Badge v={label.label} tone={label.tone} />
+        <p>{view.caption}</p>
+      </div>
+      <nav className="mia-joe-workspace-links" aria-label="Related workspaces">
+        <h3>Related workspaces</h3>
+        <ul>{WORKSPACES.map(({ to, label }) => <li key={to}><Link to={to}>
+          {label} <Icon name="chevron" size={13} />
+        </Link></li>)}</ul>
+      </nav>
+    </Card>
   </section>;
 }

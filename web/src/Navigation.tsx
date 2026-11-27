@@ -30,7 +30,7 @@ export function GroupTabs() {
   );
   if (!tools.length) return null;
   return <details className="section-tools">
-    <summary>Explore {group.label} tools <span className="hint">({tools.length})</span></summary>
+    <summary>{group.label} tools</summary>
     <nav className="section-tool-links" aria-label={`${group.label} tools`}>
       {tools.map((page) => <NavLink key={page.to} to={page.to} title={page.desc}>{page.label}</NavLink>)}
     </nav>

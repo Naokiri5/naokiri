@@ -198,14 +198,14 @@ export function Bot({ legacy = false, shell }: { legacy?: boolean; shell: ShellS
   }>
     <ErrorLine e={error} />
     <AutopilotSession mind={mind} onMindChange={setMind} />
-    <div className="grid g4 mia-dashboard-section mia-account-summary" aria-label="Paper account summary">
+    <section className="card grid g4 mia-dashboard-section mia-account-summary" aria-label="Paper account summary">
       <Stat k="Account Equity" v={fmt.usd(marksMissing ? null : a?.equity)}
         s={marksMissing ? 'Waiting for position prices' : a ? 'Available paper cash ' + fmt.usd(a.cash) : 'Paper account value'} />
       <Stat k="Active Positions" v={a?.openCount ?? '—'} s="Open paper holdings" />
       <Stat k="Today's P&L" v={fmt.usd(a?.realizedToday)} tone={pnlColor(a?.realizedToday)}
         s={a ? <>Realized today (UTC) · Unrealized {fmt.usd(unrealized)}</> : 'Closed trades and open holdings'} />
       <RiskSummary shell={shell} command={command} />
-    </div>
+    </section>
     <ResearchWorkspace mind={mind} source={!data || error ? undefined : command ? 'command' : 'market'} paperPositions={rows}
       positions={<ManagedPositions rows={rows} protection={error ? undefined : data?.command?.protection} />} activity={<AutopilotActivity />} />
     <details className="mia-advanced" open={legacy ? true : undefined}>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePrivy } from '@privy-io/react-auth';
 import { PrivyShell, WalletLogin, type PrivyPublicConfig } from './privy/WalletLogin';
 import { requirePrivyLogout, completePrivyLogout } from './privy/browserSession';
@@ -10,7 +10,7 @@ import * as P from './pages';
 import { CommandPalette } from './palette';
 import { StaleBanner, StatusRibbon } from './StatusRibbon';
 import type { ShellDto } from './status';
-import { ALL_PAGES, pageForPath } from './nav';
+import { ALL_PAGES } from './nav';
 import { GroupTabs, PrimaryNav } from './Navigation';
 import { Icon, MiaWordmark } from './brand';
 import { AccessScreen } from './AccessScreen';
@@ -107,31 +107,31 @@ function Shell({ onLogout }: { onLogout: () => void | Promise<void> }) {
     ? { ...loc, pathname: loc.pathname.slice(4) || '/' }
     : loc;
   const cockpit = routeLocation.pathname === '/' || routeLocation.pathname === '/autopilot';
+  const joePage = ['/joe', '/trader-joe'].includes(routeLocation.pathname);
   return <div className="shell mia-operator-shell">
     <a className="mia-skip-link" href="#mia-main-content">Skip to main content</a>
     <header className="top">
-      <div className="mia-top-row">
-        <div className="mia-header-brand">
-          <Link className="brand" to="/app" aria-label="MIA Autopilot"><MiaWordmark /></Link>
-          <span className="mia-header-page">{pageForPath(loc.pathname)?.label}</span>
-        </div>
-        <PrimaryNav />
-        <div className="mia-top-actions">
-          <button className="ghost mia-top-icon" onClick={() => setPalette(true)} aria-label="Open command palette"><Icon name="compass" size={17} /></button>
-          <button className="pill mia-top-icon" onClick={() => nav('/notifications')} aria-label="Notifications"><Icon name="bell" size={16} />{s?.unread ? <span>{s.unread}</span> : null}</button>
-          <button className="ghost mia-top-icon" onClick={toggleTheme} aria-label="Toggle theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} /></button>
-          <button className="ghost mia-sign-out" onClick={async () => { setSignOutError(null); try { await api('/api/auth/logout', { body: {} }); await onLogout(); } catch (e) { setSignOutError(e instanceof Error ? e.message : 'Sign out failed'); } }}>Sign out</button>
-        </div>
+      <Link className="brand" to="/app" aria-label="MIA Autopilot"><MiaWordmark /></Link>
+      <div className="mia-top-status"><StatusRibbon shell={shell} /></div>
+      <div className="mia-top-actions">
+        <Search />
+        <button className="ghost mia-top-icon" onClick={() => setPalette(true)} aria-label="Open command palette" title="Open command palette (Ctrl/⌘K)"><Icon name="compass" size={18} /></button>
+        {!joePage && <button className="ghost mia-top-icon" onClick={() => setJoe(true)} aria-label="Ask Trader Joe" title="Ask Trader Joe"><Icon name="message" size={18} /></button>}
+        <button className="ghost mia-top-icon" onClick={() => nav('/notifications')} aria-label="Notifications" title="Notifications"><Icon name="bell" size={17} />{s?.unread ? <span>{s.unread}</span> : null}</button>
+        <button className="ghost mia-top-icon" onClick={toggleTheme} aria-label="Toggle theme" title="Toggle theme"><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={18} /></button>
+        <button className="ghost mia-sign-out" onClick={async () => { setSignOutError(null); try { await api('/api/auth/logout', { body: {} }); await onLogout(); } catch (e) { setSignOutError(e instanceof Error ? e.message : 'Sign out failed'); } }}>Sign out</button>
       </div>
-      <div className="mia-top-status"><StatusRibbon shell={shell} /><Search /></div>
     </header>
+    <PrimaryNav />
     <main id="mia-main-content" tabIndex={-1}>
-      <StaleBanner shell={shell} />
-      {signOutError && <div className="banner stale" role="alert">Sign-out was not fully completed: {signOutError}</div>}
-      {s?.control.emergency && <div className="banner stale">⛔ EMERGENCY STOP active — new orders blocked. Existing positions are still monitored. Resolve in the Risk Center.</div>}
-      {s && s.dataHealth.stale && <div className="banner stale">⚠ Market data is stale or disconnected (last update {fmt.ago(s.dataHealth.tickersAt)}). New entries are blocked by the data-quality gate.</div>}
-      {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and PnL are simulated against live order books. No real funds are used.</div>}
-      {s && !s.policyAccepted && loc.pathname !== '/risk' && <div className="banner info">Risk policy not yet accepted — paper execution stays disabled until you review it in the <a href="/risk" onClick={(e) => { e.preventDefault(); nav('/risk'); }}>Risk Center</a>.</div>}
+      <div className="mia-notices" aria-label="Workspace notices">
+        <StaleBanner shell={shell} />
+        {signOutError && <div className="banner stale" role="alert">Unable to sign out completely. {signOutError}</div>}
+        {s?.control.emergency && <div className="banner stale" role="alert"><strong>Emergency stop active.</strong> New orders are blocked. <Link to="/risk">Review position protection</Link></div>}
+        {s && s.dataHealth.stale && <div className="banner stale"><strong>Market data is stale or disconnected.</strong> New entries are blocked. {s.dataHealth.tickersAt ? <>Last update {fmt.ago(s.dataHealth.tickersAt)}.</> : null}</div>}
+        {s && !s.policyAccepted && routeLocation.pathname !== '/risk' && <div className="banner info"><strong>Risk policy required.</strong> <Link to="/risk">Review the policy</Link> before paper execution.</div>}
+        {s && s.mode !== 'OBSERVE' && <div className="banner paper">PAPER TRADING — all balances, orders and P&L are simulated against live order books.</div>}
+      </div>
       <ErrorLine e={shell.error} />
       {!cockpit && <GroupTabs />}
       <Routes location={routeLocation}>
@@ -162,15 +162,37 @@ function Shell({ onLogout }: { onLogout: () => void | Promise<void> }) {
       { id: 'act:joe', label: 'Ask Trader Joe', group: 'Action', run: () => setJoe(true) },
       { id: 'act:theme', label: `Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`, group: 'Action', run: toggleTheme },
     ]} />}
-    {(joe || !['/joe', '/trader-joe'].includes(routeLocation.pathname)) &&
-      (joe ? <JoeDrawer context={loc.pathname} onClose={() => setJoe(false)} /> : <button className="fab" onClick={() => setJoe(true)}><Icon name="message" size={17} />Ask Trader Joe</button>)}
+    {joe && <JoeDrawer context={loc.pathname} onClose={() => setJoe(false)} />}
   </div>;
 }
 
 function Search() {
-  const [q, setQ] = useState(''); const [res, setRes] = useState<any[]>([]); const nav = useNavigate();
-  useEffect(() => { if (q.length < 2) return setRes([]); const t = setTimeout(() => api(`/api/markets/search?q=${encodeURIComponent(q)}`).then(setRes).catch(() => {}), 200); return () => clearTimeout(t); }, [q]);
-  const go = (sym: string) => { setQ(''); setRes([]); nav(`/terminal/${sym}`); };
-  return <div className="search"><input id="gsearch" placeholder="Search asset… (Ctrl/⌘K for commands)" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && res[0]) go(res[0].symbol); if (e.key === 'Escape') setQ(''); }} aria-label="Search assets" />
-    {res.length > 0 && <div className="results">{res.map((r) => <div key={r.id} onClick={() => go(r.symbol)}><b>{r.base}</b> <span className="muted">{r.symbol} · Binance spot</span></div>)}</div>}</div>;
+  const [q, setQ] = useState('');
+  const [res, setRes] = useState<{ id: string; base: string; symbol: string }[]>([]);
+  const input = useRef<HTMLInputElement>(null);
+  const nav = useNavigate();
+  useEffect(() => {
+    if (q.trim().length < 2) return;
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void api<typeof res>(`/api/markets/search?q=${encodeURIComponent(q.trim())}`).then((matches) => {
+        if (current) setRes(matches);
+      }).catch(() => {});
+    }, 200);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [q]);
+  const updateQuery = (query: string) => { setQ(query); setRes([]); };
+  const go = (symbol: string) => { updateQuery(''); input.current?.focus(); nav(`/terminal/${encodeURIComponent(symbol)}`); };
+  return <form className="search" role="search" aria-label="Binance spot assets" onSubmit={(e) => {
+    e.preventDefault();
+    if (res[0]) go(res[0].symbol);
+  }} onKeyDown={(e) => {
+    if (e.key === 'Escape') { updateQuery(''); input.current?.focus(); }
+  }}>
+    <input ref={input} id="gsearch" type="search" placeholder="Search assets" value={q}
+      onChange={(e) => updateQuery(e.target.value)} aria-label="Search assets" autoComplete="off" maxLength={30} />
+    {res.length > 0 && <ul className="results" aria-label="Matching assets">{res.map((r) =>
+      <li key={r.id}><button type="button" onClick={() => go(r.symbol)}><b>{r.base}</b> <span className="muted">{r.symbol} · Binance spot</span></button></li>,
+    )}</ul>}
+  </form>;
 }

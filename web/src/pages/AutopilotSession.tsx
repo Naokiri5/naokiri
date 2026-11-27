@@ -1,7 +1,6 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, authInfo, fmt, useApi } from '../api';
-import miaImage from '../assets/mia-companion.webp';
 import { Icon } from '../brand';
 import { Badge, Card, Empty, ErrorLine, Freshness, Meter, Modal } from '../ui';
 import { SwipeAuthorize } from '../components/authorization/SwipeAuthorize';
@@ -60,14 +59,12 @@ const DURATIONS = [
   { hours: 72, label: '3 days' }, { hours: 168, label: '7 days' }, { hours: 720, label: '30 days' },
 ];
 
-const MIND_CARDS: Record<Mind, { icon: 'bolt' | 'layers'; title: string; pathway: string; scope: string; summary: string }> = {
+const MIND_CARDS: Record<Mind, { icon: 'bolt' | 'layers'; scope: string }> = {
   FAST: {
-    icon: 'bolt', title: 'Memecoin opportunities', pathway: 'Low-latency pathway', scope: 'Solana memecoins',
-    summary: 'Explore newly listed tokens and review their liquidity and risk evidence.',
+    icon: 'bolt', scope: 'Solana memecoins',
   },
   DEEP: {
-    icon: 'layers', title: 'Futures intelligence', pathway: 'Multi-stage reasoning', scope: 'Perpetual futures',
-    summary: 'Examine market structure and the evidence behind strategy hypotheses.',
+    icon: 'layers', scope: 'Perpetual futures',
   },
 };
 
@@ -101,17 +98,13 @@ function MindCard({ mind, selected, view, onSelect }: { mind: Mind; selected: bo
   const readiness = mindReadiness(view);
   return <button type="button" className="mia-mind-card" data-mode={mind.toLowerCase()} aria-pressed={selected}
     aria-labelledby={titleId} aria-describedby={detailId} onClick={onSelect}>
-    <span className="mia-mind-head">
-      <span className="mia-mind-icon" aria-hidden="true"><Icon name={card.icon} size={18} /></span>
-      <span id={titleId} className="mia-mind-name">{mind}</span>
-      <span className="mia-mind-status"><Badge v={readiness.label} tone={readiness.tone} /></span>
+    <span className="mia-mind-name">
+      <Icon name={card.icon} size={17} />
+      <strong id={titleId}>{mind}</strong>
     </span>
-    <span className="mia-mind-title">{card.title}</span>
-    <span id={detailId} className="mia-mind-detail">{card.summary} {readiness.detail}</span>
-    <span className="mia-mind-facts">
-      <span>{card.scope}</span>
-      <span>{card.pathway}</span>
-    </span>
+    <span className="mia-mind-scope">{card.scope}</span>
+    <span className="mia-mind-status" data-tone={readiness.tone}>{readiness.label}</span>
+    <span id={detailId} hidden>{card.scope}. {readiness.label}. {readiness.detail}</span>
   </button>;
 }
 
@@ -120,13 +113,8 @@ export function AutopilotSession({ mind, onMindChange }: { mind: Mind; onMindCha
   const environmentDescription = useId();
   const views: Record<Mind, PreflightView> = { FAST: usePreflight('FAST', environment), DEEP: usePreflight('DEEP', environment) };
   return <>
-    <div className="mia-mandate-bar">
-      <div className="mia-mind-cards" role="group" aria-label="Intelligence view">
-        {(['FAST', 'DEEP'] as const).map((value) => <MindCard key={value} mind={value} selected={mind === value}
-          view={views[value]} onSelect={() => onMindChange(value)} />)}
-      </div>
+    <div className="card mia-session-panel">
       <div className="mia-environment">
-        <span className="mia-field-label">Environment</span>
         <div className="mia-segment mia-execution" role="group" aria-label="Execution environment" aria-describedby={environmentDescription}>
           <button type="button" aria-pressed={environment === 'PAPER'} onClick={() => setEnvironment('PAPER')}>
             <Icon name="flask" size={15} /> Paper
@@ -135,13 +123,16 @@ export function AutopilotSession({ mind, onMindChange }: { mind: Mind; onMindCha
             <Icon name="lock" size={15} /> Live locked
           </button>
         </div>
-        <p id={environmentDescription} className="hint">
-          {environment === 'PAPER' ? 'Practice trading with simulated funds. Selecting a view never starts trading.' :
-            <>Real-money execution requires separate certification. <Link to="/qa">View Live readiness</Link></>}
-        </p>
+        <span id={environmentDescription} className="hint">
+          {environment === 'PAPER' ? 'Binance spot · Simulated funds' : <Link to="/qa">View Live readiness</Link>}
+        </span>
       </div>
+      <SessionPreflight key={environment} mind={mind} environment={environment} view={views[mind]} />
     </div>
-    <SessionPreflight key={environment} mind={mind} environment={environment} view={views[mind]} />
+    <div className="mia-mind-cards" role="group" aria-label="Intelligence view">
+      {(['FAST', 'DEEP'] as const).map((value) => <MindCard key={value} mind={value} selected={mind === value}
+        view={views[value]} onSelect={() => onMindChange(value)} />)}
+    </div>
   </>;
 }
 
@@ -186,10 +177,12 @@ function SessionPreflight({ mind, environment, view }: { mind: Mind; environment
   const paperState = !paper.error && Array.isArray(paper.data?.checks) ? paper.data : null;
   const emergency = preflight?.state === 'EMERGENCY' || paperState?.state === 'EMERGENCY_KILL_SWITCH';
   const paperSessionLabel = paperState && paperSessionLabels[paperState.state];
-  const title = emergency ? 'Emergency stop active' : paperSessionLabel || (error ? 'Readiness unavailable' : preflight ? 'Preflight checked' : 'Checking readiness');
   const paperBlocker = paperState?.checks.find((check) =>
     (check.status === 'BLOCKED' || check.status === 'UNVERIFIED') &&
     !(paperState.state === 'RUNNING' && check.id === 'session-lifecycle'));
+  const title = emergency ? 'Emergency stop active' : environment === 'LIVE' ? 'Live execution locked' :
+    paperSessionLabel || (paper.error ? 'Readiness unavailable' : paperState?.canRun ? 'Ready to authorize' :
+      paperBlocker ? 'Paper session blocked' : 'Checking readiness');
   const details = emergency ? 'New entries are blocked. Review position protection in the Risk Center.'
     : environment === 'LIVE' ? 'Real-money execution is locked.'
     : paper.error ? 'Paper session readiness is unavailable. Refresh checks to try again.'
@@ -226,17 +219,12 @@ function SessionPreflight({ mind, environment, view }: { mind: Mind; environment
     setCredential('');
   }
 
-  return <section className="card mia-session-hero" aria-labelledby={headingId} data-mind={mind.toLowerCase()}>
+  return <section className="mia-session-hero" aria-labelledby={headingId}>
     <div className="mia-session-main">
-      <img className="mia-session-mascot" src={miaImage} alt="" width="96" height="96" />
       <div className="mia-session-copy">
-        <h2 id={headingId}>MIA Autopilot</h2>
-        <div className="row" role="status">
-          <Badge v={title} tone={emergency ? 'b-bad' : error ? 'b-warn' : 'b-neutral'} />
-          <Freshness at={preflight?.checkedAt} label="Checked" />
-        </div>
+        <h2 id={headingId}>Trading session</h2>
+        <div className="row" role="status"><Badge v={title} tone={emergency ? 'b-bad' : paper.error || paperBlocker ? 'b-warn' : 'b-neutral'} /></div>
         <p id={reasonId}>{details}</p>
-        {environment === 'PAPER' && <p className="hint">FAST and DEEP provide research. Session controls apply to Binance spot paper trading.</p>}
         <ErrorLine e={actionError} />
       </div>
       <div className="mia-session-actions" aria-busy={pending}>
@@ -260,13 +248,15 @@ function SessionPreflight({ mind, environment, view }: { mind: Mind; environment
         </ul>
         <h3>{mind} research checks</h3>
       </>}
-      {preflight ? <ul className="mia-preflight-list">
+      {preflight ? <>
+      <Freshness at={preflight.checkedAt} label="Research checked" />
+      <ul className="mia-preflight-list">
         {preflight.checks.map((check) => <li key={check.id}>
           <div className="row between"><strong>{check.label}</strong><Badge v={check.status} /></div>
           <p className="hint">{check.detail}</p>
           {check.observedAt && <Freshness at={check.observedAt} label="Observed" />}
         </li>)}
-      </ul> : <p className="hint">{error ?? 'Waiting for server readiness checks.'}</p>}
+      </ul></> : <p className="hint">{error ?? 'Waiting for server readiness checks.'}</p>}
       <div className="mia-session-links">
         {environment === 'PAPER' && <Link to="/bot#paper-controls">Paper Account</Link>}
         <Link to="/risk">Review Risk Policy</Link>
