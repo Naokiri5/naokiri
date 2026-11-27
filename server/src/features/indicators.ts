@@ -35,6 +35,9 @@ export class FeatureEngine {
   private pdm = new Wilder(14); private mdm = new Wilder(14); private adx = new Wilder(14);
   private obv = 0; private obvHist: number[] = []; private ema20Hist: number[] = []; private ema50Hist: number[] = []; private bbwHist: number[] = [];
   last: FeatureSnapshot | null = null;
+  /** The most recent closed-candle snapshots, oldest first (bounded); read by the regime stability check. */
+  readonly history: FeatureSnapshot[] = [];
+  static readonly HISTORY_KEEP = 12;
   lastT = -1;
 
   /** Feed candles (any order, duplicates allowed). Only strictly newer closed candles are processed. */
@@ -74,6 +77,7 @@ export class FeatureEngine {
     this.last = this.snapshot();
     if (!Number.isNaN(this.last.bbWidth)) { this.bbwHist.push(this.last.bbWidth); if (this.bbwHist.length > 100) this.bbwHist.shift(); }
     this.last.bbWidthPctile100 = this.bbwHist.length >= 20 ? this.bbwHist.filter((x) => x <= this.last!.bbWidth).length / this.bbwHist.length : NaN;
+    this.history.push(this.last); if (this.history.length > FeatureEngine.HISTORY_KEEP) this.history.shift();
   }
 
   private snapshot(): FeatureSnapshot {

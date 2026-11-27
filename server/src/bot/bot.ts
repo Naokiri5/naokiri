@@ -28,6 +28,7 @@ import type { DecisionReport } from '../decision/engine.js';
 import { acquireOrRenewLease, ownsLease, releaseLease, LeaseLostError, type LeaseFence } from '../ops/lease.js';
 import { checkScanStall, protectionIntervalMs, staleAfter } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
+import { refreshRuntimeIntegrity, storeIntegrityResult } from '../ops/runtimeIntegrity.js';
 import { isShuttingDown } from '../ops/shutdown.js';
 import { drainExpiredMandate, durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
@@ -88,6 +89,7 @@ function takeoverAllowed(lease: LeaseFence): boolean {
   let failed: ReturnType<typeof takeoverIntegrity>['checks'];
   try {
     const result = takeoverIntegrity();
+    storeIntegrityResult(result, 'takeover', Date.now(), lease);
     if (result.ok) {
       expireApprovals(lease);
       try { recoverDurableSessionAfterTakeover(lease); } catch (error) {
@@ -308,6 +310,8 @@ const backgroundLane = () => runLane('background', async (lease) => {
   if (!stillLeader(lease)) return;
   // Hash verification of every outcome record; the risk gate pauses new entries on an unacknowledged failure.
   try { refreshOutcomeHashCheck(Date.now(), lease); } catch (error) { botStatus.lastError = `evidence-integrity: ${errorText(error).slice(0, 200)}`; }
+  if (!stillLeader(lease)) return;
+  try { refreshRuntimeIntegrity(takeoverIntegrity, Date.now(), lease); } catch (error) { botStatus.lastError = `runtime-integrity: ${errorText(error).slice(0, 200)}`; }
   if (!stillLeader(lease)) return;
   try { refreshSupportDiscounts(Date.now(), lease); } catch (error) { botStatus.lastError = `worker-reliability: ${errorText(error).slice(0, 200)}`; }
   if (!stillLeader(lease)) return;

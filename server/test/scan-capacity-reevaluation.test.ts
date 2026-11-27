@@ -122,7 +122,7 @@ describe('scanOnce re-evaluates a capacity-blocked signal after a settlement (CT
   let id = '';
   beforeEach(() => {
     freshDb();
-    market.universe.length = 0;
+    market.reset();
     id = seedInstrument('CAPUSDT').inst.id;
     _scanTest.reset();
     // Force a deterministic signal from one strategy; all others stay silent.
@@ -159,6 +159,13 @@ describe('scanOnce re-evaluates a capacity-blocked signal after a settlement (CT
     settle('p-b');
     await scanOnce();
     expect(decideMock).toHaveBeenCalledTimes(2); // approved key is done for this candle
+  });
+
+  it('an unconfirmed regime stops the pipeline before any decision (regime transition gate)', async () => {
+    const eng = market.deep.get(id)!.engines['1h'];
+    eng.history.splice(0, eng.history.length - 1); // one candle of history: regime not yet confirmed
+    await scanOnce();
+    expect(decideMock).not.toHaveBeenCalled();
   });
 
   it('does not re-evaluate a signal denied for a non-capacity reason, even after a settlement', async () => {

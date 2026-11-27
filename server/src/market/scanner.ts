@@ -5,6 +5,7 @@ import { market } from './store.js';
 import { assessQuality, bookImpact, bookFreshForExecution } from './quality.js';
 import { assessCexAsset, assessDexPair, type SafetyResult } from '../safety/safety.js';
 import { classifyRegime, type Regime } from '../regime/regime.js';
+import { assessRegimeStability, type RegimeStability } from '../regime/transition.js';
 import { STRATEGIES } from '../lab/strategies.js';
 import { runConsensus } from '../qci/coordinator.js';
 import { decide, type DecisionReport } from '../decision/engine.js';
@@ -26,7 +27,7 @@ import type { Candidate, WorkerContext } from '../workers/types.js';
 /** Part 1 universal scanner + Part 16.8 rejection intelligence. One scanner; QHEF only schedules it. */
 export interface BoardRow {
   instrumentId: string; symbol: string; base: string; price: number; changePct: number; quoteVolume: number;
-  regime: Regime; safety: SafetyResult['status']; quality: string; qualityIssues: string[]; spreadBps: number | null;
+  regime: Regime; regimeStability: RegimeStability; safety: SafetyResult['status']; quality: string; qualityIssues: string[]; spreadBps: number | null;
   rsi1h: number | null; trend1h: string; signals: string[]; lastDecision?: { id: string; decision: string; score: number; at: number };
   bullish: number; bearish: number;
 }
@@ -87,11 +88,11 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
     const inst = market.instruments.get(id); const d = market.deep.get(id); const t = market.tickers.get(id);
     if (!inst || !d || !t) continue;
     const f1 = d.engines['1h'].last;
-    const q = assessQuality(id); const safety = assessCexAsset(id); const reg = classifyRegime(f1);
+    const q = assessQuality(id); const safety = assessCexAsset(id); const reg = classifyRegime(f1); const stab = assessRegimeStability(d.engines['1h'].history);
     const imp = bookImpact(d.book, 'buy', 1000);
     const ind = readIndicators({ '15m': d.engines['15m'].last, '1h': f1, '4h': d.engines['4h'].last });
     const row: BoardRow = {
-      instrumentId: id, symbol: inst.symbol, base: inst.base, price: t.last, changePct: t.changePct, quoteVolume: t.quoteVolume, regime: reg.regime,
+      instrumentId: id, symbol: inst.symbol, base: inst.base, price: t.last, changePct: t.changePct, quoteVolume: t.quoteVolume, regime: reg.regime, regimeStability: stab.stability,
       safety: safety.status, quality: q.status, qualityIssues: q.issues, spreadBps: imp?.spreadBps ?? null, rsi1h: f1?.rsi14 ?? null,
       trend1h: !f1 ? 'n/a' : f1.ema20 > f1.ema50 ? 'up' : 'down', signals: [], lastDecision: board.get(id)?.lastDecision,
       bullish: ind.filter((x) => (x.signal ?? 0) > 0.25).length, bearish: ind.filter((x) => (x.signal ?? 0) < -0.25).length,
@@ -108,6 +109,8 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
       if (storedDecisionsEndKey(id, s.id, f1.t + INTERVAL_MS[s.interval])) { ledger.markProcessed(key); continue; }
       if (q.status === 'FAIL') { recordOpportunity({ kind: 'REJECTED', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Data quality: ${q.issues.join('; ')}` }); rejectLog(inst.symbol, 'data-quality', q.issues.join('; ')); continue; }
       if (!s.suitableRegimes.includes(reg.regime)) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Regime ${reg.regime} unsuitable for strategy ${s.version}` }); continue; }
+      // Hysteresis: a suitable regime must be confirmed, not just read on one candle or flipping (regime/transition.ts).
+      if (stab.stability !== 'STABLE') { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Regime ${stab.stability}: ${stab.reason}` }); continue; }
       const sig = s.generate(f1);
       if (!sig) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Strategy ${s.version}: no entry condition` }); continue; }
       row.signals.push(s.id);
@@ -150,11 +153,11 @@ export async function analyzeInstrument(id: string, strategyId?: string): Promis
   if (!held || !held.engines['1h'].last || !bookFreshForExecution(held.book)) {
     const { refreshDeep } = await import('./fabric.js'); await timed('analyze.ondemand', () => refreshDeep([id]));
   }
-  const d = market.deep.get(id)!; const f1 = d.engines['1h'].last; const reg = classifyRegime(f1);
+  const d = market.deep.get(id)!; const f1 = d.engines['1h'].last; const reg = classifyRegime(f1); const stab = assessRegimeStability(d.engines['1h'].history);
   const ind = readIndicators({ '15m': d.engines['15m'].last, '1h': f1, '4h': d.engines['4h'].last });
   const strategies = strategyId ? STRATEGIES.filter((s) => s.id === strategyId) : STRATEGIES;
   for (const s of strategies) {
-    const sig = f1 && s.suitableRegimes.includes(reg.regime) ? s.generate(f1) : null;
+    const sig = f1 && s.suitableRegimes.includes(reg.regime) && stab.stability === 'STABLE' ? s.generate(f1) : null;
     if (!sig) continue;
     const cand: Candidate = { id: uid('cand'), eventId: `${inst.symbol}:manual:${Date.now()}`, traceId: uid('trace'), instrumentId: id, symbol: inst.symbol, base: inst.base, market: 'crypto', venue: 'binance', strategyId: s.id, strategyVersion: s.version, interval: s.interval, signal: sig, regime: reg.regime, createdAt: Date.now() };
     const ctx = buildContext(cand); const proposalMemory = recordOpportunity({ kind: 'PROPOSAL', instrumentId: id, strategyId: s.id, dedupeKey: `proposal:${cand.id}`, reason: sig.reasons.join('; '), candidate: cand, ctx }); ctx.memorySnapshotId = proposalMemory.snapshotId ?? undefined; const qci = await runConsensus(ctx);
@@ -163,6 +166,6 @@ export async function analyzeInstrument(id: string, strategyId?: string): Promis
     return rep;
   }
   recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId, dedupeKey: `manual:${id}:${uid('analysis')}`, reason: `No strategy entry condition (regime ${reg.regime})` });
-  return { instrumentId: id, status: 'NO_SIGNAL', reason: `No strategy entry condition is met (regime ${reg.regime}). Nothing to trade — monitoring.`, indicators: ind, regime: reg.regime, safety: assessCexAsset(id), quality: assessQuality(id) };
+  return { instrumentId: id, status: 'NO_SIGNAL', reason: `No strategy entry condition is met (regime ${reg.regime}, ${stab.stability.toLowerCase()}: ${stab.reason}). Nothing to trade - monitoring.`, indicators: ind, regime: reg.regime, safety: assessCexAsset(id), quality: assessQuality(id) };
 }
 export function dexBoard() { return market.dex.map((p) => ({ ...p, safety: assessDexPair(p) })).sort((a, b) => b.volume24h - a.volume24h); }

@@ -110,6 +110,21 @@ tightened stop (only full settlements advance the capacity epoch, which can miss
 Totals (counted from the table): 4 done, 10 partial, 3 open, 5 owner action, 8 gated. One row counts as done for the
 gate only (13); profitability is still unproven.
 
+## Connectivity, execution and adaptive reliability (owner PDF, 27 Nov 2026)
+
+Mapped against the code before building; each part extends an existing owner, no new engine.
+
+| Proposed part | Existing owner | Status | Evidence or reason |
+|---|---|---|---|
+| OrderBookIntegrityGuard | `market/quality.ts` | Already in place | Crossed, unordered, future-dated and stale books, future quotes and cross-venue disagreement already fail data quality, and the risk gate refuses entries on a stale or missing book. Sequence-gap resync applies to streaming books; providers are HTTPS polling (repair 06). |
+| RegimeTransitionGate | `regime/regime.ts`, `market/scanner.ts` | **Done (new)** | `regime/transition.ts`: entries require the regime confirmed for 3 closed candles with fewer than 4 changes in the last 12; transitioning, unstable or unknown regimes wait. Uses a bounded snapshot history in the feature engine. Only restricts entries; live is now stricter than the backtests that qualified a strategy. `regime-transition.test.ts`, scanner test, mutation-checked. |
+| RuntimePreFlightLatch | `ops/integrity.ts`, `risk/gate.ts` | **Done (new)** | The takeover integrity checks (quick_check, schema, audit and memory chains, ledger reconcile, protective stops) now re-run every 30 minutes on the background lane (`ops/runtimeIntegrity.ts`); the gate denies `RUNTIME_INTEGRITY_FAILED`, `_STALE` (over 90 minutes) or `_INVALID`. About 0.5 s per run on a 600 MB database (measured locally). `runtime-integrity.test.ts`, mutation-checked. |
+| AmbiguousOrderReconciler | `exec/recovery.ts`, `exec/oms.ts` | Already in place (PAPER) | Paper fills are synchronous; unresolved paper orders block entries (`UNRECONCILED_PAPER_ORDERS`). Venue status queries only matter with an external adapter (repairs 20, 22, 23: gated). |
+| PartialFillLedgerBridge | `exec/oms.ts`, `exec/fillEvents.ts` | Partial | Idempotent fill recording and `fill.recorded.v1` exist; exact integer money is repair 21 (open). |
+| SwarmSharedRingTelemetryBus | `core/bus.ts`, `core/telemetry.ts` | Not built | No benchmark shows a need; the PDF itself says to add shared memory only when measured. |
+| ChoiceArbitrationScorer | `choice/arbitration.ts` | Unchanged | Remains shadow-only; no qualified strategy exists to rank. |
+| DitasCalibrationDriftMonitor | `ditas/calibration.ts` | Not built | No automatic parameter updater exists to freeze; strategy suspension and the worker support discount already act on verified outcomes. |
+
 ## Not claimed
 
 Nothing here makes a strategy profitable. The new controls reduce risk when evidence is missing, broken or measured

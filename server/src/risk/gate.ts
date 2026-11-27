@@ -14,6 +14,7 @@ import { iso } from '../core/util.js';
 import { getSetting } from '../core/settings.js';
 import { openIncidentFor } from '../exec/incidents.js';
 import { unreconciledPaperOrders } from '../exec/recovery.js';
+import { runtimeIntegrityStatus } from '../ops/runtimeIntegrity.js';
 
 /** Part 17.9 risk gate contract. Deterministic, fail-closed: any exception ⇒ DENY. */
 export type RiskDecisionKind = 'ALLOW' | 'DENY' | 'NEEDS_REVIEW';
@@ -58,6 +59,9 @@ function evaluateInner(p: RiskProposal, nowTs: number): RiskDecision {
   // mismatch, linker failing, altered records). Computed here, not read from a background status, so it cannot be stale.
   const integrity = evaluateEvidenceIntegrity(nowTs);
   if (!integrity.ok) deny.push(`EVIDENCE_INTEGRITY_FAILED: ${integrity.reasons.join('; ')}`);
+  // Database, audit/memory chain, ledger and protective-stop checks re-run by the background lane after takeover.
+  const runtime = runtimeIntegrityStatus(nowTs);
+  if (!runtime.ok) deny.push(...runtime.reasons);
   if (ctl.disabledStrategies.includes(p.strategyId)) deny.push(`STRATEGY_DISABLED:${p.strategyId}`);
   const suspended = getSetting<string[]>('suspendedStrategies', []);
   if (suspended.includes(p.strategyId)) deny.push(`STRATEGY_SUSPENDED:${p.strategyId}`);
