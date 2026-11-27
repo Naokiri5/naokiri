@@ -65,6 +65,7 @@ import { config, inContainer } from '../config.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { qhefReport } from '../qhef/qhef.js';
 import { securityOverview, revokeOtherSessions } from '../security/security.js';
+import { allowsApiOrigin } from '../security/origins.js';
 import { discover } from '../market/discover.js';
 import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js';
 import { provider, ProviderError } from '../providers/http.js';
@@ -151,6 +152,9 @@ export async function routes(app: FastifyInstance) {
   const csrfExemptSignIn = new Set(['/api/auth/setup', '/api/auth/login', '/api/auth/privy/login']);
   app.addHook('onRequest', async (req, reply) => {
     const route = req.routeOptions?.url ?? '';
+    const socket = req.raw.socket;
+    const scheme = config.secureCookie || ('encrypted' in socket && socket.encrypted === true) ? 'https' : 'http';
+    if (!allowsApiOrigin(req.headers, scheme, config.publicOrigin)) return bad(reply, 403, 'browser origin not allowed');
     if (!publicRoutes.has(route) && !auth.validSession(tokenOf(req)))
       return bad(reply, 401, 'authentication required');
     if (req.method !== 'GET' && !csrfExemptSignIn.has(route) && req.headers['x-mia-csrf'] !== '1')

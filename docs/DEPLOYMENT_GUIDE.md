@@ -6,6 +6,7 @@
   containers so forwarded ports work; override with `MIA_HOST`. Front it with a TLS reverse proxy if you expose it remotely.
 - Paths (`data/`, `web/dist`) resolve from the repository location, not the shell's working directory. The session cookie is `HttpOnly; SameSite=Strict` and gains `Secure` only when `MIA_SECURE_COOKIE=1` (set it explicitly whenever MIA is served over HTTPS; `NODE_ENV` does not enable it); state-changing requests require the
   `x-mia-csrf` header.
+- Set `MIA_PUBLIC_ORIGIN` to the canonical HTTPS origin when a proxy rewrites the request's Host. Serve the UI and API on that origin and redirect alternate hostnames at the edge. Browser API requests with a foreign origin are refused. The app derives browser authority from this configuration or the request's Host and TLS settings. Origin-absent health and command-line requests still use the existing route access rules.
 - Secrets only via environment variables (`.env.example`). They never reach the browser, logs (redacted), or LLM prompts.
 
 ## Hosting: Railway only (Vercel retired 2026-11-26)
@@ -22,6 +23,8 @@ State on 2026-11-26:
   (database `mia.db` about 362 MB, plus an unidentified 77 MB file in `/data/backups`). `www.miaai.trade` is attached
   as a custom domain on port 8787. The service currently runs a maintenance stub, not MIA, and has no GitHub source.
 
+Release verification requires a Railway staging deployment and restore test on isolated storage. GitHub reports application tests and deployment integrations as independent checks.
+
 Cutover steps (in order):
 1. Grant the Railway GitHub app access to `Naokiri5/naokiri` (GitHub settings, Applications, Railway, repository
    access), then connect the service to the branch to deploy (owner chose the PR #140 branch,
@@ -37,7 +40,7 @@ Cutover steps (in order):
 
 ## Backup & restore
 - Data lives in `$MIA_DATA_DIR/mia.db` (SQLite WAL). Set `MIA_BACKUP_KEY` in the server environment before the first Privy owner binding and before creating online or production backups. Set a 32-byte key as hex or base64 and retain a protected copy separate from backup files.
-- Run `npm run backup -- create` to create and verify an encrypted snapshot before retention. Run `npm run backup -- verify <snapshot>` with the original backup key to verify a stored snapshot. Legacy plaintext snapshots remain readable for recovery. The backup and data volumes must support hard links for atomic publication. Use a service-account-private temporary directory on protected storage for local snapshot and verification work files.
+- Run `npm run backup -- create` to create and verify an encrypted snapshot before retention. Run `npm run backup -- verify <snapshot>` with the original backup key to verify a stored snapshot. Verification checks SQLite structure and foreign-key consistency before accepting a snapshot. Legacy plaintext snapshots remain readable for recovery. The backup and data volumes must support hard links for atomic publication. Use a service-account-private temporary directory on protected storage for local snapshot and verification work files.
 - Preserve the original evidence signing key separately. If you use `MIA_EVIDENCE_KEY`, restore that same value. Otherwise restore `$MIA_DATA_DIR/evidence.key` with the database before startup. MIA requires a usable persistent key when online or using an explicit data directory.
 - Migrations are append-only (`server/src/db/migrations.ts`). Roll back code by redeploying the previous commit together
   with a pre-upgrade backup.

@@ -1,6 +1,6 @@
 import { backupSpaceDenial, storageStatus } from './storage.js';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -9,6 +9,7 @@ import { SCHEMA_VERSION } from '../db/migrations.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { verifyMemory } from '../ditas/memory.js';
 import { config } from '../config.js';
+import { ensureStorageDirectory, privateStorageFileExists, readPrivateStorageFile } from './storagePaths.js';
 
 /**
  * Database backups for the always-on paper server.
@@ -16,8 +17,8 @@ import { config } from '../config.js';
  *  - Online and production writes require AES-256-GCM with MIA_BACKUP_KEY (32 bytes, hex or base64).
  *    Encrypted backups and restores use private temporary storage for their plaintext work files.
  *  - Manifest: `<file>.json` with the stored file's sha256, size, schema version and whether it is encrypted.
- *  - Verification ("can I restore from this?"): manifest hash, decrypt, PRAGMA integrity_check, schema version, and the
- *    audit-log and DITAS hash chains — all on the snapshot, never on the live database.
+ *  - Verification ("can I restore from this?"): manifest hash, decrypt, SQLite integrity and foreign keys, schema
+ *    version, and the audit-log and DITAS hash chains — all on the snapshot, never on the live database.
  *  - Retention: keep the newest N backups.
  */
 const MAGIC = Buffer.from('MIAB1');
@@ -63,10 +64,10 @@ export function createBackup(opts: BackupOptions = {}): BackupManifest {
 
 /** Verify in private staging before the snapshot becomes visible to retention or other processes. */
 export function createVerifiedBackup(opts: BackupOptions = {}): { manifest: BackupManifest; verification: VerifyResult } {
-  const dir = opts.dir ?? backupDir(); const key = opts.key === undefined ? backupKey() : opts.key; const t = opts.nowTs ?? Date.now();
+  const key = opts.key === undefined ? backupKey() : opts.key; const t = opts.nowTs ?? Date.now();
   if (!key && encryptionRequired()) throw new Error('MIA_BACKUP_KEY is required for online or production backups');
   if (key && key.length !== 32) throw new Error('MIA_BACKUP_KEY must be 32 bytes as 64 hex characters or base64');
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const dir = ensureStorageDirectory(opts.dir ?? backupDir());
   const name = `${PREFIX}${stamp(t)}${key ? '.db.enc' : '.db'}`; const final = join(dir, name);
   if (existsSync(final)) throw new Error(`backup ${name} already exists`);
   const staging = mkdtempSync(join(dir, '.mia-backup-'));
@@ -87,6 +88,7 @@ export function createVerifiedBackup(opts: BackupOptions = {}): { manifest: Back
     // Publish the manifest last. An interruption before then leaves an ineligible snapshot.
     linkSync(candidate, final);
     published = true;
+    unlinkSync(candidate);
     renameSync(manifestTemp, `${final}.json`);
     return { manifest, verification };
   } catch (error) {
@@ -101,10 +103,14 @@ export function createVerifiedBackup(opts: BackupOptions = {}): { manifest: Back
 /** Backups in a directory, newest first (only files that have a manifest count as complete). */
 export function listBackups(dir = backupDir()): BackupManifest[] {
   if (!existsSync(dir)) return [];
+  const directory = ensureStorageDirectory(dir);
   const out: BackupManifest[] = [];
-  for (const f of readdirSync(dir)) {
+  for (const f of readdirSync(directory)) {
     if (!f.startsWith(PREFIX) || !f.endsWith('.json')) continue;
-    try { const m = JSON.parse(readFileSync(join(dir, f), 'utf8')) as BackupManifest; if (m.file === f.slice(0, -5) && existsSync(join(dir, m.file))) out.push(m); } catch { /* unreadable manifest: not a usable backup */ }
+    try {
+      const m = JSON.parse(readPrivateStorageFile(join(directory, f))) as BackupManifest;
+      if (m?.file === f.slice(0, -5) && privateStorageFileExists(join(directory, m.file))) out.push(m);
+    } catch { /* An unreadable or unsafe pair is not a usable backup. */ }
   }
   return out.sort((a, b) => b.createdAt - a.createdAt);
 }
@@ -120,9 +126,14 @@ export function verifyBackup(file: string, key: Buffer | null = backupKey()): Ve
   const checks: VerifyResult['checks'] = []; const add = (name: string, ok: boolean, detail: string) => { checks.push({ name, ok, detail }); return ok; };
   const done = () => ({ ok: checks.every((c) => c.ok), file: basename(file), checks });
   let m: BackupManifest;
-  try { m = JSON.parse(readFileSync(`${file}.json`, 'utf8')); } catch { add('manifest', false, 'manifest missing or unreadable'); return done(); }
-  if (!add('manifest', m.file === basename(file), m.file === basename(file) ? 'present' : 'manifest names a different file')) return done();
-  if (!add('checksum', sha256File(file) === m.sha256, 'sha256 of stored file')) return done();
+  try { m = JSON.parse(readPrivateStorageFile(`${file}.json`)); } catch { add('manifest', false, 'manifest missing, unreadable or unsafe'); return done(); }
+  if (!add('manifest', m?.file === basename(file), m?.file === basename(file) ? 'present' : 'manifest names a different file')) return done();
+  let checksum: string;
+  try {
+    if (!privateStorageFileExists(file)) throw new Error('snapshot missing');
+    checksum = sha256File(file);
+  } catch { add('checksum', false, 'stored file missing, unreadable or unsafe'); return done(); }
+  if (!add('checksum', checksum === m.sha256, 'sha256 of stored file')) return done();
   let plainPath = file;
   let workspace: string | undefined;
   try {
@@ -141,6 +152,9 @@ export function verifyBackup(file: string, key: Buffer | null = backupKey()): Ve
       snap = new DatabaseSync(plainPath, { readOnly: true });
       const ic = (snap.prepare('PRAGMA integrity_check').all() as { integrity_check: string }[]).map((r) => r.integrity_check);
       add('integrity', ic.length === 1 && ic[0] === 'ok', ic.slice(0, 3).join('; '));
+      // integrity_check omits foreign keys. Read at most one violation, without exposing row identifiers.
+      const foreignKeyViolation = snap.prepare('PRAGMA foreign_key_check').get();
+      add('foreign keys', foreignKeyViolation === undefined, foreignKeyViolation ? 'referential integrity violation' : 'valid');
       const v = (snap.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number | null }).v ?? 0;
       add('schema', v === m.schema && v <= SCHEMA_VERSION, `v${v} (manifest v${m.schema}, code v${SCHEMA_VERSION})`);
       const a = verifyAuditChain(snap.prepare('SELECT * FROM audit_log ORDER BY id').all());

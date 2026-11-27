@@ -3,6 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { ensureStorageDirectory, LinkedStorageFileError, readPrivateStorageFile } from './ops/storagePaths.js';
+import { readPublicOrigin } from './security/origins.js';
 
 const env = process.env;
 /** Repository root, derived from this file's location (NOT the shell's cwd), so any launch directory works. */
@@ -106,6 +107,8 @@ export const config = {
   evidenceKeySource: EVIDENCE.source,
   /** Add the Secure flag to the session cookie (set when MIA is served over HTTPS / behind a TLS proxy). */
   secureCookie: env.MIA_SECURE_COOKIE === '1',
+  /** Browser-facing origin for proxies that rewrite the Host authority. */
+  publicOrigin: readPublicOrigin(env.MIA_PUBLIC_ORIGIN),
   webDist: env.MIA_WEB_DIST ? resolve(env.MIA_WEB_DIST) : resolve(REPO_ROOT, 'web', 'dist'),
 };
 
@@ -119,7 +122,7 @@ export const MIA_ENV_VARS = [
   'MIA_ENGINE_LEASE_TTL_MS', 'MIA_EVIDENCE_KEY', 'MIA_GIT_SHA', 'MIA_HOST', 'MIA_JOE_MODEL', 'MIA_KB_EMBEDDINGS',
   'MIA_KB_MAX_UPLOAD_MB', 'MIA_LIVE_TESTS', 'MIA_LOG', 'MIA_MAX_EXEC_BOOK_AGE_MS', 'MIA_OFFLINE', 'MIA_PORT',
   'MIA_PRIVY_APP_ID', 'MIA_PRIVY_EMBEDDED_WALLETS', 'MIA_PRIVY_OWNER_ID', 'MIA_PRIVY_VERIFICATION_KEY',
-  'MIA_SCAN_INTERVAL_MS', 'MIA_SECURE_COOKIE', 'MIA_TICKER_INTERVAL_MS', 'MIA_WEB_DIST',
+  'MIA_PUBLIC_ORIGIN', 'MIA_SCAN_INTERVAL_MS', 'MIA_SECURE_COOKIE', 'MIA_TICKER_INTERVAL_MS', 'MIA_WEB_DIST',
 ] as const;
 /** MIA_* names present in the environment that the server does not read (likely typos). Names only, never values. */
 export function unknownMiaEnv(source: Record<string, string | undefined> = env): string[] {
