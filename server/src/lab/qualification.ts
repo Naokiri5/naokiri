@@ -37,6 +37,8 @@ export interface QualificationEvidence {
   trades: readonly BtTrade[];
   /** OOS trade R of every distinct backtest configuration of this version: each one is a trial. */
   runOosR: readonly (readonly number[])[];
+  /** Stored runs of this strategy version under another, non-current fill model. They are never evidence; they only mean a re-run is needed. */
+  otherModelRuns?: number;
 }
 
 export interface QualificationReport {
@@ -104,7 +106,9 @@ function costStress(trades: readonly BtTrade[]): { mean: number; lower: number }
 }
 
 export function qualifyEvidence(evidence: QualificationEvidence | null): QualificationReport {
-  if (!evidence || !evidence.trades.length) return report(['NO_BACKTEST'], evidence?.strategyVersion ?? null);
+  if (!evidence || !evidence.trades.length) {
+    return report([evidence?.otherModelRuns ? 'LEGACY_FILL_MODEL' : 'NO_BACKTEST'], evidence?.strategyVersion ?? null);
+  }
   const reasons: QualificationReason[] = [];
   if (evidence.modelVersion !== BACKTEST_MODEL_VERSION) reasons.push('LEGACY_FILL_MODEL');
   const rs = evidence.trades.map((t) => t.r);
@@ -119,7 +123,7 @@ export function qualifyEvidence(evidence: QualificationEvidence | null): Qualifi
   if (!(moments.mean > 0)) reasons.push('NON_POSITIVE_EXPECTANCY');
   else if (!(lower > 0)) reasons.push('EXPECTANCY_NOT_SIGNIFICANT');
   if (!(dsr >= QUALIFICATION_RULES.minDeflatedSharpe)) reasons.push('DEFLATED_SHARPE_TOO_LOW');
-  const ordered = [...evidence.trades].sort((a, b) => a.exitT - b.exitT || a.entryT - b.entryT);
+  const ordered = [...evidence.trades].sort((a, b) => a.exitT - b.exitT || a.entryT - b.entryT || a.r - b.r);
   const s = stats(ordered);
   if (!(s.profitFactor >= QUALIFICATION_RULES.minProfitFactor)) reasons.push('PROFIT_FACTOR_TOO_LOW');
   if (!(s.maxDrawdownR <= QUALIFICATION_RULES.maxDrawdownR)) reasons.push('DRAWDOWN_TOO_LARGE');

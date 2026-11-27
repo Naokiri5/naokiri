@@ -34,6 +34,7 @@ export function setStrategyStatus(actor: string, id: string, status: StrategySta
     if (status === 'PAPER') {
       const q = strategyQualification(id);
       if (q.reasons.includes('NO_BACKTEST')) throw new Error('promotion to PAPER requires at least one stored backtest');
+      if (q.reasons.includes('LEGACY_FILL_MODEL') && !q.metrics) throw new Error('promotion to PAPER requires a backtest re-run under the current fill model (stored backtests use an older model)');
       if (q.verdict !== 'QUALIFIED') throw new Error(`promotion to PAPER requires strategy qualification: ${q.reasons.join(', ')}`);
     }
     run('UPDATE strategies SET status=?, updated_at=?, note=COALESCE(?, note) WHERE id=?', status, Date.now(), note ?? null, id);
@@ -77,7 +78,7 @@ export async function runBacktest(actor: string, strategyId: string, symbol: str
 const summary = (r: BtResult) => ({
   strategyId: r.strategyId, modelVersion: r.modelVersion ?? 1, instrument: r.instrument, bars: r.bars, from: r.from, to: r.to,
   inSample: r.inSample, outOfSample: r.outOfSample, all: r.all,
-  warnings: r.modelVersion == null ? ['This backtest used the earlier fill model. Rerun it to include the current cost and gap handling.', ...r.warnings] : r.warnings,
+  warnings: (r.modelVersion ?? 1) !== BACKTEST_MODEL_VERSION ? ['This backtest used the earlier fill model. Rerun it to include the current cost and gap handling.', ...r.warnings] : r.warnings,
   equityR: r.equityR, costs: r.costs, trades: r.trades.slice(-200),
 });
 export function listBacktests(limit = 50) { return all<any>('SELECT id, strategy_id, created_at, instrument, interval, result FROM backtests ORDER BY created_at DESC LIMIT ?', limit).map((r) => ({ id: r.id, created_at: r.created_at, ...summary(P(r.result)) })); }

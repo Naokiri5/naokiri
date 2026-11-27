@@ -16,11 +16,12 @@ export function oosCohort(strategyId: string) {
   const rows = all<{ instrument: string; result: string }>('SELECT instrument, result FROM backtests WHERE strategy_id=? ORDER BY created_at DESC', strategyId);
   const legacy = { modelVersion: 1, instruments: new Set<string>(), trades: [] as BtTrade[] };
   const current = { modelVersion: BACKTEST_MODEL_VERSION, instruments: new Set<string>(), trades: [] as BtTrade[] };
+  let otherModelRuns = 0; // stored runs under a non-legacy fill model that is not the current one: never evidence, but a re-run is needed
   for (const row of rows) {
     const result = P<BtResult>(row.result);
     if (result.strategyVersion !== definition.version) continue;
     const modelVersion = result.modelVersion ?? legacy.modelVersion;
-    if (modelVersion !== current.modelVersion && modelVersion !== legacy.modelVersion) continue;
+    if (modelVersion !== current.modelVersion && modelVersion !== legacy.modelVersion) { otherModelRuns++; continue; }
     const cohort = modelVersion === current.modelVersion ? current : legacy;
     if (cohort.instruments.has(row.instrument)) continue;
     cohort.instruments.add(row.instrument);
@@ -36,7 +37,7 @@ export function oosCohort(strategyId: string) {
     if (!trials.has(key)) trials.set(key, r.trades.filter((trade) => trade.segment === 'OOS').map((trade) => trade.r));
   }
   const runOosR = [...trials.values()];
-  return { strategyVersion: definition.version, modelVersion, instruments: instruments.size, trades, backtestRuns: runOosR.length, runOosR };
+  return { strategyVersion: definition.version, modelVersion, instruments: instruments.size, trades, otherModelRuns, backtestRuns: runOosR.length, runOosR };
 }
 
 /**

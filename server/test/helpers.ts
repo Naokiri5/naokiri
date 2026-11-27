@@ -25,7 +25,7 @@ import { resetLinkBackoff } from '../src/ditas/tradeOutcomes.js';
  * (60 trades: 36 at +1.5R, 24 at -1R, interleaved); `{ qualifying: false }` stores a single trade that does not.
  * `{ legacy: true }` omits the fill-model version, as results stored before model version 2 did.
  */
-export function seedBacktestFixture(strategyId = STRATEGIES[0].id, options: { qualifying?: boolean; legacy?: boolean; id?: string; instrument?: string } = {}) {
+export function seedBacktestFixture(strategyId = STRATEGIES[0].id, options: { qualifying?: boolean; legacy?: boolean; id?: string; instrument?: string; modelVersion?: number } = {}) {
   const strategy = STRATEGIES.find((s) => s.id === strategyId)!;
   const count = options.qualifying === false ? 1 : 60;
   const trades: BtTrade[] = Array.from({ length: count }, (_, i) => {
@@ -34,7 +34,7 @@ export function seedBacktestFixture(strategyId = STRATEGIES[0].id, options: { qu
       regime: 'TREND_UP', segment: 'OOS', bars: 1, mfe: Math.max(r, 0), mae: Math.min(r, 0), costR: 0.05 };
   });
   const result: BtResult = {
-    strategyId, strategyVersion: strategy.version, ...(options.legacy ? {} : { modelVersion: BACKTEST_MODEL_VERSION }), instrument: 'crypto:fixture:SYNTHETIC', interval: strategy.interval,
+    strategyId, strategyVersion: strategy.version, ...(options.legacy ? {} : { modelVersion: options.modelVersion ?? BACKTEST_MODEL_VERSION }), instrument: 'crypto:fixture:SYNTHETIC', interval: strategy.interval,
     bars: 500, from: 0, to: 2 * count + 1, splitAt: 1, costs: { feeRate: 0.001, slippageBps: 3, spreadBps: 2 },
     inSample: stats([]), outOfSample: stats(trades), all: stats(trades), trades, equityR: trades.map((t) => t.r),
     warnings: ['Synthetic test fixture — not market data or performance evidence'],

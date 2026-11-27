@@ -177,6 +177,13 @@ file sets. Every change makes qualification stricter; nothing was loosened, and 
 | Sample size 200 | Not changed | Minimum stays 30 out-of-sample trades; raising it is an owner decision. |
 | Dataset provenance hash, parameter-stability sweep, champion/challenger, PAPER forward validation as a promotion precondition | Open | Not built. |
 
+Independent trading-risk review: no blockers. Applied from it: version-2-only evidence is reported as needing a
+re-run (`LEGACY_FILL_MODEL`) rather than "no backtest", and the Lab warns on any old model version; tied exits sort
+losers first (conservative drawdown and periods); regression tests for v2 evidence including the gate denial, an
+uneven 31-trade split, a no-loss cohort, the session-simulation fixture regime, and a check that every strategy runs on
+1h (the live stability check uses the 1h engine). Known approximation: the 2x cost stress shifts each trade by one
+cost unit and does not re-simulate fills at the higher cost.
+
 **Operational consequence:** stored backtests from model version 2 no longer qualify. Until each strategy is re-run
 under version 3 in the Strategy Lab, the risk gate refuses new entries for it (open positions stay protected). No
 strategy had qualified on real data before this change either.

@@ -37,6 +37,44 @@ describe('strategy qualification verdict', () => {
     expect(qualifyEvidence(evidence(cohort(60), { modelVersion: 1 })).reasons).toContain('LEGACY_FILL_MODEL');
   });
 
+  it('reports a needed re-run, not a missing backtest, when only other-model runs exist', () => {
+    const q = qualifyEvidence(evidence([], { otherModelRuns: 1 }));
+    expect(q).toMatchObject({ verdict: 'NOT_QUALIFIED', reasons: ['LEGACY_FILL_MODEL'] });
+    expect(qualifyEvidence(evidence([], { otherModelRuns: 0 })).reasons).toEqual(['NO_BACKTEST']);
+  });
+
+  it('judges n not divisible by 3 (31 trades) with uneven periods by the other rules', () => {
+    const q = qualifyEvidence(evidence(cohort(31)));
+    expect(q.metrics!.periodExpectancyR).toHaveLength(3);
+    expect(q.reasons).not.toContain('INSUFFICIENT_SAMPLE');
+    expect(q.reasons).not.toContain('PERIOD_INCONSISTENT');
+    // 31 trades split 10/11/10; a losing final period of 10 is still refused.
+    const bad = [...cohort(21), ...Array.from({ length: 10 }, (_, i) => trade(-1, 21 + i))];
+    expect(qualifyEvidence(evidence(bad)).reasons).toContain('PERIOD_INCONSISTENT');
+  });
+
+  it('with no losing trades (profit factor Infinity) is still judged by the other rules', () => {
+    const wins = qualifyEvidence(evidence(Array.from({ length: 40 }, (_, i) => trade(1 + (i % 2) * 0.5, i))));
+    expect(wins.metrics!.profitFactor).toBe(Infinity);
+    expect(wins.reasons).not.toContain('PROFIT_FACTOR_TOO_LOW');
+    expect(wins.verdict).toBe('QUALIFIED');
+    const few = qualifyEvidence(evidence(Array.from({ length: 10 }, (_, i) => trade(1 + (i % 2) * 0.5, i))));
+    expect(few.reasons).toEqual(['INSUFFICIENT_SAMPLE']);
+    const stressed = qualifyEvidence(evidence(Array.from({ length: 40 }, (_, i) => trade(1 + (i % 2) * 0.5, i, 2))));
+    expect(stressed.reasons).toContain('COST_STRESS_FAILED');
+  });
+
+  it('orders tied exits losing-first, so drawdown is conservative and independent of input order', () => {
+    // 20 identical-time (entryT, exitT) trades: ten +1R and ten -1R. Losses first gives a 10R drawdown, wins first 0R.
+    const tied = (r: number, k: number): BtTrade => ({ ...trade(r, 100), entryT: 100, exitT: 101, reason: `t${k}` });
+    const wins = Array.from({ length: 10 }, (_, k) => tied(1, k)); const losses = Array.from({ length: 10 }, (_, k) => tied(-1, k));
+    const pad = Array.from({ length: 30 }, (_, i) => trade(i % 2 ? 2 : 1, 200 + i));
+    const a = qualifyEvidence(evidence([...wins, ...losses, ...pad])); const b = qualifyEvidence(evidence([...losses, ...wins, ...pad]));
+    expect(a.metrics!.maxDrawdownR).toBeCloseTo(10, 9);
+    expect(b.metrics!.maxDrawdownR).toBeCloseTo(10, 9);
+    expect(a.metrics!.periodExpectancyR).toEqual(b.metrics!.periodExpectancyR);
+  });
+
   it('refuses non-positive and not-significant expectancy', () => {
     expect(qualifyEvidence(evidence(cohort(100, 2, 1.5))).reasons).toContain('NON_POSITIVE_EXPECTANCY'); // mean -0.0R
     const marginal = qualifyEvidence(evidence(cohort(40, 2, 1.6))); // mean +0.04R, wide interval
@@ -166,6 +204,25 @@ describe('Strategy Lab qualification and PAPER promotion', () => {
     run('INSERT INTO backtests(id,strategy_id,created_at,instrument,interval,result) VALUES (?,?,?,?,?,?)', 'rerun', id, Date.now() - 1, stored.instrument, stored.interval, stored.result);
     run('INSERT INTO backtests(id,strategy_id,created_at,instrument,interval,result) VALUES (?,?,?,?,?,?)', 'old-version', id, Date.now() - 2, 'crypto:fixture:OLD', stored.interval, J({ ...P<Record<string, unknown>>(stored.result), strategyVersion: '0.0.1', instrument: 'crypto:fixture:OLD' }));
     expect(oosCohort(id)).toMatchObject({ backtestRuns: 2, instruments: 2 });
+  });
+
+  it('treats a model-version-2 backtest as re-run needed, not qualifying evidence, yet still a deflation trial', () => {
+    freshDb(false);
+    seedBacktestFixture(id, { modelVersion: 2 });
+    expect(strategyQualification(id)).toMatchObject({ verdict: 'NOT_QUALIFIED', reasons: ['LEGACY_FILL_MODEL'] });
+    expect(() => setStrategyStatus('owner', id, 'PAPER')).toThrow(/re-run under the current fill model/);
+    expect(oosCohort(id)).toMatchObject({ trades: [], otherModelRuns: 1, backtestRuns: 1 });
+    // Add a qualifying current-model run on another instrument: v3 is the evidence, the v2 run still counts as a trial.
+    seedBacktestFixture(id, { id: 'bt_v3', instrument: 'crypto:fixture:V3' });
+    expect(strategyQualification(id).verdict).toBe('QUALIFIED');
+    expect(oosCohort(id)).toMatchObject({ backtestRuns: 2, instruments: 1, modelVersion: BACKTEST_MODEL_VERSION });
+    expect(strategyQualification(id).metrics?.trials).toBe(2);
+  });
+
+  it('every registered strategy runs on 1h', () => {
+    // The live scanner checks regime stability on the 1h engine for every strategy, while the backtest checks it on the
+    // strategy's own interval. If this fails, the scanner's stability check must be made per-interval first.
+    for (const s of STRATEGIES) expect(s.interval).toBe('1h');
   });
 
   it('refuses owner promotion to PAPER until the evidence qualifies, and never promotes on its own', () => {

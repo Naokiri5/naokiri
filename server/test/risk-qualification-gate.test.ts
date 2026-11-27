@@ -50,6 +50,7 @@ describe('risk gate: PAPER strategies trade only while qualified', () => {
     ['no backtest', () => {}, /NO_BACKTEST/],
     ['too few out-of-sample trades', () => seedBacktestFixture(strategy.id, { qualifying: false }), /INSUFFICIENT_SAMPLE/],
     ['only legacy fill-model evidence', () => seedBacktestFixture(strategy.id, { legacy: true }), /LEGACY_FILL_MODEL/],
+    ['only model-version-2 evidence', () => seedBacktestFixture(strategy.id, { modelVersion: 2 }), /LEGACY_FILL_MODEL/],
   ])('refuses new entries with %s', (_label, seed, reason) => {
     setup(false); seed();
     const r = risk(id, last);

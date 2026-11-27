@@ -7,6 +7,8 @@ import { market } from '../src/market/store.js';
 import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { evaluateRisk } from '../src/risk/gate.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
+import { FeatureEngine } from '../src/features/indicators.js';
+import { assessRegimeStability } from '../src/regime/transition.js';
 import { freshDb, seedInstrument, synthCandles } from './helpers.js';
 
 const HOUR = 3_600_000;
@@ -26,6 +28,11 @@ function fixtureStrategy(signalAt: number[] = [SIGNAL_INDEX + 1], stopPct = 5): 
       trailAfterR: null, trigger: 'fixture', invalidation: 'fixture', reasons: ['fixture'],
     } : null,
   };
+}
+/** The second-signal candle (snapshot n === SIGNAL_INDEX + 6) must be regime-STABLE, or the entry gate would hide the test's intent. */
+function expectStableAtSnapshot(n: number) {
+  const eng = new FeatureEngine(); eng.ingest(CANDLES.slice(0, n));
+  expect(assessRegimeStability(eng.history).stability).toBe('STABLE');
 }
 const fp = (x: number) => BigInt(Math.round(x * 1e9));
 const book = (tsMs: number, mid: number, opts: { bidQty?: number; askQty?: number; spreadBps?: number; symbol?: string } = {}): HistoricalEvent => {
@@ -149,6 +156,7 @@ describe('isolated historical session simulation', () => {
       book(C + 3_000, P * 0.5), // the position still exits
       book(C + 5 * HOUR + 500, P), // a later signal is evaluated but never traded
     ], {}, fixtureStrategy([SIGNAL_INDEX + 1, SIGNAL_INDEX + 6]));
+    expectStableAtSnapshot(SIGNAL_INDEX + 6);
     expect(report.lossLimit).toMatchObject({ reachedAt: C + 2_000 });
     expect(report.lossLimit!.sessionPnlUsd).toBeLessThanOrEqual(-200);
     expect(report).toMatchObject({ signals: 2, entries: 1, rejections: { SESSION_LOSS_LIMIT_REACHED: 1 }, openPosition: null });
@@ -162,6 +170,7 @@ describe('isolated historical session simulation', () => {
     const tape = [book(C, P), book(C + 1_000, P), book(C + 2_000, P * 0.5, { bidQty: qty / 4 }), book(C + 3_000, P * 0.5),
       book(C + 5 * HOUR + 500, P), book(C + 5 * HOUR + 1_500, P)];
     const strategy = fixtureStrategy([SIGNAL_INDEX + 1, SIGNAL_INDEX + 6]);
+    expectStableAtSnapshot(SIGNAL_INDEX + 6);
     // No session loss limit: the second signal trades because realized loss + its cost still fits the ceiling.
     expect(await run(tape, { maxSessionLossUsd: undefined }, strategy)).toMatchObject({ lossLimit: null, entries: 2 });
     // A ceiling that the realized loss has used up refuses it.
