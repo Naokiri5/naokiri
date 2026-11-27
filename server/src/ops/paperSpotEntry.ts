@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { get } from '../db/db.js';
 import { getControl } from '../core/mode.js';
 import { unreconciledPaperOrders } from '../exec/recovery.js';
@@ -42,8 +43,8 @@ export interface SessionEntry { scope: EntryScope; strategy: { id: string; versi
  */
 export function paperSpotEntryDenial(fence: LeaseFence | null, at: number, entryCreatedAt?: number, entry?: SessionEntry): string | null {
   const session = durableSessionStatus();
-  // Installations with no checkpoint still use their existing owner-configured paper controls.
-  if (!session) return null;
+  // Offline simulations can use their seeded paper controls without an online engine or mandate.
+  if (!session) return config.offline ? null : 'PAPER_SPOT_SESSION_REQUIRED';
   if (session.state !== 'RUNNING') return 'SESSION_NOT_RUNNING';
   if (session.environment !== 'PAPER' || session.mind !== 'SPOT_PAPER') return 'SESSION_NOT_SPOT_PAPER';
   const mandate = mandateEntryDenial(session, at, entry);
@@ -72,7 +73,6 @@ export function paperSpotEntryDenial(fence: LeaseFence | null, at: number, entry
  */
 export function paperSpotCapitalDenial(entryCost: number): string | null {
   const session = durableSessionStatus();
-  // Installations with no checkpoint still use their existing owner-configured paper controls.
-  if (!session) return null;
+  if (!session) return config.offline ? null : 'PAPER_SPOT_SESSION_REQUIRED';
   return mandateCapitalDenial(session, entryCost);
 }

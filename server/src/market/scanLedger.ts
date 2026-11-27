@@ -105,10 +105,13 @@ export class ScanLedger {
  * An unreadable stored report counts as terminal.
  */
 export function storedDecisionsEndKey(instrumentId: string, strategyId: string, sinceTs: number): boolean {
+  // On-demand analysis writes evidence but cannot consume an automated scan's candle. Old or unreadable
+  // reports retain the conservative restart behavior.
+  const automated = "CASE WHEN json_valid(report) THEN json_extract(report, '$.source') IS NOT 'MANUAL' ELSE 1 END";
   // Any stored outcome that is not a risk DENY (approval, review, rejection before the gate) is terminal on its own.
-  if (get(`SELECT 1 FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? AND (risk_decision IS NULL OR risk_decision<>'DENY') LIMIT 1`,
+  if (get(`SELECT 1 FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? AND ${automated} AND (risk_decision IS NULL OR risk_decision<>'DENY') LIMIT 1`,
     instrumentId, strategyId, sinceTs)) return true;
   // Every DENY is checked (bounded by one evaluation per settlement per key within one candle); no row can be missed.
-  return all<{ report: string }>("SELECT report FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? AND risk_decision='DENY'", instrumentId, strategyId, sinceTs)
+  return all<{ report: string }>(`SELECT report FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? AND ${automated} AND risk_decision='DENY'`, instrumentId, strategyId, sinceTs)
     .some((r) => { try { return !isCapacityOnlyDenial(JSON.parse(r.report)?.risk); } catch { return true; } });
 }

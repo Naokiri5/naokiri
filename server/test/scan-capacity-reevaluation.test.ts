@@ -108,6 +108,13 @@ describe('restart guard and capacity epoch', () => {
     storeDecision('DENY', '{not json');
     expect(storedDecisionsEndKey('I', 'S', 1000)).toBe(true);
   });
+  it('keeps automated evaluation available after on-demand analysis', () => {
+    storeDecision(null, { source: 'MANUAL' });
+    storeDecision('DENY', { source: 'MANUAL', risk: risk('DENY', ['MODE_READ_ONLY']) });
+    expect(storedDecisionsEndKey('I', 'S', 1000)).toBe(false);
+    storeDecision('ALLOW', { risk: risk('ALLOW', []) });
+    expect(storedDecisionsEndKey('I', 'S', 1000)).toBe(true);
+  });
   it('advances the capacity epoch when a paper position closes', () => {
     const before = capacityEpoch();
     run(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,planned_risk)

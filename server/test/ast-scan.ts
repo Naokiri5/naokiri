@@ -21,6 +21,8 @@ export interface FileScan {
   importedNames: Map<string, string[]>;
   /** Every identifier name referenced in runtime code, including property keys and member names. */
   identifiers: Set<string>;
+  /** Direct SQL write targets in static strings or the leading segment of a template. */
+  sqlWrites: Set<string>;
   /** Raw source, for textual checks such as `process.env`. */
   source: string;
 }
@@ -46,7 +48,7 @@ export function scanFile(root: string, path: string): FileScan {
   const source = readFileSync(path, 'utf8');
   const parsed = parseSync(path, source, { lang: path.endsWith('.tsx') ? 'tsx' : 'ts' });
   if (parsed.errors.length) throw new Error(`${path}: parse failed`);
-  const imports: string[] = [], identifiers = new Set<string>(), named: [string, string[]][] = [];
+  const imports: string[] = [], identifiers = new Set<string>(), sqlWrites = new Set<string>(), named: [string, string[]][] = [];
   visit(parsed.program as unknown as Ast, (n, parent) => {
     if ((n.type === 'ImportDeclaration' || n.type === 'ExportNamedDeclaration' || n.type === 'ExportAllDeclaration') && n.source) {
       if (n.importKind === 'type' || n.exportKind === 'type') return;
@@ -60,12 +62,17 @@ export function scanFile(root: string, path: string): FileScan {
     }
     if (n.type === 'ImportExpression' && n.source?.type === 'Literal' && typeof n.source.value === 'string') imports.push(n.source.value);
     if (n.type === 'Identifier' && !(parent?.type === 'ImportSpecifier' && parent.importKind === 'type')) identifiers.add(n.name);
+    const literal = n.type === 'Literal' ? n.value : n.type === 'TemplateLiteral' ? n.quasis?.[0]?.value?.cooked : null;
+    if (typeof literal === 'string') {
+      const write = /^\s*(?:INSERT(?:\s+OR\s+\w+)?\s+INTO|REPLACE\s+INTO|UPDATE(?:\s+OR\s+\w+)?|DELETE\s+FROM)\s+["`\[]?(\w+)/i.exec(literal);
+      if (write) sqlWrites.add(write[1].toLowerCase());
+    }
   });
   const toKey = (spec: string) => relative(root, resolve(dirname(path), spec.replace(/\.js$/, '.ts'))).split(sep).join('/');
   const resolved = imports.filter((x) => x.startsWith('.')).map(toKey);
   const importedNames = new Map<string, string[]>();
   for (const [spec, names] of named) if (spec.startsWith('.')) importedNames.set(toKey(spec), [...(importedNames.get(toKey(spec)) ?? []), ...names]);
-  return { file: relative(root, path).split(sep).join('/'), imports, resolved, importedNames, identifiers, source };
+  return { file: relative(root, path).split(sep).join('/'), imports, resolved, importedNames, identifiers, sqlWrites, source };
 }
 
 export function scanTree(root: string): Map<string, FileScan> {

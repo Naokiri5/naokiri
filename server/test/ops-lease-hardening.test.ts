@@ -183,9 +183,9 @@ describe('engine lease hardening (additive to holdEngine)', () => {
 
   it('closes a protected paper position on schedule while ticker and book refreshes are still pending', async () => {
     vi.useFakeTimers();
-    (config as any).offline = false;
     stopBot();
     expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+    (config as any).offline = false;
     let releaseRefreshes!: () => void;
     const pending = new Promise<void>((resolve) => { releaseRefreshes = resolve; });
     hooks.tickers = () => pending;
@@ -211,9 +211,9 @@ describe('engine lease hardening (additive to holdEngine)', () => {
 
   it('keeps checking positions while the scanner waits on deep market data', async () => {
     vi.useFakeTimers();
-    (config as any).offline = false;
     stopBot();
     expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+    (config as any).offline = false;
     let releaseScan!: () => void;
     const pending = new Promise<void>((resolve) => { releaseScan = resolve; });
     hooks.deep = () => pending;

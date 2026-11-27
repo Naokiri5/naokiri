@@ -23,6 +23,8 @@ import { join } from 'node:path';
 import { walkBook, QUALITY_LIMITS } from '../src/market/quality.js';
 import type { DecisionReport } from '../src/decision/engine.js';
 import { acquireOrRenewLease, type LeaseFence } from '../src/ops/lease.js';
+import { config } from '../src/config.js';
+import { evaluateRisk } from '../src/risk/gate.js';
 
 function report(id: string, last: number, over: Partial<DecisionReport> = {}): DecisionReport {
   const cid = `cand_${Math.random().toString(36).slice(2)}`;
@@ -70,6 +72,13 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     expect(feedback.netPnl).toBeCloseTo(rec.positionsRealized, 9);
     expect(feedback.fees).toBeGreaterThan(0);
     expect(verifyAuditChain().ok).toBe(true);
+  });
+  it('cannot submit or queue a decision generated for on-demand analysis', () => {
+    const analysis = report(id, last, { source: 'MANUAL' });
+    expect(submitEntry(analysis, 'bot')).toEqual({ ok: false, reason: 'MANUAL_ANALYSIS_HAS_NO_ENTRY_AUTHORITY' });
+    expect(queueForApproval({ ...analysis, decision: 'APPROVED_FOR_USER_CONFIRMATION' })).toBeNull();
+    expect(listOrders()).toHaveLength(0);
+    expect(openPositions()).toHaveLength(0);
   });
   it('preserves the combined portfolio cash floor after fees and recalculates headroom for the next entry', () => {
     acceptPolicy('owner', { ...DEFAULT_POLICY, minUnallocatedReservePct: 94, minSettlementReservePct: 5 });
@@ -295,6 +304,52 @@ describe('Paper OMS lifecycle (Parts 17/20/26/27)', () => {
     run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', rep.id, rep.candidateId, id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
     const oid = queueForApproval(rep)!; expect(oid).toBeTruthy();
     const res = decideApproval(oid, true); expect(res, JSON.stringify(res)).toMatchObject({ ok: true });
+  });
+  it('requires an authorized session for online entries while continuing to protect existing positions', () => {
+    expect(submitEntry(report(id, last), 'bot').ok).toBe(true);
+    const other = seedInstrument('SOLUSDT', { seed: 5 });
+    const candidate = seedInstrument('XRPUSDT', { seed: 7 });
+    const pending = report(other.inst.id, other.last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      pending.id, pending.candidateId, pending.instrumentId, 'crypto', 'LONG', pending.strategy.id, pending.decision, 70, Date.now(), J(pending));
+    const pendingId = queueForApproval(pending)!;
+    expect(pendingId).toBeTruthy();
+    const engine = acquireOrRenewLease('engine', 'worker', 10_000)!;
+    const { offline, telegramBotToken } = config;
+    config.offline = false;
+    config.telegramBotToken = '';
+    try {
+      const cash = accountState().cash;
+      expect(submitEntry(report(candidate.inst.id, candidate.last), 'bot', undefined, engine)).toEqual({ ok: false, reason: 'PAPER_SPOT_SESSION_REQUIRED' });
+      expect(queueForApproval(report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' }), engine)).toBeNull();
+      expect(decideApproval(pendingId, true, engine)).toEqual({ ok: false, reason: 'PAPER_SPOT_SESSION_REQUIRED' });
+      expect(accountState().cash).toBe(cash);
+      expect(all('SELECT id FROM fills')).toHaveLength(1);
+
+      setBook(id, last * 0.96);
+      monitorPositions(undefined, engine);
+      expect(openPositions()).toHaveLength(0);
+      expect(reconcile().ok).toBe(true);
+    } finally {
+      config.offline = offline;
+      config.telegramBotToken = telegramBotToken;
+    }
+  });
+  it('requires an updated approval after the decision risk policy changes', () => {
+    updateControl('owner', { mode: 'APPROVAL' });
+    const pending = report(id, last, { decision: 'APPROVED_FOR_USER_CONFIRMATION' });
+    pending.risk = evaluateRisk({ instrumentId: id, strategyId: pending.strategy.id, side: 'buy', entryPrice: pending.entryRef,
+      stopPrice: pending.stopLoss, idempotencyKey: `entry-${pending.candidateId}`, traceId: pending.traceId });
+    expect(pending.risk.policyVersion).toBe(1);
+    run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      pending.id, pending.candidateId, pending.instrumentId, 'crypto', 'LONG', pending.strategy.id, pending.decision, 70, Date.now(), J(pending));
+    const pendingId = queueForApproval(pending)!;
+    expect(pendingId).toBeTruthy();
+
+    expect(acceptPolicy('owner', { ...DEFAULT_POLICY, riskPerTradePct: DEFAULT_POLICY.riskPerTradePct / 2 }).version).toBe(2);
+    expect(decideApproval(pendingId, true)).toEqual({ ok: false, reason: 'APPROVAL_POLICY_VERSION_CHANGED: re-evaluate under the current risk policy' });
+    expect(openPositions()).toHaveLength(0);
+    expect(accountState().cash).toBe(10_000);
   });
   it('honors session close at the OMS write boundary and continues paper protection', () => {
     expect(submitEntry(report(id, last), 'bot').ok).toBe(true);

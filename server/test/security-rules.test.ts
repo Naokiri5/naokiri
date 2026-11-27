@@ -21,6 +21,7 @@ const MUTATORS = ['submitEntry', 'executeExit', 'closePosition', 'closeAllPositi
   'decideApproval', 'cancelPendingEntries', 'ledger', 'acceptPolicy', 'setStrategyStatus', 'updateControl', 'monitorPositions'];
 const SIGNERS = ['Keypair', 'signTransaction', 'signAllTransactions', 'sendTransaction', 'sendRawTransaction', 'signMessage', 'signTypedData', 'mnemonicToSeed', 'fromSecretKey'];
 const SIGNING_PACKAGES = ['@solana/web3.js', 'ethers', 'viem', 'web3', 'tweetnacl', 'bip39', '@privy-io/server-auth', '@privy-io/node'];
+const FINANCIAL_TABLES = new Set(['orders', 'fills', 'positions', 'ledger_entries', 'risk_policy_versions', 'brainos_sessions', 'runtime_leases']);
 
 const importsOf = (f: FileScan, names: readonly string[]) =>
   [...f.importedNames].flatMap(([from, ns]) => ns.filter((n) => names.includes(n)).map((n) => `${f.file} imports ${n} from ${from}`));
@@ -32,7 +33,7 @@ export const RULES = {
     ...SIGNERS.filter((n) => f.identifiers.has(n)).map((n) => `${f.file} references ${n}`),
     ...f.imports.filter((i) => SIGNING_PACKAGES.some((p) => i === p || i.startsWith(p + '/'))).map((i) => `${f.file} imports ${i}`),
   ]),
-  /** MIA-SEC-002: Trader Joe may read and may pause new orders (risk-reducing); it cannot place or change anything. */
+  /** MIA-SEC-002: Trader Joe reads evidence. Only the standalone owner command can pause entries. */
   'MIA-SEC-002': (t: Tree) => under(t, 'joe/').flatMap((f) => [
     ...importsOf(f, MUTATORS),
     ...[...(f.importedNames.get('exec/oms.ts') ?? [])].filter((n) => !['listPositions', 'pauseNewOrders'].includes(n)).map((n) => `${f.file} imports ${n} from exec/oms.ts`),
@@ -61,6 +62,9 @@ export const RULES = {
   /** MIA-SEC-012: market data and news cannot reach the decision, risk or execution modules. */
   'MIA-SEC-012': (t: Tree) => under(t, 'providers/', 'news/').flatMap((f) =>
     [...importClosure(t, f.file)].filter((r) => r.startsWith('exec/') || r.startsWith('decision/') || r === 'risk/gate.ts').map((r) => `${f.file} reaches ${r}`)),
+  /** MIA-SEC-013: analytics and provider modules may write their own evidence tables only. */
+  'MIA-SEC-013': (t: Tree) => under(t, 'brain/', 'choice/', 'joe/', 'workers/', 'qci/', 'news/', 'providers/').flatMap((f) =>
+    [...f.sqlWrites].filter((table) => FINANCIAL_TABLES.has(table)).map((table) => `${f.file} writes ${table}`)),
 };
 
 describe('MIA SECURE Omega security rules on the real source tree', () => {
@@ -99,6 +103,7 @@ describe('each rule catches a deliberate violation', () => {
     ['MIA-SEC-009', { 'lab/qualification.ts': "import { setStrategyStatus } from './lab.js';\nsetStrategyStatus();", 'ditas/tradeOutcomes.ts': '', 'ditas/evaluation.ts': '', 'ditas/evidenceChain.ts': '', 'ditas/reflect.ts': '', 'workers/reliability.ts': '', 'workers/effectiveness.ts': '', 'lab/overfitting.ts': '' }],
     ['MIA-SEC-011', { 'workers/w.ts': "import { evaluateRisk } from '../risk/gate.js';\nimport { ledger } from '../portfolio/ledger.js';\nledger(); evaluateRisk();", 'risk/gate.ts': 'export function evaluateRisk() {}', 'portfolio/ledger.ts': 'export function ledger() {}' }],
     ['MIA-SEC-012', { 'news/feed.ts': "import './relay.js';", 'news/relay.ts': "import { submitEntry } from '../exec/oms.js';", 'exec/oms.ts': 'export function submitEntry() {}' }],
+    ['MIA-SEC-013', { 'qci/fixture.ts': 'const query = `UPDATE orders SET status=? WHERE id=?`; export { query };' }],
   ] as const)('%s', (rule, files) => {
     expect(RULES[rule](tree(files)).length).toBeGreaterThan(0);
   });

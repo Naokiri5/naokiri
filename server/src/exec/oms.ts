@@ -140,6 +140,7 @@ function simulateExitFill(instrumentId: string, qty: number, bufferPct: number, 
 /** Entry submission with Part 29 L5 last-moment validation. */
 export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', executionTs?: number, fence?: LeaseFence): { ok: boolean; orderId?: string; positionId?: string; reason?: string } {
   if (isShuttingDown()) return { ok: false, reason: 'PROCESS_SHUTTING_DOWN' };
+  if (report.source === 'MANUAL') return { ok: false, reason: 'MANUAL_ANALYSIS_HAS_NO_ENTRY_AUTHORITY' };
   const t0 = performance.now();
   const s = report;
   const coid = `entry-${report.candidateId}`;
@@ -171,6 +172,10 @@ export function submitEntry(report: DecisionReport, actor: 'bot' | 'owner', exec
       // Last-moment revalidation: fresh risk evaluation on current data
       const proposal = { instrumentId: s.instrumentId, strategyId: s.strategy.id, strategyVersion: s.strategy.version, side: 'buy' as const, entryPrice: s.entryRef, stopPrice: s.stopLoss, idempotencyKey: coid, traceId: s.traceId };
       const fresh = evaluateRisk(proposal, nowTs);
+      const approvedPolicy = s.risk?.policyVersion;
+      if (actor === 'owner' && approvedPolicy != null && approvedPolicy !== fresh.policyVersion) {
+        return { reason: 'APPROVAL_POLICY_VERSION_CHANGED: re-evaluate under the current risk policy' };
+      }
       const allowed = fresh.decision === 'ALLOW' || (fresh.decision === 'NEEDS_REVIEW' && actor === 'owner');
       if (!allowed || !fresh.sizing) return { reason: `LAST_MOMENT_RISK_${fresh.decision}: ${fresh.reasonCodes.join('; ')}` };
       // Bind the gate decision to this exact order before touching the book; nothing below can widen it.
@@ -304,7 +309,7 @@ function sessionEntry(report: DecisionReport): SessionEntry {
 
 /** APPROVAL mode: queue a pending order for the owner. */
 export function queueForApproval(report: DecisionReport, fence?: LeaseFence) {
-  if (isShuttingDown()) return null;
+  if (isShuttingDown() || report.source === 'MANUAL') return null;
   const coid = `entry-${report.candidateId}`;
   if (report.decision !== 'APPROVED_FOR_USER_CONFIRMATION') return null;
   const id = tx(() => {

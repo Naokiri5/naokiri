@@ -161,7 +161,7 @@ export async function analyzeInstrument(id: string, strategyId?: string): Promis
     if (!sig) continue;
     const cand: Candidate = { id: uid('cand'), eventId: `${inst.symbol}:manual:${Date.now()}`, traceId: uid('trace'), instrumentId: id, symbol: inst.symbol, base: inst.base, market: 'crypto', venue: 'binance', strategyId: s.id, strategyVersion: s.version, interval: s.interval, signal: sig, regime: reg.regime, createdAt: Date.now() };
     const ctx = buildContext(cand); const proposalMemory = recordOpportunity({ kind: 'PROPOSAL', instrumentId: id, strategyId: s.id, dedupeKey: `proposal:${cand.id}`, reason: sig.reasons.join('; '), candidate: cand, ctx }); ctx.memorySnapshotId = proposalMemory.snapshotId ?? undefined; const qci = await runConsensus(ctx);
-    const rep = decide(cand, ctx, qci, ctx.strategyStats, 0);
+    const rep = decide(cand, ctx, qci, ctx.strategyStats, 0, 'MANUAL');
     lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
     return rep;
   }

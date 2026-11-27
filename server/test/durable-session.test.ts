@@ -198,6 +198,7 @@ describe('durable Binance spot paper authorization', () => {
     expect(durableSessionStatus()).toBeNull();
 
     prepareSpotSession();
+    expect(paperSpotEntryDenial(fence, NOW)).toBe('PAPER_SPOT_SESSION_REQUIRED');
     expect(paperSpotSessionPreflight({ ...engine, instanceId: 'standby' }, NOW).canRun).toBe(false);
     expect(paperSpotSessionPreflight({ ...engine, monitorFailing: true }, NOW).canRun).toBe(false);
     expect(paperSpotSessionPreflight(engine, NOW)).toMatchObject({ state: 'CLOSED', canRun: true, canClose: false });

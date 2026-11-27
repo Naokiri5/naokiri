@@ -1,7 +1,8 @@
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { ensureStorageDirectory, LinkedStorageFileError, readPrivateStorageFile } from './ops/storagePaths.js';
 
 const env = process.env;
 /** Repository root, derived from this file's location (NOT the shell's cwd), so any launch directory works. */
@@ -30,19 +31,30 @@ export function loadEvidenceKey(dataDir: string, envValue = env.MIA_EVIDENCE_KEY
     return { key: Buffer.from(envValue, 'hex'), source: 'env' };
   }
   if (!persist) return { key: randomBytes(32), source: 'ephemeral' };
-  const file = join(dataDir, 'evidence.key');
-  const readKey = () => {
-    const v = readFileSync(file, 'utf8').trim();
-    if (!hex.test(v) || v.length % 2) throw new Error('evidence.key must contain at least 64 hex characters with even length');
-    return { key: Buffer.from(v, 'hex'), source: 'file' as const };
-  };
   try {
+    const directory = ensureStorageDirectory(dataDir);
+    const file = join(directory, 'evidence.key');
+    const readKey = () => {
+      const until = performance.now() + 250;
+      let wait: Int32Array | undefined;
+      for (;;) {
+        try {
+          const v = readPrivateStorageFile(file).trim();
+          if (!hex.test(v) || v.length % 2) throw new Error('evidence.key must contain at least 64 hex characters with even length');
+          return { key: Buffer.from(v, 'hex'), source: 'file' as const };
+        } catch (error) {
+          // An atomic publisher holds two links until the private staging name is removed.
+          if (!(error instanceof LinkedStorageFileError) || performance.now() >= until) throw error;
+          wait ??= new Int32Array(new SharedArrayBuffer(4));
+          Atomics.wait(wait, 0, 0, 5);
+        }
+      }
+    };
     try { return readKey(); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
 
-    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     const key = randomBytes(32);
-    const staging = mkdtempSync(join(dataDir, '.evidence-key-'));
+    const staging = mkdtempSync(join(directory, '.evidence-key-'));
     const staged = join(staging, 'key');
     try {
       writeFileSync(staged, key.toString('hex') + '\n', { mode: 0o600, flag: 'wx', flush: true });
@@ -52,16 +64,19 @@ export function loadEvidenceKey(dataDir: string, envValue = env.MIA_EVIDENCE_KEY
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         return readKey();
       }
+      unlinkSync(staged);
       return { key, source: 'generated' };
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
   } catch (error) {
-    throw new Error('A persistent evidence signing key is required. Check MIA_DATA_DIR, restore the original evidence.key, or configure MIA_EVIDENCE_KEY.', { cause: error });
+    throw new Error('A persistent evidence signing key is required. Verify MIA_DATA_DIR ownership and that the original evidence.key is a private regular file, or configure MIA_EVIDENCE_KEY.', { cause: error });
   }
 }
-const DATA_DIR = env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data');
-const EVIDENCE = loadEvidenceKey(DATA_DIR);
+const requestedDataDir = env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data');
+const persistEvidence = env.MIA_OFFLINE !== '1' || !!env.MIA_DATA_DIR;
+const DATA_DIR = persistEvidence ? ensureStorageDirectory(requestedDataDir) : requestedDataDir;
+const EVIDENCE = loadEvidenceKey(DATA_DIR, env.MIA_EVIDENCE_KEY, persistEvidence);
 
 const intEnv = (name: string, fallback: number, min: number, max: number) => {
   const raw = env[name]; if (raw == null || raw === '') return fallback;
@@ -113,5 +128,5 @@ export function unknownMiaEnv(source: Record<string, string | undefined> = env):
 }
 
 export function ensureDataDir() {
-  mkdirSync(config.dataDir, { recursive: true });
+  return ensureStorageDirectory(config.dataDir);
 }

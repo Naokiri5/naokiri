@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
-import { join } from 'node:path';
-import { config, ensureDataDir } from '../config.js';
+import { basename, dirname, join, resolve } from 'node:path';
+import { ensureDataDir } from '../config.js';
+import { createPrivateSqliteFile, ensureStorageDirectory, prepareSqliteFile, privateStorageFileExists } from '../ops/storagePaths.js';
 import { migrate } from './migrations.js';
 
 let db: DatabaseSync | null = null;
@@ -8,6 +9,7 @@ let dbPath: string | null = null;
 /** File backing the open database; null when closed or in memory (no disk capacity applies). */
 export const dbFilePath = () => (dbPath && dbPath !== ':memory:' ? dbPath : null);
 const BUSY_TIMEOUT_MS = 5_000;
+const SIDECAR_SUFFIXES = ['-wal', '-shm', '-journal'];
 
 function enableWal(connection: DatabaseSync) {
   const until = Date.now() + BUSY_TIMEOUT_MS;
@@ -26,8 +28,19 @@ function enableWal(connection: DatabaseSync) {
 
 export function openDb(file?: string) {
   if (db) return db;
-  let path = file;
-  if (!path) { ensureDataDir(); path = join(config.dataDir, 'mia.db'); }
+  const explicit = file ? resolve(file) : undefined;
+  const path = file === ':memory:' ? file : explicit
+    ? join(ensureStorageDirectory(dirname(explicit)), basename(explicit))
+    : join(ensureDataDir(), 'mia.db');
+  const sidecars = path === ':memory:' ? [] : SIDECAR_SUFFIXES.map(suffix => path + suffix);
+  if (path !== ':memory:') {
+    // Inspect each sidecar even when an earlier one existed. SQLite may access these before its first statement.
+    const existingSidecars = sidecars.map(prepareSqliteFile);
+    if (!prepareSqliteFile(path)) {
+      if (existingSidecars.some(Boolean)) throw new Error('SQLite database is missing while sidecar files remain. Preserve the files and verify the original database before restarting.');
+      createPrivateSqliteFile(path);
+    }
+  }
   const connection = new DatabaseSync(path);
   try {
     connection.exec(`PRAGMA busy_timeout=${BUSY_TIMEOUT_MS}; PRAGMA foreign_keys=ON;`);
@@ -36,6 +49,10 @@ export function openDb(file?: string) {
     // Explicitly select FULL rather than relying on the SQLite build's default synchronous mode.
     connection.exec('PRAGMA synchronous=FULL');
     migrate(connection);
+    if (path !== ':memory:') {
+      if (!privateStorageFileExists(path)) throw new Error('SQLite database disappeared during startup. Verify the storage volume before restarting.');
+      for (const sidecar of sidecars) privateStorageFileExists(sidecar);
+    }
     // Track the path only once the connection is usable; a failed setup must not leave a path for a closed database.
     db = connection; dbPath = path;
     return connection;

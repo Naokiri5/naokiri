@@ -248,7 +248,8 @@ export async function routes(app: FastifyInstance) {
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }
 
   // ── live stream (SSE) ──
-  let streams = 0;
+  const maxStreamFrameBytes = 64 * 1024;
+  const maxStreamBufferedBytes = 256 * 1024;
   // Hijacked SSE responses never finish on their own; end them when the server closes so graceful shutdown can finish
   // draining instead of waiting for the forced exit. Finite requests still drain normally.
   const openStreams = new Set<() => void>();
@@ -262,37 +263,66 @@ export async function routes(app: FastifyInstance) {
     const header = req.headers['last-event-id'];
     const lastEventId = (typeof header === 'string' ? header : undefined) ?? query.lastEventId;
     if (lastEventId !== undefined && lastEventId.length > 64) return bad(reply, 400, 'invalid last event id');
-    if (streams >= 20) return bad(reply, 503, 'too many open live streams');
+    if (openStreams.size >= 20) return bad(reply, 503, 'too many open live streams');
     const token = tokenOf(req);
+    const expiresAt = auth.activeSessionExpiry(token);
+    if (expiresAt === null) return bad(reply, 401, 'authentication required');
     reply.hijack(); // we own the raw socket from here; Fastify must not try to send a second response
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff', 'x-request-id': String(req.id) });
-    streams++;
-    let closed = false; let backlog = 0;
-    // Declared before close(): close() can run during replay (a stalled client
-    // hitting the backlog limit), and a const declared after the replay block
-    // would throw a ReferenceError from the temporal dead zone there.
-    let ka: ReturnType<typeof setInterval>;
-    const close = () => { if (closed) return; closed = true; streams--; openStreams.delete(close); unsubscribe(); clearInterval(ka); reply.raw.end(); };
+    let closed = false;
+    const authorized = () => {
+      try { return auth.validSession(token); }
+      catch { req.log.warn('live stream session verification unavailable'); return false; }
+    };
+    const close = (discard = false) => {
+      if (closed) return;
+      closed = true;
+      openStreams.delete(close);
+      unsubscribe();
+      clearInterval(keepAlive);
+      clearTimeout(expiry);
+      if (discard || !authorized()) reply.raw.destroy();
+      else reply.raw.end();
+    };
     openStreams.add(close);
-    const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
-    const send = (e: TelemetryEvent) => { if (!wanted || wanted.has(e.topic)) write(`id: ${e.id}\nevent: ${e.topic}\ndata: ${JSON.stringify(e.payload ?? null)}\n\n`); };
-    // Subscribe before replaying so nothing published in between is lost; replayed ids are skipped if seen live.
+    const write = (frame: string) => {
+      if (closed) return;
+      if (!authorized()) { close(true); return; }
+      const bytes = Buffer.byteLength(frame);
+      if (bytes > maxStreamFrameBytes || reply.raw.writableLength + bytes > maxStreamBufferedBytes) {
+        close(true);
+        return;
+      }
+      reply.raw.write(frame);
+    };
+    const send = (e: TelemetryEvent) => {
+      if (closed || (wanted && !wanted.has(e.topic))) return;
+      let data: string | undefined;
+      try { data = JSON.stringify(e.payload ?? null); }
+      catch { close(true); return; }
+      write(`id: ${e.id}\nevent: ${e.topic}\ndata: ${data ?? 'null'}\n\n`);
+    };
+    // Subscribe before replaying so nothing published in between is lost.
     let replayedThrough = 0;
     const unsubscribe = telemetry.subscribe((e) => { if (e.sequence > replayedThrough) send(e); });
+    const keepAlive = setInterval(() => write(': ka\n\n'), 20_000);
+    const expiry = setTimeout(() => close(true), Math.max(0, expiresAt - Date.now()));
+    reply.raw.once('close', () => close(true));
+    reply.raw.once('error', () => close(true));
     // The hello frame carries an SSE id: so a reconnecting browser resends it
     // as Last-Event-ID (EventSource only resends ids from SSE frames, it does
     // not read the lastEventId in this JSON body) and the server can replay
     // exactly what was missed, or send resync when the id cannot be replayed.
-    reply.raw.write(`: connected\nid: ${telemetry.lastId}\nevent: hello\ndata: ${JSON.stringify({ schemaVersion: TELEMETRY_SCHEMA_VERSION, lastEventId: telemetry.lastId })}\n\n`);
-    // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.
-    // Started before replay so close() during replay has a live interval to clear.
-    ka = setInterval(() => (auth.validSession(token) ? write(': ka\n\n') : close()), 20_000);
+    write(`: connected\nid: ${telemetry.lastId}\nevent: hello\ndata: ${JSON.stringify({ schemaVersion: TELEMETRY_SCHEMA_VERSION, lastEventId: telemetry.lastId })}\n\n`);
     if (lastEventId !== undefined) {
       const replay = telemetry.since(lastEventId);
       if (replay.resync) write(`event: resync\ndata: ${JSON.stringify({ reason: replay.reason })}\n\n`);
-      else for (const e of replay.events) { send(e); replayedThrough = e.sequence; }
+      else for (const e of replay.events) {
+        if (closed) break;
+        send(e);
+        replayedThrough = e.sequence;
+      }
     }
-    req.raw.on('close', close);
   });
 
   // ── shell / overview ──

@@ -92,3 +92,13 @@ Wallet-signing restrictions remain N/A until a signer exists.
 2. Before any signer: a dedicated review of signing scope, withdrawal impossibility, transaction simulation and key custody.
 3. Add the Claude Code security-review GitHub workflow (measure 11), pinned by commit SHA.
 4. Move the two-factor console code to an owner-only channel if Railway log access is shared.
+
+## 6. GitHub and runtime hardening follow-up
+
+The existing CI scans the complete Git history reachable from the tested commit with checksum-pinned Gitleaks. CI pins GitHub Actions to immutable revisions and keeps the checkout credential scan, `npm ci`, vulnerability audit, authority tests, builds and browser checks. Gitleaks runs before dependency installation. `node scripts/create-review-snapshot.mjs --commit HEAD --base origin/main` produces a local JSON file manifest from committed Git objects with paths, hashes, sizes and related tests. It emits no file contents and makes no network requests.
+
+Use the existing Autopilot **Run Session** flow to authorize online PAPER entries. The OMS requires a running, fenced PAPER spot session and rechecks the risk policy version for approvals that recorded one. The same OMS continues to handle protective exits. Trader Joe accepts the standalone authenticated `pause` command directly. External text and model tools can contribute evidence. On-demand decisions are marked as analysis and cannot satisfy an automated candle's evaluation or authorize an order.
+
+The server checks the owner session before replaying or sending SSE events, closes expired sessions, and bounds per-frame and queued bytes. Startup validates the configured storage directory and the ownership, permissions and links of SQLite files and the persisted evidence key. Existing volume-directory modes are preserved. Verify the Railway runtime's ownership and staging volume isolation before rolling out the startup checks. A leftover SQLite sidecar without its database requires operator recovery.
+
+Railway deployment, Cloudflare ingress, Privy production settings, recovery drills on a separate staging volume and any additional scanner adoption require their own validation.

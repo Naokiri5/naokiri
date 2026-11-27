@@ -216,7 +216,7 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(r.statusCode).toBe(400);
   });
   it('Trader Joe has no order/limit/mode/withdraw tools and refuses such commands', async () => {
-    expect([...JOE_TOOL_NAMES].sort()).toEqual(['analyze_instrument', 'explain_decision', 'get_instrument', 'get_large_prints', 'get_market_overview', 'get_news', 'get_opportunities', 'get_portfolio', 'get_risk_status', 'get_status', 'pause_new_orders', 'search_knowledge']);
+    expect([...JOE_TOOL_NAMES].sort()).toEqual(['analyze_instrument', 'explain_decision', 'get_instrument', 'get_large_prints', 'get_market_overview', 'get_news', 'get_opportunities', 'get_portfolio', 'get_risk_status', 'get_status', 'search_knowledge']);
     expect(await commandMode('buy 10 BTC now')).toMatch(/can’t place orders/);
     await commandMode('pause'); expect(getControl().pausedNewOrders).toBe(true);
     const r = await app.inject({ method: 'POST', url: '/api/joe', headers: H(), payload: { message: 'help' } });

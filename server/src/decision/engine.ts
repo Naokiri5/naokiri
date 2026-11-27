@@ -33,9 +33,10 @@ export interface DecisionReport {
   knowledge?: { refs: KnowledgeRef[]; authority: string };
   thinking?: ThinkRoutingResult;
   disclaimer: string;
+  source?: 'MANUAL';
 }
 
-export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord, stratStats: { trades: number; expectancyR: number } | null, correlatedOpen: number): DecisionReport {
+export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord, stratStats: { trades: number; expectancyR: number } | null, correlatedOpen: number, source?: DecisionReport['source']): DecisionReport {
   const t0 = performance.now();
   const steps: PipelineStep[] = []; let n = 0;
   const step = (name: string, result: PipelineStep['result'], detail: string) => steps.push({ step: ++n, name, result, detail });
@@ -83,6 +84,7 @@ export function decide(cand: Candidate, ctx: WorkerContext, qci: ConsensusRecord
   const R = s.entryRef - s.stop;
   const final = decision === 'PAPER_TRADE' || decision === 'APPROVED_FOR_USER_CONFIRMATION' ? 'ENTER' : decision === 'REJECTED' || decision === 'INSUFFICIENT_DATA' ? 'REJECT' : decision === 'WAIT_FOR_CONFIRMATION' ? 'WAIT' : 'MONITOR';
   const report: DecisionReport = {
+    ...(source ? { source } : {}),
     id: uid('dec'), createdAt: iso(), candidateId: cand.id, traceId: cand.traceId, asset: cand.symbol, instrumentId: cand.instrumentId, market: cand.market, venue: cand.venue,
     direction: final === 'ENTER' ? 'LONG' : 'NO_POSITION', strategy: { id: cand.strategyId, version: cand.strategyVersion }, regime: cand.regime,
     reason: s.reasons.join('; '), supportingEvidence: sup, opposingEvidence: opp2, entryCondition: s.trigger, invalidation: s.invalidation, entryRef: s.entryRef, stopLoss: s.stop,
