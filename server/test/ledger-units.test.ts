@@ -68,6 +68,13 @@ describe('reconcile units divergence', () => {
     expect(r.detail).toContain('diverge');
     expect(g05().status).toBe('FAIL');
   });
+  it('does not false-fail a large row whose REAL value cannot hold every unit', () => {
+    freshDb(false);
+    ledger(PAPER_ACCOUNT, 'DEPOSIT', 50_000_000.12345679);
+    expect(reconcile()).toMatchObject({ ok: true, unitsDivergence: 0 });
+    run('UPDATE ledger_entries SET amount_units=amount_units+10'); // 1e-7 USDT, beyond tolerance at any scale
+    expect(reconcile()).toMatchObject({ ok: false, unitsDivergence: 1 });
+  });
   it('fails closed on a NULL amount_units', () => {
     freshDb(false);
     ledger(PAPER_ACCOUNT, 'DEPOSIT', 1000);

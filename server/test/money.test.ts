@@ -32,6 +32,14 @@ describe('exact USDT units', () => {
     for (const v of [0, 1, -1, 10000, 0.1, 123.45678912, -99.99999999, 0.00000001, 1e6, 5.5e-7]) expect(fromUnits(toUnits(v))).toBe(v);
     expect(toUnits(1000000)).toBe(100000000000000);
   });
+  it('handles extreme magnitudes without -0 or float multiplication', () => {
+    expect(toUnits(5e-324)).toBe(0);
+    expect(Object.is(toUnits(-1.5e-9), -0)).toBe(false);
+    expect(toUnits(-1.5e-9)).toBe(0);
+    expect(toUnits(-1.5e-8)).toBe(-2);   // tie on the shortest decimal text -> even
+    expect(() => toUnits(1e21)).toThrow('MONEY_OUT_OF_RANGE');
+    expect(toUnits(50_000_000.12345678)).toBe(5_000_000_012_345_678);
+  });
   it('throws on non-finite and out-of-range input', () => {
     for (const v of [NaN, Infinity, -Infinity]) expect(() => toUnits(v)).toThrow('MONEY_INVALID_AMOUNT');
     expect(() => toUnits(9.1e7)).toThrow('MONEY_OUT_OF_RANGE');

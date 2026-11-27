@@ -5,6 +5,8 @@
  * number with BigInt arithmetic, never by `amount * 1e8`, and rounded half-to-even at the 8th decimal on write.
  * Units are stored and summed as SQLite INTEGERs. A unit value must be a safe JS integer, which bounds a single value
  * (and every SUM) to about 90 million USDT; larger values throw, so the ledger fails closed instead of losing precision.
+ * Ties are decided on that shortest text, not on the exact binary value: 1.000000005 is a tie (rounds to even) even
+ * though the double nearest to it is slightly above or below. This matches what a person reads and writes.
  * The legacy REAL `amount` column is kept as written for audit history and is cross-checked against units by reconcile.
  */
 export const USDT_SCALE = 8;

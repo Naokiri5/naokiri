@@ -35,9 +35,10 @@ function reconcileSnapshot(account: string) {
   const flows = get<{ s: number }>(`SELECT COALESCE(SUM(l.amount),0) s FROM ledger_entries l JOIN orders o ON o.id=l.ref JOIN positions p ON p.id=o.position_id
     WHERE l.account=? AND p.status='CLOSED' AND l.kind IN ('BUY','SELL','FEE')`, account)!;
   const diff = Math.abs(closed.s - flows.s);
-  // Cash is the exact integer-unit sum. Rows lacking units, or whose REAL amount drifts from units by more than 1 unit, break the dual-write.
+  // Cash is the exact integer-unit sum. Rows lacking units, or whose REAL amount drifts from units by more than
+  // 1 unit plus the REAL column's own rounding (binary REAL error is about 1e-8 units per USDT; 1e-7 allowed, so large rows do not false-fail), break the dual-write.
   const cashRow = get<{ s: unknown; missing: unknown; diverged: unknown }>(`SELECT COALESCE(SUM(amount_units),0) s, COUNT(*)-COUNT(amount_units) missing,
-    COALESCE(SUM(CASE WHEN amount_units IS NOT NULL AND ABS(amount*100000000 - amount_units) > 1 THEN 1 ELSE 0 END),0) diverged FROM ledger_entries WHERE account=?`, account)!;
+    COALESCE(SUM(CASE WHEN amount_units IS NOT NULL AND ABS(amount*100000000 - amount_units) > 1 + ABS(amount)*0.0000001 THEN 1 ELSE 0 END),0) diverged FROM ledger_entries WHERE account=?`, account)!;
   const unitsMissing = checkedUnits(cashRow.missing); const unitsDivergence = checkedUnits(cashRow.diverged);
   const cash = fromUnits(checkedUnits(cashRow.s));
   // Aggregate agreement is necessary but insufficient: opposite errors can cancel.

@@ -503,11 +503,21 @@ function applyExit(positionId: string, wantQty: number, reason: string, fr: numb
 export function executeExit(positionId: string, qty: number, reason: string, fr = feeRate(), executionTs?: number) {
   const after: Deferred = [];
   crashpoint('exit.preTx');
-  const r = tx(() => {
-    const exit = applyExit(positionId, qty, reason, fr, executionTs ?? Date.now(), after);
-    crashpoint('exit.precommit');
-    return exit;
-  });
+  let r: ReturnType<typeof applyExit>;
+  try {
+    r = tx(() => {
+      const exit = applyExit(positionId, qty, reason, fr, executionTs ?? Date.now(), after);
+      crashpoint('exit.precommit');
+      return exit;
+    });
+  } catch (e) {
+    // The transaction rolled back, so the position is still open: raise the protection incident before rethrowing.
+    if (!(e instanceof LeaseLostError)) {
+      const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId);
+      if (p?.status === 'OPEN') flagUnprotected(p, `exit failed: ${String((e as Error)?.message ?? e).slice(0, 160)}`);
+    }
+    throw e;
+  }
   crashpoint('exit.committed');
   if (r) after.forEach((fn) => fn());
   else { const p = get<PositionRow>('SELECT * FROM positions WHERE id=?', positionId); if (p?.status === 'OPEN') flagUnprotected(p, 'no fresh executable price for exit'); }
@@ -561,7 +571,14 @@ export function closeAllPositions(actor: string, confirm: string) {
   if (actor !== 'owner') throw new OmsError('only the owner may close positions');
   if (confirm !== 'CLOSE ALL') throw new OmsError('confirmation phrase required: CLOSE ALL');
   audit(actor, 'positions.closeAll');
-  const results = openPositions().map((p) => ({ positionId: p.id, result: executeExit(p.id, p.qty, 'MANUAL_CLOSE') }));
+  // One failing position must not stop the others from being closed; executeExit has already flagged it unprotected.
+  const results = openPositions().map((p) => {
+    try { return { positionId: p.id, result: executeExit(p.id, p.qty, 'MANUAL_CLOSE') }; }
+    catch (e) {
+      if (e instanceof LeaseLostError) throw e;
+      return { positionId: p.id, result: null, error: String((e as Error)?.message ?? e).slice(0, 160) };
+    }
+  });
   return { state: results.every((r) => r.result?.closed) ? 'CONFIRMED' : results.some((r) => r.result) ? 'PARTIALLY_COMPLETED' : results.length ? 'FAILED' : 'CONFIRMED', results };
 }
 export function closePosition(actor: string, positionId: string) {
