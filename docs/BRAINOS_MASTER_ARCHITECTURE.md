@@ -73,7 +73,7 @@ already allow. It never sizes a position, never authorizes an entry by itself an
 | Strategy configuration version | `strategy_config_version` | `id@version` list from `STRATEGIES` |
 | Owner identity | `authorized_by` | `owner:<step-up method>` |
 | Authorization and expiry | `authorized_at`, `expires_at` | Owner-selected duration, 1–720 hours |
-| Canonical lease identity | `lease_holder`, `lease_acquired_at`, `fence_epoch` | Engine lease at authorization |
+| Canonical lease identity | `lease_holder`, `lease_acquired_at`, `fence_epoch` | Engine lease at authorization (`fence_epoch` is the session checkpoint version; the lease's own never-reused epoch, schema 12, is checked by every write fence in `ops/lease.ts`) |
 | Recovery status | `state`, `suspend_reason` | Recovery always lands in a suspended state |
 | Audit snapshot | `brainos_session_events.mandate_json` | Written on every transition |
 

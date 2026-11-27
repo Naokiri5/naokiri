@@ -75,8 +75,10 @@ export function assertWriteFence(fence?: LeaseFence) {
 }
 
 /** Release only our own lease (graceful shutdown), so a successor can start immediately instead of waiting for expiry. */
-export function releaseLease(name: string, holder: string, acquiredAt?: number) {
+/** Releasing never resets the epoch counter (runtime_lease_epochs); passing the epoch releases only that generation. */
+export function releaseLease(name: string, holder: string, acquiredAt?: number, epoch?: number) {
   const result = acquiredAt === undefined ? run('DELETE FROM runtime_leases WHERE name=? AND holder=?', name, holder) :
-    run('DELETE FROM runtime_leases WHERE name=? AND holder=? AND acquired_at=?', name, holder, acquiredAt);
+    epoch === undefined ? run('DELETE FROM runtime_leases WHERE name=? AND holder=? AND acquired_at=?', name, holder, acquiredAt) :
+    run('DELETE FROM runtime_leases WHERE name=? AND holder=? AND acquired_at=? AND epoch=?', name, holder, acquiredAt, epoch);
   return Number(result.changes) > 0;
 }

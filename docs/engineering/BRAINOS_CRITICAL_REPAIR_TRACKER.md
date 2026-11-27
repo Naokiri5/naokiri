@@ -117,7 +117,7 @@ Mapped against the code before building; each part extends an existing owner, no
 | Proposed part | Existing owner | Status | Evidence or reason |
 |---|---|---|---|
 | OrderBookIntegrityGuard | `market/quality.ts` | Already in place | Crossed, unordered, future-dated and stale books, future quotes and cross-venue disagreement already fail data quality, and the risk gate refuses entries on a stale or missing book. Sequence-gap resync applies to streaming books; providers are HTTPS polling (repair 06). |
-| RegimeTransitionGate | `regime/regime.ts`, `market/scanner.ts` | **Done (new)** | `regime/transition.ts`: entries require the regime confirmed for 3 closed candles with fewer than 4 changes in the last 12; transitioning, unstable or unknown regimes wait. Uses a bounded snapshot history in the feature engine. Only restricts entries; live is now stricter than the backtests that qualified a strategy. `regime-transition.test.ts`, scanner test, mutation-checked. |
+| RegimeTransitionGate | `regime/regime.ts`, `market/scanner.ts` | **Done (new)** | `regime/transition.ts`: entries require the regime confirmed for 3 closed candles with fewer than 4 changes in the last 12; transitioning, unstable or unknown regimes wait. Uses a bounded snapshot history in the feature engine. Only restricts entries; since backtest model 3 the Lab applies the same check (see the qualification section). `regime-transition.test.ts`, scanner test, mutation-checked. |
 | RuntimePreFlightLatch | `ops/integrity.ts`, `risk/gate.ts` | **Done (new)** | The takeover integrity checks (quick_check, schema, audit and memory chains, ledger reconcile, protective stops) now re-run every 30 minutes on the background lane (`ops/runtimeIntegrity.ts`); the gate denies `RUNTIME_INTEGRITY_FAILED`, `_STALE` (over 90 minutes) or `_INVALID`. About 0.5 s per run on a 600 MB database (measured locally). `runtime-integrity.test.ts`, mutation-checked. |
 | AmbiguousOrderReconciler | `exec/recovery.ts`, `exec/oms.ts` | Already in place (PAPER) | Paper fills are synchronous; unresolved paper orders block entries (`UNRECONCILED_PAPER_ORDERS`). Venue status queries only matter with an external adapter (repairs 20, 22, 23: gated). |
 | PartialFillLedgerBridge | `exec/oms.ts`, `exec/fillEvents.ts` | Partial | Idempotent fill recording and `fill.recorded.v1` exist; exact integer money is repair 21 (open). |
@@ -129,10 +129,7 @@ Independent trading-risk review: no blockers. Fixed from it: a failed write whil
 longer refuses takeover (that would have left open positions unmonitored); the check yields to protection timers
 first and its duration is recorded (`ops.runtime_integrity`); a failed result is retried after 5 minutes instead of
 30; the owner gets one alert when the result turns from clean to failed; protective exits are tested to work while
-it has failed. Known and accepted: backtests and session simulation apply only `suitableRegimes`, not the stability
-check, so qualification evidence describes more trades than live now takes (safe direction, but not certified for
-the live subset). It matters most for `donchian_breakout`, whose entries sit on regime changes and are delayed by
-the 3-candle confirmation. Applying the same check in the Lab is the follow-up. While the bot is stopped for more
+it has failed. Since backtest model 3 the backtest and historical session simulation apply the same stability check, so qualification evidence matches live entries (see the strategy qualification section below). While the bot is stopped for more
 than 90 minutes, manual paper entries are refused as `RUNTIME_INTEGRITY_STALE`.
 
 ## Runtime Spine V2 (owner PDF, 27 Nov 2026)

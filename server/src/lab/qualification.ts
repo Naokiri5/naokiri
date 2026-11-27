@@ -4,6 +4,7 @@
  * lifecycle. A QUALIFIED verdict is a precondition for the owner's PAPER promotion, never a promotion by itself and
  * never LIVE authorization.
  */
+import { mean } from '../core/util.js';
 import { stats, BACKTEST_MODEL_VERSION, type BtTrade } from './backtest.js';
 import { deflatedSharpe, MIN_DEFLATED_SHARPE, returnMoments, sharpeEstimatorVariance } from './overfitting.js';
 
@@ -89,7 +90,6 @@ function sharpeVariance(evidence: QualificationEvidence, moments: ReturnType<typ
   return { variance: floor, source: 'ESTIMATOR' as const };
 }
 
-const mean = (xs: readonly number[]) => xs.reduce((s, v) => s + v, 0) / xs.length;
 
 /** Mean R of each of `k` chronological equal-count periods (sizes differ by at most one). */
 function periodMeans(rs: readonly number[], k: number): number[] {

@@ -12,7 +12,7 @@
  * write the database can also forge the stored result: this detects faults, it is not a defence against an attacker.
  */
 import { tx } from '../db/db.js';
-import { getSetting, setSetting } from '../core/settings.js';
+import { readValidatedSetting, setSetting } from '../core/settings.js';
 import { assertWriteFence, type LeaseFence } from './lease.js';
 import type { takeoverIntegrity } from './integrity.js';
 
@@ -27,15 +27,19 @@ export const RUNTIME_INTEGRITY_MAX_AGE_MS = 3 * RUNTIME_INTEGRITY_INTERVAL_MS;
 export interface RuntimeIntegrityRecord { checkedAt: number; ok: boolean; failed: { name: string; detail: string }[]; source: 'takeover' | 'runtime' }
 export interface RuntimeIntegrityStatus { ok: boolean; reasons: string[]; record: RuntimeIntegrityRecord | null }
 
-const isRecord = (v: any): v is RuntimeIntegrityRecord => !!v && typeof v === 'object' && Number.isSafeInteger(v.checkedAt) && v.checkedAt > 0
-  && typeof v.ok === 'boolean' && (v.source === 'takeover' || v.source === 'runtime') && Array.isArray(v.failed)
-  && v.failed.every((f: any) => !!f && typeof f.name === 'string' && typeof f.detail === 'string') && (v.ok ? v.failed.length === 0 : v.failed.length > 0);
+const isFailedCheck = (f: unknown): f is { name: string; detail: string } =>
+  !!f && typeof f === 'object' && typeof (f as { name?: unknown }).name === 'string' && typeof (f as { detail?: unknown }).detail === 'string';
+const isRecord = (v: unknown): v is RuntimeIntegrityRecord => {
+  if (!v || typeof v !== 'object') return false;
+  const r = v as Partial<Record<keyof RuntimeIntegrityRecord, unknown>>;
+  if (!Number.isSafeInteger(r.checkedAt) || (r.checkedAt as number) <= 0 || typeof r.ok !== 'boolean') return false;
+  if ((r.source !== 'takeover' && r.source !== 'runtime') || !Array.isArray(r.failed) || !r.failed.every(isFailedCheck)) return false;
+  return r.ok ? r.failed.length === 0 : r.failed.length > 0;
+};
 
 function readRecord(): { record: RuntimeIntegrityRecord | null; invalid: boolean } {
-  let raw: unknown;
-  try { raw = getSetting<unknown>(RUNTIME_INTEGRITY_KEY, null); } catch { return { record: null, invalid: true }; }
-  if (raw === null) return { record: null, invalid: false };
-  return isRecord(raw) ? { record: raw, invalid: false } : { record: null, invalid: true };
+  const { value, invalid } = readValidatedSetting(RUNTIME_INTEGRITY_KEY, isRecord);
+  return { record: value, invalid };
 }
 
 /** Stores a completed integrity result (from takeover or the background lane) under the engine write fence. */

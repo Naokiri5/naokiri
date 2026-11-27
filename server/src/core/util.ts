@@ -7,7 +7,7 @@ export const sha256 = (s: string | Buffer) => createHash('sha256').update(s).dig
 export const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
 export const round = (x: number, dp = 8) => { const f = 10 ** dp; return Math.round(x * f) / f; };
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-export function mean(xs: number[]) { return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN; }
+export function mean(xs: readonly number[]) { return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN; }
 export function std(xs: number[]) {
   if (xs.length < 2) return NaN;
   const m = mean(xs);

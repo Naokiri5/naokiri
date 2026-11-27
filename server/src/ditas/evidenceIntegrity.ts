@@ -21,7 +21,7 @@
  */
 import { all, get, tx } from '../db/db.js';
 import { audit } from '../core/audit.js';
-import { getSetting, setSetting } from '../core/settings.js';
+import { getSetting, readValidatedSetting, setSetting } from '../core/settings.js';
 import { assertWriteFence, type LeaseFence } from '../ops/lease.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import { storedContentHash, verifyTradeOutcomes } from './tradeOutcomes.js';
@@ -58,13 +58,7 @@ const isAck = (v: any): v is Acknowledgement => !!v && typeof v === 'object' && 
 const isHashCheck = (v: any): v is HashCheck => !!v && typeof v === 'object' && (v.checkedAt === null || time(v.checkedAt)) && time(v.checked)
   && Array.isArray(v.tampered) && v.tampered.every(str) && time(v.lastAttemptAt) && (v.lastError === null || str(v.lastError));
 
-/** getSetting throws on malformed JSON; both that and a wrong shape are reported as invalid, never as "no finding". */
-function readSetting<T>(key: string, valid: (v: unknown) => v is T): { value: T | null; invalid: boolean } {
-  let raw: unknown;
-  try { raw = getSetting<unknown>(key, null); } catch { return { value: null, invalid: true }; }
-  if (raw === null) return { value: null, invalid: false };
-  return valid(raw) ? { value: raw, invalid: false } : { value: null, invalid: true };
-}
+const readSetting = readValidatedSetting;
 
 /** The finding for one stored outcome row, re-hashed now. A row that cannot be hashed has no content hash. */
 function finding(positionId: string, kind: FindingKind): Finding | null {

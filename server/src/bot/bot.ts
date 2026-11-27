@@ -110,7 +110,7 @@ function takeoverAllowed(lease: LeaseFence): boolean {
     failed = [{ name: 'takeover verification', ok: false, detail: errorText(error).slice(0, 200) }];
   }
   takeoverRefused = true;
-  try { releaseLease(lease.name, lease.holder, lease.acquired_at); } catch { /* lease simply expires */ }
+  try { releaseLease(lease.name, lease.holder, lease.acquired_at, lease.epoch); } catch { /* lease simply expires */ }
   stopBot(); botStatus.lastError = `integrity: ${failed.map((c) => `${c.name}: ${c.detail}`).join('; ')}`;
   try {
     journal('SYSTEM', `Engine refused takeover: integrity checks failed (${failed.map((c) => c.name).join(', ')})`, undefined, { checks: failed });
@@ -423,7 +423,7 @@ export async function drainBot(timeoutMs = 20_000): Promise<boolean> {
   while (lanesBusy() && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
   const drained = !lanesBusy();
   // Release only after the lanes stopped; if one is still stuck, keep the lease so it expires rather than overlapping.
-  if (drained && lease) { try { releaseLease(lease.name, lease.holder, lease.acquired_at); } catch { /* lease expires */ } }
+  if (drained && lease) { try { releaseLease(lease.name, lease.holder, lease.acquired_at, lease.epoch); } catch { /* lease expires */ } }
   return drained;
 }
 export function botStatusView(acct = accountState()) {
