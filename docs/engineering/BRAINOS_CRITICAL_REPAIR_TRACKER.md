@@ -125,6 +125,16 @@ Mapped against the code before building; each part extends an existing owner, no
 | ChoiceArbitrationScorer | `choice/arbitration.ts` | Unchanged | Remains shadow-only; no qualified strategy exists to rank. |
 | DitasCalibrationDriftMonitor | `ditas/calibration.ts` | Not built | No automatic parameter updater exists to freeze; strategy suspension and the worker support discount already act on verified outcomes. |
 
+Independent trading-risk review: no blockers. Fixed from it: a failed write while recording the takeover result no
+longer refuses takeover (that would have left open positions unmonitored); the check yields to protection timers
+first and its duration is recorded (`ops.runtime_integrity`); a failed result is retried after 5 minutes instead of
+30; the owner gets one alert when the result turns from clean to failed; protective exits are tested to work while
+it has failed. Known and accepted: backtests and session simulation apply only `suitableRegimes`, not the stability
+check, so qualification evidence describes more trades than live now takes (safe direction, but not certified for
+the live subset). It matters most for `donchian_breakout`, whose entries sit on regime changes and are delayed by
+the 3-candle confirmation. Applying the same check in the Lab is the follow-up. While the bot is stopped for more
+than 90 minutes, manual paper entries are refused as `RUNTIME_INTEGRITY_STALE`.
+
 ## Not claimed
 
 Nothing here makes a strategy profitable. The new controls reduce risk when evidence is missing, broken or measured

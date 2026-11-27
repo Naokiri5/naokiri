@@ -9,7 +9,7 @@ import { ledger, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import { takeoverIntegrity } from '../src/ops/integrity.js';
 import {
   refreshRuntimeIntegrity, runtimeIntegrityDue, runtimeIntegrityStatus, storeIntegrityResult,
-  RUNTIME_INTEGRITY_INTERVAL_MS, RUNTIME_INTEGRITY_KEY, RUNTIME_INTEGRITY_MAX_AGE_MS,
+  RUNTIME_INTEGRITY_INTERVAL_MS, RUNTIME_INTEGRITY_KEY, RUNTIME_INTEGRITY_MAX_AGE_MS, RUNTIME_INTEGRITY_RETRY_MS,
 } from '../src/ops/runtimeIntegrity.js';
 
 const T0 = 1_800_000_000_000;
@@ -48,6 +48,9 @@ describe('runtime integrity latch', () => {
     expect(runtimeIntegrityDue(T0 + RUNTIME_INTEGRITY_INTERVAL_MS)).toBe(true);
     expect(refreshRuntimeIntegrity(() => { throw new Error('disk I/O error'); }, T0 + RUNTIME_INTEGRITY_INTERVAL_MS)).toMatchObject({ ok: false });
     expect(runs).toBe(1);
+    // A failed result is retried after RUNTIME_INTEGRITY_RETRY_MS, not after the full interval.
+    expect(runtimeIntegrityDue(T0 + RUNTIME_INTEGRITY_INTERVAL_MS + RUNTIME_INTEGRITY_RETRY_MS - 1)).toBe(false);
+    expect(runtimeIntegrityDue(T0 + RUNTIME_INTEGRITY_INTERVAL_MS + RUNTIME_INTEGRITY_RETRY_MS)).toBe(true);
     expect(runtimeIntegrityStatus(T0 + RUNTIME_INTEGRITY_INTERVAL_MS).reasons[0]).toMatch(/disk I\/O error/);
   });
 

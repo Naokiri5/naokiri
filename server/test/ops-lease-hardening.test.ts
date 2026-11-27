@@ -13,6 +13,7 @@ import * as lab from '../src/lab/lab.js';
 import * as oms from '../src/exec/oms.js';
 import { setCrashHook } from '../src/exec/crashpoint.js';
 import type { DecisionReport } from '../src/decision/engine.js';
+import { runtimeIntegrityStatus, storeIntegrityResult, RUNTIME_INTEGRITY_KEY } from '../src/ops/runtimeIntegrity.js';
 
 // Network lanes are replaced; everything that writes (OMS, ledger, lease, journal) is the real code.
 const hooks = vi.hoisted(() => ({
@@ -201,6 +202,52 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(botStatus.lastError).toMatch(/^integrity: audit chain: broken at entry/);
     expect(currentLease(ENGINE_LEASE)).toBeNull();
     expect(get<any>("SELECT title FROM notifications WHERE source='engine-lease'")!.title).toBe('Engine stopped: integrity check failed');
+  });
+
+  it('takeover records its integrity result for the risk gate; a failed takeover records the failure', () => {
+    expect(_test.holdEngine()).toBe(true);
+    expect(runtimeIntegrityStatus().record).toMatchObject({ ok: true, source: 'takeover' });
+    stopBot(); _test.resetTakeoverRefusal(); run('DELETE FROM runtime_leases');
+    run("UPDATE audit_log SET hash='tampered' WHERE id=(SELECT MIN(id) FROM audit_log)");
+    Object.assign(botStatus, { running: true, role: 'STANDBY' });
+    expect(_test.holdEngine()).toBe(false);
+    const status = runtimeIntegrityStatus();
+    expect(status.ok).toBe(false);
+    expect(status.reasons[0]).toMatch(/^RUNTIME_INTEGRITY_FAILED: audit chain/);
+  });
+
+  it('a failure to store the takeover result does not refuse takeover (protection keeps running)', () => {
+    run(`CREATE TRIGGER block_integrity_insert BEFORE INSERT ON settings WHEN NEW.key='${RUNTIME_INTEGRITY_KEY}' BEGIN SELECT RAISE(ABORT, 'disk full'); END`);
+    expect(_test.holdEngine()).toBe(true);
+    expect(botStatus.role).toBe('LEADER');
+    expect(botStatus.lastError).toMatch(/^runtime-integrity store: .*disk full/);
+    expect(runtimeIntegrityStatus().record).toBeNull();
+  });
+
+  it('a failed runtime check pauses entries with one alert, retries sooner, and never blocks a protective exit', async () => {
+    expect(_test.holdEngine()).toBe(true);
+    await _test.protectionLane();
+    expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+    // Simulate the background lane finding a fault: the stored result fails, as refreshRuntimeIntegrity would store it.
+    storeIntegrityResult({ ok: false, checks: [{ name: 'ledger reconcile', ok: false, detail: 'drift' }] }, 'runtime', Date.now());
+    expect(oms.submitEntry(report(id, last * 1.001), 'bot').ok).toBe(false);
+    setBook(id, last * 0.96); // through the stop
+    await _test.protectionLane();
+    expect(openPositions()).toHaveLength(0); // the exit was not gated
+  });
+
+  it('the background lane alerts once when the runtime check turns from clean to failed', async () => {
+    expect(_test.holdEngine()).toBe(true);
+    run("UPDATE settings SET value=json_set(value,'$.checkedAt',?) WHERE key=?", Date.now() - 31 * 60_000, RUNTIME_INTEGRITY_KEY);
+    run("UPDATE audit_log SET hash='tampered' WHERE id=(SELECT MIN(id) FROM audit_log)");
+    await _test.backgroundLane();
+    expect(runtimeIntegrityStatus().reasons[0]).toMatch(/^RUNTIME_INTEGRITY_FAILED: audit chain/);
+    const alerts = () => all<any>("SELECT title FROM notifications WHERE title='New entries paused: integrity check failed'").length;
+    expect(alerts()).toBe(1);
+    run("UPDATE settings SET value=json_set(value,'$.checkedAt',?) WHERE key=?", Date.now() - 6 * 60_000, RUNTIME_INTEGRITY_KEY);
+    await _test.backgroundLane(); // retried after 5 minutes, still failing: no second alert
+    expect(alerts()).toBe(1);
+    expect(runtimeIntegrityStatus().record!.checkedAt).toBeGreaterThan(Date.now() - 60_000);
   });
 
   it('takeover integrity also fails on an open position without its protective stop, and on a newer schema', async () => {

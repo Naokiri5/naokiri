@@ -19,6 +19,8 @@ import type { takeoverIntegrity } from './integrity.js';
 export const RUNTIME_INTEGRITY_KEY = 'ops.runtimeIntegrity';
 /** About 0.5 s per run on a 600 MB database (measured locally), so a 30 minute cadence keeps the cost negligible. */
 export const RUNTIME_INTEGRITY_INTERVAL_MS = 30 * 60_000;
+/** A failed result is re-checked sooner, so one transient failure (a busy lock) does not pause entries for 30 minutes. */
+export const RUNTIME_INTEGRITY_RETRY_MS = 5 * 60_000;
 /** Three missed runs of slack before a stalled background lane is treated as an unverified database. */
 export const RUNTIME_INTEGRITY_MAX_AGE_MS = 3 * RUNTIME_INTEGRITY_INTERVAL_MS;
 
@@ -45,10 +47,11 @@ export function storeIntegrityResult(result: ReturnType<typeof takeoverIntegrity
   return record;
 }
 
-/** True when the background lane should re-run the checks (no result yet, or the last one is older than the interval). */
+/** True when the background lane should re-run the checks: no result yet, or the last one is older than the interval (sooner after a failure). */
 export function runtimeIntegrityDue(nowTs = Date.now()): boolean {
   const { record } = readRecord();
-  return !record || nowTs - record.checkedAt >= RUNTIME_INTEGRITY_INTERVAL_MS || record.checkedAt > nowTs;
+  if (!record || record.checkedAt > nowTs) return true;
+  return nowTs - record.checkedAt >= (record.ok ? RUNTIME_INTEGRITY_INTERVAL_MS : RUNTIME_INTEGRITY_RETRY_MS);
 }
 
 /**

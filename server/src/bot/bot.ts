@@ -28,7 +28,7 @@ import type { DecisionReport } from '../decision/engine.js';
 import { acquireOrRenewLease, ownsLease, releaseLease, LeaseLostError, type LeaseFence } from '../ops/lease.js';
 import { checkScanStall, protectionIntervalMs, staleAfter } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
-import { refreshRuntimeIntegrity, storeIntegrityResult } from '../ops/runtimeIntegrity.js';
+import { refreshRuntimeIntegrity, runtimeIntegrityDue, runtimeIntegrityStatus, storeIntegrityResult } from '../ops/runtimeIntegrity.js';
 import { isShuttingDown } from '../ops/shutdown.js';
 import { drainExpiredMandate, durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
@@ -89,7 +89,12 @@ function takeoverAllowed(lease: LeaseFence): boolean {
   let failed: ReturnType<typeof takeoverIntegrity>['checks'];
   try {
     const result = takeoverIntegrity();
-    storeIntegrityResult(result, 'takeover', Date.now(), lease);
+    // Recording the result is bookkeeping: a failed write must not refuse takeover (that would leave open positions
+    // unmonitored). The background lane stores a fresh result on its first pass, since a missing record is due.
+    try { storeIntegrityResult(result, 'takeover', Date.now(), lease); } catch (error) {
+      if (error instanceof LeaseLostError) throw error;
+      botStatus.lastError = `runtime-integrity store: ${errorText(error).slice(0, 200)}`;
+    }
     if (result.ok) {
       expireApprovals(lease);
       try { recoverDurableSessionAfterTakeover(lease); } catch (error) {
@@ -290,6 +295,31 @@ function researchLane() {
   });
 }
 
+/**
+ * Re-run the takeover integrity checks when due (ops/runtimeIntegrity.ts). Yields first so due protection timers run
+ * before a synchronous check of the whole database; alerts once when the result turns from clean to failed.
+ */
+async function runtimeIntegrityPass(lease: LeaseFence) {
+  if (!runtimeIntegrityDue()) return;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  if (!stillLeader(lease)) return;
+  const wasOk = runtimeIntegrityStatus().record?.ok;
+  const t0 = performance.now();
+  try {
+    const record = refreshRuntimeIntegrity(takeoverIntegrity, Date.now(), lease);
+    if (record && !record.ok && wasOk !== false) {
+      const failed = record.failed.map((f) => f.name).join(', ');
+      try {
+        journal('SYSTEM', `Runtime integrity check failed (${failed}); new entries paused`, undefined, { failed: record.failed });
+        notify('CRITICAL', 'New entries paused: integrity check failed', `${failed} failed on ${botStatus.instanceId}. Protection and exits continue; new entries stay paused until the check passes.`, 'engine-lease');
+      } catch { /* the stored result already pauses entries */ }
+    }
+  } catch (error) {
+    if (error instanceof LeaseLostError) throw error;
+    botStatus.lastError = `runtime-integrity: ${errorText(error).slice(0, 200)}`;
+  } finally { record('ops.runtime_integrity', performance.now() - t0); }
+}
+
 const backgroundLane = () => runLane('background', async (lease) => {
   try { await refreshBackground(); } catch { /* tracked per provider */ }
   try { await scanPrints(); botStatus.lastPrintsAt = Date.now(); } catch { /* tracked */ }
@@ -311,7 +341,7 @@ const backgroundLane = () => runLane('background', async (lease) => {
   // Hash verification of every outcome record; the risk gate pauses new entries on an unacknowledged failure.
   try { refreshOutcomeHashCheck(Date.now(), lease); } catch (error) { botStatus.lastError = `evidence-integrity: ${errorText(error).slice(0, 200)}`; }
   if (!stillLeader(lease)) return;
-  try { refreshRuntimeIntegrity(takeoverIntegrity, Date.now(), lease); } catch (error) { botStatus.lastError = `runtime-integrity: ${errorText(error).slice(0, 200)}`; }
+  await runtimeIntegrityPass(lease);
   if (!stillLeader(lease)) return;
   try { refreshSupportDiscounts(Date.now(), lease); } catch (error) { botStatus.lastError = `worker-reliability: ${errorText(error).slice(0, 200)}`; }
   if (!stillLeader(lease)) return;
