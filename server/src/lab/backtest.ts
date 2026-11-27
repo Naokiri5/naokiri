@@ -12,7 +12,9 @@ import { quantile } from '../core/util.js';
  * in-sample / out-of-sample split. Results are in R multiples so they are size-independent.
  */
 export interface BtCosts { feeRate: number; slippageBps: number; spreadBps: number }
-export interface BtTrade { entryT: number; exitT: number; entry: number; exit: number; r: number; reason: string; regime: string; segment: 'IS' | 'OOS'; bars: number; mfe: number; mae: number }
+export interface BtTrade { entryT: number; exitT: number; entry: number; exit: number; r: number; reason: string; regime: string; segment: 'IS' | 'OOS'; bars: number; mfe: number; mae: number;
+  /** Total modeled execution cost of this trade in R (fees, spread, slippage both sides); set from model version 3. */
+  costR?: number }
 export interface BtStats { trades: number; winRate: number; avgR: number; expectancyR: number; profitFactor: number; maxDrawdownR: number; totalR: number; avgBars: number }
 export const BACKTEST_MODEL_VERSION = 2;
 // Stored results produced before model versioning omit modelVersion.
