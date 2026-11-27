@@ -135,6 +135,23 @@ the live subset). It matters most for `donchian_breakout`, whose entries sit on 
 the 3-candle confirmation. Applying the same check in the Lab is the follow-up. While the bot is stopped for more
 than 90 minutes, manual paper entries are refused as `RUNTIME_INTEGRITY_STALE`.
 
+## Runtime Spine V2 (owner PDF, 27 Nov 2026)
+
+Gap analysis by the architecture subagent against this branch, then implemented by two engineer subagents in
+separate file sets. The V2 reference code (its own SQLite tables, permits and outbox) was not copied in: each
+invariant was mapped to the existing owner.
+
+| V2 requirement | Status | Evidence or remaining work |
+|---|---|---|
+| Persisted desired session state, no auto-rearm, stop only when flat and reconciled | Already in place (partial) | `ops/durableSession.ts`: recovery moves RUNNING to a risk halt, a draining session stays draining, close finishes only when flat and reconciled. Not yet: scoping by account/environment, and pause as a session state (it is a control flag). |
+| Never-reused lease fencing epoch | **Done (new)** | Migration 12 adds `runtime_lease_epochs` and `runtime_leases.epoch`; every new acquisition or takeover takes the next epoch in the same transaction; release never resets it; `ownsLease`/`assertWriteFence` compare it, so a stale writer with the same holder and timestamp is refused. Takeover integrity also re-runs on a new epoch. `ops-lease.test.ts` (6 cases incl. upgrade from v11), mutation-checked. |
+| Single coalescing scheduler, no lost wake | **Done (new)** | A wake (settlement rescan, interval) arriving while a scan pass runs is no longer dropped: it marks the scan dirty and exactly one more pass runs afterwards, only while running and still leader (`bot/bot.ts` `scanLane`). `ops-lease-hardening.test.ts` (5 cases), mutation-checked. |
+| Risk permit bound to the entry, re-verified by the OMS | Already in place (partial) | `exec/authorization.ts` binds account, instrument, side, qty, price, cost, policy version and expiry, issued and verified in one transaction. No revision/epoch binding (not needed while fills are synchronous). |
+| Durable intent before dispatch, no blind retry | Already in place for PAPER | Paper fills are atomic; stuck orders block entries (`exec/recovery.ts`). Needed only with an external adapter (gated). |
+| Outbox, consumer receipts, dead critical topic | Partial | `fill.recorded.v1` is appended in the fill transaction; closed-trade linking is exactly-once by primary key. No consumer receipts table or dead-topic gate yet. |
+| Bounded workers | Already in place | `workers/runtime.ts`: 16 concurrent, 250 ms deadline, quarantine. |
+| Fixed-point money | Open | Repair 21. |
+
 ## Not claimed
 
 Nothing here makes a strategy profitable. The new controls reduce risk when evidence is missing, broken or measured

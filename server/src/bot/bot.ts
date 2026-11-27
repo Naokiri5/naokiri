@@ -73,8 +73,8 @@ function holdEngine(): LeaseFence | null {
     const lease = acquireOrRenewLease(ENGINE_LEASE, botStatus.instanceId, engineLeaseTtlMs());
     if (lease) {
       // Reacquiring an expired lease starts a new generation even when this process was the previous holder.
-      if (activeLease?.acquired_at !== lease.acquired_at && !takeoverAllowed(lease)) return null;
-      activeLease = { name: lease.name, holder: lease.holder, acquired_at: lease.acquired_at };
+      if ((activeLease?.acquired_at !== lease.acquired_at || activeLease?.epoch !== lease.epoch) && !takeoverAllowed(lease)) return null;
+      activeLease = { name: lease.name, holder: lease.holder, acquired_at: lease.acquired_at, epoch: lease.epoch };
       setEngineRole('LEADER');
       return activeLease;
     }
@@ -236,8 +236,21 @@ const hotLane = () => runLane('ticker', async (lease) => {
   if (stillLeader(lease)) botStatus.lastTickerAt = Date.now();
 });
 
-function scanLane() {
+/**
+ * Single coalescing scan scheduler: at most one pass is in flight. A wake (settlement rescan, interval tick, startup)
+ * that arrives mid-pass is not lost; it sets scanDirty, and when the pass ends exactly one more pass is scheduled,
+ * however many wakes arrived. The rerun requires a running bot that is still the leader; the interval stays the safety net.
+ */
+let scanDirty = false;
+async function scanLane() {
   if (!botStatus.lastTickerAt) return;
+  if (lanes.scan.inFlight) { if (botStatus.running) scanDirty = true; return; }
+  await scanPass();
+  if (!scanDirty) return;
+  scanDirty = false;
+  if (botStatus.running && activeLease && stillLeader(activeLease)) setImmediate(() => { void scanLane(); });
+}
+function scanPass() {
   return runLane('scan', async (lease) => {
     await refreshDeep();
     if (!stillLeader(lease)) return;
@@ -392,6 +405,7 @@ export function stopBot() {
   timers.forEach(clearInterval);
   timers = [];
   activeLease = null;
+  scanDirty = false;
   botStatus.running = false;
   botStatus.role = 'STOPPED';
   resetInternalProcesses();
@@ -420,4 +434,4 @@ export function botStatusView(acct = accountState()) {
     state: ctl.emergency ? 'EMERGENCY' : ctl.pausedNewOrders ? 'PAUSED' : ctl.mode === 'OBSERVE' ? 'OBSERVING' : ctl.mode === 'PAPER' ? 'PAPER_TRADING' : ctl.mode === 'APPROVAL' ? 'AWAITING_APPROVAL' : 'BOUNDED_LIVE',
   };
 }
-export const _test = { requestSettlementRescan, onDecision, holdEngine: () => !!holdEngine(), hotLane, protectionLane, scanLane, backgroundLane, resetTakeoverRefusal: () => { takeoverRefused = false; } };
+export const _test = { requestSettlementRescan, onDecision, holdEngine: () => !!holdEngine(), hotLane, protectionLane, scanLane, scanDirty: () => scanDirty, backgroundLane, resetTakeoverRefusal: () => { takeoverRefused = false; } };

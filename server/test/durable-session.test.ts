@@ -68,7 +68,7 @@ describe('BrainOS 6.1 operational durable session protection', () => {
   it('never creates a session when prerequisites or actual paper execution are uncertified', () => {
     const lease = acquireOrRenewLease('engine', 'leader-a', 60_000, NOW)!;
     expect(() => openDurablePaperSession(engine, 'FAST', {
-      name: lease.name, holder: lease.holder, acquired_at: lease.acquired_at,
+      name: lease.name, holder: lease.holder, acquired_at: lease.acquired_at, epoch: lease.epoch,
     }, NOW)).toThrow('SESSION_EXECUTION_LANE_NOT_CERTIFIED');
     expect(durableSessionStatus()).toBeNull();
     expect(all('SELECT * FROM brainos_session_events')).toHaveLength(0);
@@ -78,7 +78,7 @@ describe('BrainOS 6.1 operational durable session protection', () => {
     const old = acquireOrRenewLease('engine', 'leader-a', 100, NOW)!;
     acquireOrRenewLease('engine', 'leader-b', 60_000, NOW + 101);
     expect(() => openDurablePaperSession(engine, 'FAST', {
-      name: old.name, holder: old.holder, acquired_at: old.acquired_at,
+      name: old.name, holder: old.holder, acquired_at: old.acquired_at, epoch: old.epoch,
     }, NOW + 101)).toThrow('SESSION_LEADER_FENCE_REQUIRED');
     expect(durableSessionStatus()).toBeNull();
   });

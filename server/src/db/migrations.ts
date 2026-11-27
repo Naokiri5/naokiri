@@ -176,6 +176,12 @@ const MIGRATIONS: string[] = [
   CREATE INDEX positions_account_status_closed ON positions(account, status, closed_at);
   CREATE INDEX ditas_trade_outcomes_settlement ON ditas_trade_outcomes(settlement, closed_at);
   `,
+  /* 12 - Lease fencing epoch (ops/lease.ts). The counter lives in its own table because releaseLease deletes the lease
+     row; existing leases keep epoch 0 and the next acquisition by anyone moves the counter to 1. */ `
+  CREATE TABLE runtime_lease_epochs (name TEXT PRIMARY KEY, epoch INTEGER NOT NULL);
+  ALTER TABLE runtime_leases ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;
+  INSERT INTO runtime_lease_epochs(name, epoch) SELECT name, epoch FROM runtime_leases;
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */

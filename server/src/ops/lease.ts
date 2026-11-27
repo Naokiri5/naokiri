@@ -6,8 +6,13 @@ import { get, inTransaction, run, tx } from '../db/db.js';
  * SQLite file cannot both win. The TTL must exceed the renewal interval with margin; a crashed holder is replaced only
  * after its lease expires. Write fences stop an in-flight pass from committing after expiry or takeover.
  */
-export interface Lease { name: string; holder: string; acquired_at: number; renewed_at: number; expires_at: number }
-export type LeaseFence = Pick<Lease, 'name' | 'holder' | 'acquired_at'>;
+/**
+ * `epoch` is a never-reused fencing counter, bumped on every new acquisition or takeover. holder + acquired_at alone is
+ * not enough: a ms timestamp is not guaranteed unique or monotonic, and release deletes the row, so the counter is
+ * persisted separately in runtime_lease_epochs.
+ */
+export interface Lease { name: string; holder: string; acquired_at: number; renewed_at: number; expires_at: number; epoch: number }
+export type LeaseFence = Pick<Lease, 'name' | 'holder' | 'acquired_at' | 'epoch'>;
 export const currentLease = (name: string) => get<Lease>('SELECT * FROM runtime_leases WHERE name=?', name) ?? null;
 
 /** Reject malformed persisted leases and backward observations, not just expired ones.
@@ -22,6 +27,13 @@ export function validLeaseAt(lease: Lease, at: number): boolean {
     lease.renewed_at <= at && lease.expires_at > lease.renewed_at;
 }
 
+function nextEpoch(name: string, rowEpoch: number): number {
+  const stored = get<{ epoch: number }>('SELECT epoch FROM runtime_lease_epochs WHERE name=?', name)?.epoch ?? 0;
+  const epoch = Math.max(stored, rowEpoch) + 1;
+  run('INSERT INTO runtime_lease_epochs(name,epoch) VALUES (?,?) ON CONFLICT(name) DO UPDATE SET epoch=excluded.epoch', name, epoch);
+  return epoch;
+}
+
 export function acquireOrRenewLease(name: string, holder: string, ttlMs: number, clock?: number): Lease | null {
   if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) throw new Error('lease ttl must be a positive safe integer');
   if (!name || !holder) throw new Error('lease identity must not be empty');
@@ -33,11 +45,13 @@ export function acquireOrRenewLease(name: string, holder: string, ttlMs: number,
     if (cur && !validLeaseAt(cur, nowTs)) return null;
     const stillValid = !!cur && cur.expires_at >= nowTs;
     if (stillValid && cur.holder !== holder) return null;
-    const lease: Lease = { name, holder, acquired_at: stillValid ? cur.acquired_at : nowTs, renewed_at: nowTs, expires_at: nowTs + ttlMs };
+    // A plain renewal keeps its generation; a new acquisition or takeover takes the next epoch (same transaction).
+    const epoch = stillValid ? cur.epoch : nextEpoch(name, cur?.epoch ?? 0);
+    const lease: Lease = { name, holder, acquired_at: stillValid ? cur.acquired_at : nowTs, renewed_at: nowTs, expires_at: nowTs + ttlMs, epoch };
     run(
-      'INSERT INTO runtime_leases(name,holder,acquired_at,renewed_at,expires_at) VALUES (?,?,?,?,?) ' +
-      'ON CONFLICT(name) DO UPDATE SET holder=excluded.holder, acquired_at=excluded.acquired_at, renewed_at=excluded.renewed_at, expires_at=excluded.expires_at',
-      lease.name, lease.holder, lease.acquired_at, lease.renewed_at, lease.expires_at,
+      'INSERT INTO runtime_leases(name,holder,acquired_at,renewed_at,expires_at,epoch) VALUES (?,?,?,?,?,?) ' +
+      'ON CONFLICT(name) DO UPDATE SET holder=excluded.holder, acquired_at=excluded.acquired_at, renewed_at=excluded.renewed_at, expires_at=excluded.expires_at, epoch=excluded.epoch',
+      lease.name, lease.holder, lease.acquired_at, lease.renewed_at, lease.expires_at, lease.epoch,
     );
     return lease;
   });
@@ -47,7 +61,7 @@ export const tryAcquireLease = (name: string, holder: string, ttlMs: number, now
 
 export function ownsLease(fence: LeaseFence, nowTs = Date.now()) {
   const current = currentLease(fence.name);
-  return !!current && validLeaseAt(current, nowTs) && current.holder === fence.holder && current.acquired_at === fence.acquired_at && current.expires_at >= nowTs;
+  return !!current && validLeaseAt(current, nowTs) && current.holder === fence.holder && current.acquired_at === fence.acquired_at && current.epoch === fence.epoch && current.expires_at >= nowTs;
 }
 
 export class LeaseLostError extends Error {

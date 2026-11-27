@@ -106,6 +106,70 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(_test.requestSettlementRescan(botStatus.lastSettlementRescanAt + 10_000)).toBe(true);
   });
 
+  describe('coalescing scan scheduler', () => {
+    let passes = 0; let release!: () => void; let entered!: () => void;
+    const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+    const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
+    /** Blocks the first scan pass on a promise; later passes return at once. */
+    const blockFirstPass = () => {
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const started = new Promise<void>((resolve) => { entered = resolve; });
+      hooks.deep = async () => { passes++; if (passes === 1) { entered(); await gate; } };
+      return started;
+    };
+    beforeEach(() => { passes = 0; botStatus.lastTickerAt = Date.now(); expect(_test.holdEngine()).toBe(true); });
+
+    it('a settlement rescan during a pass causes exactly one extra pass after it finishes', async () => {
+      const started = blockFirstPass();
+      const first = _test.scanLane(); await started;
+      botStatus.lastSettlementRescanAt = 0; const before = botStatus.settlementRescans;
+      expect(_test.requestSettlementRescan()).toBe(true);
+      await settle();
+      expect(botStatus.settlementRescans).toBe(before + 1);
+      expect(passes).toBe(1); expect(_test.scanDirty()).toBe(true);
+      release(); await first; await settle();
+      expect(passes).toBe(2); expect(_test.scanDirty()).toBe(false);
+    });
+
+    it('three wakes during one pass coalesce into one extra pass', async () => {
+      const started = blockFirstPass();
+      const first = _test.scanLane(); await started;
+      void _test.scanLane(); void _test.scanLane(); void _test.scanLane();
+      await settle(); expect(passes).toBe(1);
+      release(); await first; await settle();
+      expect(passes).toBe(2);
+    });
+
+    it('no extra pass when nothing arrived during the pass', async () => {
+      await _test.scanLane(); await settle();
+      expect(passes).toBe(0);
+      const started = blockFirstPass();
+      const first = _test.scanLane(); await started;
+      release(); await first; await settle();
+      expect(passes).toBe(1); expect(_test.scanDirty()).toBe(false);
+    });
+
+    it('no extra pass after stopBot()', async () => {
+      const started = blockFirstPass();
+      const first = _test.scanLane(); await started;
+      void _test.scanLane();
+      expect(_test.scanDirty()).toBe(true);
+      stopBot(); expect(_test.scanDirty()).toBe(false);
+      release(); await first; await settle();
+      expect(passes).toBe(1);
+    });
+
+    it('no extra pass after the lease is lost', async () => {
+      const started = blockFirstPass();
+      const first = _test.scanLane(); await started;
+      _test.requestSettlementRescan(botStatus.lastSettlementRescanAt + 10_000);
+      await settle(); expect(_test.scanDirty()).toBe(true);
+      steal();
+      release(); await first; await settle();
+      expect(passes).toBe(1); expect(_test.scanDirty()).toBe(false); expect(botStatus.role).toBe('STANDBY');
+    });
+  });
+
   it('fences protective exits at the write lock and leaves the position for the successor', async () => {
     expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
     setBook(id, last * 0.96);
