@@ -1,6 +1,7 @@
 import { XMLParser } from 'fast-xml-parser';
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
 registerProvider({
+  hosts: ['news.google.com'],
   id: 'googlenews', name: 'Google News RSS', sourceClass: 'news', markets: ['all'],
   license: 'RESTRICTED: feed terms permit personal, non-commercial feed-reader use only. Replace with a licensed news API before commercial use.',
   realtime: 'NEAR_REALTIME', requiresCredentials: false,

@@ -1,11 +1,15 @@
+import { storageBlocksEntries, storageStatus } from './storage.js';
 import { get } from '../db/db.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
-import { market } from '../market/store.js';
+import { QUALITY_LIMITS } from '../market/quality.js';
 import { providers } from '../providers/http.js';
 import { currentPolicy } from '../risk/policy.js';
 import { notify } from '../notify/notify.js';
 import { journal } from '../journal/journal.js';
 import { config } from '../config.js';
+import { unreconciledPaperOrders } from '../exec/recovery.js';
+import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
+import { isShuttingDown } from './shutdown.js';
 
 /**
  * Readiness for an always-on paper server (Phase 1). `ready` answers one question for a supervisor or load balancer:
@@ -17,8 +21,10 @@ export type CheckStatus = 'pass' | 'fail' | 'skip' | 'info';
 export interface Check { name: string; status: CheckStatus; detail: string }
 export interface EngineView { running: boolean; role: 'STOPPED' | 'LEADER' | 'STANDBY'; startedAt: number; lastTickerAt: number; lastScanAt: number; lastMonitorAt: number; monitorFailing: boolean }
 
-/** A lane is stale after three of its intervals; a freshly started engine gets that much grace before its first run. */
-export const staleAfter = () => ({ tickerMs: config.tickerIntervalMs * 3, scanMs: config.scanIntervalMs * 3 });
+/** Allow multiple protection passes during the lifetime of an executable book. */
+export const protectionIntervalMs = () => Math.max(1_000, Math.min(config.tickerIntervalMs, Math.floor(QUALITY_LIMITS.maxExecBookAgeMs / 3)));
+/** A lane is stale after three of its intervals. */
+export const staleAfter = () => ({ tickerMs: config.tickerIntervalMs * 3, scanMs: config.scanIntervalMs * 3, monitorMs: protectionIntervalMs() * 3 });
 const secs = (ms: number) => `${Math.round(ms / 1000)}s`;
 
 function laneCheck(name: string, lastAt: number, limitMs: number, e: EngineView, nowTs: number): Check {
@@ -31,10 +37,23 @@ function laneCheck(name: string, lastAt: number, limitMs: number, e: EngineView,
 
 export function readiness(e: EngineView, nowTs = Date.now()) {
   const checks: Check[] = [];
+  // A shutting-down process must not reopen SQLite merely to answer readiness.
+  if (isShuttingDown()) return { ready: false, at: nowTs, schema: SCHEMA_VERSION,
+    role: config.offline ? 'OFFLINE' : e.role,
+    checks: [{ name: 'lifecycle', status: 'fail', detail: 'process draining' } satisfies Check] };
   try {
     const v = get<{ v: number | null }>('SELECT MAX(version) v FROM schema_migrations')?.v ?? 0;
     checks.push(v === SCHEMA_VERSION ? { name: 'database', status: 'pass', detail: `schema v${v}` } : { name: 'database', status: 'fail', detail: `schema v${v}, expected v${SCHEMA_VERSION}` });
   } catch { checks.push({ name: 'database', status: 'fail', detail: 'database unavailable' }); }
+
+  try {
+    checks.push(unreconciledPaperOrders()
+      ? { name: 'paper recovery', status: 'fail', detail: 'paper orders require reconciliation' }
+      : { name: 'paper recovery', status: 'pass', detail: 'no unresolved paper orders' });
+    if (get("SELECT 1 FROM protection_incidents i JOIN positions p ON p.id=i.position_id WHERE i.status='OPEN' AND p.status='OPEN' AND p.account=? LIMIT 1", PAPER_ACCOUNT)) {
+      checks.push({ name: 'position protection', status: 'fail', detail: 'open paper positions have unverified protection' });
+    }
+  } catch { checks.push({ name: 'paper recovery', status: 'fail', detail: 'paper recovery state unavailable' }); }
 
   const lim = staleAfter();
   if (config.offline) {
@@ -47,13 +66,20 @@ export function readiness(e: EngineView, nowTs = Date.now()) {
   } else {
     checks.push({ name: 'engine', status: 'pass', detail: e.role === 'LEADER' ? 'leader' : 'starting' });
     checks.push(laneCheck('tickers', e.lastTickerAt, lim.tickerMs, e, nowTs));
-    // Position monitoring: fails while the latest monitorPositions() pass threw, or when none completed within the ticker window.
-    checks.push(e.monitorFailing ? { name: 'monitor', status: 'fail', detail: 'last position-monitor pass failed' } : laneCheck('monitor', e.lastMonitorAt, lim.tickerMs, e, nowTs));
+    checks.push(e.monitorFailing ? { name: 'monitor', status: 'fail', detail: 'last position-monitor pass failed' } : laneCheck('monitor', e.lastMonitorAt, lim.monitorMs, e, nowTs));
     checks.push(laneCheck('scanner', e.lastScanAt, lim.scanMs, e, nowTs));
   }
   const ps = providers().filter((p) => p.status !== 'DISABLED');
   checks.push({ name: 'providers', status: 'info', detail: `${ps.filter((p) => p.status === 'LIVE').length}/${ps.length} live` });
-  checks.push({ name: 'risk policy', status: 'info', detail: currentPolicy() ? 'accepted' : 'not accepted (no paper entries until accepted)' });
+  try {
+    checks.push({ name: 'risk policy', status: 'info', detail: currentPolicy() ? 'accepted' : 'not accepted (no paper entries until accepted)' });
+  } catch { checks.push({ name: 'risk policy', status: 'fail', detail: 'risk policy unavailable' }); }
+  const storage = storageStatus(nowTs);
+  if (storage.level !== 'NOT_APPLICABLE') {
+    const pct = storage.freeBytes !== null && storage.totalBytes ? `${Math.round((storage.freeBytes / storage.totalBytes) * 100)}% free` : 'free space unknown';
+    checks.push({ name: 'storage', status: storage.level === 'OK' ? 'pass' : storage.level === 'LOW' ? 'info' : 'fail',
+      detail: storage.level === 'OK' ? pct : `${storage.level.toLowerCase()}: ${pct}; new entries ${storageBlocksEntries(storage) ? 'blocked' : 'allowed'}` });
+  }
   return { ready: !checks.some((c) => c.status === 'fail'), at: nowTs, schema: SCHEMA_VERSION, role: config.offline ? 'OFFLINE' : e.role, checks };
 }
 

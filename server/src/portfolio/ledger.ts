@@ -1,15 +1,24 @@
 import { all, get, run } from '../db/db.js';
 import { uid } from '../core/util.js';
 import { market } from '../market/store.js';
+import { toUnits, fromUnits, checkedUnits } from './money.js';
 import { getSetting, setSetting } from '../core/settings.js';
 
 export const PAPER_ACCOUNT = 'paper-bot';
 export type LedgerKind = 'DEPOSIT' | 'WITHDRAW' | 'BUY' | 'SELL' | 'FEE';
+/** Single money write path. Dual-writes the REAL amount as passed and exact integer units; a bad amount throws (rolls back the caller's tx). */
 export function ledger(account: string, kind: LedgerKind, amount: number, ref?: string, note?: string, ts = Date.now()) {
-  run('INSERT INTO ledger_entries(id,account,ts,kind,amount,ref,note) VALUES (?,?,?,?,?,?,?)', uid('led'), account, ts, kind, amount, ref ?? null, note ?? null);
+  const units = toUnits(amount);
+  run('INSERT INTO ledger_entries(id,account,ts,kind,amount,amount_units,ref,note) VALUES (?,?,?,?,?,?,?,?)', uid('led'), account, ts, kind, amount, units, ref ?? null, note ?? null);
 }
-export const cashBalance = (account = PAPER_ACCOUNT) => get<{ s: number }>('SELECT COALESCE(SUM(amount),0) s FROM ledger_entries WHERE account=?', account)!.s;
-export const totalDeposits = (account = PAPER_ACCOUNT) => get<{ s: number }>("SELECT COALESCE(SUM(amount),0) s FROM ledger_entries WHERE account=? AND kind IN ('DEPOSIT','WITHDRAW')", account)!.s;
+/** Exact SUM of units; fails closed on a row without units or an unsafe total. */
+function sumUnits(where: string, account: string): number {
+  const r = get<{ s: unknown; missing: unknown }>(`SELECT COALESCE(SUM(amount_units),0) s, COUNT(*)-COUNT(amount_units) missing FROM ledger_entries WHERE account=?${where}`, account)!;
+  if (checkedUnits(r.missing) !== 0) throw new Error('LEDGER_UNITS_MISSING: ledger rows without amount_units');
+  return checkedUnits(r.s);
+}
+export const cashBalance = (account = PAPER_ACCOUNT) => fromUnits(sumUnits('', account));
+export const totalDeposits = (account = PAPER_ACCOUNT) => fromUnits(sumUnits(" AND kind IN ('DEPOSIT','WITHDRAW')", account));
 
 export interface PositionRow { id: string; account: string; instrument: string; market: string; direction: string; strategy: string; qty: number; entry_price: number; stop_price: number; initial_stop: number; targets: string; status: string; opened_at: number; closed_at: number | null; exit_price: number | null; realized_pnl: number; fees: number; max_hold_ms: number | null; decision_id: string | null; exit_reason: string | null; planned_risk: number; mfe: number; mae: number }
 export const openPositions = (account = PAPER_ACCOUNT) => all<PositionRow>("SELECT * FROM positions WHERE account=? AND status='OPEN' ORDER BY opened_at", account);

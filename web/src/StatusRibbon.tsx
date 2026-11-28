@@ -6,7 +6,7 @@ import { deriveStatus, type RibbonModel, type ShellDto } from './status';
 export interface ShellState { data: ShellDto | null; requestedAt: number | null; error: string | null; reload: () => void }
 
 /** Ticks once a second inside the component that uses it, so ages advance without re-rendering the whole shell. */
-function useRibbon(shell: ShellState): RibbonModel {
+export function useRibbon(shell: ShellState): RibbonModel {
   const [now, setNow] = useState(() => performance.now());
   useEffect(() => { const t = window.setInterval(() => setNow(performance.now()), 1000); return () => clearInterval(t); }, []);
   return deriveStatus({ shell: shell.data, requestedAt: shell.requestedAt, error: shell.error, streamConnected: streamState.connected, now });

@@ -44,13 +44,16 @@ export interface ConsensusRecord {
   schema_version: '1.0'; consensus_id: string; candidate_id: string; event_id: string; instrument_id: string; strategy_id: string;
   state: ConsensusState; reason_codes: string[];
   created_at: string; expires_at: string; analysis_ms: number;
-  method: { id: 'domain-capped-weighted-v1'; support_threshold: number; max_opposition: number; min_response_ratio: number; calibration: 'NOT_CALIBRATED' };
+  /** v1 records predate support discounts; v2 scores measured-unreliable SUPPORT as ABSTAIN. */
+  method: { id: 'domain-capped-weighted-v1' | 'domain-capped-weighted-v2'; support_threshold: number; max_opposition: number; min_response_ratio: number; calibration: 'NOT_CALIBRATED' };
   workers: { eligible: number; responding: number; abstaining: number; failed: number; quarantined: number; rejected_packets: number };
   domains: { domain: string; groups: number; support: number; oppose: number; abstain: number; score: number | null; weight: number; required: boolean }[];
   dependency_groups: number;
   weighted_support: number; weighted_opposition: number;
   vetoes: { worker_id: string; reasons: string[] }[];
   challenge: ChallengeFinding[];
+  /** SUPPORT votes scored as ABSTAIN (absent on records written before v2). */
+  support_discounts?: { worker_id: string; worker_version: string }[];
   missing_inputs: string[];
   coordinator_version: string; trace_id: string;
 }

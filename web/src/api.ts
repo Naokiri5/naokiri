@@ -34,13 +34,17 @@ export function connectStream() {
   es.onopen = () => { streamState.connected = true; };
   es.onerror = () => { streamState.connected = false; };
   for (const t of TOPICS) es.addEventListener(t, (ev) => { streamState.lastEventAt = Date.now(); let p: any = null; try { p = JSON.parse((ev as MessageEvent).data); } catch { /* */ } handlers.forEach((h) => h(t, p)); });
+  // The browser resends the last event id on reconnect and the server replays what was missed. When it cannot
+  // (server restarted or the gap is too old) it sends `resync`: every live view refetches its authoritative state.
+  es.addEventListener('resync', () => { streamState.lastEventAt = Date.now(); for (const t of TOPICS) handlers.forEach((h) => h(t, null)); });
 }
 export function disconnectStream() { es?.close(); es = null; streamState.connected = false; }
 export function useStream(fn: Handler) { const ref = useRef(fn); ref.current = fn; useEffect(() => { const h: Handler = (t, p) => ref.current(t, p); handlers.add(h); return () => { handlers.delete(h); }; }, []); }
 
 /** Fetch + auto-refresh on listed stream topics (debounced) and optional interval. */
-export function useApi<T = any>(path: string | null, opts: { topics?: string[]; every?: number } = {}) {
+export function useApi<T = any>(path: string | null, opts: { topics?: string[]; every?: number; isolatePath?: boolean } = {}) {
   const [data, setData] = useState<T | null>(null); const [error, setError] = useState<string | null>(null); const [loading, setLoading] = useState(false);
+  const [dataPath, setDataPath] = useState<string | null>(null); const [errorPath, setErrorPath] = useState<string | null>(null);
   /** Monotonic (performance.now()) time the newest successful request was SENT; conservative for freshness checks. */
   const [requestedAt, setRequestedAt] = useState<number | null>(null);
   const timer = useRef<number | null>(null); const seq = useRef(0);
@@ -48,8 +52,8 @@ export function useApi<T = any>(path: string | null, opts: { topics?: string[]; 
     if (!path) { setLoading(false); return; }
     setLoading(true);
     const n = ++seq.current; const sent = performance.now();
-    try { const d = await api<T>(path); if (n !== seq.current) return; setData(d); setError(null); setRequestedAt(sent); }
-    catch (e: any) { if (n === seq.current) setError(e.message); }
+    try { const d = await api<T>(path); if (n !== seq.current) return; setData(d); setDataPath(path); setError(null); setRequestedAt(sent); }
+    catch (e: any) { if (n === seq.current) { setErrorPath(path); setError(e.message); } }
     finally { if (n === seq.current) setLoading(false); }
   }, [path]);
   useEffect(() => {
@@ -72,7 +76,14 @@ export function useApi<T = any>(path: string | null, opts: { topics?: string[]; 
       void load();
     }, 600);
   });
-  return { data, error, loading, requestedAt, reload: load, setData };
+  return {
+    data: opts.isolatePath && dataPath !== path ? null : data,
+    error: opts.isolatePath && errorPath !== path ? null : error,
+    loading,
+    requestedAt: opts.isolatePath && dataPath !== path ? null : requestedAt,
+    reload: load,
+    setData,
+  };
 }
 
 export const fmt = {

@@ -1,5 +1,6 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
 registerProvider({
+  hosts: ['api.coingecko.com'],
   id: 'coingecko', name: 'CoinGecko (public API)', sourceClass: 'aggregator', markets: ['crypto'],
   license: 'CoinGecko public API — attribution required; commercial use requires a paid plan.', realtime: 'DELAYED', requiresCredentials: false,
 });

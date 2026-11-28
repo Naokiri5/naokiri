@@ -220,11 +220,56 @@ function Disciplines() {
   </Card>)}<ErrorLine e={d.error} /></div>;
 }
 
+type CapabilityReadout = {
+  registry: {
+    id: string;
+    owner: string;
+    evidence?: { input: string; output: string; dependencies: string; freshness: string; provenance: string; whenUnavailable: string };
+  }[];
+  status: string;
+  latest: { capturedAt: number; capabilities: { id: string; state: string; reason: string }[] } | null;
+};
+
+type MemoryReadout = {
+  authority: string;
+  categories: { id: string; name: string; holds: string; records: Record<string, number>; freshness: string }[];
+  internalIntelligence?: CapabilityReadout & { settings: CapabilityReadout };
+};
+
+function CapabilityTable({ readout, title }: { readout: CapabilityReadout; title: string }) {
+  const observed = new Map(readout.latest?.capabilities.map((capability) => [capability.id, capability]));
+  return <details className="card">
+    <summary>{title} · {readout.registry.length}</summary>
+    <p className="hint">{readout.latest ? `Observed ${fmt.time(readout.latest.capturedAt)}` : readout.status === 'STALE' ? 'The last snapshot expired.' : 'Waiting for the active engine to publish a snapshot.'}</p>
+    <div className="tablewrap"><table>
+      <thead><tr><th scope="col">Capability</th><th scope="col">Owner</th><th scope="col">Observed status</th><th scope="col">Evidence contract</th></tr></thead>
+      <tbody>{readout.registry.map((capability) => {
+        const evidence = capability.evidence;
+        const status = observed.get(capability.id);
+        return <tr key={capability.id}>
+          <th scope="row">{capability.id.replaceAll('_', ' ')}</th><td>{capability.owner}</td>
+          <td>{status ? <><Status v={status.state} /><p>{status.reason}</p></> : 'Unavailable'}</td>
+          <td>{evidence && <details><summary>View source and freshness</summary>
+            <dl><dt>Source</dt><dd>{evidence.provenance}</dd><dt>Inputs</dt><dd>{evidence.input}</dd><dt>Dependencies</dt><dd>{evidence.dependencies}</dd><dt>Output</dt><dd>{evidence.output}</dd><dt>Freshness</dt><dd>{evidence.freshness}</dd><dt>Failure status</dt><dd>{evidence.whenUnavailable}</dd></dl>
+          </details>}</td>
+        </tr>;
+      })}</tbody>
+    </table></div>
+  </details>;
+}
+
 function Memory() {
-  const m = useApi('/api/academy/memory');
-  return <Card title="Memory architecture" right={<span className="hint">{m.data?.authority}</span>} flush><ErrorLine e={m.error} />
-    <div className="tablewrap"><table><thead><tr><th>Category</th><th>Holds</th><th>Stores (records)</th><th>Freshness</th></tr></thead><tbody>
-      {(m.data?.categories ?? []).map((c: any) => <tr key={c.id}><td><b>{c.id}. {c.name}</b></td><td>{c.holds}</td><td className="mono">{Object.entries(c.records).map(([k, v]) => `${k}: ${v}`).join(' · ')}</td><td className="hint">{c.freshness}</td></tr>)}
-    </tbody></table></div>
-  </Card>;
+  const m = useApi<MemoryReadout>('/api/academy/memory');
+  const brain = m.data?.internalIntelligence;
+  return <>
+    <Card title="Memory architecture" right={<span className="hint">{m.data?.authority}</span>} flush><ErrorLine e={m.error} />
+      <div className="tablewrap"><table><thead><tr><th>Category</th><th>Holds</th><th>Stores (records)</th><th>Freshness</th></tr></thead><tbody>
+        {(m.data?.categories ?? []).map((c) => <tr key={c.id}><td><b>{c.id}. {c.name}</b></td><td>{c.holds}</td><td className="mono">{Object.entries(c.records).map(([k, v]) => `${k}: ${v}`).join(' · ')}</td><td className="hint">{c.freshness}</td></tr>)}
+      </tbody></table></div>
+    </Card>
+    {brain && <>
+      <CapabilityTable readout={brain} title="Autopilot capability evidence" />
+      <CapabilityTable readout={brain.settings} title="Settings capability evidence" />
+    </>}
+  </>;
 }

@@ -1,12 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { config, REPO_ROOT } from '../src/config.js';
-import { run } from '../src/db/db.js';
+import { run, closeDb, openDb, all } from '../src/db/db.js';
+import { readiness } from '../src/ops/readiness.js';
+import { unreconciledPaperOrders } from '../src/exec/recovery.js';
 import { PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 import * as gates from '../src/qa/gates.js';
+import { getControl, updateControl } from '../src/core/mode.js';
 import { freshDb } from './helpers.js';
 
 const ref = { file: 'server/test/quality.test.ts', fullName: 'data quality gate (Part 32.2) fresh multi-source data is OK' };
@@ -188,9 +191,65 @@ describe('release gate manifest and certification gaps', () => {
       expect(listed.filter(test => normalize(test.file) === file && test.name.split(' > ').join(' ') === item.fullName), `${item.file}: ${item.fullName}`).toHaveLength(1);
     }
     expect(files).not.toContain('server/test/joe.test.ts');
-    expect(gates.TEST_GATE_REQUIREMENTS.G09).toHaveLength(2);
+    expect(gates.TEST_GATE_REQUIREMENTS.G09).toHaveLength(2 + gates.P0_REQUIRED_TESTS.length);
     expect(gates.TEST_GATE_REQUIREMENTS.G09).toContainEqual({ file: 'server/test/api.test.ts', fullName: 'HTTP API (auth, permissions, release gate) risk-increasing actions require step-up; risk-reducing ones do not' });
   });
+
+  it.each(['PENDING_RESERVE', 'SUBMITTED', 'PARTIALLY_FILLED', 'AMBIGUOUS'])(
+    'retains %s quarantine across database reopen and denies release evidence', status => {
+      const dir = mkdtempSync(join(tmpdir(), 'mia-recovery-gate-'));
+      const file = join(dir, 'mia.db');
+      try {
+        freshDb(true, file);
+        const now = Date.now();
+        const engine = { running: false, role: 'STOPPED' as const, startedAt: 0,
+          lastTickerAt: 0, lastScanAt: 0, lastMonitorAt: 0, monitorFailing: false };
+        const financialGate = () => gates.releaseGates(null).gates.find(g => g.id === 'G05');
+        expect(financialGate()?.status).toBe('PASS');
+        run("INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,status,purpose,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+          'recovery-fixture','recovery-fixture',PAPER_ACCOUNT,'binance-paper','crypto:binance:BTCUSDT','BUY','MARKET',1,status,'ENTRY',now,now);
+        const before = all('SELECT * FROM orders');
+        closeDb(); openDb(file);
+        expect(unreconciledPaperOrders()).toBe(1);
+        expect(readiness(engine)).toMatchObject({ ready: false, checks: expect.arrayContaining([
+          { name: 'paper recovery', status: 'fail', detail: 'paper orders require reconciliation' },
+        ]) });
+        expect(financialGate()).toMatchObject({ status: 'FAIL', evidence: expect.stringContaining('1 unresolved paper order') });
+        expect(gates.releaseGates(report(gates.TEST_GATE_REQUIREMENTS.G01)).liveAllowed).toBe(false);
+        expect(all('SELECT * FROM orders')).toEqual(before);
+      } finally { closeDb(); rmSync(dir, { recursive: true, force: true }); }
+    });
+  it('does not accept malformed approval or orphaned protective stop as resolved', () => {
+    const now = Date.now();
+    const insert = (id: string, status: string, purpose: string, side: string, filled: number) =>
+      run("INSERT INTO orders(id,client_order_id,account,venue,instrument,side,type,qty,status,purpose,filled_qty,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        id,id,PAPER_ACCOUNT,'binance-paper','crypto:binance:BTCUSDT',side,'MARKET',1,status,purpose,filled,now,now);
+    insert('valid-approval','PENDING_APPROVAL','ENTRY','BUY',0);
+    expect(unreconciledPaperOrders()).toBe(0);
+    insert('filled-approval','PENDING_APPROVAL','ENTRY','BUY',0.5);
+    insert('orphan-stop','ACTIVE','PROTECTIVE_STOP','SELL',0);
+    expect(unreconciledPaperOrders()).toBe(2);
+    expect(gates.releaseGates(null).gates.find(g => g.id === 'G05')?.status).toBe('FAIL');
+  });
+
+  it.each([undefined, 'false', 'true'])(
+    'never authorizes LIVE from an environment acknowledgement (%s) or claimed certificate', ack => {
+      updateControl('owner', { mode: 'PAPER', pausedNewOrders: true, emergency: true });
+      const control = getControl();
+      const snapshot = () => ['settings', 'audit_log', 'orders', 'fills', 'positions', 'ledger_entries']
+        .map(table => all('SELECT * FROM ' + table));
+      const before = snapshot();
+      vi.stubEnv('MIA_OWNER_LIVE_ACK', ack);
+      vi.stubEnv('MIA_RELEASE_CERT_HASH', 'f'.repeat(64));
+      try {
+        // Exercise the actual central authority, not a stub promotion script.
+        expect(() => updateControl('owner', { mode: 'BOUNDED_LIVE' }, () => ({ ok: true })))
+          .toThrow('BOUNDED_LIVE blocked');
+        expect(gates.releaseGates(report(gates.TEST_GATE_REQUIREMENTS.G01)).liveAllowed).toBe(false);
+        expect(getControl()).toEqual(control);
+        expect(snapshot()).toEqual(before);
+      } finally { vi.unstubAllEnvs(); }
+    });
 
   it('keeps browser, worker coverage and factuality gaps pending even with complete automated evidence', () => {
     const input = report(gates.TEST_GATE_REQUIREMENTS.G01);

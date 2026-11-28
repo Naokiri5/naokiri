@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ingestCandleBatch, validateCandleBatch, REBUILD_MIN_BARS } from '../src/market/fabric.js';
 import { market } from '../src/market/store.js';
-import { assessQuality, bookImpact } from '../src/market/quality.js';
+import { assessQuality, bookImpact, bookAge, bookFreshForExecution, walkBook } from '../src/market/quality.js';
 import { parseRss } from '../src/providers/googlenews.js';
 import { synthCandles } from './helpers.js';
 
@@ -200,5 +200,35 @@ describe('raw candle batch integrity and recovery', () => {
     expect(d.engines['1h'].last?.t).toBe(T - 3_600_000);
     expect(d.forming['1h']?.t).toBe(T);
     expect(d.integrityIssues?.['1h']).toEqual([]);
+  });
+});
+
+describe('canonical execution depth invariants', () => {
+  const book = () => ({ bids: [[99, 2], [98, 3]] as [number, number][],
+    asks: [[101, 2], [102, 3]] as [number, number][], ts: 1000 });
+  it('rejects malformed and locked depth on both execution sides', () => {
+    for (const side of ['buy', 'sell'] as const) {
+      for (const levels of [
+        { bids: [[101, 1]] }, { bids: [[99, 1], [99, 2]] },
+        { asks: [[101, 2], [102, -1]] }, { asks: [[101, 1], [100, 1]] },
+        { asks: [[101, Infinity]] }, { bids: [[99, 2], [98, NaN]] },
+      ]) {
+        const b = { ...book(), ...levels } as ReturnType<typeof book>;
+        expect(walkBook(b, side, 1)).toBeNull();
+      }
+    }
+  });
+  it('rejects invalid quantities, directions and clocks', () => {
+    for (const qty of [0, -1, NaN, Infinity]) expect(walkBook(book(), 'buy', qty)).toBeNull();
+    expect(walkBook(book(), 'unknown' as 'buy', 1)).toBeNull();
+    for (const at of [NaN, Infinity, -1, 999]) {
+      expect(bookAge(book(), at)).toBeNull();
+      expect(bookFreshForExecution(book(), at)).toBe(false);
+    }
+  });
+  it('retains realistic multi-level and partial fill estimates', () => {
+    expect(walkBook(book(), 'buy', 3)).toMatchObject({ filledQty: 3, filledFully: true, worst: 102 });
+    expect(walkBook(book(), 'buy', 3)!.avgPrice).toBeCloseTo(304 / 3);
+    expect(walkBook(book(), 'sell', 8)).toMatchObject({ filledQty: 5, filledFully: false, worst: 98 });
   });
 });

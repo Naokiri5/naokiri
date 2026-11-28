@@ -6,9 +6,9 @@
 export interface NavPage { to: string; icon: string; label: string; desc: string; keywords?: string[] }
 export interface NavGroup { id: string; label: string; icon: string; desc: string; pages: NavPage[]; /** extra path prefixes that belong to this group (detail routes) */ also?: string[] }
 
-export const NAV_GROUPS: NavGroup[] = [
+const LEGACY_NAV_GROUPS: NavGroup[] = [
   { id: 'home', label: 'Home', icon: '⌂', desc: 'Account, risk and market overview', pages: [
-    { to: '/app', icon: '◎', label: 'Overview', desc: 'Paper account, risk monitor, opportunities and activity', keywords: ['dashboard', 'home', 'summary', 'start'] },
+    { to: '/overview', icon: '◎', label: 'Overview', desc: 'Paper account, risk monitor, opportunities and activity', keywords: ['dashboard', 'home', 'summary', 'start'] },
   ] },
   { id: 'markets', label: 'Markets', icon: '▥', desc: 'Prices, charts, scanners and market news', also: ['/terminal/'], pages: [
     { to: '/terminal', icon: '▤', label: 'Market Terminal', desc: 'Candlestick chart, indicators and order book', keywords: ['chart', 'candles', 'price', 'order book', 'indicators'] },
@@ -46,14 +46,57 @@ export const NAV_GROUPS: NavGroup[] = [
     { to: '/settings', icon: '⚙', label: 'Settings', desc: 'Preferences', keywords: ['settings', 'preferences', 'theme'] },
   ] },
 ];
-/** Trader Joe is a universal launcher, plus a deep-linkable full page. */
-export const JOE_PAGE: NavPage = { to: '/joe', icon: '☺', label: 'Trader Joe', desc: 'Assistant: explains markets, decisions and risk (no trading authority)', keywords: ['assistant', 'chat', 'help', 'ask', 'joe'] };
+/**
+ * MIA 6.0 shell: four operator destinations, mapped onto existing functional pages.
+ * Trading authority is unchanged. Existing deep links remain searchable and routable.
+ * The full legacy catalogue remains data only (not a second sidebar or route registry).
+ */
+export const NAV_GROUPS: NavGroup[] = [
+  { id: 'autopilot', label: 'Autopilot', icon: '◉',
+    desc: 'Paper bot, market research, protection and operational status',
+    pages: [{ to: '/autopilot', icon: '◉', label: 'Autopilot', desc: 'Existing paper bot and Central Command cockpit' }],
+    also: ['/overview', '/bot', '/terminal', '/scanner', '/discover', '/bubbles', '/whales', '/holders', '/copy', '/news', '/intelligence'],
+  },
+  { id: 'smart-portfolio', label: 'Portfolio', icon: '◔',
+    desc: 'Paper holdings, performance and historical records',
+    pages: [{ to: '/smart-portfolio', icon: '◔', label: 'Portfolio', desc: 'Canonical paper ledger and position view' }],
+    also: ['/portfolio', '/history', '/journal', '/calendar', '/wallet'],
+  },
+  { id: 'trader-joe', label: 'Trader Joe', icon: '☺',
+    desc: 'Explanations, verifiable decisions and knowledge',
+    pages: [{ to: '/trader-joe', icon: '☺', label: 'Trader Joe', desc: 'Existing permission-limited assistant' }],
+    also: ['/joe', '/ditas', '/academy', '/decision'],
+  },
+  { id: 'settings', label: 'Settings', icon: '⚙',
+    desc: 'Risk policies, strategies, connections, security and release gates',
+    pages: [{ to: '/settings', icon: '⚙', label: 'Settings', desc: 'Account and operational preferences' }],
+    also: ['/risk', '/lab', '/connections', '/notifications', '/security', '/qa', '/qhef'],
+  },
+];
 
-export const ALL_PAGES: NavPage[] = [...NAV_GROUPS.flatMap((g) => g.pages), JOE_PAGE];
+/** Legacy Joe link remains indexed for bookmarks and command-palette search. */
+export const JOE_PAGE: NavPage = { to: '/joe', icon: '☺', label: 'Trader Joe (legacy link)',
+  desc: 'Permission-limited assistant; legacy route', keywords: ['assistant', 'chat', 'help', 'joe'] };
 
-const matches = (path: string, to: string) => (to === '/' ? path === '/' : path === to || path.startsWith(`${to}/`));
-/** The group that owns a path (detail routes such as /terminal/BTCUSDT or /decision/:id included); null for /joe and unknown paths. */
+export const ALL_PAGES: NavPage[] = [
+  ...NAV_GROUPS.flatMap((g) => g.pages),
+  ...LEGACY_NAV_GROUPS.flatMap((g) => g.pages).filter((p) => !NAV_GROUPS.some((g) => g.pages.some((n) => n.to === p.to))),
+  JOE_PAGE,
+];
+
+const matches = (path: string, to: string) => path === to || path.startsWith(`${to}/`);
+const canonicalPath = (path: string) =>
+  path === '/app' || path === '/app/' ? '/autopilot' :
+    path.startsWith('/app/') ? path.slice(4) : path;
+
+/** Map any known legacy deep link to its MIA 6.0 owning surface. */
 export function groupForPath(path: string): NavGroup | null {
-  return NAV_GROUPS.find((g) => g.pages.some((p) => matches(path, p.to)) || g.also?.some((a) => path.startsWith(a))) ?? null;
+  const normalized = canonicalPath(path);
+  return NAV_GROUPS.find((group) =>
+    group.pages.some((page) => matches(normalized, page.to)) ||
+    group.also?.some((prefix) => matches(normalized, prefix)),
+  ) ?? null;
 }
-export const pageForPath = (path: string) => ALL_PAGES.find((p) => matches(path, p.to)) ?? null;
+
+export const pageForPath = (path: string) =>
+  ALL_PAGES.find((page) => matches(canonicalPath(path), page.to)) ?? null;

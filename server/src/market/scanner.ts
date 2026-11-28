@@ -1,9 +1,13 @@
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { recordOpportunity } from '../ditas/memory.js';
 import { marketBreadth } from './bubbles.js';
 import { market } from './store.js';
+import { config } from '../config.js';
+import { durableSessionStatus } from '../ops/paperSpotEntry.js';
 import { assessQuality, bookImpact, bookFreshForExecution } from './quality.js';
 import { assessCexAsset, assessDexPair, type SafetyResult } from '../safety/safety.js';
 import { classifyRegime, type Regime } from '../regime/regime.js';
+import { assessRegimeStability, type RegimeStability } from '../regime/transition.js';
 import { STRATEGIES } from '../lab/strategies.js';
 import { runConsensus } from '../qci/coordinator.js';
 import { decide, type DecisionReport } from '../decision/engine.js';
@@ -16,7 +20,8 @@ import { strategyStats } from '../lab/lab.js';
 import { readIndicators } from '../workers/indicators.js';
 import { getControl } from '../core/mode.js';
 import { uid } from '../core/util.js';
-import { get } from '../db/db.js';
+import { ScanLedger, storedDecisionsEndKey } from './scanLedger.js';
+import { paperSettlementCursor } from '../exec/fillEvents.js';
 import { INTERVAL_MS } from './types.js';
 import { timed, record } from '../core/latency.js';
 import { bus } from '../core/bus.js';
@@ -25,13 +30,16 @@ import type { Candidate, WorkerContext } from '../workers/types.js';
 /** Part 1 universal scanner + Part 16.8 rejection intelligence. One scanner; QHEF only schedules it. */
 export interface BoardRow {
   instrumentId: string; symbol: string; base: string; price: number; changePct: number; quoteVolume: number;
-  regime: Regime; safety: SafetyResult['status']; quality: string; qualityIssues: string[]; spreadBps: number | null;
+  regime: Regime; regimeStability: RegimeStability; safety: SafetyResult['status']; quality: string; qualityIssues: string[]; spreadBps: number | null;
   rsi1h: number | null; trend1h: string; signals: string[]; lastDecision?: { id: string; decision: string; score: number; at: number };
   bullish: number; bearish: number;
 }
 export const board = new Map<string, BoardRow>();
 export const rejections: { at: number; symbol: string; stage: string; reason: string }[] = [];
-const processed = new Set<string>();
+const ledger = new ScanLedger();
+/** Signals denied only for capacity, held until a settlement frees capacity or their candle is superseded. */
+export const waitingCandidates = (nowTs = Date.now()) => ledger.waitingList(nowTs);
+export const _scanTest = { reset: () => ledger.clear() };
 const lastDecisions: DecisionReport[] = [];
 export const recentDecisions = () => lastDecisions.slice(-100).reverse();
 
@@ -68,19 +76,29 @@ export function buildContext(cand: Candidate): WorkerContext {
   };
 }
 
-export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
+export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: string) => void, continueScan?: () => boolean) {
   const t0 = performance.now();
   const ctl = getControl();
+  const duringOnlinePaper = !config.offline && (ctl.mode === 'PAPER' || ctl.mode === 'APPROVAL');
+  const session = duringOnlinePaper ? durableSessionStatus() : null;
+  const awaitingPaperSession = duringOnlinePaper && (session?.state !== 'RUNNING' || session.environment !== 'PAPER' || session.mind !== 'SPOT_PAPER');
   let candidates = 0;
+  const settlementCursor = paperSettlementCursor();
+  ledger.beginScan();
   for (const id of market.universe) {
+    // Scheduled scans give due protection timers a turn between instruments.
+    if (continueScan) {
+      await nextTurn();
+      if (!continueScan()) return { candidates, universe: market.universe.length, settlementCursor };
+    }
     const inst = market.instruments.get(id); const d = market.deep.get(id); const t = market.tickers.get(id);
     if (!inst || !d || !t) continue;
     const f1 = d.engines['1h'].last;
-    const q = assessQuality(id); const safety = assessCexAsset(id); const reg = classifyRegime(f1);
+    const q = assessQuality(id); const safety = assessCexAsset(id); const reg = classifyRegime(f1); const stab = assessRegimeStability(d.engines['1h'].history);
     const imp = bookImpact(d.book, 'buy', 1000);
     const ind = readIndicators({ '15m': d.engines['15m'].last, '1h': f1, '4h': d.engines['4h'].last });
     const row: BoardRow = {
-      instrumentId: id, symbol: inst.symbol, base: inst.base, price: t.last, changePct: t.changePct, quoteVolume: t.quoteVolume, regime: reg.regime,
+      instrumentId: id, symbol: inst.symbol, base: inst.base, price: t.last, changePct: t.changePct, quoteVolume: t.quoteVolume, regime: reg.regime, regimeStability: stab.stability,
       safety: safety.status, quality: q.status, qualityIssues: q.issues, spreadBps: imp?.spreadBps ?? null, rsi1h: f1?.rsi14 ?? null,
       trend1h: !f1 ? 'n/a' : f1.ema20 > f1.ema50 ? 'up' : 'down', signals: [], lastDecision: board.get(id)?.lastDecision,
       bullish: ind.filter((x) => (x.signal ?? 0) > 0.25).length, bearish: ind.filter((x) => (x.signal ?? 0) < -0.25).length,
@@ -90,14 +108,20 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
     for (const s of STRATEGIES) {
       if (ctl.disabledStrategies.includes(s.id)) continue;
       const key = `${id}:${s.id}:${f1.t}`;
-      if (processed.has(key)) { continue; }
-      // survive restarts: a decision for this instrument/strategy after this candle closed already exists
-      if (get('SELECT 1 FROM decisions WHERE instrument=? AND strategy=? AND created_at>=? LIMIT 1', id, s.id, f1.t + INTERVAL_MS[s.interval])) continue;
+      const verdict = ledger.verdict(key, Date.now(), settlementCursor);
+      if (verdict !== 'EVALUATE') continue;
+      // survive restarts: a terminal decision for this instrument/strategy after this candle closed already exists
+      // (a capacity-only denial is not terminal; it is re-evaluated once and then waits for a settlement)
+      if (storedDecisionsEndKey(id, s.id, f1.t + INTERVAL_MS[s.interval])) { ledger.markProcessed(key); continue; }
       if (q.status === 'FAIL') { recordOpportunity({ kind: 'REJECTED', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Data quality: ${q.issues.join('; ')}` }); rejectLog(inst.symbol, 'data-quality', q.issues.join('; ')); continue; }
       if (!s.suitableRegimes.includes(reg.regime)) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Regime ${reg.regime} unsuitable for strategy ${s.version}` }); continue; }
+      // Hysteresis: a suitable regime must be confirmed, not just read on one candle or flipping (regime/transition.ts).
+      if (stab.stability !== 'STABLE') { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Regime ${stab.stability}: ${stab.reason}` }); continue; }
       const sig = s.generate(f1);
       if (!sig) { recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Strategy ${s.version}: no entry condition` }); continue; }
       row.signals.push(s.id);
+      // Board signals remain visible while awaiting authorization. Do not consume their candle as a decision.
+      if (awaitingPaperSession) continue;
       if (!safety.eligibleForAutomation) { recordOpportunity({ kind: 'REJECTED', instrumentId: id, strategyId: s.id, dedupeKey: `scan:${key}`, reason: `Safety: ${safety.reasons.join('; ')}` }); rejectLog(inst.symbol, 'safety', `${s.id}: ${safety.status} — ${safety.reasons.join('; ')}`); continue; }
       candidates++;
       try {
@@ -107,25 +131,27 @@ export async function scanOnce(onDecision?: (r: DecisionReport) => void) {
       const proposalMemory = recordOpportunity({ kind: 'PROPOSAL', instrumentId: id, strategyId: s.id, dedupeKey: `proposal:${cand.id}`, reason: sig.reasons.join('; '), candidate: cand, ctx });
       ctx.memorySnapshotId = proposalMemory.snapshotId ?? undefined;
       const qci = await runConsensus(ctx);
+      if (continueScan && !continueScan()) return { candidates, universe: market.universe.length, settlementCursor };
       const correlatedOpen = openPositions().filter((p) => { const c = correlation(p.instrument, id); return c == null || c >= (currentPolicy()?.policy ?? DEFAULT_POLICY).correlationThreshold; }).length;
       const rep = decide(cand, ctx, qci, ctx.strategyStats, correlatedOpen);
       record('pipeline.candidate_to_decision', Date.now() - cand.createdAt);
       row.lastDecision = { id: rep.id, decision: rep.decision, score: rep.opportunity.score, at: Date.now() };
       if (rep.decision === 'REJECTED' || rep.decision === 'INSUFFICIENT_DATA') rejectLog(inst.symbol, 'decision', `${s.id}: ${rep.decision} — ${[...qci.reason_codes, ...(rep.risk?.reasonCodes ?? [])].slice(0, 3).join('; ')}`);
       lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
-      processed.add(key);
-      onDecision?.(rep);
+      // A capacity-only denial waits for a settlement; any other outcome ends this key for the candle.
+      ledger.record(key, { instrumentId: id, strategyId: s.id }, rep.risk, settlementCursor, f1.t + 2 * INTERVAL_MS['1h'], Date.now());
+      onDecision?.(rep, ctx.memorySnapshotId);
       } catch (e: any) {
         // One failing candidate must not abort the scan for the rest of the universe; it is retried next cycle.
-        processed.delete(key); rejectLog(inst.symbol, 'error', `${s.id}: ${String(e?.message ?? e).slice(0, 200)}`);
+        ledger.forget(key); rejectLog(inst.symbol, 'error', `${s.id}: ${String(e?.message ?? e).slice(0, 200)}`);
       }
     }
   }
-  if (processed.size > 50_000) processed.clear();
+  ledger.prune(Date.now());
   record('scan.cycle', performance.now() - t0);
   market.lastScanAt = Date.now();
   bus.publish('scan', { at: market.lastScanAt, universe: market.universe.length, candidates });
-  return { candidates, universe: market.universe.length };
+  return { candidates, universe: market.universe.length, settlementCursor };
 }
 
 /** Manual "analyze now" for any instrument & strategy (Trader Joe / Scanner button). Runs the full pipeline even with no live signal → evaluation only. */
@@ -135,19 +161,19 @@ export async function analyzeInstrument(id: string, strategyId?: string): Promis
   if (!held || !held.engines['1h'].last || !bookFreshForExecution(held.book)) {
     const { refreshDeep } = await import('./fabric.js'); await timed('analyze.ondemand', () => refreshDeep([id]));
   }
-  const d = market.deep.get(id)!; const f1 = d.engines['1h'].last; const reg = classifyRegime(f1);
+  const d = market.deep.get(id)!; const f1 = d.engines['1h'].last; const reg = classifyRegime(f1); const stab = assessRegimeStability(d.engines['1h'].history);
   const ind = readIndicators({ '15m': d.engines['15m'].last, '1h': f1, '4h': d.engines['4h'].last });
   const strategies = strategyId ? STRATEGIES.filter((s) => s.id === strategyId) : STRATEGIES;
   for (const s of strategies) {
-    const sig = f1 && s.suitableRegimes.includes(reg.regime) ? s.generate(f1) : null;
+    const sig = f1 && s.suitableRegimes.includes(reg.regime) && stab.stability === 'STABLE' ? s.generate(f1) : null;
     if (!sig) continue;
     const cand: Candidate = { id: uid('cand'), eventId: `${inst.symbol}:manual:${Date.now()}`, traceId: uid('trace'), instrumentId: id, symbol: inst.symbol, base: inst.base, market: 'crypto', venue: 'binance', strategyId: s.id, strategyVersion: s.version, interval: s.interval, signal: sig, regime: reg.regime, createdAt: Date.now() };
     const ctx = buildContext(cand); const proposalMemory = recordOpportunity({ kind: 'PROPOSAL', instrumentId: id, strategyId: s.id, dedupeKey: `proposal:${cand.id}`, reason: sig.reasons.join('; '), candidate: cand, ctx }); ctx.memorySnapshotId = proposalMemory.snapshotId ?? undefined; const qci = await runConsensus(ctx);
-    const rep = decide(cand, ctx, qci, ctx.strategyStats, 0);
+    const rep = decide(cand, ctx, qci, ctx.strategyStats, 0, 'MANUAL');
     lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
     return rep;
   }
   recordOpportunity({ kind: 'NO_SIGNAL', instrumentId: id, strategyId, dedupeKey: `manual:${id}:${uid('analysis')}`, reason: `No strategy entry condition (regime ${reg.regime})` });
-  return { instrumentId: id, status: 'NO_SIGNAL', reason: `No strategy entry condition is met (regime ${reg.regime}). Nothing to trade — monitoring.`, indicators: ind, regime: reg.regime, safety: assessCexAsset(id), quality: assessQuality(id) };
+  return { instrumentId: id, status: 'NO_SIGNAL', reason: `No strategy entry condition is met (regime ${reg.regime}, ${stab.stability.toLowerCase()}: ${stab.reason}). Nothing to trade - monitoring.`, indicators: ind, regime: reg.regime, safety: assessCexAsset(id), quality: assessQuality(id) };
 }
 export function dexBoard() { return market.dex.map((p) => ({ ...p, safety: assessDexPair(p) })).sort((a, b) => b.volume24h - a.volume24h); }

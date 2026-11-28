@@ -113,20 +113,106 @@ const MIGRATIONS: string[] = [
   CREATE TABLE runtime_leases (name TEXT PRIMARY KEY, holder TEXT NOT NULL, acquired_at INTEGER NOT NULL,
     renewed_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);
   `,
+  /* 6 — BrainOS 6.1: durable session checkpoints and advisory research; no second OMS, risk engine or ledger. */ `
+  CREATE TABLE brainos_sessions (
+    session_id TEXT PRIMARY KEY, version INTEGER NOT NULL, state TEXT NOT NULL,
+    environment TEXT NOT NULL, mind TEXT NOT NULL, lease_holder TEXT,
+    lease_acquired_at INTEGER, fence_epoch INTEGER NOT NULL,
+    suspend_reason TEXT NOT NULL, started_at INTEGER, closed_at INTEGER, updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE brainos_session_events (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES brainos_sessions(session_id),
+    version INTEGER NOT NULL, from_state TEXT NOT NULL, to_state TEXT NOT NULL,
+    kind TEXT NOT NULL, fence_epoch INTEGER NOT NULL, ts INTEGER NOT NULL,
+    UNIQUE(session_id,version)
+  );
+  CREATE INDEX brainos_session_events_lookup ON brainos_session_events(session_id,seq);
+  CREATE TABLE flin_launch_candidates (
+    candidate_id TEXT PRIMARY KEY, mint_address TEXT NOT NULL, pair_address TEXT NOT NULL,
+    first_seen_at INTEGER NOT NULL, last_seen_at INTEGER NOT NULL, source_as_of INTEGER NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('QUARANTINED','REJECTED')),
+    reason TEXT NOT NULL, evidence_json TEXT NOT NULL
+  );
+  CREATE INDEX flin_launch_recent ON flin_launch_candidates(last_seen_at);
+  CREATE TABLE deep_postclose_decisions (
+    decision_id TEXT PRIMARY KEY, bundle_id TEXT NOT NULL, thesis_lineage_id TEXT NOT NULL,
+    close_reason TEXT NOT NULL, decision TEXT NOT NULL, next_state TEXT NOT NULL,
+    evaluated_at INTEGER NOT NULL, ledger_reconciled INTEGER NOT NULL CHECK(ledger_reconciled IN (0,1)),
+    reason TEXT NOT NULL, UNIQUE(bundle_id,decision_id)
+  );
+  `,
+  /* 7 — BrainOS trading mandate: the owner-authorized market scope, capital ceiling, policy and strategy versions
+     and expiry of a session. Existing rows keep NULL mandates and therefore cannot authorize new entries. */ `
+  ALTER TABLE brainos_sessions ADD COLUMN market_scope TEXT;
+  ALTER TABLE brainos_sessions ADD COLUMN capital_ceiling REAL;
+  ALTER TABLE brainos_sessions ADD COLUMN risk_policy_version INTEGER;
+  ALTER TABLE brainos_sessions ADD COLUMN authorized_by TEXT;
+  ALTER TABLE brainos_sessions ADD COLUMN authorized_at INTEGER;
+  ALTER TABLE brainos_sessions ADD COLUMN expires_at INTEGER;
+  ALTER TABLE brainos_sessions ADD COLUMN strategy_config_version TEXT;
+  ALTER TABLE brainos_session_events ADD COLUMN mandate_json TEXT;
+  `,
+  /* 8 — Reconciliation indexes. portfolio/calendar.reconcile() runs inside the OMS entry transaction; without these its
+     per-position join rescanned every ledger entry of the account (quadratic in closed trades). Index-only: no data change. */ `
+  CREATE INDEX ledger_entries_ref ON ledger_entries(ref, account);
+  CREATE INDEX orders_position ON orders(position_id, account);
+  `,
+  /* 9 — Evidence retention: consensus records are compacted by age (qci/retention.ts), so they need a time index. */ `
+  CREATE INDEX consensus_records_created ON consensus_records(created_at);
+  CREATE INDEX orders_decision ON orders(decision_id);
+  `,
+  /* 10 — Closed-trade learning linker (ditas/tradeOutcomes.ts): one immutable record per settled paper position,
+     linking it to its decision, frozen DITAS snapshot, orders, fills and verified ledger settlement. */ `
+  CREATE TABLE ditas_trade_outcomes (position_id TEXT PRIMARY KEY REFERENCES positions(id), decision_id TEXT,
+    strategy TEXT NOT NULL, strategy_version TEXT, instrument TEXT NOT NULL, decision_event_id TEXT REFERENCES ditas_events(id),
+    opened_at INTEGER NOT NULL, closed_at INTEGER NOT NULL, linked_at INTEGER NOT NULL, settlement TEXT NOT NULL,
+    net_pnl REAL NOT NULL, net_r REAL, payload TEXT NOT NULL, hash TEXT NOT NULL);
+  CREATE INDEX ditas_trade_outcomes_strategy ON ditas_trade_outcomes(strategy, closed_at);
+  CREATE TRIGGER ditas_trade_outcomes_no_update BEFORE UPDATE ON ditas_trade_outcomes BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  CREATE TRIGGER ditas_trade_outcomes_no_delete BEFORE DELETE ON ditas_trade_outcomes BEGIN SELECT RAISE(ABORT, 'DITAS records are immutable'); END;
+  `,
+  /* 11 - Evidence integrity runs on every risk-gate evaluation (ditas/evidenceIntegrity.ts): closed positions waiting
+     for a link and settlement mismatches must be found without scanning the whole history. */ `
+  CREATE INDEX positions_account_status_closed ON positions(account, status, closed_at);
+  CREATE INDEX ditas_trade_outcomes_settlement ON ditas_trade_outcomes(settlement, closed_at);
+  `,
+  /* 12 - Lease fencing epoch (ops/lease.ts). The counter lives in its own table because releaseLease deletes the lease
+     row; existing leases keep epoch 0 and the next acquisition by anyone moves the counter to 1. */ `
+  CREATE TABLE runtime_lease_epochs (name TEXT PRIMARY KEY, epoch INTEGER NOT NULL);
+  ALTER TABLE runtime_leases ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;
+  INSERT INTO runtime_lease_epochs(name, epoch) SELECT name, epoch FROM runtime_leases;
+  `,
+  /* 13 - Exact cash authority (portfolio/money.ts): integer base units (1e-8 USDT) beside the legacy REAL amount.
+     The backfill uses SQLite ROUND (half away from zero), so an exact decimal tie in an old row may differ from the
+     half-even rule used for new writes by at most 1 unit. Reconcile accepts a REAL/units gap of up to 1 unit. */ `
+  ALTER TABLE ledger_entries ADD COLUMN amount_units INTEGER;
+  UPDATE ledger_entries SET amount_units = CAST(ROUND(amount * 100000000) AS INTEGER);
+  `,
+  /* 14 - Bind new owner authorizations to the engine lease generation. Existing sessions have no proof of it. */ `
+  ALTER TABLE brainos_sessions ADD COLUMN lease_epoch INTEGER;
+  `,
+  /* 15 - Bound PAPER fill cursor queries to fill events in the existing audit log. */ `
+  CREATE INDEX audit_log_paper_settlement_cursor ON audit_log(id) WHERE action='fill.recorded.v1' AND
+    CASE WHEN json_valid(detail) THEN json_extract(detail,'$.payload.side')='SELL'
+      AND json_type(detail,'$.payload.closed')='true' ELSE 0 END;
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */
 export function migrate(db: DatabaseSync, target = MIGRATIONS.length) {
-  db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
-  const row = db.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number | null };
-  const current = row?.v ?? 0;
-  for (let i = current; i < Math.min(target, MIGRATIONS.length); i++) {
-    db.exec('BEGIN');
-    try {
+  // Read the schema version under the write lock so simultaneous starters cannot both apply the same migration.
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
+    const row = db.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number | null };
+    for (let i = row.v ?? 0; i < Math.min(target, MIGRATIONS.length); i++) {
       db.exec(MIGRATIONS[i]);
       db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)').run(i + 1, Date.now());
-      db.exec('COMMIT');
-    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
 }
 export const SCHEMA_VERSION = MIGRATIONS.length;

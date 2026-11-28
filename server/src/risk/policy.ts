@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { all, get, run, J, P } from '../db/db.js';
+import { all, get, run, J, P, tx } from '../db/db.js';
 import { audit } from '../core/audit.js';
 
 /**
@@ -15,8 +15,17 @@ export const RiskPolicy = z.object({
   drawdownHaltPct: z.number().min(2).max(40),
   maxConsecutiveLosses: z.number().int().min(1).max(10),
   cooldownMinutesAfterLossStreak: z.number().int().min(0).max(10_080),
+  postExitCooldownMs: z.number().int().min(0).max(604_800_000).optional(),
+  stopLossCooldownMs: z.number().int().min(0).max(604_800_000).optional(),
+  entryFrequencyWindowMs: z.number().int().min(1000).max(86_400_000).optional(),
+  maxEntriesPerWindow: z.number().int().min(1).max(1000).optional(),
+  adaptiveDrawdownSizing: z.boolean().optional(),
   maxConcurrentPositions: z.number().int().min(1).max(20),
   maxPositionNotionalPct: z.number().min(1).max(50),
+  // Optional logical cash reserves. Existing accepted policies keep their prior behavior.
+  // Both are disjoint portions of the same PAPER cash balance, not separate wallets.
+  minUnallocatedReservePct: z.number().min(0).max(100).optional(),
+  minSettlementReservePct: z.number().min(0).max(100).optional(),
   maxSpreadBps: z.number().min(1).max(50),
   maxSlippageBps: z.number().min(1).max(100),
   maxCostR: z.number().min(0.01).max(0.5),
@@ -49,10 +58,14 @@ export function acceptPolicy(actor: string, input: unknown): PolicyVersion {
   const policy = RiskPolicy.parse(input);
   if (policy.drawdownHaltPct < policy.drawdownWarnPct) throw new Error('drawdownHaltPct must be ≥ drawdownWarnPct');
   if (policy.weeklyLossPct < policy.dailyLossPct) throw new Error('weeklyLossPct must be ≥ dailyLossPct');
+  if ((policy.minUnallocatedReservePct ?? 0) + (policy.minSettlementReservePct ?? 0) > 100) throw new Error('combined cash reserve percentages must not exceed 100');
   if (policy.maxOpenRiskPct < policy.riskPerTradePct) throw new Error('maxOpenRiskPct must be ≥ riskPerTradePct');
-  const cur = currentPolicy(); const version = (cur?.version ?? 0) + 1;
-  run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (?,?,?,?)', version, J(policy), Date.now(), actor);
-  audit(actor, 'risk.policy.accept', { version, policy, previous: cur?.version ?? null });
-  return currentPolicy()!;
+  if ((policy.entryFrequencyWindowMs === undefined) !== (policy.maxEntriesPerWindow === undefined)) throw new Error('entry frequency window and cap must be configured together');
+  return tx(() => {
+    const cur = currentPolicy(); const version = (cur?.version ?? 0) + 1;
+    run('INSERT INTO risk_policy_versions(version, policy, created_at, accepted_by) VALUES (?,?,?,?)', version, J(policy), Date.now(), actor);
+    audit(actor, 'risk.policy.accept', { version, policy, previous: cur?.version ?? null });
+    return currentPolicy()!;
+  });
 }
 export const policyHistory = () => all<any>('SELECT version, created_at, accepted_by, policy FROM risk_policy_versions ORDER BY version DESC').map((r) => ({ ...r, policy: P(r.policy) }));

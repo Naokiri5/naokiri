@@ -2,13 +2,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { freshDb, seedInstrument, setBook } from './helpers.js';
+import { freshDb, promoteStrategiesWithEvidence, seedInstrument, setBook } from './helpers.js';
 import { closeDb, openDb, get, run } from '../src/db/db.js';
 import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, PAPER_ACCOUNT, openPositions } from '../src/portfolio/ledger.js';
-import { submitEntry, monitorPositions, executeExit } from '../src/exec/oms.js';
+import { submitEntry, monitorPositions, executeExit, closeAllPositions } from '../src/exec/oms.js';
+import { setCrashHook } from '../src/exec/crashpoint.js';
 import { evaluateRisk } from '../src/risk/gate.js';
 import { seedStrategies } from '../src/lab/lab.js';
 import { listIncidents, acknowledgeIncident, reportUnprotected, REALERT_MS } from '../src/exec/incidents.js';
@@ -55,6 +56,22 @@ describe('protection incidents', () => {
     const pos = openPositions()[0]; stale(id);
     expect(executeExit(pos.id, pos.qty, 'MANUAL_CLOSE')).toBeNull(); monitorPositions();
     expect(listIncidents()).toHaveLength(1); expect(listIncidents()[0].occurrences).toBe(2);
+  });
+
+  it('an exit that throws rolls back, opens an incident, and close-all reports the failure instead of aborting', () => {
+    const pos = openPositions()[0];
+    setCrashHook((point) => { if (point === 'exit.precommit') throw new Error('disk I/O error'); });
+    try {
+      const r = closeAllPositions('owner', 'CLOSE ALL');
+      expect(r.state).toBe('FAILED');
+      expect(r.results).toEqual([{ positionId: pos.id, result: null, error: 'disk I/O error' }]);
+    } finally { setCrashHook(null); }
+    expect(openPositions()).toHaveLength(1);
+    expect(listIncidents()[0]).toMatchObject({ status: 'OPEN' });
+    expect(listIncidents()[0].reason).toMatch(/exit failed: disk I\/O error/);
+    expect(() => { setCrashHook((point) => { if (point === 'exit.precommit') throw new Error('boom'); }); executeExit(pos.id, pos.qty, 'MANUAL_CLOSE'); }).toThrow('boom');
+    setCrashHook(null);
+    expect(closeAllPositions('owner', 'CLOSE ALL').state).toBe('CONFIRMED');
   });
 
   it('delayed (future-dated) quote is treated as unusable', () => {
@@ -104,7 +121,7 @@ describe('protection incidents survive a restart', () => {
     const folder = mkdtempSync(join(tmpdir(), 'mia-incidents-')); folders.push(folder); const dbPath = join(folder, 'mia.sqlite');
     closeDb(); openDb(dbPath); market.reset();
     const { inst, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any;
-    seedStrategies(); run("UPDATE strategies SET status='PAPER'"); acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
+    seedStrategies(); promoteStrategiesWithEvidence(); acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
     expect(submitEntry(report(inst.id, last), 'bot').ok).toBe(true);
     stale(inst.id); monitorPositions();
     closeDb(); openDb(dbPath); // restart

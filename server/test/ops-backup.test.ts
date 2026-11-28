@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, readdirSync, renameSync, rmSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,7 +8,7 @@ import { freshDb } from './helpers.js';
 import { audit } from '../src/core/audit.js';
 import * as auditModule from '../src/core/audit.js';
 import { config } from '../src/config.js';
-import { run } from '../src/db/db.js';
+import { getDb, run } from '../src/db/db.js';
 import { backupKey, createBackup, decrypt, encrypt, listBackups, maybeScheduledBackup, pruneBackups, verifyBackup } from '../src/ops/backup.js';
 
 const KEY = Buffer.alloc(32, 7);
@@ -23,7 +23,7 @@ describe('database backups', () => {
     expect(m).toMatchObject({ file: 'mia-20270115T080000Z.db', encrypted: false, format: 'sqlite' });
     const v = verifyBackup(join(dir, m.file), null);
     expect(v.ok).toBe(true);
-    expect(v.checks.map((c) => c.name)).toEqual(['manifest', 'checksum', 'integrity', 'schema', 'audit chain', 'decision memory chain']);
+    expect(v.checks.map((c) => c.name)).toEqual(['manifest', 'checksum', 'integrity', 'foreign keys', 'schema', 'audit chain', 'decision memory chain']);
     // No temporary or partial files left behind.
     expect(readdirSync(dir).sort()).toEqual([m.file, `${m.file}.json`]);
   });
@@ -95,6 +95,44 @@ describe('database backups', () => {
     expect(() => maybeScheduledBackup(t + 3_600_000)).toThrow(/restore check failed.*audit chain/i);
     expect(listBackups(dir).map(({ file }) => file)).toEqual([earlier.file]);
     expect(verifyBackup(join(dir, earlier.file), KEY).ok).toBe(true);
+  });
+  it('refuses a new backup with an orphan session event and preserves the prior restore point', () => {
+    const t = 1_800_000_000_000;
+    const earlier = createBackup({ dir, key: KEY, nowTs: t });
+    vi.stubEnv('MIA_BACKUP_DIR', dir);
+    vi.stubEnv('MIA_BACKUP_KEY', KEY.toString('hex'));
+    vi.stubEnv('MIA_BACKUP_INTERVAL_H', '1');
+    vi.stubEnv('MIA_BACKUP_KEEP', '1');
+
+    const db = getDb();
+    db.exec('PRAGMA foreign_keys=OFF');
+    try {
+      run(`INSERT INTO brainos_session_events(session_id,version,from_state,to_state,kind,fence_epoch,ts)
+        VALUES (?,1,'CLOSED','RUNNING','TEST',1,?)`, 'fixture-orphan', t);
+    } finally { db.exec('PRAGMA foreign_keys=ON'); }
+    expect(db.prepare('PRAGMA integrity_check').get()).toMatchObject({ integrity_check: 'ok' });
+
+    expect(() => maybeScheduledBackup(t + 3_600_000)).toThrow(/restore check failed.*foreign keys/i);
+    expect(listBackups(dir)).toEqual([earlier]);
+    expect(verifyBackup(join(dir, earlier.file), KEY).ok).toBe(true);
+    expect(readdirSync(dir).sort()).toEqual([earlier.file, `${earlier.file}.json`]);
+  });
+  it.skipIf(process.platform === 'win32')('refuses linked snapshots and manifests during discovery and verification', () => {
+    const m = createBackup({ dir, key: KEY, nowTs: 1_800_000_000_000 });
+    const file = join(dir, m.file);
+    const real = join(dir, 'real-backup');
+    renameSync(file, real);
+    symlinkSync(real, file);
+    expect(listBackups(dir)).toEqual([]);
+    expect(verifyBackup(file, KEY).checks.at(-1)).toMatchObject({ name: 'checksum', ok: false });
+    rmSync(file);
+    renameSync(real, file);
+
+    const manifest = `${file}.json`;
+    renameSync(manifest, real);
+    symlinkSync(real, manifest);
+    expect(listBackups(dir)).toEqual([]);
+    expect(verifyBackup(file, KEY).checks.at(-1)).toMatchObject({ name: 'manifest', ok: false });
   });
   it('keeps a candidate out of retention until restore verification succeeds', () => {
     const first = createBackup({ dir, key: KEY, nowTs: 1_800_000_000_000 });

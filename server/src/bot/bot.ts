@@ -1,6 +1,11 @@
 import { ensureRules, refreshTickers, refreshDeep, refreshBackground, refreshBooks } from '../market/fabric.js';
 import { scanOnce } from '../market/scanner.js';
+import { evaluateShadowChoices, freezeChoiceEvidence, MAX_SHADOW_CANDIDATES } from '../choice/arbitration.js';
+import { runDualResearchPass } from '../choice/dualRuntime.js';
+import { recordShadowChoice } from '../ditas/memory.js';
+import { uid } from '../core/util.js';
 import { monitorPositions, expireApprovals, submitEntry, queueForApproval } from '../exec/oms.js';
+import { paperSettlementCursor } from '../exec/fillEvents.js';
 import { refreshNews } from '../news/news.js';
 import { scanPrints } from '../whales/prints.js';
 import { checkStrategyHealth } from '../lab/lab.js';
@@ -9,15 +14,31 @@ import { accountState, openPositions } from '../portfolio/ledger.js';
 import { currentPolicy } from '../risk/policy.js';
 import { notify } from '../notify/notify.js';
 import { journal } from '../journal/journal.js';
+import { refreshBrainSnapshot } from '../knowledge/brain.js';
+import { recordAutonomicObservation, recordLearningEvidence, resetInternalProcesses } from '../knowledge/cognitive/internalProcesses.js';
+import { recentInternalLearningEvidence, registerDirectionForecast } from '../ditas/service.js';
+import { verifyDueForecasts } from '../ditas/forecastVerifier.js';
+import { linkClosedTrades } from '../ditas/tradeOutcomes.js';
+import { refreshOutcomeHashCheck } from '../ditas/evidenceIntegrity.js';
+import { refreshSupportDiscounts } from '../workers/reliability.js';
+import { refreshSettingsCapabilitySnapshot } from '../knowledge/settingsCapabilities.js';
+import { CAPABILITY_REFRESH_INTERVAL_MS } from '../knowledge/capabilitySnapshot.js';
 import { bus } from '../core/bus.js';
 import { config } from '../config.js';
 import type { DecisionReport } from '../decision/engine.js';
-import { tryAcquireLease, releaseLease } from '../ops/lease.js';
-import { checkScanStall } from '../ops/readiness.js';
+import { acquireOrRenewLease, ownsLease, releaseLease, LeaseLostError, type LeaseFence } from '../ops/lease.js';
+import { checkScanStall, protectionIntervalMs, staleAfter } from '../ops/readiness.js';
 import { takeoverIntegrity } from '../ops/integrity.js';
+import { refreshRuntimeIntegrity, runtimeIntegrityDue, runtimeIntegrityStatus, storeIntegrityResult } from '../ops/runtimeIntegrity.js';
+import { isShuttingDown } from '../ops/shutdown.js';
+import { drainExpiredMandate, durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
+import { storageBlocksEntries, storageStatus } from '../ops/storage.js';
+import { compactConsensusEvidence } from '../qci/retention.js';
+import { record } from '../core/latency.js';
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 
 /** Part 26 funded (paper) bot runtime + Part 33 hot/background lanes. */
 export const botStatus = {
@@ -25,99 +46,338 @@ export const botStatus = {
   lastError: null as string | null, entriesToday: 0, decisionsTotal: 0,
   /** Last position-monitor pass that completed without an error; monitorFailing is true while the latest pass threw. */
   lastMonitorAt: 0, monitorFailing: false,
+  /** Early opportunity scans started because a position settled (continuous multi-trade). */
+  settlementRescans: 0, lastSettlementRescanAt: 0,
   /** Single-runner lock: only the LEADER (holder of the 'engine' lease) runs the lanes; a STANDBY copy keeps retrying. */
   role: 'STOPPED' as 'STOPPED' | 'LEADER' | 'STANDBY', instanceId: `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`,
 };
 export const ENGINE_LEASE = 'engine';
 /** Lease lifetime: three ticker intervals (minimum 45 s), so one slow tick never hands the engine to another copy. */
 export const engineLeaseTtlMs = () => (config.offline && config.engineLeaseTtlMs) || Math.max(45_000, config.tickerIntervalMs * 3);
-/** Acquire or renew the engine lease before any lane runs; a lane that does not hold it does nothing (fail closed). */
-function holdEngine(): boolean {
-  if (takeoverRefused) return false; // integrity checks failed: no lease until the owner restarts the engine
-  let ok = false;
-  try { ok = tryAcquireLease(ENGINE_LEASE, botStatus.instanceId, engineLeaseTtlMs()); } catch (e: any) { botStatus.lastError = `lease: ${e.message}`; }
-  if (ok && botStatus.running && botStatus.role !== 'LEADER' && !takeoverAllowed()) return false;
-  const role = ok ? 'LEADER' : 'STANDBY';
-  if (botStatus.running && role !== botStatus.role) {
-    journal('SYSTEM', role === 'LEADER' ? `Engine lease acquired by ${botStatus.instanceId}` : `Engine lease held by another instance; ${botStatus.instanceId} is on standby`);
-    if (botStatus.role === 'LEADER') notify('CRITICAL', 'Engine lease lost', `${botStatus.instanceId} no longer holds the engine lease and stopped scanning/managing positions.`, 'engine-lease');
-  }
-  if (botStatus.running) botStatus.role = role;
-  return ok;
-}
+const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
+let activeLease: LeaseFence | null = null;
 let takeoverRefused = false;
-/**
- * Integrity gate on every takeover (STOPPED or STANDBY → LEADER): a corrupt or inconsistent database never gets a
- * scheduler. On failure the lease is released, the engine stops and the reason is recorded; nothing is repaired.
- */
-function takeoverAllowed(): boolean {
-  const r = takeoverIntegrity(); if (r.ok) return true;
+let lastScannedSettlementCursor = 0;
+
+function setEngineRole(role: 'LEADER' | 'STANDBY') {
+  if (isShuttingDown() || !botStatus.running || botStatus.role === role) return;
+  const previous = botStatus.role;
+  resetInternalProcesses();
+  botStatus.role = role;
+  try {
+    journal('SYSTEM', role === 'LEADER' ? `Engine lease acquired by ${botStatus.instanceId}` : `Engine on standby: ${botStatus.instanceId}`);
+    if (previous === 'LEADER') notify('CRITICAL', 'Engine lease lost', `${botStatus.instanceId} lost scheduling authority.`, 'engine-lease');
+  } catch (error) { botStatus.lastError = `lease reporting: ${errorText(error)}`; }
+}
+
+function holdEngine(): LeaseFence | null {
+  if (isShuttingDown() || !botStatus.running || takeoverRefused) return null;
+  try {
+    const lease = acquireOrRenewLease(ENGINE_LEASE, botStatus.instanceId, engineLeaseTtlMs());
+    if (lease) {
+      // Reacquiring an expired lease starts a new generation even when this process was the previous holder.
+      if (activeLease?.acquired_at !== lease.acquired_at || activeLease?.epoch !== lease.epoch) {
+        if (!takeoverAllowed(lease)) return null;
+        lastScannedSettlementCursor = 0;
+      }
+      activeLease = { name: lease.name, holder: lease.holder, acquired_at: lease.acquired_at, epoch: lease.epoch };
+      setEngineRole('LEADER');
+      return activeLease;
+    }
+  } catch (error) { botStatus.lastError = `lease: ${errorText(error)}`; }
+  activeLease = null;
+  setEngineRole('STANDBY');
+  return null;
+}
+
+/** Verify persisted paper state and expire orphaned approvals before the scheduler starts a new generation. */
+function takeoverAllowed(lease: LeaseFence): boolean {
+  let failed: ReturnType<typeof takeoverIntegrity>['checks'];
+  try {
+    const result = takeoverIntegrity();
+    // Recording the result is bookkeeping: a failed write must not refuse takeover (that would leave open positions
+    // unmonitored). The background lane stores a fresh result on its first pass, since a missing record is due.
+    try { storeIntegrityResult(result, 'takeover', Date.now(), lease); } catch (error) {
+      if (error instanceof LeaseLostError) throw error;
+      botStatus.lastError = `runtime-integrity store: ${errorText(error).slice(0, 200)}`;
+    }
+    if (result.ok) {
+      expireApprovals(lease);
+      try { recoverDurableSessionAfterTakeover(lease); } catch (error) {
+        if (error instanceof LeaseLostError) throw error;
+        // The previous session cannot authorize this lease generation. Keep paper protection running.
+        botStatus.lastError = `session recovery: ${errorText(error).slice(0, 200)}`;
+      }
+      return true;
+    }
+    failed = result.checks.filter((check) => !check.ok);
+  } catch (error) {
+    if (error instanceof LeaseLostError) throw error;
+    failed = [{ name: 'takeover verification', ok: false, detail: errorText(error).slice(0, 200) }];
+  }
   takeoverRefused = true;
-  const failed = r.checks.filter((c) => !c.ok);
-  try { releaseLease(ENGINE_LEASE, botStatus.instanceId); } catch { /* lease simply expires */ }
+  try { releaseLease(lease.name, lease.holder, lease.acquired_at, lease.epoch); } catch { /* lease simply expires */ }
   stopBot(); botStatus.lastError = `integrity: ${failed.map((c) => `${c.name}: ${c.detail}`).join('; ')}`;
   try {
-    journal('SYSTEM', `Engine refused takeover: integrity checks failed (${failed.map((c) => c.name).join(', ')})`, undefined, { checks: r.checks });
+    journal('SYSTEM', `Engine refused takeover: integrity checks failed (${failed.map((c) => c.name).join(', ')})`, undefined, { checks: failed });
     notify('CRITICAL', 'Engine stopped: integrity check failed', `${failed.map((c) => c.name).join(', ')} failed before ${botStatus.instanceId} could take over the engine. Nothing was repaired; open paper positions are not monitored until the owner investigates and restarts.`, 'engine-lease');
   } catch { /* database unusable: lastError still records why */ }
   return false;
 }
-/** Synchronous lease re-check right before a write that follows awaited network calls. A DB error counts as lost (fail closed). */
-function stillLeader(): boolean {
-  try { return holdEngine(); } catch (e: any) { botStatus.lastError = `lease: ${e.message}`; return false; }
-}
-let timers: NodeJS.Timeout[] = []; let scanning = false; let ticking = false; let backgrounding = false;
-
-function onDecision(r: DecisionReport) {
-  // scanOnce awaits consensus before every decision: re-check the lease synchronously right before any OMS write.
-  if (!stillLeader()) return;
-  botStatus.decisionsTotal++;
-  const ctl = getControl();
-  if (r.decision === 'PAPER_TRADE' && ctl.mode === 'PAPER') { const res = submitEntry(r, 'bot'); if (res.ok) botStatus.entriesToday++; }
-  else if (r.decision === 'APPROVED_FOR_USER_CONFIRMATION' && ctl.mode !== 'OBSERVE') queueForApproval(r);
+function stillLeader(lease: LeaseFence): boolean {
+  if (isShuttingDown() || !botStatus.running || activeLease?.acquired_at !== lease.acquired_at || activeLease?.epoch !== lease.epoch) return false;
+  try { if (ownsLease(lease)) return true; } catch (error) { botStatus.lastError = `lease: ${errorText(error)}`; }
+  activeLease = null;
+  setEngineRole('STANDBY');
+  return false;
 }
 
-async function hotLane() {
-  if (ticking || !botStatus.running) return; ticking = true;
+export function activeEngineFence(): LeaseFence | null {
+  return activeLease && stillLeader(activeLease) ? activeLease : null;
+}
+
+function laneStatus(priority: 'protective' | 'entry' | 'background') {
+  return { priority, inFlight: false, startedAt: 0, completedAt: 0, failedAt: 0, error: null as string | null };
+}
+const lanes = {
+  protection: laneStatus('protective'),
+  positionBooks: laneStatus('protective'),
+  ticker: laneStatus('entry'),
+  scan: laneStatus('entry'),
+  background: laneStatus('background'),
+  research: { ...laneStatus('background'), deferredAt: 0, deferReason: null as string | null },
+};
+let timers: NodeJS.Timeout[] = [];
+
+async function runLane(name: keyof typeof lanes, pass: (lease: LeaseFence) => void | Promise<void>) {
+  const lane = lanes[name];
+  if (isShuttingDown() || lane.inFlight || !botStatus.running) return;
+  const lease = holdEngine();
+  if (!lease) return;
+  lane.inFlight = true;
+  lane.startedAt = Date.now();
+  const started = performance.now();
   try {
-    if (!holdEngine()) return;
-    // Steps fail independently. A rules or ticker outage must never skip position monitoring: with stale prices
-    // monitorPositions() raises the "protection unverified" alert, which is exactly when the owner needs it.
-    try { await ensureRules(); } catch (e: any) { botStatus.lastError = `rules: ${e.message}`; }
-    try { await refreshTickers(); botStatus.lastTickerAt = Date.now(); } catch (e: any) { botStatus.lastError = `ticker: ${e.message}`; }
-    // Exits are priced against the book: keep the books of open positions as fresh as the tickers that trigger them.
-    try { await refreshBooks(openPositions().map((p) => p.instrument)); } catch (e: any) { botStatus.lastError = `books: ${e.message}`; }
-    // The awaits above can outlast the lease: re-check synchronously before writing; a copy that lost it skips to STANDBY.
-    if (!stillLeader()) return;
-    try { monitorPositions(); botStatus.lastMonitorAt = Date.now(); botStatus.monitorFailing = false; }
-    catch (e: any) { botStatus.lastError = `monitor: ${e.message}`; botStatus.monitorFailing = true; }
-    try { expireApprovals(); } catch (e: any) { botStatus.lastError = `approvals: ${e.message}`; }
-    try { checkScanStall(botStatus); } catch (e: any) { botStatus.lastError = `watchdog: ${e.message}`; }
+    await pass(lease);
+    if (stillLeader(lease)) { lane.completedAt = Date.now(); lane.error = null; }
+  } catch (error) {
+    if (error instanceof LeaseLostError) { stillLeader(lease); return; }
+    lane.failedAt = Date.now();
+    lane.error = errorText(error);
+    botStatus.lastError = `${name}: ${lane.error}`;
+  } finally {
+    lane.inFlight = false;
+    record(`bot.${name}`, performance.now() - started);
   }
-  finally { ticking = false; }
 }
-async function scanLane() {
-  if (scanning || !botStatus.running) return; scanning = true;
+
+function onDecision(r: DecisionReport, lease: LeaseFence | null = activeLease) {
+  if (isShuttingDown() || !lease || !stillLeader(lease)) return;
+  botStatus.decisionsTotal++;
+  if (botStatus.monitorFailing || Date.now() - botStatus.lastMonitorAt > staleAfter().monitorMs) return;
   try {
-    if (!holdEngine()) return;
-    if (!botStatus.lastTickerAt) await hotLane();
-    await refreshDeep(); await scanOnce(onDecision); botStatus.lastScanAt = Date.now(); botStatus.cycles++;
-    bus.publish('bot', { ...botStatusView() });
-  } catch (e: any) { botStatus.lastError = `scan: ${e.message}`; }
-  finally { scanning = false; }
+    if (r.decision === 'PAPER_TRADE') {
+      const result = submitEntry(r, 'bot', undefined, lease);
+      if (result.ok) botStatus.entriesToday++;
+    } else if (r.decision === 'APPROVED_FOR_USER_CONFIRMATION') queueForApproval(r, lease);
+  } catch (error) {
+    if (!(error instanceof LeaseLostError)) throw error;
+    stillLeader(lease);
+  }
 }
-async function backgroundLane() {
-  if (backgrounding || !botStatus.running) return; backgrounding = true; // a slow pass must not overlap the next (duplicated prints/news)
-  try { if (holdEngine()) await backgroundPass(); } finally { backgrounding = false; }
+
+/**
+ * Wake the existing scan lane when a committed settlement is newer than its last completed scan. A settlement
+ * during the cooldown remains due unless an ordinary scan catches up first. The scan still applies the full risk gate.
+ */
+export const SETTLEMENT_RESCAN_MIN_MS = 10_000;
+function wakeScanForSettlement(lease: LeaseFence, nowTs = Date.now()) {
+  if (isShuttingDown() || !botStatus.lastTickerAt || nowTs - botStatus.lastSettlementRescanAt < SETTLEMENT_RESCAN_MIN_MS ||
+      paperSettlementCursor() <= lastScannedSettlementCursor || !stillLeader(lease)) return;
+  botStatus.lastSettlementRescanAt = nowTs; botStatus.settlementRescans++;
+  setImmediate(() => { if (stillLeader(lease)) void scanLane(); });
 }
-async function backgroundPass() {
+
+const protectionLane = () => runLane('protection', (lease) => {
+  try {
+    monitorPositions(undefined, lease);
+    botStatus.lastMonitorAt = Date.now();
+    botStatus.monitorFailing = false;
+  } catch (error) {
+    if (!(error instanceof LeaseLostError)) botStatus.monitorFailing = true;
+    throw error;
+  }
+  // An expired mandate revokes entry authority without the owner present; exits keep running.
+  // Contained so a clock regression cannot skip the drain completion or the watchdog below; entries stay denied.
+  try {
+    const versionBefore = durableSessionStatus()?.version;
+    if (drainExpiredMandate()?.version !== versionBefore) bus.publish('bot', botStatusView());
+  } catch (error) { botStatus.lastError = `mandate expiry: ${errorText(error)}`; }
+  if (durableSessionStatus()?.state === 'CLOSING_DRAINING_ENTRIES') {
+    try {
+      finishDurableClose(undefined, lease);
+      bus.publish('bot', botStatusView());
+    } catch (error) {
+      if (!(error instanceof Error) || !['SESSION_DRAIN_RECONCILIATION_INCOMPLETE', 'SESSION_NOT_DRAINING'].includes(error.message)) throw error;
+    }
+  }
+  try { checkScanStall(botStatus); } catch (error) { botStatus.lastError = `watchdog: ${errorText(error)}`; }
+  wakeScanForSettlement(lease);
+});
+
+const booksLane = () => runLane('positionBooks', async () => {
+  await refreshBooks(openPositions().map((p) => p.instrument));
+});
+
+const hotLane = () => runLane('ticker', async (lease) => {
+  try { expireApprovals(lease); } catch (error) {
+    if (error instanceof LeaseLostError) throw error;
+    botStatus.lastError = `approvals: ${errorText(error)}`;
+  }
+  try { await ensureRules(); } catch (error) { botStatus.lastError = `rules: ${errorText(error)}`; }
+  if (!stillLeader(lease)) return;
+  await refreshTickers();
+  if (stillLeader(lease)) botStatus.lastTickerAt = Date.now();
+});
+
+/**
+ * Single coalescing scan scheduler: at most one pass is in flight. A wake (settlement rescan, interval tick, startup)
+ * that arrives mid-pass is not lost; it sets scanDirty, and when the pass ends exactly one more pass is scheduled,
+ * however many wakes arrived. The rerun requires a running bot that is still the leader; the interval stays the safety net.
+ */
+let scanDirty = false;
+async function scanLane() {
+  if (isShuttingDown() || !botStatus.running || !botStatus.lastTickerAt) return;
+  if (lanes.scan.inFlight) { if (botStatus.running) scanDirty = true; return; }
+  await scanPass();
+  if (!scanDirty) return;
+  scanDirty = false;
+  if (botStatus.running && activeLease && stillLeader(activeLease)) setImmediate(() => { void scanLane(); });
+}
+function scanPass() {
+  return runLane('scan', async (lease) => {
+    await refreshDeep();
+    if (!stillLeader(lease)) return;
+    const shadowEnabled = process.env.MIA_CHOICE_SHADOW !== '0';
+    const startedAt = Date.now(), control = getControl(), policy = currentPolicy()?.version;
+    const observed: ReturnType<typeof freezeChoiceEvidence>[] = [];
+    let totalReportsObserved = 0;
+    const { settlementCursor } = await scanOnce((report, snapshotId) => {
+      totalReportsObserved++;
+      if (shadowEnabled && observed.length < MAX_SHADOW_CANDIDATES) observed.push(freezeChoiceEvidence(report, snapshotId));
+      onDecision(report, lease);
+    }, () => stillLeader(lease));
+    if (!stillLeader(lease)) return;
+    lastScannedSettlementCursor = settlementCursor;
+    if (shadowEnabled) {
+      const completedAt = Date.now();
+      const currentControl = getControl();
+      const roundId = totalReportsObserved ? uid('choice') :
+        `choice-empty-${control.mode}-${Math.floor(completedAt / (15 * 60_000))}`;
+      try {
+        recordShadowChoice(evaluateShadowChoices(observed, {
+          roundId, startedAt, completedAt, mode: control.mode, totalReportsObserved,
+          modeChanged: currentControl.mode !== control.mode || currentControl.updatedAt !== control.updatedAt,
+          policyChanged: currentPolicy()?.version !== policy,
+        }), lease);
+      } catch (error) {
+        if (error instanceof LeaseLostError) throw error;
+        botStatus.lastError = `choice: ${errorText(error)}`;
+      }
+    }
+    botStatus.lastScanAt = Date.now();
+    botStatus.cycles++;
+    bus.publish('bot', botStatusView());
+  });
+}
+
+let lastResearchSample = performance.eventLoopUtilization();
+function researchLane() {
+  const sample = performance.eventLoopUtilization();
+  const busy = performance.eventLoopUtilization(sample, lastResearchSample).utilization;
+  lastResearchSample = sample;
+  if (isShuttingDown() || !botStatus.running || botStatus.role !== 'LEADER') return;
+  const autonomic = recordAutonomicObservation({
+    now: Date.now(), monitorAt: botStatus.lastMonitorAt,
+    monitorMaxAgeMs: staleAfter().monitorMs, monitorFailing: botStatus.monitorFailing,
+    eventLoopUtilization: busy,
+  });
+  if (!autonomic.researchAllowed) {
+    lanes.research.deferredAt = Date.now();
+    lanes.research.deferReason = autonomic.reason;
+    return;
+  }
+  return runLane('research', async (lease) => {
+    lanes.research.deferReason = null;
+    const startedAt = Date.now();
+    const { deep } = await runDualResearchPass(undefined, startedAt, () => stillLeader(lease));
+    if (!stillLeader(lease) || deep.successAt !== startedAt || !deep.result || storageBlocksEntries(storageStatus())) return;
+    for (const forecast of Object.values(deep.result.directionForecasts)) registerDirectionForecast(forecast, lease);
+  });
+}
+
+/**
+ * Re-run the takeover integrity checks when due (ops/runtimeIntegrity.ts). Yields first so due protection timers run
+ * before a synchronous check of the whole database; alerts once when the result turns from clean to failed.
+ */
+async function runtimeIntegrityPass(lease: LeaseFence) {
+  if (!runtimeIntegrityDue()) return;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  if (!stillLeader(lease)) return;
+  const wasOk = runtimeIntegrityStatus().record?.ok;
+  const t0 = performance.now();
+  try {
+    const record = refreshRuntimeIntegrity(takeoverIntegrity, Date.now(), lease);
+    if (record && !record.ok && wasOk !== false) {
+      const failed = record.failed.map((f) => f.name).join(', ');
+      try {
+        journal('SYSTEM', `Runtime integrity check failed (${failed}); new entries paused`, undefined, { failed: record.failed });
+        notify('CRITICAL', 'New entries paused: integrity check failed', `${failed} failed on ${botStatus.instanceId}. Protection and exits continue; new entries stay paused until the check passes.`, 'engine-lease');
+      } catch { /* the stored result already pauses entries */ }
+    }
+  } catch (error) {
+    if (error instanceof LeaseLostError) throw error;
+    botStatus.lastError = `runtime-integrity: ${errorText(error).slice(0, 200)}`;
+  } finally { record('ops.runtime_integrity', performance.now() - t0); }
+}
+
+const backgroundLane = () => runLane('background', async (lease) => {
   try { await refreshBackground(); } catch { /* tracked per provider */ }
   try { await scanPrints(); botStatus.lastPrintsAt = Date.now(); } catch { /* tracked */ }
   if (Date.now() - botStatus.lastNewsAt > 5 * 60_000) { try { await refreshNews(); botStatus.lastNewsAt = Date.now(); } catch { /* tracked */ } }
-  if (!stillLeader()) return; // backups and strategy suspension write: only the current leader, re-checked after the awaits
+  if (!stillLeader(lease)) return;
+  try { refreshBrainSnapshot(); } catch (error) { botStatus.lastError = `brain: ${errorText(error).slice(0, 200)}`; }
+  try { refreshSettingsCapabilitySnapshot(); } catch (error) { botStatus.lastError = `settings-brain: ${errorText(error).slice(0, 200)}`; }
+  // Bounded evidence retention before the backup, so the copy and the live database stay within the volume.
+  try { compactConsensusEvidence(); } catch (error) { botStatus.lastError = `retention: ${errorText(error).slice(0, 200)}`; }
   backupPass();
-  try { const s = checkStrategyHealth(); if (s.length) notify('WARNING', 'Strategy auto-suspended', s.join(', '), 'strategy-health'); } catch { /* */ }
-}
+  if (!stillLeader(lease)) return;
+  // Closed-trade feedback first: link settled positions to their decision, snapshot and verified ledger settlement, so
+  // the health check below decides on the newest verified evidence. A linking failure never skips the health check.
+  try {
+    const linked = linkClosedTrades(Date.now(), { fence: lease });
+    if (linked.failed.length) botStatus.lastError = `trade-outcomes: could not link ${linked.failed.slice(0, 5).join(', ')}`;
+  } catch (error) { botStatus.lastError = `trade-outcomes: ${errorText(error).slice(0, 200)}`; }
+  if (!stillLeader(lease)) return;
+  // Hash verification of every outcome record; the risk gate pauses new entries on an unacknowledged failure.
+  try { refreshOutcomeHashCheck(Date.now(), lease); } catch (error) { botStatus.lastError = `evidence-integrity: ${errorText(error).slice(0, 200)}`; }
+  if (!stillLeader(lease)) return;
+  await runtimeIntegrityPass(lease);
+  if (!stillLeader(lease)) return;
+  try { refreshSupportDiscounts(Date.now(), lease); } catch (error) { botStatus.lastError = `worker-reliability: ${errorText(error).slice(0, 200)}`; }
+  if (!stillLeader(lease)) return;
+  const suspended = checkStrategyHealth(lease);
+  // Reuse the background lane and canonical memory; never delay protective exits.
+  if (stillLeader(lease)) {
+    try {
+      await verifyDueForecasts(lease);
+      if (!stillLeader(lease)) return;
+      recordLearningEvidence(recentInternalLearningEvidence());
+    }
+    catch (error) { botStatus.lastError = `learning-evidence: ${errorText(error).slice(0, 200)}`; }
+  }
+  if (suspended.length) notify('WARNING', 'Strategy auto-suspended', suspended.join(', '), 'strategy-health');
+});
 
 /** Scheduled backup + restore check (leader only, from the background lane). Failures alert at most hourly. */
 let lastBackupAlertAt = 0;
@@ -132,38 +392,73 @@ function backupPass() {
 }
 
 export function startBot() {
-  if (botStatus.running || config.offline) return;
-  botStatus.running = true; botStatus.startedAt = Date.now(); botStatus.monitorFailing = false; takeoverRefused = false;
+  if (isShuttingDown() || activeDrain || botStatus.running || lanesBusy() || config.offline) return;
+  Object.assign(botStatus, { running: true, startedAt: Date.now(), lastMonitorAt: 0, lastTickerAt: 0, lastScanAt: 0, monitorFailing: false });
+  takeoverRefused = false;
   journal('SYSTEM', `MIA engine started in ${displayMode()} mode`);
-  hotLane().then(() => backgroundLane()).then(() => scanLane());
   timers = [
+    setInterval(protectionLane, protectionIntervalMs()),
+    setInterval(booksLane, protectionIntervalMs()),
     setInterval(hotLane, config.tickerIntervalMs),
     setInterval(scanLane, config.scanIntervalMs),
-    setInterval(backgroundLane, 60_000),
+    setInterval(backgroundLane, CAPABILITY_REFRESH_INTERVAL_MS),
+    setInterval(researchLane, 60_000),
   ];
+  void protectionLane();
+  void booksLane();
+  void hotLane().then(scanLane);
+  void backgroundLane();
 }
-export function stopBot() { timers.forEach(clearInterval); timers = []; botStatus.running = false; botStatus.role = 'STOPPED'; }
+export function stopBot() {
+  timers.forEach(clearInterval);
+  timers = [];
+  activeLease = null;
+  scanDirty = false;
+  botStatus.running = false;
+  botStatus.role = 'STOPPED';
+  resetInternalProcesses();
+}
 /** Lanes currently executing (graceful drain waits for these before the lease is released and the DB closed). */
-export const lanesBusy = () => ticking || scanning || backgrounding;
+export const lanesBusy = () => Object.values(lanes).some((lane) => lane.inFlight);
 /**
  * Graceful stop: no new lane starts, in-flight lanes finish (bounded wait), then the lease is released so a successor
  * starts at once instead of waiting for expiry. Returns whether every lane drained in time.
  */
-export async function drainBot(timeoutMs = 20_000): Promise<boolean> {
+let activeDrain: Promise<boolean> | null = null;
+export function drainBot(timeoutMs = 20_000, beforeRelease?: () => Promise<void>): Promise<boolean> {
+  if (activeDrain) return activeDrain;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Promise.resolve(false);
+  const lease = activeLease;
   stopBot();
-  const until = Date.now() + timeoutMs;
-  while (lanesBusy() && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
-  const drained = !lanesBusy();
-  // Release only after the lanes stopped; if one is still stuck, keep the lease so it expires rather than overlapping.
-  if (drained) { try { releaseLease(ENGINE_LEASE, botStatus.instanceId); } catch { /* DB already closed: lease expires */ } }
-  return drained;
+  const until = performance.now() + timeoutMs;
+  activeDrain = (async () => {
+    while (lanesBusy() && performance.now() < until)
+      await new Promise<void>(resolve => setTimeout(resolve, Math.min(50, Math.max(0, until - performance.now()))));
+    if (lanesBusy() || performance.now() >= until) return false;
+    if (beforeRelease) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const remaining = Math.max(0, until - performance.now());
+        const completed = await Promise.race([
+          Promise.resolve().then(beforeRelease).then(() => true),
+          new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), remaining); }),
+        ]);
+        if (!completed || performance.now() >= until) return false;
+      } finally { clearTimeout(timer); }
+    }
+    // Retain the captured generation on timeout/error. A successor can take
+    // over only through the existing lease expiry + recovery protocol.
+    if (lease) releaseLease(lease.name, lease.holder, lease.acquired_at, lease.epoch);
+    return true;
+  })().finally(() => { activeDrain = null; });
+  return activeDrain;
 }
-export function botStatusView() {
-  const ctl = getControl(); const acct = accountState();
+export function botStatusView(acct = accountState()) {
+  const ctl = getControl();
   return {
-    ...botStatus, display: displayMode(ctl), mode: ctl.mode, paused: ctl.pausedNewOrders, emergency: ctl.emergency,
+    ...botStatus, lanes, display: displayMode(ctl), mode: ctl.mode, paused: ctl.pausedNewOrders, emergency: ctl.emergency,
     policyAccepted: !!currentPolicy(), funded: acct.deposits > 0, equity: acct.equity,
     state: ctl.emergency ? 'EMERGENCY' : ctl.pausedNewOrders ? 'PAUSED' : ctl.mode === 'OBSERVE' ? 'OBSERVING' : ctl.mode === 'PAPER' ? 'PAPER_TRADING' : ctl.mode === 'APPROVAL' ? 'AWAITING_APPROVAL' : 'BOUNDED_LIVE',
   };
 }
-export const _test = { onDecision, holdEngine, hotLane, scanLane, backgroundLane, resetTakeoverRefusal: () => { takeoverRefused = false; } };
+export const _test = { onDecision, holdEngine: () => !!holdEngine(), hotLane, protectionLane, scanLane, scanDirty: () => scanDirty, backgroundLane, resetTakeoverRefusal: () => { takeoverRefused = false; } };

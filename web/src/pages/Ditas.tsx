@@ -1,12 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, useApi } from '../api';
-import { Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
+import { Action, Badge, Card, Empty, ErrorLine, Modal, Page, Stat, Tabs } from '../ui';
+import { StepUp } from './Trading';
 
-const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Foundation coverage'];
+const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Intelligence evaluation', 'Foundation coverage'];
 const count = (v: unknown) => Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0;
+function forecastCohortLabel(key: string) {
+  try {
+    const [target, instrument, model, horizon, deadband, lead] = JSON.parse(key);
+    if (target === 'DIRECTION_WITH_DEADBAND' && typeof instrument === 'string') {
+      return `${instrument.split(':').at(-1)} perpetual · ${horizon} · ±${deadband} bps · ${lead}/4 lead window · ${model}`;
+    }
+  } catch { /* Legacy cohort keys are displayed as stored. */ }
+  return key;
+}
 
-/** Read-only DITAS evidence. No control, strategy promotion, simulation or execution authority. */
+/** DITAS evidence. No strategy promotion, simulation or execution authority; the only action is the owner's step-up
+ * acknowledgement of investigated evidence-integrity findings, which lets new paper entries resume. */
 export function Ditas() {
   const [cohort, setCohort] = useState('');
   const { data, error, loading, reload } = useApi(`/api/ditas${cohort ? `?cohort=${encodeURIComponent(cohort)}` : ''}`, { topics: ['scan', 'decision', 'order', 'position', 'mode'], every: 30_000 });
@@ -25,6 +36,7 @@ export function Ditas() {
   const reportedCalibration = data?.calibration;
   const pendingCalibration = (reportedCalibration?.cohort ?? '') !== cohort;
   const calibration = pendingCalibration ? undefined : reportedCalibration;
+  const direction = calibration?.sourceVerified?.direction;
   const calibrationStatus = pendingCalibration ? (error && !loading ? 'UNAVAILABLE' : 'LOADING') : calibration?.status ?? 'UNCALIBRATED';
   return <Page title="DITAS · Decision intelligence" sub="Inspect the evidence behind decisions, strategy health and hypothetical alternatives. Every result is tied to stored records."
     right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={() => { reload(); setRefreshKey((k) => k + 1); }} disabled={loading}>Refresh</button></>}>
@@ -72,14 +84,19 @@ export function Ditas() {
       <div className="col"><div>{p.description}</div><div className="row"><Badge v={p.paperHealth?.status ?? 'INSUFFICIENT_SAMPLE'} /><span className="hint">{p.paperHealth?.samples ?? 0} recent version-matched paper outcomes · minimum {p.paperHealth?.minimumSamples ?? 30}</span></div><div className="hint">{p.paperHealth?.recommendation ?? 'Inspect the passport for rules, evidence, approval status and known limitations.'}</div><div className="row"><button className="sm" onClick={() => setDetail({ title: 'Strategy passport and health', value: p })}>Inspect passport</button><Link to="/lab">Open Strategy Lab</Link></div></div>
     </Card>)}{!data.passports?.length && <Empty>No strategy passports available.</Empty>}</div>}
     {tab === 'Execution quality' && <ExecutionQuality refreshKey={refreshKey} />}
+    {tab === 'Intelligence evaluation' && <div className="col" style={{ gap: 14 }}><EvidenceIntegrity refreshKey={refreshKey} /><IntelligenceEvaluation refreshKey={refreshKey} /><EvidenceCoverage refreshKey={refreshKey} /></div>}
     {data && tab === 'Calibration' && <Card title="Probability calibration" right={<Badge v={calibrationStatus} tone="b-warn" />}>
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
             <option value="">Select a cohort to evaluate</option>
-            {(reportedCalibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{c.cohort} · {c.n} forecasts</option>)}
+            {(reportedCalibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{forecastCohortLabel(c.cohort)} · {c.n} forecasts</option>)}
           </select>
         </label>
         <div className="hint">Calibration evaluates stored probability forecasts against outcomes. It does not turn chart confidence, opportunity scores or votes into win probabilities.</div>
+        {direction && <>
+          <div className="kv"><span>Venue-verified direction outcomes</span><span>{direction.sample}</span><span>Three-way Brier score</span><span>{fmt.num(direction.brierScore, 4)}</span><span>Three-way log loss</span><span>{fmt.num(direction.logLoss, 4)}</span></div>
+          <div className="hint">The reliability bins below evaluate the bullish outcome against all other outcomes.</div>
+        </>}
         <div className="kv"><span>Matched outcomes</span><span>{calibration?.sample ?? calibration?.sampleSize ?? 0}</span><span>Brier score</span><span>{fmt.num(calibration?.brierScore, 4)}</span><span>Log loss</span><span>{fmt.num(calibration?.logLoss, 4)}</span><span>Expected calibration error</span><span>{fmt.num(calibration?.ece, 4)}</span></div>
         <div className="hint">{calibration?.note ?? 'An insufficient sample remains UNCALIBRATED. No production model is promoted automatically.'}</div>
         <div className="tablewrap"><table><thead><tr><th>Probability bin</th><th>Outcomes</th><th>Mean prediction</th><th>Observed frequency</th><th>95% Wilson interval</th><th>Evidence status</th></tr></thead><tbody>
@@ -111,6 +128,85 @@ function ExecutionQuality({ refreshKey }: { refreshKey: number }) {
         <td className="mono">{o.firstFillDelayMs == null ? '—' : `${o.firstFillDelayMs} ms`}</td></tr>)}
     </tbody></table></div>
     {data && !rows.length && <Empty>No paper orders yet.</Empty>}
+    {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
+  </Card>;
+}
+
+/** One-line summary of a measured area; the full metrics stay available under "Details". */
+function evaluationSummary(a: any): string {
+  const m = a.metrics; if (!m) return '';
+  const pct = (x: number) => `${fmt.num(x * 100, 1)}%`, ci = (v: any, f: (x: number) => string) => `${f(v.mean ?? v.rate)} (95% ${f(v.lower)} to ${f(v.upper)})`;
+  const r = (x: number) => `${fmt.num(x, 2)}R`;
+  switch (a.area) {
+    case 'DIRECTIONAL': return `Gross win rate ${ci(m.grossWinRate, pct)}`;
+    case 'PROBABILITY': return m.cohorts.map((c: any) => `${c.cohort}: Brier ${fmt.num(c.brierScore, 3)} (n=${c.sample})`).join(' | ');
+    case 'ENTRY': return `Adverse slippage ${ci(m.adverseSlippageBps, (x) => `${fmt.num(x, 1)} bps`)}, p90 ${fmt.num(m.p90Bps, 1)} bps`;
+    case 'EXIT': return `Captured ${ci(m.meanCaptureOfFavourableMove, pct)} of the favourable move`;
+    case 'REGIME': return m.regimes.map((g: any) => `${g.regime}: ${g.netR ? r(g.netR.mean) : 'needs evidence'} (n=${g.sample})`).join(' | ');
+    case 'PERFORMANCE': return `Net expectancy ${ci(m.netExpectancyR, r)}, max drawdown ${r(m.maxDrawdownR)}`;
+    default: return '';
+  }
+}
+
+/** Six kinds of accuracy from verified evidence only; areas below their minimum sample say so instead of guessing. */
+function IntelligenceEvaluation({ refreshKey }: { refreshKey: number }) {
+  const { data, error, loading, reload } = useApi<any>('/api/ditas/evaluation', { topics: ['position'] });
+  useEffect(() => { if (refreshKey) reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the page Refresh button also reloads this panel
+  return <Card title="BrainOS intelligence evaluation" right={<Badge v={data?.label ?? 'PAPER'} tone="b-violet" />} flush>
+    <ErrorLine e={error} />
+    {!data && loading && <div role="status" aria-live="polite"><Empty>Loading evaluation evidence...</Empty></div>}
+    {data && <div className="tablewrap"><table><thead><tr><th>Accuracy</th><th>Status</th><th>Evidence</th><th>Result</th></tr></thead><tbody>
+      {data.areas.map((a: any) => <tr key={a.area}><td><b>{a.area}</b><div className="hint">{a.question}</div></td>
+        <td><Badge v={a.status} tone={a.status === 'MEASURED' ? undefined : 'b-warn'} /></td>
+        <td className="mono">{a.sample} / {a.minimumSample}</td>
+        <td>{a.metrics ? <>{evaluationSummary(a)}<details><summary className="hint">Details</summary><pre style={{ whiteSpace: 'pre-wrap', fontSize: 12 }}>{JSON.stringify(a.metrics, null, 2)}</pre></details></> : <span className="hint">{a.note}</span>}</td></tr>)}
+    </tbody></table></div>}
+    {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
+  </Card>;
+}
+
+/** Entry pause on broken closed-trade evidence. Exits never pause. Acknowledging re-enables entries, so it needs step-up. */
+function EvidenceIntegrity({ refreshKey }: { refreshKey: number }) {
+  const { data, error, loading, reload } = useApi<any>('/api/evidence-integrity', { topics: ['position'], every: 60_000 });
+  useEffect(() => { if (refreshKey) reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the page Refresh button also reloads this panel
+  const [credential, setCredential] = useState('');
+  // Sent back exactly as shown, so the server acknowledges only the version the owner reviewed.
+  const acknowledgeable: { positionId: string; kind: string; storedHash: string; contentHash: string | null }[] = data ? [...data.findings.mismatched, ...data.findings.tampered] : [];
+  return <Card title="Evidence integrity" right={data && <Badge v={data.ok ? 'ENTRIES ALLOWED' : 'NEW ENTRIES PAUSED'} tone={data.ok ? 'b-good' : 'b-bad'} />}>
+    <ErrorLine e={error} />
+    {!data && loading && <div role="status" aria-live="polite"><Empty>Loading evidence integrity...</Empty></div>}
+    {data && <div className="col" style={{ gap: 8 }}>
+      <div className="hint">New paper entries pause while a settlement disagrees with the ledger, a closed trade stays unlinked, or an outcome record fails its hash check. Exits and stops keep running.</div>
+      {data.reasons.map((r: string) => <div key={r}>{r}</div>)}
+      {data.findings.unlinked.length > 0 && <div className="hint">Unlinked trades clear when the linker succeeds; they cannot be acknowledged: <span className="mono">{data.findings.unlinked.join(', ')}</span></div>}
+      {acknowledgeable.length > 0 && <div className="col" style={{ gap: 6 }}>
+        <div className="hint">Records to investigate (see the trade chain in the Decision ledger): <span className="mono">{acknowledgeable.map((f) => `${f.positionId} (${f.kind})`).join(', ')}</span></div>
+        <div className="row"><StepUp value={credential} onChange={setCredential} />
+          <Action className="primary" label="Acknowledge investigated records (step-up)" confirm="Acknowledging lets new paper entries resume. Continue?"
+            run={async () => { await api('/api/evidence-integrity/acknowledge', { body: { records: acknowledgeable, password: credential } }); setCredential(''); reload(); }} /></div>
+      </div>}
+      <div className="hint">Hash check: {data.hashCheck.checkedAt ? fmt.time(data.hashCheck.checkedAt) : 'not run yet'}{data.hashCheck.lastError ? ` (last attempt failed: ${data.hashCheck.lastError})` : ''}</div>
+    </div>}
+  </Card>;
+}
+
+/** How much of what BrainOS decided and traded is backed by complete, classified evidence (EVIDENCE Omega). */
+function EvidenceCoverage({ refreshKey }: { refreshKey: number }) {
+  const { data, error, loading, reload } = useApi<any>('/api/ditas/evidence-coverage', { topics: ['decision', 'position'] });
+  useEffect(() => { if (refreshKey) reload(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- the page Refresh button also reloads this panel
+  const classes = (counts: Record<string, number>) => Object.entries(counts).map(([k, n]) => `${k} ${n}`).join(' | ') || 'none';
+  return <Card title="Evidence coverage" right={<Badge v={data?.label ?? 'PAPER'} tone="b-violet" />} flush>
+    <ErrorLine e={error} />
+    {!data && loading && <div role="status" aria-live="polite"><Empty>Loading evidence coverage...</Empty></div>}
+    {data && <div className="tablewrap"><table><thead><tr><th>Records</th><th>Sample</th><th>Complete</th><th>Classification</th></tr></thead><tbody>
+      <tr><td><b>Decisions</b><div className="hint">Snapshot, worker findings, risk decision and decision record</div></td>
+        <td className="mono">{data.decisions.sample}</td><td className="mono">{data.decisions.fullyEvidenced}</td>
+        <td>{Object.entries(data.decisions.byKind).map(([k, v]) => <div key={k}><span className="hint">{k}:</span> {classes(v as Record<string, number>)}</div>)}</td></tr>
+      <tr><td><b>Closed trades</b><div className="hint">Session to settled outcome, every link checked</div></td>
+        <td className="mono">{data.closedTrades.sample}</td><td className="mono">{data.closedTrades.completeChains}</td>
+        <td><div><span className="hint">Settlement:</span> {classes(data.closedTrades.settlement)}</div>
+          {data.closedTrades.gaps.map((g: any) => <div key={g.gap} className="hint">{g.gap}: {g.count}</div>)}</td></tr>
+    </tbody></table></div>}
     {data && <ul className="hint" style={{ padding: '8px 28px' }}>{data.limitations.map((l: string) => <li key={l}>{l}</li>)}</ul>}
   </Card>;
 }

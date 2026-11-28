@@ -1,6 +1,6 @@
 import { seedInstrument, seedBacktestFixture } from './helpers.js';
 import { describe, it, expect, beforeAll } from 'vitest';
-import { all, closeDb, openDb } from '../src/db/db.js';
+import { all, closeDb, openDb, run } from '../src/db/db.js';
 import { buildApp } from '../src/index.js';
 import { DEFAULT_POLICY } from '../src/risk/policy.js';
 import { commandMode, JOE_TOOL_NAMES } from '../src/joe/joe.js';
@@ -31,12 +31,35 @@ describe('HTTP API (auth, permissions, release gate)', () => {
   it('rejects state changes without CSRF header', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/emergency/pause', headers: { cookie } })).statusCode).toBe(403);
   });
+  it('requires owner step-up to run spot paper, keeps offline operation locked, and allows an authenticated close', async () => {
+    const url = '/api/session/paper-spot';
+    const post = (path: string, payload = {}, headers = H()) =>
+      app.inject({ method: 'POST', url: `${url}/${path}`, headers, payload });
+    expect((await app.inject({ url })).statusCode).toBe(401);
+    const preflight = await app.inject({ url, headers: { cookie } });
+    expect(preflight.statusCode).toBe(200);
+    expect(preflight.headers['cache-control']).toBe('no-store');
+    expect(preflight.json()).toMatchObject({ canRun: false, canClose: false, mandate: null,
+      authorization: { minDurationHours: 1, maxDurationHours: 720 } });
+    const mandate = { capitalCeiling: 1_000, durationHours: 24 };
+    expect((await post('run', mandate, { cookie, 'x-mia-csrf': '0' })).statusCode).toBe(403);
+    expect((await post('run', mandate)).statusCode).toBe(403);
+    // Run Session carries the owner's mandate; a missing or out-of-range mandate is rejected before step-up.
+    expect((await post('run', { password: 'correct horse battery' })).statusCode).toBe(400);
+    expect((await post('run', { ...mandate, durationHours: 721, password: 'correct horse battery' })).statusCode).toBe(400);
+    expect((await post('run', { ...mandate, capitalCeiling: -1, password: 'correct horse battery' })).statusCode).toBe(400);
+    expect((await post('run', { ...mandate, password: 'correct horse battery' })).statusCode).toBe(409);
+    expect((await post('close')).json()).toEqual({ state: 'CLOSED' });
+    expect(all('SELECT * FROM brainos_sessions')).toEqual([]);
+    failureGate.reset();
+  });
   it('policy acceptance and mode changes require step-up; PAPER requires policy; BOUNDED_LIVE is locked', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER', password: 'correct horse battery' } })).json().error).toMatch(/risk policy/);
     expect((await app.inject({ method: 'POST', url: '/api/risk/policy', headers: H(), payload: { policy: DEFAULT_POLICY } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/risk/policy', headers: H(), payload: { policy: DEFAULT_POLICY, password: 'correct horse battery' } })).json().version).toBe(1);
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER' } })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'PAPER', password: 'correct horse battery' } })).json().mode).toBe('PAPER');
+    expect(all('SELECT state, mind FROM brainos_sessions')).toEqual([{ state: 'CLOSED', mind: 'SPOT_PAPER' }]);
     const live = await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { mode: 'BOUNDED_LIVE', password: 'correct horse battery' } });
     expect(live.statusCode).toBe(400); expect(live.json().error).toMatch(/BOUNDED_LIVE blocked/);
     expect((await app.inject({ url: '/api/qa', headers: { cookie } })).json().liveAllowed).toBe(false);
@@ -102,7 +125,14 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     await denied(statusUrl, { status: 'PAPER' });
     const noBacktest = await post(statusUrl, { status: 'PAPER', password });
     expect(noBacktest.statusCode).toBe(400); expect(noBacktest.json().error).toMatch(/backtest/);
+    // A single out-of-sample trade is a backtest but not evidence: promotion is refused with the qualification reasons.
+    seedBacktestFixture(id, { qualifying: false });
+    const weak = await post(statusUrl, { status: 'PAPER', password });
+    expect(weak.statusCode).toBe(400); expect(weak.json().error).toMatch(/requires strategy qualification: .*INSUFFICIENT_SAMPLE/);
+    expect((await app.inject({ url: `/api/lab/strategy/${id}/qualification`, headers: { cookie } })).json()).toMatchObject({ verdict: 'NOT_QUALIFIED', automaticPromotion: false });
     seedBacktestFixture(id);
+    expect((await app.inject({ url: `/api/lab/strategy/${id}/qualification`, headers: { cookie } })).json()).toMatchObject({ verdict: 'QUALIFIED' });
+    expect((await app.inject({ url: '/api/lab/strategy/nope/qualification', headers: { cookie } })).statusCode).toBe(404);
     expect((await post(statusUrl, { status: 'PAPER', password })).statusCode).toBe(200);
     expect((await app.inject({ url: '/api/lab', headers: { cookie } })).json().strategies.find((s: { id: string; status: string }) => s.id === id).status).toBe('PAPER');
     expect((await post(statusUrl, { status: 'PAPER' })).statusCode).toBe(200);
@@ -186,11 +216,21 @@ describe('HTTP API (auth, permissions, release gate)', () => {
     expect(r.statusCode).toBe(400);
   });
   it('Trader Joe has no order/limit/mode/withdraw tools and refuses such commands', async () => {
-    expect([...JOE_TOOL_NAMES].sort()).toEqual(['analyze_instrument', 'explain_decision', 'get_instrument', 'get_large_prints', 'get_market_overview', 'get_news', 'get_opportunities', 'get_portfolio', 'get_risk_status', 'get_status', 'pause_new_orders', 'search_knowledge']);
+    expect([...JOE_TOOL_NAMES].sort()).toEqual(['analyze_instrument', 'explain_decision', 'get_instrument', 'get_large_prints', 'get_market_overview', 'get_news', 'get_opportunities', 'get_portfolio', 'get_risk_status', 'get_status', 'search_knowledge']);
     expect(await commandMode('buy 10 BTC now')).toMatch(/can’t place orders/);
     await commandMode('pause'); expect(getControl().pausedNewOrders).toBe(true);
     const r = await app.inject({ method: 'POST', url: '/api/joe', headers: H(), payload: { message: 'help' } });
     expect(r.json().mode).toBe('COMMAND');
+  });
+  it('clearing a paper entry pause does not restore a prior BrainOS session grant', async () => {
+    run("UPDATE brainos_sessions SET state='RUNNING', started_at=?", Date.now());
+    const resume = await app.inject({ method: 'POST', url: '/api/control', headers: H(),
+      payload: { pausedNewOrders: false, password: 'correct horse battery' } });
+    expect(resume.statusCode).toBe(200);
+    expect(resume.json().pausedNewOrders).toBe(false);
+    expect(all('SELECT state, suspend_reason FROM brainos_sessions')).toEqual([
+      { state: 'ENTRY_SUSPENDED_RISK_HALT', suspend_reason: 'RISK_HALT' },
+    ]);
   });
 });
 
@@ -224,6 +264,15 @@ describe('HTTP hardening (auth gate, validation, error classes, step-up limits)'
   it('unknown resources are 404 and unknown emergency actions are 404', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/emergency/launch', headers: H(), payload: {} })).statusCode).toBe(404);
     expect((await app.inject({ method: 'POST', url: '/api/analyze', headers: H(), payload: { symbol: 'NOPEUSDT' } })).statusCode).toBe(404);
+  });
+  it('acknowledging evidence-integrity findings needs step-up and an exact open finding', async () => {
+    const url = '/api/evidence-integrity/acknowledge';
+    expect((await app.inject({ url: '/api/evidence-integrity', headers: { cookie } })).json()).toMatchObject({ ok: true, findings: { mismatched: [] } });
+    expect((await app.inject({ method: 'POST', url, headers: H(), payload: { records: [{ positionId: 'pos_x', kind: 'MISMATCH', storedHash: 'x', contentHash: null }] } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url, headers: H(), payload: { records: [], password: PW } })).statusCode).toBe(400);
+    const r = await app.inject({ method: 'POST', url, headers: H(), payload: { records: [{ positionId: 'pos_x', kind: 'MISMATCH', storedHash: 'x', contentHash: 'a'.repeat(64) }], password: PW } });
+    expect(r.statusCode).toBe(400); expect(r.json().error).toMatch(/not an open finding/);
+    failureGate.reset();
   });
   it('resuming after a pause needs the passphrase', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/control', headers: H(), payload: { pausedNewOrders: true } })).statusCode).toBe(200);

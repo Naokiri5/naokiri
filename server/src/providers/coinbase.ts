@@ -1,5 +1,6 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
 registerProvider({
+  hosts: ['api.exchange.coinbase.com'],
   id: 'coinbase', name: 'Coinbase Exchange (public)', sourceClass: 'cex', markets: ['crypto'],
   license: 'Coinbase Exchange public market data — Coinbase Market Data Terms.', realtime: 'NEAR_REALTIME', requiresCredentials: false,
 });

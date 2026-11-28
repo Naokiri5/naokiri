@@ -17,7 +17,7 @@ import { ledger, PAPER_ACCOUNT } from '../../src/portfolio/ledger.js';
 import { queueForApproval, submitEntry } from '../../src/exec/oms.js';
 import type { CrashPoint } from '../../src/exec/crashpoint.js';
 import type { DecisionReport } from '../../src/decision/engine.js';
-import { seedInstrument } from '../helpers.js';
+import { promoteStrategiesWithEvidence, seedInstrument } from '../helpers.js';
 
 const SERVER_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CHILD = join(SERVER_DIR, 'test', 'crash', 'child.ts');
@@ -26,7 +26,7 @@ export const DEPOSIT = 10_000;
 /** Child exit code when a barrier is never released; exits directly so the OMS cannot catch it and carry on. */
 export const BARRIER_TIMEOUT = 75;
 
-export interface ChildRequest { db: string; op: 'enter' | 'approve' | 'monitor' | 'close'; mid?: number; crashAt?: CrashPoint; occurrence?: number; barrier?: CrashPoint; go?: string; barrierMs?: number }
+export interface ChildRequest { db: string; op: 'enter' | 'approve' | 'monitor' | 'close'; reportFile?: string; mid?: number; crashAt?: CrashPoint; occurrence?: number; barrier?: CrashPoint; go?: string; barrierMs?: number }
 export interface ChildOutcome { code: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string; result: unknown; marker: { at: CrashPoint; occurrence: number } | null }
 
 /** Deterministic ETHUSDT last price; children seed the same synthetic market. */
@@ -47,7 +47,7 @@ export function newCaseDir(template?: string) {
   return { dir, db: join(dir, 'mia.db') };
 }
 
-function report(instrumentId: string, last: number, decision: DecisionReport['decision']): DecisionReport {
+export function report(instrumentId: string, last: number, decision: DecisionReport['decision']): DecisionReport {
   return { id: `dec_${CANDIDATE}`, candidateId: CANDIDATE, traceId: 'tr_crash', asset: 'ETHUSDT', instrumentId, market: 'crypto', venue: 'binance', strategy: { id: 'trend_pullback', version: '1.0.0' }, regime: 'TREND_UP',
     entryRef: last, stopLoss: last * 0.97, takeProfit: [{ price: last * 1.045, fraction: 0.5, r: 1.5 }, { price: last * 1.09, fraction: 0.5, r: 3 }],
     consensus: { id: 'q', state: 'STRONG_CONSENSUS', support: 0.7, opposition: 0.1, expiresAt: new Date(Date.now() + 3600_000).toISOString() },
@@ -65,7 +65,7 @@ export function buildStage(stage: Stage) {
   const rep = report(inst.id, last, stage === 'pending' ? 'APPROVED_FOR_USER_CONFIRMATION' : 'PAPER_TRADE');
   writeFileSync(join(dir, 'report.json'), J(rep));
   withDb(db, () => {
-    seedStrategies(); run("UPDATE strategies SET status='PAPER'");
+    seedStrategies(); promoteStrategiesWithEvidence();
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: stage === 'pending' ? 'APPROVAL' : 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', DEPOSIT);
     run('INSERT INTO decisions(id,candidate_id,instrument,market,direction,strategy,decision,score,created_at,report) VALUES (?,?,?,?,?,?,?,?,?,?)', rep.id, rep.candidateId, inst.id, 'crypto', 'LONG', 'trend_pullback', rep.decision, 70, Date.now(), J(rep));
     if (stage === 'pending' && !queueForApproval(rep)) throw new Error('approval was not queued');

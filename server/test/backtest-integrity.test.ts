@@ -97,10 +97,10 @@ describe('backtest evidence integrity', () => {
   });
 
   it('keeps legacy results readable and excludes them from current-model aggregates', () => {
-    freshDb();
+    freshDb(false); // no baseline evidence: this test counts only the backtests it stores
     try {
       const definition = STRATEGIES[0];
-      seedBacktestFixture(definition.id);
+      seedBacktestFixture(definition.id, { qualifying: false, legacy: true });
       expect(strategyStats(definition.id)?.trades).toBe(1);
       expect(listBacktests()[0].warnings).toContain('This backtest used the earlier fill model. Rerun it to include the current cost and gap handling.');
 

@@ -1,6 +1,7 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
 import type { Quote } from './coinbase.js';
 registerProvider({
+  hosts: ['api.kraken.com'],
   id: 'kraken', name: 'Kraken (public)', sourceClass: 'cex', markets: ['crypto'],
   license: 'Kraken public REST market data — Kraken Terms of Service.', realtime: 'NEAR_REALTIME', requiresCredentials: false,
 });

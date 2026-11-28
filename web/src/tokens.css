@@ -1,0 +1,106 @@
+@font-face {
+  font-family: Manrope;
+  src: url('./assets/fonts/manrope-latin.woff2') format('woff2');
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Instrument Serif';
+  src: url('./assets/fonts/instrument-serif-latin-italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  --mia-ui: Manrope, system-ui, sans-serif;
+  --mia-display: 'Instrument Serif', Georgia, serif;
+  --mia-mono: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  --mia-ink: #100e1b;
+  --mia-navy: #161326;
+  --mia-panel: #1d1930;
+  --mia-elevated: #29243d;
+  --mia-text: #f6f3fc;
+  --mia-muted: #b9b3cc;
+  --mia-faint: #a29ab6;
+  --mia-line: #36304a;
+  --mia-edge: #4b4165;
+  --mia-lavender: #c4a9ff;
+  --mia-azure: #7cd9ff;
+  --mia-lime: #d2fa7b;
+  --mia-gold: #e0bd83;
+  --mia-gain: #75e3b9;
+  --mia-loss: #ff949e;
+  --mia-warning: #f0c375;
+  --mia-on-action: #1b2412;
+  --mia-action: #d2fa7b;
+  --mia-action-hover: #e4ffa7;
+  /* BrainOS mandate accents: FAST is candy pink, DEEP is soft sky. `*-ink` variants are the text-safe forms. */
+  --mia-fast: #f48bb8;
+  --mia-deep: #a5d8ff;
+  --mia-fast-ink: #f48bb8;
+  --mia-deep-ink: #a5d8ff;
+  --mia-cream: #fff8f1;
+  --mia-coral: #f0aba3;
+  --mia-coral-wash: rgba(240, 171, 163, .14);
+  --mia-powder: #bdd7ee;
+  --mia-powder-wash: rgba(189, 215, 238, .12);
+  --mia-sage: #c5dcd0;
+  --mia-sage-wash: rgba(197, 220, 208, .12);
+  --mia-shadow: none;
+  --mia-radius-card: 14px;
+  --mia-graphite: #302d39;
+}
+
+:root[data-theme='light'] {
+  /* MIA Atelier: soft-white workspace. Coral and powder blue are decorative accents; gain/loss stay semantic
+     green/red so a coral surface is never read as a loss. Text-safe `*-ink` forms meet WCAG AA on white. */
+  --mia-ink: #f6f7f9;            /* Cloud White page */
+  --mia-navy: #eef0f3;
+  --mia-panel: #ffffff;          /* Pure White cards */
+  --mia-elevated: #f2f3f6;
+  --mia-text: #252b31;           /* Graphite */
+  --mia-muted: #545c66;
+  --mia-faint: #66707b;
+  --mia-line: #e5e8ed;
+  --mia-edge: #d4d9e0;
+  --mia-lavender: #2b6386;       /* links and focus: powder-blue ink, never coral */
+  --mia-azure: #2b6386;
+  --mia-lime: #b4473b;           /* brand point: coral ink */
+  --mia-gold: #7a5418;
+  --mia-gain: #1b7a50;
+  --mia-loss: #b3261e;
+  --mia-warning: #8a5410;
+  --mia-on-action: #ffffff;
+  --mia-action: #252b31;         /* primary actions are Graphite, as in the Run Session control */
+  --mia-action-hover: #3a424b;
+  --mia-fast: #f0aba3;           /* Soft Coral */
+  --mia-deep: #bdd7ee;           /* Powder Blue */
+  --mia-fast-ink: #a3402f;
+  --mia-deep-ink: #1f5b85;
+  --mia-coral: #f0aba3;
+  --mia-coral-wash: #fce8e5;
+  --mia-powder: #bdd7ee;
+  --mia-powder-wash: #e8f1f9;
+  --mia-sage: #c5dcd0;
+  --mia-sage-wash: #e6f0ea;
+  --mia-shadow: 0 1px 2px rgba(37, 43, 49, .04), 0 10px 28px rgba(37, 43, 49, .06);
+  --mia-radius-card: 20px;
+}
+
+.mia-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mia-text);
+  font-family: var(--mia-ui);
+  font-size: 25px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.075em;
+  white-space: nowrap;
+}
+
+.mia-mark, .mia-wordmark-point { color: var(--mia-lime); }

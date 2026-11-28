@@ -1,16 +1,36 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { config, REPO_ROOT } from '../config.js';
-import { all, get } from '../db/db.js';
+import { all, get, getDb, readSnapshot } from '../db/db.js';
 import { currentPolicy } from '../risk/policy.js';
 import { verifyAuditChain } from '../core/audit.js';
 import { WORKERS } from '../workers/registry.js';
-import { reconcile } from '../portfolio/calendar.js';
+import { fillEvidenceMismatches, reconcile } from '../portfolio/calendar.js';
+import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 
 /** Part 12.7 release gates. Evidence-driven; manual gates can only be satisfied by humans outside this app. */
 export interface Gate { id: string; name: string; status: 'PASS' | 'FAIL' | 'PENDING' | 'NOT_CERTIFIED' | 'NOT_IMPLEMENTED'; evidence: string }
 export interface TestRef { file: string; fullName: string }
+
+export const RELEASE_GATE_EVIDENCE_MAX_AGE_MS = 3 * 60_000;
+interface ReleaseGateEvidence {
+  checkedAt: number;
+  passed: number;
+  total: number;
+  liveAllowed: boolean;
+  summary: string;
+  unmetGateIds: readonly string[];
+}
+
+const releaseEvidence = new WeakMap<ReturnType<typeof getDb>, ReleaseGateEvidence>();
+
+/** Reuses the last canonical evaluation for advisory display without rereading QA or the audit chain. */
+export function recentReleaseGateEvidence(at = Date.now()): ReleaseGateEvidence | null {
+  const evidence = releaseEvidence.get(getDb());
+  if (!evidence || evidence.checkedAt > at || at - evidence.checkedAt > RELEASE_GATE_EVIDENCE_MAX_AGE_MS) return null;
+  return evidence;
+}
 
 const marketTests: readonly TestRef[] = [
   ...['fresh multi-source data is OK', 'stale quote fails closed', 'cross-venue deviation fails', 'missing instrument fails'].map(title => ({ file: 'server/test/quality.test.ts', fullName: `data quality gate (Part 32.2) ${title}` })),
@@ -23,7 +43,24 @@ const workerTests: readonly TestRef[] = [
 const joeTests: readonly TestRef[] = [
   { file: 'server/test/api.test.ts', fullName: 'HTTP API (auth, permissions, release gate) Trader Joe has no order/limit/mode/withdraw tools and refuses such commands' },
 ];
+/** Exact named regressions required in every shuffled P0 run (Linux CI). */
+export const P0_REQUIRED_TESTS: readonly TestRef[] = [
+  { file: 'server/test/oms.test.ts', fullName: 'Paper OMS lifecycle (Parts 17/20/26/27) freezes new entries at the shutdown boundary but permits existing protective exits' },
+  { file: 'server/test/runtime-shutdown.test.ts', fullName: 'canonical process shutdown latches once and changes the existing readiness endpoint without claiming liveness failure' },
+  ...['SIGTERM', 'SIGINT'].map(signal => ({ file: 'server/test/runtime-shutdown.test.ts', fullName: `real server subprocess lifecycle ${signal} exits normally and preserves committed WAL evidence` })),
+  ...[
+    'recovers committed canonical WAL state and rolls back an interrupted financial transaction after process death',
+    'fences a real suspended leader after another process takes over its expired lease',
+    'a real standby process waits for lease expiry after primary SIGKILL',
+  ].map(title => ({ file: 'server/test/brainos-wal-audit.test.ts', fullName: `BrainOS canonical WAL audit evidence (Q42/Q48 partial coverage) ${title}` })),
+  ...[
+    'drains a suspended scanner and ingress before releasing the captured lease',
+    'retains the lease when the ingress drain exceeds its deadline',
+  ].map(title => ({ file: 'server/test/ops-lease-hardening.test.ts', fullName: `engine lease hardening (additive to holdEngine) ${title}` })),
+];
+
 const emergencyTests: readonly TestRef[] = [
+  ...P0_REQUIRED_TESTS,
   { file: 'server/test/oms.test.ts', fullName: 'Paper OMS lifecycle (Parts 17/20/26/27) emergency stop: blocks, cancels, verifies protection, does not auto-close' },
   { file: 'server/test/api.test.ts', fullName: 'HTTP API (auth, permissions, release gate) risk-increasing actions require step-up; risk-reducing ones do not' },
 ];
@@ -137,8 +174,16 @@ export function releaseGates(report?: unknown) {
   g.push({ id: 'G03', name: 'All 100 worker roles tested; health observable', ...workers, status: 'PENDING', evidence: `${workers.evidence}; ${WORKERS.length} workers registered (requires 100); current offline CEX test covers 94 of 100, six on-chain roles and complete health coverage remain unproven` });
   const joe = testGate('G04');
   g.push({ id: 'G04', name: 'Trader Joe factuality & authorization tests', ...joe, status: 'PENDING', evidence: `${joe.evidence}; authorization checks do not certify LLM factuality; human review is required` });
-  const rec = reconcile();
-  g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile', status: rec.ok ? 'PASS' : 'FAIL', evidence: rec.detail });
+  try {
+    // One snapshot for all three checks, so a commit between them cannot produce a mixed verdict.
+    const { rec, unresolved, fillGaps } = readSnapshot(() => ({ rec: reconcile(), unresolved: unreconciledPaperOrders(), fillGaps: fillEvidenceMismatches() }));
+    g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile',
+      status: rec.ok && unresolved === 0 && fillGaps === 0 ? 'PASS' : 'FAIL',
+      evidence: `${rec.detail}; ${unresolved} unresolved paper order(s); ${fillGaps} filled order(s) without matching fill quantity and fees. External venue reconciliation is not certified.` });
+  } catch {
+    g.push({ id: 'G05', name: 'Entries, exits, fills, fees & PnL reconcile',
+      status: 'FAIL', evidence: 'Canonical ledger or order recovery evidence unavailable.' });
+  }
   const ac = verifyAuditChain();
   g.push({ id: 'G06', name: 'Audit log integrity', status: ac.ok ? 'PASS' : 'FAIL', evidence: `${ac.entries} hash-chained entries${ac.ok ? ' verified' : `, broken at ${ac.brokenAt}`}` });
   g.push({ id: 'G07', name: 'Wallet permissions & signing isolation security tests', status: 'NOT_IMPLEMENTED', evidence: 'No signer exists in this build (by design). Requires isolated signer + external security test.' });
@@ -155,7 +200,11 @@ export function releaseGates(report?: unknown) {
   g.push({ id: 'G12', name: 'Live venue adapter + transaction firewall implemented', status: 'NOT_IMPLEMENTED', evidence: 'Deliberately absent until gates G07–G10 pass.' });
   g.push({ id: 'G13', name: 'Independent Release Auditor go/no-go', status: 'NOT_CERTIFIED', evidence: 'Human sign-off required.' });
   g.push({ id: 'G14', name: 'Owner explicit authorization for live execution', status: 'PENDING', evidence: 'Can only be recorded after all other gates pass.' });
-  const liveAllowed = g.every((x) => x.status === 'PASS');
-  return { gates: g, liveAllowed, summary: `${g.filter((x) => x.status === 'PASS').length}/${g.length} gates passed — live execution ${liveAllowed ? 'ELIGIBLE' : 'LOCKED'}` };
+  const unmetGateIds = g.filter((gate) => gate.status !== 'PASS').map((gate) => gate.id);
+  const passed = g.length - unmetGateIds.length;
+  const liveAllowed = unmetGateIds.length === 0;
+  const summary = `${passed}/${g.length} gates passed — live execution ${liveAllowed ? 'ELIGIBLE' : 'LOCKED'}`;
+  if (!arguments.length) releaseEvidence.set(getDb(), { checkedAt: Date.now(), passed, total: g.length, liveAllowed, summary, unmetGateIds });
+  return { gates: g, liveAllowed, summary };
 }
 export const openDefects = () => all('SELECT * FROM journal WHERE kind=? ORDER BY ts DESC LIMIT 50', 'RISK');

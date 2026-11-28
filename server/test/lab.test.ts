@@ -2,7 +2,7 @@ import { beforeEach, describe, it, expect } from 'vitest';
 import { stepExit, newExitState } from '../src/lab/exits.js';
 import { backtest, monteCarlo } from '../src/lab/backtest.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
-import { checkStrategyHealth, paperStats } from '../src/lab/lab.js';
+import { checkStrategyHealth, paperStats, setStrategyStatus } from '../src/lab/lab.js';
 import { getSetting } from '../src/core/settings.js';
 import { get, J, run } from '../src/db/db.js';
 import { strategyPassports } from '../src/ditas/passports.js';
@@ -88,5 +88,33 @@ describe('paper strategy health', () => {
     run('UPDATE strategies SET status=? WHERE id=?', status, strategy.id);
     expect(checkStrategyHealth()).toEqual([]);
     expect(get<{ status: string }>('SELECT status FROM strategies WHERE id=?', strategy.id)?.status).toBe(status);
+  });
+});
+
+describe('atomic strategy lifecycle authority', () => {
+  const id = STRATEGIES[0].id;
+  beforeEach(() => freshDb());
+
+  it('rolls back strategy status and suspension index if audit persistence fails', () => {
+    const before = get('SELECT * FROM strategies WHERE id=?', id);
+    const suspended = getSetting<string[]>('suspendedStrategies', []);
+    // Force a late write failure, after both the lifecycle and suspension writes.
+    run("CREATE TEMP TRIGGER fixture_reject_strategy_audit BEFORE INSERT ON audit_log WHEN NEW.action='strategy.status' BEGIN SELECT RAISE(ABORT, 'fixture audit failure'); END");
+    try {
+      expect(() => setStrategyStatus('strategy-health-monitor', id, 'SUSPENDED')).toThrow('fixture audit failure');
+      expect(get('SELECT * FROM strategies WHERE id=?', id)).toEqual(before);
+      expect(getSetting<string[]>('suspendedStrategies', [])).toEqual(suspended);
+    } finally {
+      run('DROP TRIGGER fixture_reject_strategy_audit');
+    }
+    setStrategyStatus('strategy-health-monitor', id, 'SUSPENDED');
+    expect(get('SELECT status FROM strategies WHERE id=?', id)).toEqual({status: 'SUSPENDED'});
+    expect(getSetting<string[]>('suspendedStrategies', [])).toContain(id);
+    expect(get("SELECT action FROM audit_log WHERE action='strategy.status'")).toEqual({action: 'strategy.status'});
+  });
+
+  it('never accepts a direct LIVE_CANDIDATE promotion, even from the owner', () => {
+    expect(() => setStrategyStatus('owner', id, 'LIVE_CANDIDATE')).toThrow(/certification/);
+    expect(get('SELECT status FROM strategies WHERE id=?', id)).toEqual({status: 'PAPER'});
   });
 });

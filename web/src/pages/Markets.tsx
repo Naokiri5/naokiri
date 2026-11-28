@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChartApi, type UTCTimestamp } from 'lightweight-charts';
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, LineStyle, type IChartApi, type ISeriesApi, type UTCTimestamp } from 'lightweight-charts';
 import { hierarchy, pack } from 'd3-hierarchy';
 import { api, fmt, useApi } from '../api';
 import { Action, Badge, Card, Chg, Empty, ErrorLine, Freshness, Modal, Page, Tabs, useSort } from '../ui';
 import { DecisionView, IndicatorGrid } from './Intel';
+import { useMiaTheme } from '../theme';
 
 export function Terminal() {
   const { symbol = 'BTCUSDT' } = useParams(); const [iv, setIv] = useState<'15m' | '1h' | '4h'>('1h'); const nav = useNavigate();
@@ -18,11 +19,11 @@ export function Terminal() {
     right={<><Freshness at={t?.receivedAt} label="quote" /><Action className="primary" label="Run full analysis" disabled={!!gone} run={async () => setAna(await api('/api/analyze', { body: { symbol } }))} /></>}>
     <ErrorLine e={gone ? null : error} />
     {gone ? <div className="banner info">No data for {symbol}: {gone}</div> :
-    <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) 300px' }}>
+    <div className="grid terminal-layout">
       <div className="col" style={{ gap: 14 }}>
         <Card title={<span className="row"><span className="mono" style={{ fontSize: 18 }}>{fmt.px(t?.last)}</span><Chg v={t?.changePct} /><span className="hint">H {fmt.px(t?.high)} · L {fmt.px(t?.low)} · Vol {fmt.big(t?.quoteVolume)}</span></span>}
           right={<>{(['15m', '1h', '4h'] as const).map((x) => <button key={x} className={`sm ${x === iv ? 'primary' : ''}`} onClick={() => setIv(x)}>{x}</button>)}</>}>
-          {data?.candles?.length ? <CandleChart candles={data.candles} features={f} /> : <Empty>Loading candles…</Empty>}
+          {data?.candles?.length ? <CandleChart candles={data.candles} /> : <Empty>Loading candles…</Empty>}
           <div className="hint" style={{ marginTop: 6 }}>Last candle may be forming (not yet closed); strategies evaluate closed candles only. Lines: EMA20 (blue), EMA50 (violet).</div>
         </Card>
         <div className="grid g3">
@@ -57,27 +58,43 @@ export function Terminal() {
     {ana && <Modal title="Full pipeline analysis" onClose={() => setAna(null)}>{ana.decision ? <DecisionView report={ana} /> : <div className="banner info">{ana.reason}</div>}</Modal>}
   </Page>;
 }
-function CandleChart({ candles, features }: { candles: any[]; features: any }) {
+export type MarketCandle = { t: number; o: number; h: number; l: number; c: number; v: number };
+export type MarketPriceLevel = { price: number; title: string; color: string };
+
+export function CandleChart({ candles, priceLevels }: { candles: MarketCandle[]; priceLevels?: MarketPriceLevel[] }) {
+  const [theme] = useMiaTheme();
   const ref = useRef<HTMLDivElement>(null); const chart = useRef<IChartApi | null>(null); const series = useRef<any>({});
   useEffect(() => {
     if (!ref.current) return;
     const css = getComputedStyle(document.documentElement);
-    const c = createChart(ref.current, { autoSize: true, layout: { background: { color: 'transparent' }, textColor: css.getPropertyValue('--muted').trim(), fontFamily: 'IBM Plex Mono' }, grid: { vertLines: { color: css.getPropertyValue('--line').trim() }, horzLines: { color: css.getPropertyValue('--line').trim() } }, timeScale: { timeVisible: true }, rightPriceScale: { borderVisible: false } });
+    const c = createChart(ref.current, { autoSize: true, layout: { background: { color: 'transparent' }, textColor: css.getPropertyValue('--mia-muted').trim(), fontFamily: 'monospace' }, grid: { vertLines: { color: css.getPropertyValue('--mia-line').trim() }, horzLines: { color: css.getPropertyValue('--mia-line').trim() } }, timeScale: { timeVisible: true }, rightPriceScale: { borderVisible: false } });
     series.current.c = c.addSeries(CandlestickSeries, { upColor: '#22c38e', downColor: '#f0505a', borderVisible: false, wickUpColor: '#22c38e', wickDownColor: '#f0505a' });
     series.current.v = c.addSeries(HistogramSeries, { priceScaleId: 'vol', priceFormat: { type: 'volume' }, color: 'rgba(139,150,168,.35)' });
     c.priceScale('vol').applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     series.current.e20 = c.addSeries(LineSeries, { color: '#4f8cff', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     series.current.e50 = c.addSeries(LineSeries, { color: '#a78bfa', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     chart.current = c; return () => { c.remove(); chart.current = null; };
-  }, []);
+  }, [theme]);
   useEffect(() => {
     const s = series.current; if (!s.c) return;
-    const t = (x: any) => Math.floor(x.t / 1000) as UTCTimestamp;
+    const t = (x: MarketCandle) => Math.floor(x.t / 1000) as UTCTimestamp;
     s.c.setData(candles.map((x) => ({ time: t(x), open: x.o, high: x.h, low: x.l, close: x.c })));
     s.v.setData(candles.map((x) => ({ time: t(x), value: x.v, color: x.c >= x.o ? 'rgba(34,195,142,.35)' : 'rgba(240,80,90,.35)' })));
     const ema = (p: number) => { const k = 2 / (p + 1); let e: number | null = null; return candles.map((x, i) => { e = e == null ? x.c : x.c * k + e * (1 - k); return { time: t(x), value: e, i }; }).filter((x) => x.i >= p).map(({ time, value }) => ({ time, value })); };
     s.e20.setData(ema(20)); s.e50.setData(ema(50));
-  }, [candles, features]);
+  }, [candles, theme]);
+  useEffect(() => {
+    const seriesWithCandles = series.current.c as ISeriesApi<'Candlestick'> | undefined;
+    const currentChart = chart.current;
+    if (!seriesWithCandles || !priceLevels?.length) return;
+    const lines = priceLevels.filter((level) => Number.isFinite(level.price) && level.price > 0)
+      .map((level) => seriesWithCandles.createPriceLine({ ...level, lineStyle: LineStyle.Dashed, lineWidth: 1 }));
+    return () => {
+      if (chart.current === currentChart) {
+        for (const line of lines) seriesWithCandles.removePriceLine(line);
+      }
+    };
+  }, [priceLevels, theme]);
   return <div ref={ref} className="chart" role="img" aria-label="Candlestick price chart" />;
 }
 function Book({ book }: { book: any }) {

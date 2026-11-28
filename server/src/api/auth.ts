@@ -46,11 +46,12 @@ export function createSession(ip: string, method: 'passphrase' | 'privy') {
 }
 export function revokeAllSessions() { run('DELETE FROM sessions'); }
 
-export function validSession(token?: string) {
-  if (!token) return false;
+export function activeSessionExpiry(token?: string): number | null {
+  if (!token) return null;
   const r = get<{ expires_at: number }>('SELECT expires_at FROM sessions WHERE token_hash=?', sha256(token));
-  return !!r && r.expires_at > Date.now();
+  return r && Number.isSafeInteger(r.expires_at) && r.expires_at > Date.now() ? r.expires_at : null;
 }
+export const validSession = (token?: string) => activeSessionExpiry(token) !== null;
 export function logout(token?: string) { if (token) run('DELETE FROM sessions WHERE token_hash=?', sha256(token)); }
 export function changePassword(oldP: string, newP: string, client = 'local') {
   verifyPassphrase(oldP, client, 'password.change');

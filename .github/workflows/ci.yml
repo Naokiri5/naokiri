@@ -14,14 +14,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # For PR events github.sha is GitHub's tested merge commit, not just the source head.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact tested commit
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Tested commit: $EXPECTED_SHA"
+      - name: Scan tested Git history for credentials
+        shell: bash
+        run: |
+          test "$(git rev-parse --is-shallow-repository)" = false
+          scan_dir="$(mktemp -d "$RUNNER_TEMP/mia-gitleaks.XXXXXXXX")"
+          trap 'rm -rf "$scan_dir"' EXIT
+          curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location --retry 2 --max-time 60 \
+            'https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz' \
+            --output "$scan_dir/gitleaks.tar.gz"
+          printf '%s  %s\n' '551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb' \
+            "$scan_dir/gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf "$scan_dir/gitleaks.tar.gz" -C "$scan_dir" gitleaks
+          "$scan_dir/gitleaks" git --redact=100 --no-banner --no-color --log-opts=HEAD .
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: npm ci
       - name: Secret scan
         run: node scripts/secret-scan.mjs
+      - run: npm ci
       - name: Dependency audit (fail on high/critical)
         run: npm audit --audit-level=high
       - name: Typecheck
@@ -30,9 +54,21 @@ jobs:
         run: npm run build
       - name: Unit & integration tests (offline, deterministic)
         run: npm run qa -w server
+      # Same local and CI P0 verification entrypoint, not a release certificate.
+      - name: P0 reliability regressions (three shuffled runs)
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: bash scripts/verify-brainos-phases.sh --p0-only
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: p0-offline-verification-evidence
+          path: ${{ runner.temp }}/mia-brainos-verify.*/logs/
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Web unit tests (status ribbon model)
         run: npm test -w web
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: unit-test-results
@@ -43,8 +79,18 @@ jobs:
     needs: checks
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # For PR events github.sha is GitHub's tested merge commit, not just the source head.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify exact tested commit
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          echo "Tested commit: $EXPECTED_SHA"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -53,7 +99,7 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Build UI and run browser suite
         run: npm run test:e2e
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-failures

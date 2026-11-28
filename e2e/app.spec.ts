@@ -35,6 +35,7 @@ test('owner setup and sign-in', async () => {
   await page.goto('/app');
   const pws = page.locator('input[type=password]'); await pws.nth(0).fill(PW); await pws.nth(1).fill(PW);
   await page.getByRole('button', { name: 'Create owner' }).click();
+  await expect(page.getByRole('heading', { level: 1, name: 'Autopilot', exact: true })).toBeVisible();
   await expect(page.locator('.mode')).toHaveText('READ-ONLY');
   await expect(page.getByText('Market data is stale or disconnected')).toBeVisible(); // offline ⇒ honest stale banner
 });
@@ -52,25 +53,235 @@ test('status ribbon tells the truth about an offline server', async () => {
   await ribbon.locator('[data-seg=engine]').click(); await expect(page).toHaveURL(/\/bot$/);
 });
 
+test('Central Command renders offline, paper reconciliation and research states from the backend', async () => {
+  await page.goto('/bot');
+  const command = page.getByRole('region', { name: 'MIA Central Command' });
+  await expect(command.getByText('Engine authority', { exact: true })).toBeVisible();
+  await expect(command.getByText('OFFLINE', { exact: true }).first()).toBeVisible();
+  await expect(command.getByText('Reconciled', { exact: true })).toBeVisible();
+  await expect(command.getByText('No open positions', { exact: true })).toBeVisible();
+  await expect(command.getByText('Awaiting first comparison', { exact: true })).toBeVisible();
+  await expect(command.getByText('Awaiting samples', { exact: true })).toHaveCount(2);
+  await expect(command.getByRole('link', { name: 'Release gates' })).toHaveAttribute('href', '/qa');
+});
+
+test('FAST and DEEP inspect existing research without changing execution mode', async () => {
+  await page.goto('/autopilot');
+  const lanes = page.getByRole('group', { name: 'Intelligence view' });
+  await expect(page.getByText('Awaiting a DEX research snapshot.')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'FAST market view' })).toBeVisible();
+  const mode = page.locator('.mode');
+  await expect(mode).toHaveText('READ-ONLY');
+  const deep = lanes.getByRole('button', { name: 'DEEP' });
+  await deep.focus();
+  await deep.press('Enter');
+  await expect(deep).toBeFocused();
+  await expect(deep).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('heading', { name: 'DEEP spot chart' })).toBeVisible();
+  const strategy = page.getByRole('region', { name: 'Strategy architect' });
+  await strategy.getByText('Perpetual futures research').click();
+  await expect(strategy).toContainText('Awaiting a futures research snapshot.');
+  await expect(mode).toHaveText('READ-ONLY');
+  const timeframe = page.getByRole('group', { name: 'Chart timeframe' });
+  const candles = page.waitForResponse((response) => response.url().includes('/api/instrument/BTCUSDT?interval=4h'));
+  const fourHours = timeframe.getByRole('button', { name: '4h' });
+  await fourHours.focus();
+  await fourHours.press('Enter');
+  expect((await candles).ok()).toBe(true);
+  await expect(fourHours).toBeFocused();
+  await expect(page.getByText('Market candles unavailable')).toBeVisible();
+});
+
+test('DEEP switches between instrument evidence without granting execution authority', async () => {
+  const statusPath = '**/api/choice/dual/status';
+  const snapshot = (symbol: string, funding: number, openInterest: number, bullish: number, stale = false) => {
+    const asOf = Date.now() - (stale ? 25 * 60_000 : 10_000);
+    return {
+      instrumentId: 'futures:binance-usdm:' + symbol, symbol, stale, error: null,
+      attemptAt: asOf, successAt: asOf, consecutiveFailures: 0,
+      result: {
+        symbol, asOf, market: 'CRYPTO_PERPETUAL_FUTURES', tradingAuthority: false,
+        source: 'binance-usdm-public-klines', state: 'NO_TRADE', reason: 'MULTI_TIMEFRAME_TREND_CONFLICT', plan: null,
+        chartEvidence: { '15m': { trend: 'BULLISH' }, '1h': { trend: 'RANGING' }, '4h': { trend: 'BEARISH' } },
+        marketContext: { funding: { rate: funding, localAt: asOf }, openInterest: { quantity: openInterest, localAt: asOf } },
+        scenarioAnalysis: { calibration: 'UNCALIBRATED', tradingAuthority: false,
+          relativeWeights: { bullish, sideways: 0.2, bearish: 0.8 - bullish } },
+        directionForecasts: { '15m': {
+          targetAt: asOf + 15 * 60_000, deadbandBps: 10, probabilities: { BULLISH: bullish - 0.1, SIDEWAYS: 0.2, BEARISH: 0.9 - bullish },
+          empiricalPriceRange: { lower: 100, upper: 120 }, calibrationStatus: 'MEASURED_NOT_CERTIFIED', tradingAuthority: false,
+          historicalEvaluation: { sampleCount: 31, model: { brierScore: 0.5, logLoss: 0.9 }, uniform: { brierScore: 0.667, logLoss: 1.099 } },
+        } },
+      },
+    };
+  };
+  const mutations: string[] = [];
+  const trackRequest = (request: { method(): string; url(): string }) => {
+    if (request.url().includes('/api/') && request.method() !== 'GET') mutations.push(request.url());
+  };
+  await page.route(statusPath, (route) => {
+    const btc = snapshot('BTCUSDT', 0, 100, 0.7);
+    const eth = snapshot('ETHUSDT', -0.0002, 40, 0.3);
+    return route.fulfill({ json: {
+      tradingAuthority: false, fast: { stale: true, result: null }, deep: eth,
+      deepInstruments: [btc, eth, snapshot('SOLUSDT', 0.001, 999, 0.2, true)],
+    } });
+  });
+  page.on('request', trackRequest);
+  try {
+    await page.goto('/autopilot');
+    await page.getByRole('button', { name: 'DEEP' }).click();
+    const strategy = page.getByRole('region', { name: 'Strategy architect' });
+    await strategy.getByText('Perpetual futures research').click();
+    const futures = strategy.getByRole('combobox', { name: 'Futures instrument' });
+    await expect(futures.getByRole('option')).toHaveCount(3);
+    await expect(strategy).toContainText('BTCUSDT perpetual');
+    await expect(strategy).toContainText('0.0000%');
+    await expect(strategy).toContainText('15m direction forecast · Measured, uncertified');
+    await expect(strategy).toContainText('Bullish 60.0%');
+    await expect(strategy).toContainText('0.500 model / 0.667 uniform · 31 observations');
+    await expect(strategy).toContainText('Bullish 70%');
+    await expect(strategy).toContainText('Uncalibrated');
+
+    await futures.selectOption({ label: 'ETHUSDT' });
+    await expect(strategy).toContainText('ETHUSDT perpetual');
+    await expect(strategy).toContainText('-0.0200%');
+    await expect(strategy).toContainText('Bullish 20.0%');
+    await expect(strategy).toContainText('Bullish 30%');
+    await expect(strategy).not.toContainText('BTCUSDT perpetual');
+    await expect(page.getByRole('combobox', { name: 'Spot market' })).toHaveValue('BTCUSDT');
+
+    await futures.selectOption({ label: 'SOLUSDT' });
+    await expect(strategy).toContainText('Futures evidence is stale or expired.');
+    await expect(strategy).not.toContainText('SOLUSDT perpetual');
+    await expect(strategy).not.toContainText('ETHUSDT perpetual');
+    await expect(page.locator('.mode')).toHaveText('READ-ONLY');
+    expect(mutations).toEqual([]);
+  } finally {
+    page.off('request', trackRequest);
+    await page.unroute(statusPath);
+  }
+});
+
+test('server readiness explains the disabled session controls and the Live lock', async () => {
+  await page.goto('/app');
+  const session = page.getByRole('region', { name: 'MIA Autopilot' });
+  await expect(session.getByText('Preflight checked', { exact: true })).toBeVisible();
+  // FAST and DEEP report server readiness; neither research pathway is presented as executable.
+  const lanes = page.getByRole('group', { name: 'Intelligence view' });
+  for (const lane of ['FAST', 'DEEP']) {
+    await expect(lanes.getByRole('button', { name: lane })).toContainText('Research only');
+    await expect(lanes.getByRole('button', { name: lane })).toContainText('Execution is not certified.');
+  }
+  await expect(session.getByText(/No active mandate\. Run Session asks you to authorize capital/)).toBeVisible();
+  await expect(session.getByRole('button', { name: 'Run Session' })).toBeDisabled();
+  await expect(session.getByRole('button', { name: 'Close Session' })).toBeDisabled();
+  await expect(session.getByRole('link', { name: 'Emergency controls' })).toHaveAttribute('href', '/risk');
+  await session.getByText('Session readiness checklist').click();
+  await expect(session.getByRole('link', { name: 'Review Risk Policy' })).toHaveAttribute('href', '/risk');
+  const before = await (await page.request.get('/api/shell')).json();
+  const live = page.getByRole('group', { name: 'Execution environment' }).getByRole('button', { name: 'Live locked' });
+  const response = page.waitForResponse((result) => result.url().includes('/api/session/preflight?mind=FAST&environment=LIVE'));
+  await live.click();
+  expect(await (await response).json()).toMatchObject({ mind: 'FAST', environment: 'LIVE', canRun: false, canClose: false });
+  await expect(live).toHaveAttribute('aria-pressed', 'true');
+  await expect(session.getByRole('button', { name: 'Run Session' })).toBeDisabled();
+  const after = await (await page.request.get('/api/shell')).json();
+  expect(after.control).toEqual(before.control);
+});
+
 test('accept risk policy (step-up) → fund → PAPER mode', async () => {
   await page.goto('/risk'); await page.getByPlaceholder('Owner passphrase (step-up)').last().fill(PW);
   await page.getByRole('button', { name: 'Accept policy' }).click(); await expect(page.getByText(/Risk policy v1/)).toBeVisible();
   await page.goto('/bot'); await page.getByRole('button', { name: 'Allocate' }).click();
   await expect(page.getByText('$10,000.00').first()).toBeVisible();
   await page.getByPlaceholder('Owner passphrase (step-up)').fill(PW);
-  await page.locator('label:has-text("Paper —")').getByRole('button', { name: 'Switch' }).click();
+  await page.getByRole('button', { name: 'Switch to Paper', exact: true }).click();
   await expect(page.locator('.mode')).toHaveText('PAPER');
   await expect(page.getByText('PAPER TRADING — all balances')).toBeVisible();
 });
 
 test('BOUNDED LIVE cannot be enabled', async () => {
-  const before = errors.length;
-  await page.goto('/bot'); await page.getByPlaceholder('Owner passphrase (step-up)').fill(PW);
-  await page.locator('label:has-text("Bounded live")').getByRole('button', { name: 'Switch' }).click();
-  await expect(page.getByText(/BOUNDED_LIVE blocked/)).toBeVisible();
+  await page.goto('/bot');
+  const environment = page.getByRole('group', { name: 'Execution environment' });
+  await expect(environment.getByRole('button', { name: 'Live locked' })).toBeVisible();
+  const response = await page.request.post('/api/control', { headers: { 'x-mia-csrf': '1' }, data: { mode: 'BOUNDED_LIVE', password: PW } });
+  expect(response.status()).toBe(400);
+  expect(await response.json()).toMatchObject({ error: expect.stringContaining('BOUNDED_LIVE blocked') });
   await expect(page.locator('.mode')).toHaveText('PAPER');
-  // the server's refusal (HTTP 400) is the expected outcome; the browser logs it as a failed resource
-  const extra = errors.splice(before); expect(extra.every((e) => /status of 400/.test(e)), extra.join('\n')).toBe(true);
+});
+
+test('Trader Joe and the portfolio use the recorded paper balance', async () => {
+  await page.goto('/trader-joe');
+  await page.getByRole('button', { name: 'Paper portfolio' }).click();
+  await expect(page.getByRole('log', { name: 'Trader Joe conversation' })).toContainText('Paper equity $10000.00');
+  await page.goto('/smart-portfolio');
+  await expect(page.getByText('$10,000.00', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('PASS', { exact: true })).toBeVisible();
+});
+
+test('swipe authorization: Enter in a field, a repeated key or a plain click never authorizes; one explicit press sends one request', async () => {
+  // The offline server never enables Run Session, so only the paper-session read model and the run command are
+  // stubbed here; this test exercises the browser control, while server rejection is covered in durable-session tests.
+  let runs = 0;
+  await page.route('**/api/session/paper-spot', (route) => route.fulfill({ json: {
+    state: 'CLOSED', canRun: true, canClose: false, checks: [], mandate: null,
+    authorization: { maxCapital: 1000, minDurationHours: 1, maxDurationHours: 720 } } }));
+  await page.route('**/api/session/paper-spot/run', (route) => { runs++; return route.fulfill({ json: { state: 'RUNNING' } }); });
+  try {
+    await page.goto('/autopilot');
+    const session = page.getByRole('region', { name: 'MIA Autopilot' });
+    await session.getByRole('button', { name: 'Run Session' }).click();
+    const sheet = page.getByRole('dialog');
+    await expect(sheet.getByText('Withdrawal permission')).toBeVisible();
+    await sheet.getByLabel('Authorized capital (USD)').fill('100');
+    const credential = sheet.getByPlaceholder('Owner passphrase (step-up)');
+    await credential.fill('any passphrase');
+    await expect(sheet.getByText('$100.00')).toBeVisible();
+    await credential.press('Enter'); await credential.press('Enter');
+    await expect(credential).toBeFocused(); // focus never jumps to the handle
+    const handle = sheet.getByRole('button', { name: /Swipe to authorize: swipe right, or press Enter/ });
+    await handle.click(); // a plain mouse click is not a swipe
+    await page.waitForTimeout(300);
+    expect(runs).toBe(0);
+    const sent = page.waitForRequest('**/api/session/paper-spot/run');
+    await handle.focus(); await page.keyboard.press('Enter');
+    expect((await sent).postDataJSON()).toMatchObject({ password: 'any passphrase', capitalCeiling: 100, durationHours: 24 });
+    await page.waitForTimeout(300);
+    expect(runs).toBe(1);
+  } finally {
+    await page.unroute('**/api/session/paper-spot/run'); await page.unroute('**/api/session/paper-spot');
+  }
+});
+
+test('Trader Joe studio reports the real offline state and keeps accessible monitor links', async () => {
+  await page.goto('/trader-joe');
+  const studio = page.getByRole('region', { name: 'Trader Joe studio' });
+  // Offline server: market data is stale, so Joe must not look busy or connected.
+  await expect(studio.getByRole('status')).toContainText('Data disconnected');
+  await expect(studio).toHaveAttribute('data-state', 'DISCONNECTED');
+  // The lazy 3D chunk loads, or the scene reports that WebGL is unavailable; either way the page stays usable.
+  await expect(studio.locator('.mia-joe-canvas').or(studio.getByText('3D view unavailable on this device.'))).toBeVisible();
+  if (process.env.MIA_E2E_SCREENSHOTS) await studio.screenshot({ path: process.env.MIA_E2E_SCREENSHOTS + '/joe-studio.png' });
+  for (const name of ['Decision records', 'Market terminal', 'Portfolio']) await expect(studio.getByRole('link', { name })).toBeVisible();
+  await studio.getByRole('link', { name: 'Market terminal' }).click();
+  await expect(page).toHaveURL(/\/terminal$/);
+});
+
+test('Trader Joe explains the real preflight and Academy exposes the capability contracts', async () => {
+  await page.goto('/trader-joe');
+  await page.getByRole('button', { name: 'FAST paper readiness' }).click();
+  const conversation = page.getByRole('log', { name: 'Trader Joe conversation' });
+  await expect(conversation).toContainText('FAST · PAPER · Run Session is unavailable');
+  await expect(conversation).toContainText('Source: Autopilot session preflight.');
+
+  await page.goto('/academy');
+  await page.getByRole('tab', { name: 'Memory', exact: true }).click();
+  await page.getByText('Autopilot capability evidence · 11').click();
+  await page.getByText('Settings capability evidence · 7').click();
+  await expect(page.getByRole('rowheader', { name: 'holder map' })).toBeVisible();
+  const release = page.getByRole('row').filter({ has: page.getByRole('rowheader', { name: 'release gates' }) });
+  await release.getByText('View source and freshness').click();
+  await expect(release).toContainText('releaseGates()');
 });
 
 test('status ribbon goes STALE (never green) when the server stops answering, then recovers', async ({ browser }) => {
@@ -157,7 +368,6 @@ test('Lab batch retries rate limits and reports partial results', async ({ brows
     const lab = await context.newPage();
     const now = Date.now();
     await lab.clock.install({ time: now });
-    await lab.clock.pauseAt(now + 60_000);
     const attempted: string[] = [];
     await lab.route('**/api/lab', async route => {
       const response = await route.fetch();
@@ -172,7 +382,10 @@ test('Lab batch retries rate limits and reports partial results', async ({ brows
     });
 
     await lab.goto('/lab');
-    await lab.getByRole('button', { name: 'Run first 3 symbols' }).click();
+    const batch = lab.getByRole('button', { name: 'Run first 3 symbols' });
+    await expect(batch).toBeEnabled();
+    await lab.clock.pauseAt(now + 60_000);
+    await batch.click();
     await expect(lab.getByRole('status').filter({ hasText: 'Waiting for the rate limit' })).toBeVisible();
     await expect(lab.getByRole('button', { name: 'Run', exact: true })).toBeDisabled();
     await lab.clock.runFor(999);
@@ -237,7 +450,7 @@ test('academy: upload a document, see it indexed, search it with a cited source'
 });
 
 test('overview dashboard shows account, market intelligence, risk monitor, data sources and activity from the backend', async () => {
-  await page.goto('/app');
+  await page.goto('/overview');
   for (const t of ['Paper account', 'Market intelligence', 'Risk monitor', 'Data sources', 'Activity', 'Trader Joe daily briefing']) await expect(page.getByText(t, { exact: true }).first()).toBeVisible();
   await expect(page.getByText('Equity', { exact: true })).toBeVisible();
   await expect(page.getByRole('meter', { name: 'Daily loss' })).toBeVisible(); // policy accepted earlier in this suite
@@ -251,12 +464,32 @@ test('DITAS execution quality tab lists actual paper orders only', async () => {
   await expect(page.getByText(/Actual paper OMS records only/)).toBeVisible();
 });
 
+test('DITAS intelligence evaluation reports areas without evidence honestly', async () => {
+  await page.goto('/ditas');
+  await page.getByRole('tab', { name: 'Intelligence evaluation' }).click();
+  await expect(page.getByText('BrainOS intelligence evaluation')).toBeVisible();
+  await expect(page.getByText('PROBABILITY', { exact: true })).toBeVisible();
+  await expect(page.getByText('NEEDS_EVIDENCE').first()).toBeVisible();
+  await expect(page.getByText(/Research scores and QCI votes are not probabilities/)).toBeVisible();
+  await expect(page.getByText('Evidence coverage')).toBeVisible();
+  await expect(page.getByText(/Session to settled outcome, every link checked/)).toBeVisible();
+  await expect(page.getByText('Evidence integrity')).toBeVisible();
+  await expect(page.getByText('ENTRIES ALLOWED')).toBeVisible();
+  await expect(page.getByText(/Exits and stops keep running/)).toBeVisible();
+});
+
 test('no console errors anywhere', async () => { expect(errors, errors.join('\n')).toEqual([]); });
 
 test('mobile layout has no horizontal overflow', async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, storageState: await page.context().storageState() });
   const m = await ctx.newPage();
-  for (const r of ['/', '/scanner', '/bot', '/risk', '/lab', '/intelligence', '/qhef', '/history', '/academy']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
+  for (const r of ['/', '/app', '/scanner', '/bot', '/risk', '/lab', '/intelligence', '/qhef', '/history', '/academy']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
   await expect(m.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=live]')).toBeInViewport();
+  await m.goto('/autopilot');
+  const chart = await m.getByRole('heading', { name: 'FAST market view' }).boundingBox();
+  const positions = await m.getByRole('heading', { name: 'Open positions', exact: true }).boundingBox();
+  const activity = await m.getByRole('heading', { name: 'MIA Activity' }).boundingBox();
+  expect(chart!.y).toBeLessThan(positions!.y);
+  expect(positions!.y).toBeLessThan(activity!.y);
   await ctx.close();
 });

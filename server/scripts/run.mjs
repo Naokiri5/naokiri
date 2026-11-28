@@ -3,6 +3,7 @@
  * Cross-platform launcher (replaces POSIX `VAR=x cmd` prefixes that fail in Windows cmd/PowerShell).
  *   node scripts/run.mjs start|dev
  *   node scripts/run.mjs backup create|verify <file>|list
+ *   node scripts/run.mjs simulate --strategy <id> --candles <json> --tape <ndjson.gz> ... (offline research)
  * Sets NODE_USE_ENV_PROXY (so built-in fetch honours HTTPS_PROXY where one is configured) and silences the
  * node:sqlite experimental warning, then runs src/main.ts through tsx.
  */
@@ -20,8 +21,8 @@ const mode = process.argv[2] ?? 'start';
 const serverDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const env = { ...process.env, NODE_USE_ENV_PROXY: '1', NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' ') };
 const { existsSync } = await import('node:fs');
-const entry = mode === 'backup' ? 'ops/backup-cli' : 'main';
-const extra = mode === 'backup' ? process.argv.slice(3) : [];
+const entry = mode === 'backup' ? 'ops/backup-cli' : mode === 'simulate' ? 'lab/simulate-cli' : 'main';
+const extra = mode === 'backup' || mode === 'simulate' ? process.argv.slice(3) : [];
 const builtEntry = resolve(serverDir, 'dist', `${entry}.js`);
 let command;
 let args;

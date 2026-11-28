@@ -36,12 +36,19 @@ export function assessCexAsset(instrumentId: string): SafetyResult {
   return { status, reasons, checks, eligibleForAutomation: eligible };
 }
 
-/** DEX token heuristics. Contract-level checks need an RPC provider (pending) ⇒ never better than CAUTION, never automation-eligible. */
-export function assessDexPair(p: DexPair, nowTs = Date.now()): SafetyResult {
+/** DEX token heuristics. Mint checks alone cannot establish executable sell routes or automation eligibility. */
+export function assessDexPair(p: DexPair, nowTs = Date.now()): SafetyResult & { hardLaunchRisk: boolean } {
   const checks: SafetyResult['checks'] = []; const reasons: string[] = [];
   let status: SafetyStatus = 'CAUTION';
-  const add = (name: string, result: SafetyResult['checks'][0]['result'], detail: string, s?: SafetyStatus) => { checks.push({ name, result, detail }); if (s) { status = worst(status, s); reasons.push(`${name}: ${detail}`); } };
-  add('contract permissions / sell simulation', 'NOT_AVAILABLE', 'EVM/Solana RPC provider not configured — honeypot checks incomplete', 'UNVERIFIED');
+  let hardLaunchRisk = false;
+  const add = (name: string, result: SafetyResult['checks'][0]['result'], detail: string, s?: SafetyStatus, expectedLaunchRisk = false) => {
+    checks.push({ name, result, detail });
+    if (!s) return;
+    status = worst(status, s);
+    reasons.push(`${name}: ${detail}`);
+    if (!expectedLaunchRisk && (s === 'REJECTED' || s === 'HIGH_RISK')) hardLaunchRisk = true;
+  };
+  add('contract permissions / sell simulation', 'NOT_AVAILABLE', 'Full contract and executable sell-route verification unavailable', 'UNVERIFIED');
   if (p.liquidityUsd < 10_000) add('pool liquidity', 'FAIL', `$${fmt(p.liquidityUsd)}`, 'REJECTED');
   else if (p.liquidityUsd < 100_000) add('pool liquidity', 'WARN', `$${fmt(p.liquidityUsd)}`, 'HIGH_RISK');
   else add('pool liquidity', 'PASS', `$${fmt(p.liquidityUsd)}`);
@@ -50,11 +57,11 @@ export function assessDexPair(p: DexPair, nowTs = Date.now()): SafetyResult {
   else add('sell activity', 'PASS', `${p.buys24h} buys / ${p.sells24h} sells`);
   const ageH = p.pairCreatedAt ? (nowTs - p.pairCreatedAt) / 3600_000 : null;
   if (ageH == null) add('pair age', 'NOT_AVAILABLE', 'unknown');
-  else if (ageH < 24) add('pair age', 'WARN', `${ageH.toFixed(1)}h old`, 'HIGH_RISK'); else add('pair age', 'PASS', `${(ageH / 24).toFixed(1)}d`);
+  else if (ageH < 24) add('pair age', 'WARN', `${ageH.toFixed(1)}h old`, 'HIGH_RISK', true); else add('pair age', 'PASS', `${(ageH / 24).toFixed(1)}d`);
   if (p.liquidityUsd > 0 && p.fdv / p.liquidityUsd > 200) add('FDV/liquidity', 'WARN', `${(p.fdv / p.liquidityUsd).toFixed(0)}×`, 'HIGH_RISK');
   if (p.volume24h > 0 && p.liquidityUsd > 0 && p.volume24h / p.liquidityUsd > 50) add('volume/liquidity (wash proxy)', 'WARN', `${(p.volume24h / p.liquidityUsd).toFixed(0)}×`, 'HIGH_RISK');
   if (Math.abs(p.change24h) > 300) add('pump/dump pattern', 'WARN', `${p.change24h.toFixed(0)}% 24h`, 'HIGH_RISK');
   if (!p.hasWebsite && !p.hasSocials) add('project metadata', 'WARN', 'no website or socials', 'CAUTION');
-  return { status, reasons, checks, eligibleForAutomation: false };
+  return { status, reasons, checks, eligibleForAutomation: false, hardLaunchRisk };
 }
 const fmt = (x: number) => (x >= 1e9 ? `${(x / 1e9).toFixed(2)}B` : x >= 1e6 ? `${(x / 1e6).toFixed(2)}M` : x >= 1e3 ? `${(x / 1e3).toFixed(1)}K` : x.toFixed(0));

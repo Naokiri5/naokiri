@@ -1,5 +1,6 @@
 import { fetchProvider, registerProvider, setRateLimit } from './http.js';
 registerProvider({
+  hosts: ['api.frankfurter.dev'],
   id: 'frankfurter', name: 'Frankfurter (ECB reference rates)', sourceClass: 'fx_reference', markets: ['forex'],
   license: 'ECB euro foreign exchange reference rates — free reuse with attribution. Reference fixing, NOT a tradeable quote.',
   realtime: 'DAILY_REFERENCE', requiresCredentials: false,

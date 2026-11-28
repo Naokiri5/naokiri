@@ -1,7 +1,9 @@
-import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
+import { ensureStorageDirectory, LinkedStorageFileError, readPrivateStorageFile } from './ops/storagePaths.js';
+import { readPublicOrigin } from './security/origins.js';
 
 const env = process.env;
 /** Repository root, derived from this file's location (NOT the shell's cwd), so any launch directory works. */
@@ -30,19 +32,30 @@ export function loadEvidenceKey(dataDir: string, envValue = env.MIA_EVIDENCE_KEY
     return { key: Buffer.from(envValue, 'hex'), source: 'env' };
   }
   if (!persist) return { key: randomBytes(32), source: 'ephemeral' };
-  const file = join(dataDir, 'evidence.key');
-  const readKey = () => {
-    const v = readFileSync(file, 'utf8').trim();
-    if (!hex.test(v) || v.length % 2) throw new Error('evidence.key must contain at least 64 hex characters with even length');
-    return { key: Buffer.from(v, 'hex'), source: 'file' as const };
-  };
   try {
+    const directory = ensureStorageDirectory(dataDir);
+    const file = join(directory, 'evidence.key');
+    const readKey = () => {
+      const until = performance.now() + 250;
+      let wait: Int32Array | undefined;
+      for (;;) {
+        try {
+          const v = readPrivateStorageFile(file).trim();
+          if (!hex.test(v) || v.length % 2) throw new Error('evidence.key must contain at least 64 hex characters with even length');
+          return { key: Buffer.from(v, 'hex'), source: 'file' as const };
+        } catch (error) {
+          // An atomic publisher holds two links until the private staging name is removed.
+          if (!(error instanceof LinkedStorageFileError) || performance.now() >= until) throw error;
+          wait ??= new Int32Array(new SharedArrayBuffer(4));
+          Atomics.wait(wait, 0, 0, 5);
+        }
+      }
+    };
     try { return readKey(); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
 
-    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     const key = randomBytes(32);
-    const staging = mkdtempSync(join(dataDir, '.evidence-key-'));
+    const staging = mkdtempSync(join(directory, '.evidence-key-'));
     const staged = join(staging, 'key');
     try {
       writeFileSync(staged, key.toString('hex') + '\n', { mode: 0o600, flag: 'wx', flush: true });
@@ -52,16 +65,19 @@ export function loadEvidenceKey(dataDir: string, envValue = env.MIA_EVIDENCE_KEY
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         return readKey();
       }
+      unlinkSync(staged);
       return { key, source: 'generated' };
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
   } catch (error) {
-    throw new Error('A persistent evidence signing key is required. Check MIA_DATA_DIR, restore the original evidence.key, or configure MIA_EVIDENCE_KEY.', { cause: error });
+    throw new Error('A persistent evidence signing key is required. Verify MIA_DATA_DIR ownership and that the original evidence.key is a private regular file, or configure MIA_EVIDENCE_KEY.', { cause: error });
   }
 }
-const DATA_DIR = env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data');
-const EVIDENCE = loadEvidenceKey(DATA_DIR);
+const requestedDataDir = env.MIA_DATA_DIR ? resolve(env.MIA_DATA_DIR) : resolve(REPO_ROOT, 'data');
+const persistEvidence = env.MIA_OFFLINE !== '1' || !!env.MIA_DATA_DIR;
+const DATA_DIR = persistEvidence ? ensureStorageDirectory(requestedDataDir) : requestedDataDir;
+const EVIDENCE = loadEvidenceKey(DATA_DIR, env.MIA_EVIDENCE_KEY, persistEvidence);
 
 const intEnv = (name: string, fallback: number, min: number, max: number) => {
   const raw = env[name]; if (raw == null || raw === '') return fallback;
@@ -91,9 +107,29 @@ export const config = {
   evidenceKeySource: EVIDENCE.source,
   /** Add the Secure flag to the session cookie (set when MIA is served over HTTPS / behind a TLS proxy). */
   secureCookie: env.MIA_SECURE_COOKIE === '1',
+  /** Browser-facing origin for proxies that rewrite the Host authority. */
+  publicOrigin: readPublicOrigin(env.MIA_PUBLIC_ORIGIN),
   webDist: env.MIA_WEB_DIST ? resolve(env.MIA_WEB_DIST) : resolve(REPO_ROOT, 'web', 'dist'),
 };
 
+/**
+ * Every MIA_* environment variable the server reads. Documented in .env.example (a test keeps both in sync with the
+ * source). Unknown MIA_* names are reported at startup, so a typo such as MIA_BACKUP_KEYY is not silently ignored.
+ */
+export const MIA_ENV_VARS = [
+  'MIA_ALLOW_REMOTE_SETUP', 'MIA_AUTH_MODE', 'MIA_BACKUP_DIR', 'MIA_BACKUP_INTERVAL_H', 'MIA_BACKUP_KEEP', 'MIA_BACKUP_KEY',
+  'MIA_CHOICE_SHADOW', 'MIA_CONSENSUS_DETAIL_HOURS', 'MIA_DATA_DIR', 'MIA_DEEP_TIER', 'MIA_DUAL_RESEARCH',
+  'MIA_ENGINE_LEASE_TTL_MS', 'MIA_EVIDENCE_KEY', 'MIA_GIT_SHA', 'MIA_HOST', 'MIA_JOE_MODEL', 'MIA_KB_EMBEDDINGS',
+  'MIA_KB_MAX_UPLOAD_MB', 'MIA_LIVE_TESTS', 'MIA_LOG', 'MIA_MAX_EXEC_BOOK_AGE_MS', 'MIA_OFFLINE', 'MIA_PORT',
+  'MIA_PRIVY_APP_ID', 'MIA_PRIVY_EMBEDDED_WALLETS', 'MIA_PRIVY_OWNER_ID', 'MIA_PRIVY_VERIFICATION_KEY',
+  'MIA_PUBLIC_ORIGIN', 'MIA_SCAN_INTERVAL_MS', 'MIA_SECURE_COOKIE', 'MIA_TICKER_INTERVAL_MS', 'MIA_WEB_DIST',
+] as const;
+/** MIA_* names present in the environment that the server does not read (likely typos). Names only, never values. */
+export function unknownMiaEnv(source: Record<string, string | undefined> = env): string[] {
+  const known = new Set<string>(MIA_ENV_VARS);
+  return Object.keys(source).filter((name) => name.startsWith('MIA_') && !known.has(name)).sort();
+}
+
 export function ensureDataDir() {
-  mkdirSync(config.dataDir, { recursive: true });
+  return ensureStorageDirectory(config.dataDir);
 }

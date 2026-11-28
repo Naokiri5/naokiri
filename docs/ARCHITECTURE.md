@@ -1,5 +1,8 @@
 # MIA 4.1 — Architecture & Trust Boundaries (Part 22.2)
 
+> BrainOS master architecture, trading-mandate model, subsystem classification and pending-work register:
+> [`BRAINOS_MASTER_ARCHITECTURE.md`](BRAINOS_MASTER_ARCHITECTURE.md). This document keeps the 4.1 trust boundaries.
+
 ## Runtime topology
 
 ```
@@ -44,7 +47,7 @@
 | Risk → execution | Execution requires mode ≥ PAPER, ALLOW, and last-moment validation (`exec/oms.ts`). |
 | Real-money execution | No live venue adapter can be enabled: `qa/gates.ts` keeps `LIVE_EXECUTION` locked until gates pass **and** owner authorizes. No signer exists in this build. |
 | Withdrawals | Bot has no withdrawal path. Withdrawal workflow stops at preview/`BLOCKED_BY_RELEASE_GATE`. |
-| Trader Joe | Tools are read-only except `pause_bot`, `pause_new_orders` (risk-reducing). Cannot change limits, mode, or allocation. |
+| Trader Joe | Model tools read and evaluate evidence. The authenticated standalone `pause` command is handled by the server before model dispatch. |
 | Owner config | Risk policy / mode changes require an authenticated session and are written to the append-only audit log with policy versioning. |
 
 ## Specialist roles vs runtime processes (Part 22 / 29.2)

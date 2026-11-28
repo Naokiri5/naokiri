@@ -1,4 +1,12 @@
 import { ditasRoutes } from '../ditas/routes.js';
+import { acknowledgeEvidenceFindings, evaluateEvidenceIntegrity, MAX_ACKNOWLEDGE } from '../ditas/evidenceIntegrity.js';
+import { recentChoiceShadows } from '../ditas/memory.js';
+import { paperChoiceOutcomes } from '../ditas/execution.js';
+import { assessFastMemecoinResearch, reconstructDeepFuturesResearch } from '../choice/dualResearch.js';
+import { dualResearchStatus } from '../choice/dualRuntime.js';
+import { FUTURES_RESEARCH_SYMBOLS, fetchFuturesResearchSnapshot } from '../providers/binanceFuturesResearch.js';
+import { catalogSummary } from '../fabric/catalog.js';
+import { paperFillEvents } from '../exec/fillEvents.js';
 import { knowledgeRoutes } from '../knowledge/routes.js';
 import { analyzeChart } from '../chart/analysis.js';
 import { replayChart } from '../chart/replay.js';
@@ -10,8 +18,9 @@ import * as totp from '../security/totp.js';
 import { authMode, passphraseSignInAllowed, stepUpMethod, verifyStepUp } from '../security/stepUp.js';
 import { createVerifiedBackup } from '../ops/backup.js';
 import { bus } from '../core/bus.js';
+import { isBusTopic, telemetry, TELEMETRY_SCHEMA_VERSION, type TelemetryEvent } from '../core/telemetry.js';
 import { market } from '../market/store.js';
-import { board, rejections, recentDecisions, analyzeInstrument, dexBoard } from '../market/scanner.js';
+import { board, rejections, recentDecisions, analyzeInstrument, dexBoard, waitingCandidates } from '../market/scanner.js';
 import { bubbleMap } from '../market/bubbles.js';
 import { isEligibleSpot } from '../market/fabric.js';
 import { assessQuality, bookImpact } from '../market/quality.js';
@@ -21,7 +30,8 @@ import { readIndicators, INDICATOR_SPECIALISTS } from '../workers/indicators.js'
 import { WORKERS, DOMAINS, REQUIRED_DOMAINS } from '../workers/registry.js';
 import { POOL, quarantined, releaseQuarantine } from '../workers/runtime.js';
 import { workerEffectiveness } from '../workers/effectiveness.js';
-import { overviewSnapshot } from '../dashboard/overview.js';
+import { workerReliability } from '../workers/reliability.js';
+import { activityFeed, overviewSnapshot } from '../dashboard/overview.js';
 import { QCI_POLICY, DOMAIN_WEIGHTS } from '../qci/coordinator.js';
 import { providers } from '../providers/http.js';
 import { latencyReport } from '../core/latency.js';
@@ -41,16 +51,21 @@ import * as wallet from '../wallet/wallet.js';
 import { listNotifications, markRead, notify } from '../notify/notify.js';
 import { releaseGates } from '../qa/gates.js';
 import { recentAudit, verifyAuditChain } from '../core/audit.js';
-import { botStatus, botStatusView } from '../bot/bot.js';
-import { readiness } from '../ops/readiness.js';
+import { activeEngineFence, botStatus, botStatusView } from '../bot/bot.js';
+import { readiness, staleAfter } from '../ops/readiness.js';
+import { commandStatus } from '../ops/commandStatus.js';
+import { SESSION_ENVIRONMENTS, SESSION_MINDS, paperSpotSessionPreflight, sessionPreflight } from '../ops/sessionPreflight.js';
+import { durableSessionStatus, authorizePaperSpotSession, requestPaperSpotClose, requirePaperSpotSession, suspendDurableEntries } from '../ops/durableSession.js';
+import { MANDATE_LIMITS } from '../ops/tradingMandate.js';
 import { askJoe, chatHistory, dailyBriefing, JOE_TOOL_NAMES } from '../joe/joe.js';
-import { all, get, P } from '../db/db.js';
+import { all, get, P, tx } from '../db/db.js';
 import { getSetting, setSetting } from '../core/settings.js';
 import { audit } from '../core/audit.js';
 import { config, inContainer } from '../config.js';
 import { SCHEMA_VERSION } from '../db/migrations.js';
 import { qhefReport } from '../qhef/qhef.js';
 import { securityOverview, revokeOtherSessions } from '../security/security.js';
+import { allowsApiOrigin } from '../security/origins.js';
 import { discover } from '../market/discover.js';
 import { tradingHistory, toCsv, type HistoryFilter } from '../journal/history.js';
 import { provider, ProviderError } from '../providers/http.js';
@@ -72,6 +87,13 @@ const passphraseOnly = () => {
   if (!passphraseSignInAllowed()) throw httpError(403, 'passphrase authentication is disabled; connect a wallet with Privy');
 };
 const PW = z.string().min(1).max(1024);
+const SESSION_STEP_UP = z.object({ password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional() }).strict();
+/** Run Session: step-up proof plus the owner's mandate (authorized capital and duration). */
+const SESSION_RUN = z.object({
+  password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional(),
+  capitalCeiling: z.number().finite().positive().max(1e12),
+  durationHours: z.number().int().min(MANDATE_LIMITS.minDurationHours).max(MANDATE_LIMITS.maxDurationHours),
+}).strict();
 const INTERVAL = z.enum(['15m', '1h', '4h']);
 /** Path ids and short query tokens: one string, bounded. Repeated query keys (arrays) are rejected as 400, never bound to SQL. */
 const ID = z.string().min(1).max(150);
@@ -83,7 +105,7 @@ const httpError = (code: number, msg: string) => Object.assign(new Error(msg), {
 const isServerFault = (e: any) => e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError
   || /^ERR_SQLITE|^SQLITE/.test(String(e?.code ?? '')) || /SQLITE_|database is locked/i.test(String(e?.message ?? ''));
 // Per-session budgets for routes that call paid APIs, many upstream endpoints, or run long CPU work.
-const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2) };
+const LIMITS = { joe: limiter(10, 5), backtest: limiter(6, 2), analyze: limiter(30, 10), instrument: limiter(60, 20), news: limiter(4, 2), futuresResearch: limiter(8, 2) };
 
 export async function routes(app: FastifyInstance) {
   /**
@@ -130,6 +152,9 @@ export async function routes(app: FastifyInstance) {
   const csrfExemptSignIn = new Set(['/api/auth/setup', '/api/auth/login', '/api/auth/privy/login']);
   app.addHook('onRequest', async (req, reply) => {
     const route = req.routeOptions?.url ?? '';
+    const socket = req.raw.socket;
+    const scheme = config.secureCookie || ('encrypted' in socket && socket.encrypted === true) ? 'https' : 'http';
+    if (!allowsApiOrigin(req.headers, scheme, config.publicOrigin)) return bad(reply, 403, 'browser origin not allowed');
     if (!publicRoutes.has(route) && !auth.validSession(tokenOf(req)))
       return bad(reply, 401, 'authentication required');
     if (req.method !== 'GET' && !csrfExemptSignIn.has(route) && req.headers['x-mia-csrf'] !== '1')
@@ -139,6 +164,29 @@ export async function routes(app: FastifyInstance) {
 
   await ditasRoutes(app);
   await knowledgeRoutes(app);
+  app.get('/api/session/preflight', async (req) => {
+    const { mind, environment } = z.object({ mind: z.enum(SESSION_MINDS), environment: z.enum(SESSION_ENVIRONMENTS) }).strict().parse(req.query);
+    return sessionPreflight(botStatus, mind, environment);
+  });
+  app.get('/api/session/paper-spot', async (_req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return paperSpotSessionPreflight(botStatus);
+  });
+  app.post('/api/session/paper-spot/run', async (req) => {
+    const { capitalCeiling, durationHours, ...proof } = SESSION_RUN.parse(req.body ?? {});
+    stepUp(req, proof);
+    const fence = activeEngineFence();
+    if (!fence) throw httpError(409, 'The active engine must authorize a paper session.');
+    const session = authorizePaperSpotSession(botStatus, fence, { capitalCeiling, durationHours, authorizedBy: `owner:${stepUpMethod()}` });
+    bus.publish('bot', botStatusView());
+    return { state: session.state };
+  });
+  app.post('/api/session/paper-spot/close', async (req) => {
+    z.object({}).strict().parse(req.body ?? {});
+    const session = requestPaperSpotClose();
+    bus.publish('bot', botStatusView());
+    return { state: session?.state ?? 'CLOSED' };
+  });
   // ── protection incidents (persistent; owner acknowledgement) ──
   app.get('/api/risk/incidents', async (req) => listIncidents(z.object({ all: z.enum(['0', '1']).default('0') }).parse(req.query).all === '1'));
   app.post('/api/risk/incidents/:id/ack', async (req) => {
@@ -204,22 +252,81 @@ export async function routes(app: FastifyInstance) {
   function issue(reply: FastifyReply, token: string) { reply.header('set-cookie', `${COOKIE}=${token}; ${cookieFlags}; Max-Age=43200`); return { ok: true }; }
 
   // ── live stream (SSE) ──
-  let streams = 0;
+  const maxStreamFrameBytes = 64 * 1024;
+  const maxStreamBufferedBytes = 256 * 1024;
+  // Hijacked SSE responses never finish on their own; end them when the server closes so graceful shutdown can finish
+  // draining instead of waiting for the forced exit. Finite requests still drain normally.
+  const openStreams = new Set<() => void>();
+  app.addHook('preClose', async () => { for (const close of [...openStreams]) close(); });
   app.get('/api/stream', (req, reply) => {
-    if (streams >= 20) return bad(reply, 503, 'too many open live streams');
+    // Read-only telemetry: optional topic filter, ids for gap-free reconnection (Last-Event-ID), resync when impossible.
+    const query = z.object({ topics: z.string().max(400).optional(), lastEventId: z.string().max(64).optional() }).strict().parse(req.query);
+    const topics = query.topics?.split(',').map((t) => t.trim()).filter(Boolean);
+    if (topics && (!topics.length || topics.some((t) => !isBusTopic(t)))) return bad(reply, 400, 'unknown stream topic');
+    const wanted = topics ? new Set(topics) : null;
+    const header = req.headers['last-event-id'];
+    const lastEventId = (typeof header === 'string' ? header : undefined) ?? query.lastEventId;
+    if (lastEventId !== undefined && lastEventId.length > 64) return bad(reply, 400, 'invalid last event id');
+    if (openStreams.size >= 20) return bad(reply, 503, 'too many open live streams');
     const token = tokenOf(req);
+    const expiresAt = auth.activeSessionExpiry(token);
+    if (expiresAt === null) return bad(reply, 401, 'authentication required');
     reply.hijack(); // we own the raw socket from here; Fastify must not try to send a second response
     reply.raw.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive', 'x-content-type-options': 'nosniff', 'x-request-id': String(req.id) });
-    streams++;
-    reply.raw.write(': connected\n\n');
-    let closed = false; let backlog = 0;
-    const close = () => { if (closed) return; closed = true; streams--; bus.off('*', send); clearInterval(ka); reply.raw.end(); };
-    const write = (s: string) => { if (closed) return; if (reply.raw.write(s)) backlog = 0; else if (++backlog > 200) close(); /* stalled client: drop it instead of buffering forever */ };
-    const send = (e: { topic: string; payload: unknown }) => write(`event: ${e.topic}\ndata: ${JSON.stringify(e.payload)}\n\n`);
-    // Logout, passphrase change and "revoke other sessions" now end open streams at the next keep-alive.
-    const ka = setInterval(() => (auth.validSession(token) ? write(': ka\n\n') : close()), 20_000);
-    bus.on('*', send);
-    req.raw.on('close', close);
+    let closed = false;
+    const authorized = () => {
+      try { return auth.validSession(token); }
+      catch { req.log.warn('live stream session verification unavailable'); return false; }
+    };
+    const close = (discard = false) => {
+      if (closed) return;
+      closed = true;
+      openStreams.delete(close);
+      unsubscribe();
+      clearInterval(keepAlive);
+      clearTimeout(expiry);
+      if (discard || !authorized()) reply.raw.destroy();
+      else reply.raw.end();
+    };
+    openStreams.add(close);
+    const write = (frame: string) => {
+      if (closed) return;
+      if (!authorized()) { close(true); return; }
+      const bytes = Buffer.byteLength(frame);
+      if (bytes > maxStreamFrameBytes || reply.raw.writableLength + bytes > maxStreamBufferedBytes) {
+        close(true);
+        return;
+      }
+      reply.raw.write(frame);
+    };
+    const send = (e: TelemetryEvent) => {
+      if (closed || (wanted && !wanted.has(e.topic))) return;
+      let data: string | undefined;
+      try { data = JSON.stringify(e.payload ?? null); }
+      catch { close(true); return; }
+      write(`id: ${e.id}\nevent: ${e.topic}\ndata: ${data ?? 'null'}\n\n`);
+    };
+    // Subscribe before replaying so nothing published in between is lost.
+    let replayedThrough = 0;
+    const unsubscribe = telemetry.subscribe((e) => { if (e.sequence > replayedThrough) send(e); });
+    const keepAlive = setInterval(() => write(': ka\n\n'), 20_000);
+    const expiry = setTimeout(() => close(true), Math.max(0, expiresAt - Date.now()));
+    reply.raw.once('close', () => close(true));
+    reply.raw.once('error', () => close(true));
+    // The hello frame carries an SSE id: so a reconnecting browser resends it
+    // as Last-Event-ID (EventSource only resends ids from SSE frames, it does
+    // not read the lastEventId in this JSON body) and the server can replay
+    // exactly what was missed, or send resync when the id cannot be replayed.
+    write(`: connected\nid: ${telemetry.lastId}\nevent: hello\ndata: ${JSON.stringify({ schemaVersion: TELEMETRY_SCHEMA_VERSION, lastEventId: telemetry.lastId })}\n\n`);
+    if (lastEventId !== undefined) {
+      const replay = telemetry.since(lastEventId);
+      if (replay.resync) write(`event: resync\ndata: ${JSON.stringify({ reason: replay.reason })}\n\n`);
+      else for (const e of replay.events) {
+        if (closed) break;
+        send(e);
+        replayedThrough = e.sequence;
+      }
+    }
   });
 
   // ── shell / overview ──
@@ -232,6 +339,7 @@ export async function routes(app: FastifyInstance) {
       unread: get<{ n: number }>('SELECT COUNT(*) n FROM notifications WHERE read=0')!.n, gates: gates.summary, liveAllowed: gates.liveAllowed, offline: config.offline, scanIntervalMs: config.scanIntervalMs, tickerIntervalMs: config.tickerIntervalMs, serverTime: Date.now() };
   });
   app.get('/api/overview', async () => overviewSnapshot());
+  app.get('/api/activity', async () => ({ activity: activityFeed() }));
 
   // ── markets ──
   app.get('/api/markets', async () => ({ tickers: [...market.tickers.values()].filter((t) => t.quoteVolume > 1e6 && isEligibleSpot(t.base, t.quote)).sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, 300), universe: market.universe, asOf: market.tickersFetchedAt }));
@@ -263,15 +371,67 @@ export async function routes(app: FastifyInstance) {
   });
   app.get('/api/fx', async () => ({ series: market.fx, asOf: market.fxFetchedAt, note: 'ECB daily reference rates via Frankfurter — not tradeable quotes.' }));
   app.get('/api/bubbles', async (req) => bubbleMap(z.object({ limit: z.coerce.number().int().min(1).max(500).default(150), minVolume: z.coerce.number().min(0).default(1e6) }).parse(req.query ?? {})));
-  app.get('/api/dex', async () => ({ pairs: dexBoard(), asOf: market.dexFetchedAt, note: 'DEX tokens are never automation-eligible: contract-level honeypot checks require an on-chain provider (pending).' }));
+  app.get('/api/dex', async () => ({ pairs: dexBoard(), asOf: market.dexFetchedAt, note: 'DEX discovery is research only. Full contract, pool and sell-route verification remains required.' }));
 
   // ── scanner / decisions ──
-  app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
+  app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), waitingCapacity: waitingCandidates(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
+  // Authenticated research and replay views.
+  app.get('/api/fabric/catalog', async () => catalogSummary());
+  app.get('/api/fabric/events', async (req) => {
+    const query = z.object({
+      after: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
+      limit: z.coerce.number().int().min(1).max(100).default(50),
+    }).parse(req.query ?? {});
+    return paperFillEvents(query.after, query.limit);
+  });
+  app.get('/api/choice/dual/status', async () => dualResearchStatus());
+  app.get('/api/choice/dual/fast', async () => {
+    const { fast } = dualResearchStatus();
+    return !fast.stale && fast.result?.sourceAsOf === market.dexFetchedAt ? fast.result
+      : assessFastMemecoinResearch(market.dex, market.dexFetchedAt);
+  });
+  app.get('/api/choice/dual/deep', async (req) => {
+    limit(req, 'futuresResearch', 'futures chart research');
+    const { symbol } = z.object({
+      symbol: z.enum(FUTURES_RESEARCH_SYMBOLS).default('BTCUSDT'),
+    }).parse(req.query ?? {});
+    try {
+      if (config.offline) throw new Error('FUTURES_RESEARCH_OFFLINE');
+      const snapshot = await fetchFuturesResearchSnapshot(symbol);
+      return reconstructDeepFuturesResearch(snapshot);
+    } catch (error: unknown) {
+      return {
+        version: 'mia-dual-research-v1' as const, lane: 'DEEP_FUTURES' as const,
+        rolloutMode: 'RESEARCH_ONLY' as const, tradingAuthority: false as const,
+        market: 'CRYPTO_PERPETUAL_FUTURES' as const, symbol,
+        state: 'NO_TRADE' as const, reason: 'FUTURES_SOURCE_UNAVAILABLE_OR_INVALID',
+        errorClass: error instanceof Error && error.message.startsWith('UNUSABLE_FUTURES_CANDLES')
+          ? 'INVALID_CANDLES' : 'PROVIDER_UNAVAILABLE',
+        plan: null,
+      };
+    }
+  });
+  app.get('/api/choice/shadow', async (req) => {
+    const { limit } = z.object({ limit: z.coerce.number().int().min(1).max(100).default(20) }).parse(req.query ?? {});
+    const rounds = recentChoiceShadows(limit);
+    const compared = rounds.flatMap((round) => [round.firstEligibleDecisionId, round.selectedDecisionId])
+      .filter((id): id is string => typeof id === 'string');
+    return {
+      rolloutMode: 'SHADOW_ONLY' as const,
+      releaseReadiness: 'NOT_CERTIFIED' as const,
+      reason: 'Active allocation requires prospective paper evidence based on net expectancy and a validated reservation lifecycle.',
+      tradingAuthority: false,
+      rounds,
+      observedPaperOutcomes: paperChoiceOutcomes(compared),
+    };
+  });
   app.get('/api/decisions', async (req) => { const q = z.object({ decision: TOKEN.optional() }).parse(req.query); return all<any>(`SELECT id, instrument, strategy, decision, score, risk_decision, created_at FROM decisions ${q.decision ? 'WHERE decision=?' : ''} ORDER BY created_at DESC LIMIT 300`, ...(q.decision ? [q.decision] : [])); });
   app.get('/api/decisions/:id', async (req, reply) => { const r = get<any>('SELECT report, consensus_id FROM decisions WHERE id=?', idOf(req)); if (!r) return bad(reply, 404, 'not found'); const c = get<any>('SELECT record FROM consensus_records WHERE id=?', r.consensus_id); return { report: P(r.report), consensus: c ? P(c.record) : null }; });
   app.post('/api/analyze', async (req) => { const { symbol, strategyId } = z.object({ symbol: z.string().min(1).max(20), strategyId: z.string().max(60).optional() }).parse(req.body); const i = market.bySymbol(symbol); if (!i) throw httpError(404, 'unknown symbol'); limit(req, 'analyze', 'analysis'); return analyzeInstrument(i.id, strategyId); });
 
   // ── AI intelligence (workers / QCI) ──
+  // Outcome-linked worker reliability (performance memory): read-only, never changes weights or thresholds.
+  app.get('/api/intelligence/reliability', async () => workerReliability());
   app.get('/api/intelligence', async () => {
     const stats = new Map(all<any>('SELECT * FROM worker_stats').map((s) => [s.worker_id, s]));
     const recs = all<any>('SELECT id, instrument, state, created_at, record FROM consensus_records ORDER BY created_at DESC LIMIT 40').map((r) => { const x = P<any>(r.record); delete x.packets; return x; });
@@ -282,6 +442,16 @@ export async function routes(app: FastifyInstance) {
       note: 'Workers are deterministic, versioned evaluators running in a bounded pool — not LLM agents. Confidence is NOT_CALIBRATED until walk-forward calibration is performed.' };
   });
   app.get('/api/consensus/:id', async (req, reply) => { const r = get<any>('SELECT record FROM consensus_records WHERE id=?', idOf(req)); return r ? P(r.record) : bad(reply, 404, 'not found'); });
+  // Evidence integrity: entries pause while closed-trade evidence is broken; acknowledging re-enables risk, so step-up.
+  app.get('/api/evidence-integrity', async () => evaluateEvidenceIntegrity());
+  app.post('/api/evidence-integrity/acknowledge', async (req) => {
+    const hash = z.string().regex(/^[0-9a-f]{64}$/);
+    // The client sends each record exactly as reviewed; the server acknowledges it only if it is still that version.
+    const reviewed = z.object({ positionId: z.string().min(1).max(150), kind: z.enum(['MISMATCH', 'TAMPERED']), storedHash: z.string().min(1).max(128), contentHash: hash.nullable() }).strict();
+    const b = z.object({ records: z.array(reviewed).min(1).max(MAX_ACKNOWLEDGE), password: PW.optional(), otp: z.string().regex(/^\d{6}$/).optional() }).strict().parse(req.body ?? {});
+    stepUp(req, b);
+    return acknowledgeEvidenceFindings('owner', b.records);
+  });
   app.post('/api/workers/:id/release', async (req) => {
     const id = idOf(req); const b = z.object({ password: PW.optional() }).strict().parse(req.body ?? {});
     stepUp(req, b); releaseQuarantine('owner', id); audit('owner', 'worker.release', { id }); return { ok: true };
@@ -302,24 +472,56 @@ export async function routes(app: FastifyInstance) {
     const cur = getControl();
     const reEnables = !!patch.disabledStrategies && cur.disabledStrategies.some((s) => !patch.disabledStrategies!.includes(s));
     if (patch.mode || patch.emergency === false || patch.pausedNewOrders === false || reEnables) stepUp(req, b);
-    return updateControl('owner', patch, (m) => {
-      if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
-      if ((m === 'PAPER' || m === 'APPROVAL') && !currentPolicy()) return { ok: false, reason: 'accept a risk policy before enabling paper execution' };
-      return { ok: true };
+    return tx(() => {
+      const paperRequested = patch.mode === 'PAPER' || patch.mode === 'APPROVAL';
+      if (paperRequested) requirePaperSpotSession();
+      const current = getControl();
+      const changed = (patch.mode !== undefined && patch.mode !== current.mode)
+        || (patch.pausedNewOrders !== undefined && patch.pausedNewOrders !== current.pausedNewOrders)
+        || (patch.emergency !== undefined && patch.emergency !== current.emergency)
+        || (patch.disabledStrategies !== undefined && JSON.stringify(patch.disabledStrategies) !== JSON.stringify(current.disabledStrategies));
+      if (!changed) return current;
+      if (durableSessionStatus()?.state === 'RUNNING') {
+        suspendDurableEntries(patch.emergency ? 'EMERGENCY_HALT' : 'RISK_HALT');
+      }
+      return updateControl('owner', patch, (m) => {
+        if (m === 'BOUNDED_LIVE') { const g = releaseGates(); if (!g.liveAllowed) return { ok: false, reason: `BOUNDED_LIVE blocked: ${g.summary}. No live venue adapter or isolated signer exists in this build.` }; }
+        if ((m === 'PAPER' || m === 'APPROVAL') && !currentPolicy()) return { ok: false, reason: 'accept a risk policy before enabling paper execution' };
+        return { ok: true };
+      });
     });
   });
   app.post('/api/emergency/:action', async (req) => {
     const a = z.object({ action: z.string().max(40) }).parse(req.params).action; const b = z.object({ confirm: z.string().max(40).optional(), password: PW.optional() }).strict().parse(req.body ?? {});
-    if (a === 'pause') return oms.pauseNewOrders('owner');
+    if (a === 'pause') {
+      const result = oms.pauseNewOrders('owner');
+      suspendDurableEntries('RISK_HALT');
+      return result;
+    }
     if (a === 'cancel-pending') return oms.cancelPendingEntries('owner');
     if (a === 'protect') return oms.protectPositions(true);
-    if (a === 'stop') return oms.emergencyStop('owner');
+    if (a === 'stop') {
+      const result = oms.emergencyStop('owner');
+      const session = durableSessionStatus();
+      if (session && session.state !== 'CLOSED') suspendDurableEntries('EMERGENCY_HALT');
+      return result;
+    }
     if (a === 'close-all') { stepUp(req, b); return oms.closeAllPositions('owner', b.confirm ?? ''); }
     throw httpError(404, 'unknown emergency action');
   });
 
   // ── bot account / portfolio / orders ──
-  app.get('/api/bot', async () => ({ status: botStatusView(), account: accountState(), positions: oms.listPositions('OPEN'), pending: all("SELECT * FROM orders WHERE status='PENDING_APPROVAL' ORDER BY created_at DESC"), strategies: lab.listStrategies(), ledger: all('SELECT * FROM ledger_entries WHERE account=? ORDER BY ts DESC LIMIT 100', PAPER_ACCOUNT) }));
+  app.get('/api/bot', async () => {
+    const account = accountState();
+    const status = botStatusView(account);
+    return {
+      status, account, command: commandStatus(status),
+      positions: oms.listPositions('OPEN'),
+      pending: all("SELECT * FROM orders WHERE account=? AND venue=? AND purpose='ENTRY' AND status='PENDING_APPROVAL' ORDER BY created_at DESC", PAPER_ACCOUNT, oms.VENUE),
+      strategies: lab.listStrategies(),
+      ledger: all('SELECT * FROM ledger_entries WHERE account=? ORDER BY ts DESC LIMIT 100', PAPER_ACCOUNT),
+    };
+  });
   app.post('/api/bot/allocation', async (req) => {
     const b = z.object({ amount: z.number().positive().max(10_000_000), direction: z.enum(['DEPOSIT', 'WITHDRAW']) }).parse(req.body);
     if (b.direction === 'WITHDRAW' && b.amount > accountState().cash) throw new Error('cannot remove more than available paper cash');
@@ -332,7 +534,15 @@ export async function routes(app: FastifyInstance) {
     return { account: acct, open: pos.filter((p) => p.status === 'OPEN'), closed: pos.filter((p) => p.status === 'CLOSED').slice(0, 200), equityCurve, reconciliation: reconcile(), external: { wallets: 'PENDING: on-chain RPC not configured', exchanges: 'PENDING: read-only exchange API keys not configured' } };
   });
   app.get('/api/orders', async () => oms.listOrders(300));
-  app.post('/api/orders/:id/approve', async (req) => oms.decideApproval(idOf(req), true));
+  app.post('/api/orders/:id/approve', async (req) => {
+    if (!durableSessionStatus()) return oms.decideApproval(idOf(req), true);
+    const fence = activeEngineFence();
+    const monitorAge = Date.now() - botStatus.lastMonitorAt;
+    if (!fence || botStatus.monitorFailing || monitorAge < 0 || monitorAge > staleAfter().monitorMs) {
+      throw httpError(409, 'Paper approval requires the active engine and a current protection check.');
+    }
+    return oms.decideApproval(idOf(req), true, fence);
+  });
   app.post('/api/orders/:id/reject', async (req) => oms.decideApproval(idOf(req), false));
   app.post('/api/positions/:id/close', async (req) => oms.closePosition('owner', idOf(req)));
 
@@ -344,6 +554,10 @@ export async function routes(app: FastifyInstance) {
   // ── strategy lab ──
   app.get('/api/lab', async () => ({ strategies: lab.listStrategies(), backtests: lab.listBacktests(30), universe: lab._universeSymbols() }));
   app.post('/api/lab/backtest', async (req) => { const b = z.object({ strategyId: z.string().max(60), symbol: z.string().min(1).max(20).regex(/^[A-Za-z0-9]+$/), bars: z.number().int().min(500).max(8000).optional() }).parse(req.body); limit(req, 'backtest', 'backtests'); return lab.runBacktest('owner', b.strategyId, b.symbol.toUpperCase(), b.bars); });
+  app.get('/api/lab/strategy/:id/qualification', async (req, reply) => {
+    const id = z.object({ id: z.string().min(1).max(60) }).parse(req.params).id;
+    return lab.listStrategies().some((s: { id: string }) => s.id === id) ? lab.strategyQualification(id) : reply.code(404).send({ error: 'unknown strategy' });
+  });
   app.post('/api/lab/strategy/:id/status', async (req) => {
     const id = idOf(req);
     const b = z.object({ status: z.enum(['RESEARCH', 'BACKTESTED', 'PAPER', 'LIVE_CANDIDATE', 'SUSPENDED', 'RETIRED']), note: z.string().max(300).optional(), password: PW.optional() }).strict().parse(req.body);
@@ -394,7 +608,7 @@ export async function routes(app: FastifyInstance) {
     return { status: 'BLOCKED', trackedWallets: [], copyRules: [],
       requirements: [
         { name: 'EVM RPC + explorer (wallet discovery, transfers, ranking)', providerId: 'evm_rpc', status: evm?.status ?? 'PENDING_CREDENTIALS' },
-        { name: 'Solana RPC (wallet activity, token authorities)', providerId: 'solana_rpc', status: sol?.status ?? 'PENDING_CREDENTIALS' },
+        { name: 'Solana RPC (wallet activity and transaction history)', providerId: 'solana_rpc', status: sol?.status ?? 'PENDING_CREDENTIALS' },
       ],
       pipeline: ['Discover candidate whale wallets from on-chain transfers', 'Rank by verified, cost-adjusted historical performance (Part 4.3)', 'Detect a new trade by a followed wallet',
         'Treat it as a candidate: asset safety → 100-worker QCI → decision engine → deterministic risk gate', 'Paper-execute only within your limits; never mirror size blindly'],

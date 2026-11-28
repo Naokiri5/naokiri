@@ -1,15 +1,19 @@
-import { all, get, run, J, P } from '../db/db.js';
+import { all, get, run, tx, J, P } from '../db/db.js';
 import { uid, sha256 } from '../core/util.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import { getControl } from '../core/mode.js';
 import { market } from '../market/store.js';
 import { assessQuality } from '../market/quality.js';
-import { memoryDetail, memoryEvents } from './memory.js';
+import { memoryDetail, memoryEvents, recordDirectionForecast } from './memory.js';
 import { strategyPassports } from './passports.js';
 import { compareFingerprints } from './fingerprint.js';
-import { calibrationReport } from './calibration.js';
+import { calibrationReport, scoreMulticlassForecast } from './calibration.js';
 import { simulateTwin, type TwinAssumptions } from './twin.js';
 import { INTERVAL_MS, type Candle } from '../market/types.js';
+import { assertWriteFence, LeaseLostError, type LeaseFence } from '../ops/lease.js';
+import { futuresResearchSymbol } from '../providers/binanceFuturesResearch.js';
+import { DIRECTION_DEADBAND_BPS, DIRECTION_FORECAST_SOURCE, DIRECTION_FORECAST_TARGET, DIRECTION_MODEL_VERSION,
+  type DirectionForecast } from './directionForecast.js';
 
 export const DITAS_COVERAGE = [
   { foundation: 'Market data truth', status: 'PARTIAL', detail: 'Strict timestamps, identities, quotes, books and closed-candle validation; polling crypto only. No WebSocket/session certification.' },
@@ -29,7 +33,40 @@ export function forecastCohorts() { return all<{ cohort: string; n: number }>('S
 export function calibrationFor(cohort?: string) {
   if (!cohort) return { ...calibrationReport([]), cohort: null, cohorts: forecastCohorts(), note: 'Select an exact forecast cohort. Different strategies, versions, horizons and targets are never pooled.' };
   const rows = all<{ probability: number; outcome: 0 | 1 }>('SELECT f.probability,o.outcome FROM ditas_forecasts f JOIN ditas_outcomes o ON o.forecast_id=f.id WHERE f.cohort=? ORDER BY f.created_at', cohort);
-  return { ...calibrationReport(rows), cohort, cohorts: forecastCohorts(), provenance: 'OWNER_REPORTED observations; independent market-source verification pending.' };
+  // Keep historical combined metrics for API compatibility, but never label
+  // owner observations as independently verified or mix them into source-only drift.
+  const verified = sourceVerifiedCalibration(cohort);
+  return { ...calibrationReport(rows), cohort, cohorts: forecastCohorts(),
+    provenance: verified.binaryProjection ? 'Same-contract USD-M closed bars. Reliability bins evaluate the bullish outcome.'
+      : 'Mixed or owner-reported observations; see sourceVerified for provider-backed outcomes only.',
+    sourceVerified: verified };
+}
+/** Derived from immutable WAL rows, survives restart without mutable counters.
+ * Exact cohort includes model, strategy, target and horizon; never pool them.
+ * Provider-backed outcome is not proof of a calibrated production model.
+ */
+export function sourceVerifiedCalibration(cohort: string) {
+  const provenance = cohort.startsWith(`["${DIRECTION_FORECAST_TARGET}",`) ? DIRECTION_FORECAST_SOURCE : 'BINANCE_PUBLIC_CLOSED_BAR';
+  const rows = all<{ probability: number; outcome: 0 | 1; brier: number | null; logLoss: number | null }>(
+    `SELECT f.probability,o.outcome,json_extract(o.payload,'$.score.brierScore') brier,json_extract(o.payload,'$.score.logLoss') logLoss
+    FROM ditas_forecasts f JOIN ditas_outcomes o ON o.forecast_id=f.id
+    WHERE f.cohort=? AND json_extract(o.payload,'$.provenance')=? AND f.created_at<f.target_at AND f.target_at<=o.created_at
+    ORDER BY f.target_at DESC,f.id DESC LIMIT 200`, cohort, provenance);
+  const direction = provenance === DIRECTION_FORECAST_SOURCE ? directionCalibration(rows) : undefined;
+  return { ...calibrationReport(rows), cohort, windowLimit: 200,
+    provenance, ...(direction ? { direction, binaryProjection: 'BULLISH' as const } : {}),
+    tradingAuthority: false as const, automaticPromotion: false as const };
+}
+
+function directionCalibration(rows: readonly { brier: number | null; logLoss: number | null }[]) {
+  let sample = 0, brier = 0, logLoss = 0;
+  for (const row of rows) {
+    if (row.brier === null || row.logLoss === null || !Number.isFinite(row.brier) || !Number.isFinite(row.logLoss)) continue;
+    sample++;
+    brier += row.brier;
+    logLoss += row.logLoss;
+  }
+  return { sample, brierScore: sample ? brier / sample : null, logLoss: sample ? logLoss / sample : null };
 }
 export function ditasOverview(cohort?: string) {
   const events = memoryEvents(100);
@@ -88,13 +125,62 @@ export function addForecast(eventId: string, probability: number, targetAt: numb
   const id = uid('forecast'); run('INSERT INTO ditas_forecasts(id,dedupe_key,event_id,created_at,target_at,probability,cohort,payload) VALUES (?,?,?,?,?,?,?,?)', id, dedupeKey, eventId, now, targetAt, probability, cohort, J(payload));
   return { id, eventId, createdAt: now, targetAt, probability, cohort, ...payload };
 }
+
+/** Commit one prospective claim per instrument, horizon, model and next-close target. */
+export function registerDirectionForecast(forecast: DirectionForecast, fence: LeaseFence) {
+  const { instrumentId, modelVersion, horizon: timeframe, asOf, referenceAt, referencePrice, targetAt, deadbandBps, probabilities } = forecast;
+  return tx(() => {
+    if (!fence || fence.name !== 'engine') throw new LeaseLostError();
+    assertWriteFence(fence);
+    const createdAt = Date.now();
+    if (targetAt <= createdAt || createdAt - asOf > 60_000) return null;
+    const width = INTERVAL_MS[timeframe];
+    if (!futuresResearchSymbol(instrumentId) || modelVersion !== DIRECTION_MODEL_VERSION ||
+        !Object.hasOwn(INTERVAL_MS, timeframe) || deadbandBps !== DIRECTION_DEADBAND_BPS[timeframe] ||
+        ![asOf, referenceAt, targetAt].every(Number.isSafeInteger) || targetAt % width !== 0 ||
+        referenceAt !== targetAt - width || referenceAt > asOf || asOf > createdAt ||
+        !Number.isFinite(referencePrice) || referencePrice <= 0 || forecast.tradingAuthority !== false) {
+      throw new Error('invalid prospective direction forecast');
+    }
+    scoreMulticlassForecast(probabilities, 'BULLISH');
+    const key = sha256(J([DIRECTION_FORECAST_TARGET, instrumentId, modelVersion, timeframe, deadbandBps, targetAt]));
+    const existing = get<{ id: string; cohort: string }>('SELECT id,cohort FROM ditas_forecasts WHERE dedupe_key=?', key);
+    if (existing) return existing;
+    const leadQuarterBars = Math.ceil((targetAt - createdAt) / (width / 4));
+    const cohort = J([DIRECTION_FORECAST_TARGET, instrumentId, modelVersion, timeframe, deadbandBps, leadQuarterBars]);
+    const event = recordDirectionForecast(forecast, key, createdAt, fence);
+    const id = uid('forecast');
+    const payload = { target: DIRECTION_FORECAST_TARGET, referenceAt, referencePrice, modelVersion, instrumentId,
+      timeframe, deadbandBps, probabilities, provenance: 'ENGINE_DIRECTION_RESEARCH', binaryProjection: 'BULLISH' };
+    run('INSERT INTO ditas_forecasts(id,dedupe_key,event_id,created_at,target_at,probability,cohort,payload) VALUES (?,?,?,?,?,?,?,?)',
+      id, key, event.id, createdAt, targetAt, probabilities.BULLISH, cohort, J(payload));
+    return { id, cohort };
+  });
+}
+
 export function addOutcome(forecastId: string, observedPrice: number, observedAt: number, sourceReference: string) {
   const f = get<any>('SELECT * FROM ditas_forecasts WHERE id=?', forecastId), now = Date.now();
   if (!f) throw new Error('forecast not found');
   if (!Number.isFinite(observedPrice) || observedPrice <= 0 || observedAt !== f.target_at || observedAt > now || observedAt <= f.created_at) throw new Error('outcome must match the forecast target time and follow its recorded forecast');
-  const prediction = P(f.payload), outcome = observedPrice > prediction.referencePrice ? 1 : 0, id = uid('outcome');
+  const prediction = P(f.payload);
+  if (prediction.target === DIRECTION_FORECAST_TARGET) throw new Error('engine research forecast requires independent venue settlement');
+  const outcome = observedPrice > prediction.referencePrice ? 1 : 0, id = uid('outcome');
   const payload = { observedPrice, observedAt, sourceReference, provenance: 'OWNER_REPORTED_UNVERIFIED', target: prediction.target, note: 'Operator-supplied observation, not independently verified exchange history.' };
   if (get('SELECT 1 FROM ditas_outcomes WHERE forecast_id=?', forecastId)) throw new Error('duplicate outcome: this forecast is already settled');
   run('INSERT INTO ditas_outcomes(id,forecast_id,created_at,outcome,payload) VALUES (?,?,?,?,?)', id, forecastId, now, outcome, J(payload));
   return { id, forecastId, createdAt: now, outcome, ...payload };
+}
+
+// BrainOS internal learning observes canonical records on the existing background lane.
+// These records are NOT an independently verified calibration cohort. No writes or model promotion.
+export function recentInternalLearningEvidence(now = Date.now()) {
+  if (!Number.isSafeInteger(now) || now <= 0) throw new Error('INVALID_LEARNING_OBSERVATION_TIME');
+  const closed = all<{ closed_at: number }>(
+    "SELECT closed_at FROM positions WHERE account=? AND status='CLOSED' AND closed_at>0 AND closed_at<=? ORDER BY closed_at DESC LIMIT 100",
+    PAPER_ACCOUNT, now);
+  const outcomes = all<{ id: string }>(
+    "SELECT o.id FROM ditas_outcomes o JOIN ditas_forecasts f ON f.id=o.forecast_id WHERE f.created_at<f.target_at AND f.target_at<=o.created_at AND o.created_at<=? AND json_extract(o.payload,'$.provenance')='OWNER_REPORTED_UNVERIFIED' ORDER BY o.created_at DESC LIMIT 100",
+    now);
+  return { observedAt: now, recentPaperClosedCount: closed.length,
+    latestPaperClosedAt: closed[0]?.closed_at ?? null, recentOwnerReportedOutcomes: outcomes.length };
 }

@@ -3,6 +3,7 @@ import { verify } from '../core/signing.js';
 import { DOMAINS, REQUIRED_DOMAINS } from '../workers/registry.js';
 import { dispatch, flushWorkerStats } from '../workers/runtime.js';
 import { challengePanel } from './challenge.js';
+import { discountSupport, storedSupportDiscounts } from './supportDiscount.js';
 import type { WorkerContext } from '../workers/types.js';
 import { uid, iso } from '../core/util.js';
 import { record } from '../core/latency.js';
@@ -18,7 +19,7 @@ import { run, J } from '../db/db.js';
  */
 export const QCI_POLICY = { supportThreshold: 0.5, maxOpposition: 0.25, minResponseRatio: 0.6, validityMs: 5 * 60_000 };
 export const DOMAIN_WEIGHTS: Record<string, number> = { trend: 0.16, momentum: 0.1, volatility: 0.08, flow: 0.1, liquidity: 0.12, structure: 0.1, regime: 0.1, news: 0.06, onchain: 0.04, risk: 0.08, execution: 0.06 };
-const COORDINATOR_VERSION = 'qci-coordinator@1.0.0';
+const COORDINATOR_VERSION = 'qci-coordinator@1.1.0';
 const seen = new Set<string>(); // replay protection
 const SEEN_MAX = 200_000;
 
@@ -69,7 +70,9 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     packets.push(v);
   }
   const applicable = new Set(DOMAINS.filter((d) => d !== 'onchain' || ctx.candidate.market === 'crypto-dex'));
-  const agg = aggregate(packets, applicable);
+  // Measured-unreliable SUPPORT is scored as ABSTAIN on a copy; vetoes, challenge and storage use the signed originals.
+  const { scored, discounted } = discountSupport(packets, storedSupportDiscounts());
+  const agg = aggregate(scored, applicable);
   const challenge = challengePanel(ctx, packets);
   const responding = packets.filter((p) => p.stance !== 'ABSTAIN').length;
   const abstaining = packets.length - responding;
@@ -95,16 +98,17 @@ export async function runConsensus(ctx: WorkerContext): Promise<ConsensusRecord>
     state = 'MIXED_CONSENSUS';
     reasons.push(`weighted support ${agg.weightedSupport.toFixed(3)}, opposition ${agg.weightedOpposition.toFixed(3)}`);
   }
+  if (discounted.length) reasons.push(`support discounted (measured below base win rate): ${discounted.map((d) => d.worker_id).join(', ')}`);
   const ms = performance.now() - t0; record('qci.consensus', ms);
   flushWorkerStats();
   const created = Date.now();
   const rec: ConsensusRecord = {
     schema_version: '1.0', consensus_id: uid('qci'), candidate_id: ctx.candidate.id, event_id: ctx.candidate.eventId, instrument_id: ctx.candidate.instrumentId,
     strategy_id: ctx.candidate.strategyId, state, reason_codes: reasons, created_at: iso(created), expires_at: iso(created + QCI_POLICY.validityMs), analysis_ms: Math.round(ms * 100) / 100,
-    method: { id: 'domain-capped-weighted-v1', support_threshold: QCI_POLICY.supportThreshold, max_opposition: QCI_POLICY.maxOpposition, min_response_ratio: QCI_POLICY.minResponseRatio, calibration: 'NOT_CALIBRATED' },
+    method: { id: 'domain-capped-weighted-v2', support_threshold: QCI_POLICY.supportThreshold, max_opposition: QCI_POLICY.maxOpposition, min_response_ratio: QCI_POLICY.minResponseRatio, calibration: 'NOT_CALIBRATED' },
     workers: { eligible, responding, abstaining, failed, quarantined, rejected_packets: rejected },
     domains: agg.domains, dependency_groups: agg.groups, weighted_support: round3(agg.weightedSupport), weighted_opposition: round3(agg.weightedOpposition),
-    vetoes, challenge, missing_inputs: missing, coordinator_version: COORDINATOR_VERSION, trace_id: ctx.candidate.traceId,
+    vetoes, challenge, support_discounts: discounted, missing_inputs: missing, coordinator_version: COORDINATOR_VERSION, trace_id: ctx.candidate.traceId,
   };
   try { run('INSERT INTO consensus_records(id,candidate_id,instrument,state,created_at,expires_at,record) VALUES (?,?,?,?,?,?,?)', rec.consensus_id, rec.candidate_id, rec.instrument_id, rec.state, created, created + QCI_POLICY.validityMs, J({ ...rec, packets })); } catch { /* persistence failure doesn't create approval */ }
   return rec;
