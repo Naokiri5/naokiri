@@ -37,7 +37,10 @@ function laneCheck(name: string, lastAt: number, limitMs: number, e: EngineView,
 
 export function readiness(e: EngineView, nowTs = Date.now()) {
   const checks: Check[] = [];
-  if (isShuttingDown()) checks.push({ name: 'lifecycle', status: 'fail', detail: 'process draining' });
+  // A shutting-down process must not reopen SQLite merely to answer readiness.
+  if (isShuttingDown()) return { ready: false, at: nowTs, schema: SCHEMA_VERSION,
+    role: config.offline ? 'OFFLINE' : e.role,
+    checks: [{ name: 'lifecycle', status: 'fail', detail: 'process draining' } satisfies Check] };
   try {
     const v = get<{ v: number | null }>('SELECT MAX(version) v FROM schema_migrations')?.v ?? 0;
     checks.push(v === SCHEMA_VERSION ? { name: 'database', status: 'pass', detail: `schema v${v}` } : { name: 'database', status: 'fail', detail: `schema v${v}, expected v${SCHEMA_VERSION}` });

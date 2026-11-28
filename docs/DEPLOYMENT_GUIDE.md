@@ -65,3 +65,5 @@ emergency stop (pause + cancel + verify, **no auto-close**) · close all (step-u
 Requires every gate on the Release Gates page: 30-day paper evaluation, independent security review, an isolated signer
 and transaction firewall (Part 24), a live venue adapter, the Independent Release Auditor sign-off, then explicit owner
 authorization.
+
+For signal handling, lease-safe drain, and three-pass offline P0 evidence, see [BrainOS shutdown and release runbook](operations/BRAINOS_SHUTDOWN_AND_RELEASE.md).

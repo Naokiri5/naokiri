@@ -25,9 +25,7 @@ cleanup() {
   local status=$?
   trap - EXIT
   rm -rf -- "$WORK/data" "$WORK/home" "$WORK/tmp"
-  if [[ "$status" -eq 0 ]]; then rm -rf -- "$WORK"; else
-    printf "Verification failed; sanitized-environment test logs: %s/logs\n" "$WORK" >&2
-  fi
+  printf "Offline verification reports and logs (exit %s): %s/logs\n" "$status" "$WORK" >&2
   exit "$status"
 }
 trap cleanup EXIT
@@ -59,9 +57,11 @@ fi
   for seed in 13701 13702 13703; do
     step "p0-$seed" node ../node_modules/vitest/vitest.mjs run \
       --sequence.shuffle --sequence.seed="$seed" \
-      test/runtime-shutdown.test.ts test/brainos-wal-audit.test.ts
+      --reporter=default --reporter=json --outputFile.json="$WORK/logs/p0-$seed.json" \
+      test/runtime-shutdown.test.ts test/brainos-wal-audit.test.ts test/oms.test.ts test/ops-lease-hardening.test.ts
   done
 )
+step p0-evidence node --import tsx server/src/qa/verify-p0-evidence.ts record "$WORK/logs" "$HEAD_SHA"
 printf "\nOffline verification passed for %s (%s).\n" "$HEAD_SHA" "$mode"
 echo "Not certified: historical profitability, external venue settlement, real Railway/Privy/Cloudflare, prospective soak or LIVE."
 echo "Browser E2E and dependency audit remain separate existing CI checks."

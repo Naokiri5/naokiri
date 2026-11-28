@@ -19,10 +19,15 @@ describe('canonical process shutdown', () => {
       expect(isShuttingDown()).toBe(true);
       const ready = await app.inject({ method: 'GET', url: '/api/ready' });
       expect(ready.statusCode).toBe(503);
-      expect(ready.json()).toMatchObject({ ready: false, checks: expect.arrayContaining([
+      expect(ready.json()).toMatchObject({ ready: false, checks: [
         { name: 'lifecycle', status: 'fail', detail: 'process draining' },
-      ]) });
+      ] });
       expect((await app.inject({ method: 'GET', url: '/api/health' })).statusCode).toBe(200);
+      for (const request of [
+        { method: 'GET' as const, url: '/api/stream' },
+        { method: 'GET' as const, url: '/api/auth/state' },
+        { method: 'POST' as const, url: '/api/session/paper-spot/run' },
+      ]) expect((await app.inject(request)).statusCode).toBe(503);
     } finally {
       await app.close();
       await waitForIdle();
@@ -54,7 +59,7 @@ async function unusedPort(): Promise<number> {
 }
 
 describe('real server subprocess lifecycle', () => {
-  it.skipIf(process.platform === 'win32')('SIGTERM exits normally and preserves committed WAL evidence', async () => {
+  it.skipIf(process.platform === 'win32').each(['SIGTERM', 'SIGINT'] as const)('%s exits normally and preserves committed WAL evidence', async (signal) => {
     const dir = mkdtempSync(join(tmpdir(), 'mia-sigterm-'));
     const file = join(dir, 'mia.db');
     const port = await unusedPort();
@@ -89,7 +94,7 @@ describe('real server subprocess lifecycle', () => {
       expect(ready.status).toBe(200);
       await ready.text();
       const started = performance.now();
-      expect(child.kill('SIGTERM')).toBe(true);
+      expect(child.kill(signal)).toBe(true);
       const watchdog = setTimeout(() => child.kill('SIGKILL'), 10_000);
       let result: Awaited<typeof exited>;
       try { result = await exited; } finally { clearTimeout(watchdog); }

@@ -60,7 +60,7 @@ let takeoverRefused = false;
 let lastScannedSettlementCursor = 0;
 
 function setEngineRole(role: 'LEADER' | 'STANDBY') {
-  if (!botStatus.running || botStatus.role === role) return;
+  if (isShuttingDown() || !botStatus.running || botStatus.role === role) return;
   const previous = botStatus.role;
   resetInternalProcesses();
   botStatus.role = role;
@@ -71,7 +71,7 @@ function setEngineRole(role: 'LEADER' | 'STANDBY') {
 }
 
 function holdEngine(): LeaseFence | null {
-  if (!botStatus.running || takeoverRefused) return null;
+  if (isShuttingDown() || !botStatus.running || takeoverRefused) return null;
   try {
     const lease = acquireOrRenewLease(ENGINE_LEASE, botStatus.instanceId, engineLeaseTtlMs());
     if (lease) {
@@ -125,7 +125,7 @@ function takeoverAllowed(lease: LeaseFence): boolean {
   return false;
 }
 function stillLeader(lease: LeaseFence): boolean {
-  if (!botStatus.running || activeLease?.acquired_at !== lease.acquired_at || activeLease?.epoch !== lease.epoch) return false;
+  if (isShuttingDown() || !botStatus.running || activeLease?.acquired_at !== lease.acquired_at || activeLease?.epoch !== lease.epoch) return false;
   try { if (ownsLease(lease)) return true; } catch (error) { botStatus.lastError = `lease: ${errorText(error)}`; }
   activeLease = null;
   setEngineRole('STANDBY');
@@ -151,7 +151,7 @@ let timers: NodeJS.Timeout[] = [];
 
 async function runLane(name: keyof typeof lanes, pass: (lease: LeaseFence) => void | Promise<void>) {
   const lane = lanes[name];
-  if (lane.inFlight || !botStatus.running) return;
+  if (isShuttingDown() || lane.inFlight || !botStatus.running) return;
   const lease = holdEngine();
   if (!lease) return;
   lane.inFlight = true;
@@ -172,7 +172,7 @@ async function runLane(name: keyof typeof lanes, pass: (lease: LeaseFence) => vo
 }
 
 function onDecision(r: DecisionReport, lease: LeaseFence | null = activeLease) {
-  if (!lease || !stillLeader(lease)) return;
+  if (isShuttingDown() || !lease || !stillLeader(lease)) return;
   botStatus.decisionsTotal++;
   if (botStatus.monitorFailing || Date.now() - botStatus.lastMonitorAt > staleAfter().monitorMs) return;
   try {
@@ -192,7 +192,7 @@ function onDecision(r: DecisionReport, lease: LeaseFence | null = activeLease) {
  */
 export const SETTLEMENT_RESCAN_MIN_MS = 10_000;
 function wakeScanForSettlement(lease: LeaseFence, nowTs = Date.now()) {
-  if (!botStatus.lastTickerAt || nowTs - botStatus.lastSettlementRescanAt < SETTLEMENT_RESCAN_MIN_MS ||
+  if (isShuttingDown() || !botStatus.lastTickerAt || nowTs - botStatus.lastSettlementRescanAt < SETTLEMENT_RESCAN_MIN_MS ||
       paperSettlementCursor() <= lastScannedSettlementCursor || !stillLeader(lease)) return;
   botStatus.lastSettlementRescanAt = nowTs; botStatus.settlementRescans++;
   setImmediate(() => { if (stillLeader(lease)) void scanLane(); });
@@ -247,7 +247,7 @@ const hotLane = () => runLane('ticker', async (lease) => {
  */
 let scanDirty = false;
 async function scanLane() {
-  if (!botStatus.lastTickerAt) return;
+  if (isShuttingDown() || !botStatus.running || !botStatus.lastTickerAt) return;
   if (lanes.scan.inFlight) { if (botStatus.running) scanDirty = true; return; }
   await scanPass();
   if (!scanDirty) return;
@@ -296,7 +296,7 @@ function researchLane() {
   const sample = performance.eventLoopUtilization();
   const busy = performance.eventLoopUtilization(sample, lastResearchSample).utilization;
   lastResearchSample = sample;
-  if (!botStatus.running || botStatus.role !== 'LEADER') return;
+  if (isShuttingDown() || !botStatus.running || botStatus.role !== 'LEADER') return;
   const autonomic = recordAutonomicObservation({
     now: Date.now(), monitorAt: botStatus.lastMonitorAt,
     monitorMaxAgeMs: staleAfter().monitorMs, monitorFailing: botStatus.monitorFailing,
@@ -392,7 +392,7 @@ function backupPass() {
 }
 
 export function startBot() {
-  if (isShuttingDown() || botStatus.running || lanesBusy() || config.offline) return;
+  if (isShuttingDown() || activeDrain || botStatus.running || lanesBusy() || config.offline) return;
   Object.assign(botStatus, { running: true, startedAt: Date.now(), lastMonitorAt: 0, lastTickerAt: 0, lastScanAt: 0, monitorFailing: false });
   takeoverRefused = false;
   journal('SYSTEM', `MIA engine started in ${displayMode()} mode`);
@@ -424,15 +424,34 @@ export const lanesBusy = () => Object.values(lanes).some((lane) => lane.inFlight
  * Graceful stop: no new lane starts, in-flight lanes finish (bounded wait), then the lease is released so a successor
  * starts at once instead of waiting for expiry. Returns whether every lane drained in time.
  */
-export async function drainBot(timeoutMs = 20_000): Promise<boolean> {
+let activeDrain: Promise<boolean> | null = null;
+export function drainBot(timeoutMs = 20_000, beforeRelease?: () => Promise<void>): Promise<boolean> {
+  if (activeDrain) return activeDrain;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return Promise.resolve(false);
   const lease = activeLease;
   stopBot();
-  const until = Date.now() + timeoutMs;
-  while (lanesBusy() && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
-  const drained = !lanesBusy();
-  // Release only after the lanes stopped; if one is still stuck, keep the lease so it expires rather than overlapping.
-  if (drained && lease) { try { releaseLease(lease.name, lease.holder, lease.acquired_at, lease.epoch); } catch { /* lease expires */ } }
-  return drained;
+  const until = performance.now() + timeoutMs;
+  activeDrain = (async () => {
+    while (lanesBusy() && performance.now() < until)
+      await new Promise<void>(resolve => setTimeout(resolve, Math.min(50, Math.max(0, until - performance.now()))));
+    if (lanesBusy() || performance.now() >= until) return false;
+    if (beforeRelease) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const remaining = Math.max(0, until - performance.now());
+        const completed = await Promise.race([
+          Promise.resolve().then(beforeRelease).then(() => true),
+          new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), remaining); }),
+        ]);
+        if (!completed || performance.now() >= until) return false;
+      } finally { clearTimeout(timer); }
+    }
+    // Retain the captured generation on timeout/error. A successor can take
+    // over only through the existing lease expiry + recovery protocol.
+    if (lease) releaseLease(lease.name, lease.holder, lease.acquired_at, lease.epoch);
+    return true;
+  })().finally(() => { activeDrain = null; });
+  return activeDrain;
 }
 export function botStatusView(acct = accountState()) {
   const ctl = getControl();

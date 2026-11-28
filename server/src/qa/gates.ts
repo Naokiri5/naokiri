@@ -43,7 +43,24 @@ const workerTests: readonly TestRef[] = [
 const joeTests: readonly TestRef[] = [
   { file: 'server/test/api.test.ts', fullName: 'HTTP API (auth, permissions, release gate) Trader Joe has no order/limit/mode/withdraw tools and refuses such commands' },
 ];
+/** Exact named regressions required in every shuffled P0 run (Linux CI). */
+export const P0_REQUIRED_TESTS: readonly TestRef[] = [
+  { file: 'server/test/oms.test.ts', fullName: 'Paper OMS lifecycle (Parts 17/20/26/27) freezes new entries at the shutdown boundary but permits existing protective exits' },
+  { file: 'server/test/runtime-shutdown.test.ts', fullName: 'canonical process shutdown latches once and changes the existing readiness endpoint without claiming liveness failure' },
+  ...['SIGTERM', 'SIGINT'].map(signal => ({ file: 'server/test/runtime-shutdown.test.ts', fullName: `real server subprocess lifecycle ${signal} exits normally and preserves committed WAL evidence` })),
+  ...[
+    'recovers committed canonical WAL state and rolls back an interrupted financial transaction after process death',
+    'fences a real suspended leader after another process takes over its expired lease',
+    'a real standby process waits for lease expiry after primary SIGKILL',
+  ].map(title => ({ file: 'server/test/brainos-wal-audit.test.ts', fullName: `BrainOS canonical WAL audit evidence (Q42/Q48 partial coverage) ${title}` })),
+  ...[
+    'drains a suspended scanner and ingress before releasing the captured lease',
+    'retains the lease when the ingress drain exceeds its deadline',
+  ].map(title => ({ file: 'server/test/ops-lease-hardening.test.ts', fullName: `engine lease hardening (additive to holdEngine) ${title}` })),
+];
+
 const emergencyTests: readonly TestRef[] = [
+  ...P0_REQUIRED_TESTS,
   { file: 'server/test/oms.test.ts', fullName: 'Paper OMS lifecycle (Parts 17/20/26/27) emergency stop: blocks, cancels, verifies protection, does not auto-close' },
   { file: 'server/test/api.test.ts', fullName: 'HTTP API (auth, permissions, release gate) risk-increasing actions require step-up; risk-reducing ones do not' },
 ];

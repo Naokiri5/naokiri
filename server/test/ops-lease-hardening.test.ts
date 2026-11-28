@@ -9,7 +9,7 @@ import { all, get, run } from '../src/db/db.js';
 import { config } from '../src/config.js';
 import { currentLease, tryAcquireLease } from '../src/ops/lease.js';
 import { readiness, protectionIntervalMs, _resetWatchdog } from '../src/ops/readiness.js';
-import { botStatus, botStatusView, startBot, stopBot, ENGINE_LEASE, SETTLEMENT_RESCAN_MIN_MS, engineLeaseTtlMs, _test } from '../src/bot/bot.js';
+import { botStatus, botStatusView, startBot, stopBot, drainBot, ENGINE_LEASE, SETTLEMENT_RESCAN_MIN_MS, engineLeaseTtlMs, _test } from '../src/bot/bot.js';
 import * as lab from '../src/lab/lab.js';
 import * as oms from '../src/exec/oms.js';
 import { setCrashHook } from '../src/exec/crashpoint.js';
@@ -65,6 +65,49 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     vi.mocked(oms.monitorPositions).mockClear(); vi.mocked(oms.submitEntry).mockClear(); vi.mocked(lab.checkStrategyHealth).mockClear(); _resetWatchdog();
   });
   afterEach(() => { stopBot(); setCrashHook(null); vi.useRealTimers(); _test.resetTakeoverRefusal(); (config as any).offline = wasOffline; });
+
+  it('drains a suspended scanner and ingress before releasing the captured lease', async () => {
+    await _test.hotLane();
+    await _test.protectionLane();
+    let resumeScan!: () => void, finishIngress!: () => void, ingressStarted!: () => void;
+    const provider = new Promise<void>(resolve => { resumeScan = resolve; });
+    const ingress = new Promise<void>(resolve => { finishIngress = resolve; });
+    const entered = new Promise<void>(resolve => { ingressStarted = resolve; });
+    let scans = 0;
+    hooks.deep = async () => { scans++; await provider; };
+    const scan = _test.scanLane();
+    expect(botStatusView().lanes.scan.inFlight).toBe(true);
+    const lease = currentLease(ENGINE_LEASE);
+    expect(lease).not.toBeNull();
+    const drained = drainBot(2_000, async () => { ingressStarted(); await ingress; });
+    try {
+      expect(drainBot(2_000)).toBe(drained);
+      await _test.scanLane();
+      _test.onDecision(report(id, last));
+      expect(scans).toBe(1);
+      expect(oms.submitEntry).not.toHaveBeenCalled();
+      expect(currentLease(ENGINE_LEASE)).toEqual(lease);
+      resumeScan();
+      await scan;
+      await entered;
+      expect(currentLease(ENGINE_LEASE)).toEqual(lease);
+      expect(count('fills')).toBe(0);
+      finishIngress();
+      expect(await drained).toBe(true);
+      expect(currentLease(ENGINE_LEASE)).toBeNull();
+    } finally { resumeScan(); finishIngress(); await scan; await drained; }
+  });
+
+  it('retains the lease when the ingress drain exceeds its deadline', async () => {
+    expect(_test.holdEngine()).toBe(true);
+    const lease = currentLease(ENGINE_LEASE);
+    let complete!: () => void;
+    const ingress = new Promise<void>(resolve => { complete = resolve; });
+    try {
+      expect(await drainBot(30, () => ingress)).toBe(false);
+      expect(currentLease(ENGINE_LEASE)).toEqual(lease);
+    } finally { complete(); }
+  });
 
   it('a ticker refresh that loses the lease leaves scheduling authority with the successor', async () => {
     hooks.duringAwait = steal;

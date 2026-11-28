@@ -60,9 +60,9 @@ jobs:
           EXPECTED_SHA: ${{ github.sha }}
         run: bash scripts/verify-brainos-phases.sh --p0-only
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: failure()
+        if: always()
         with:
-          name: p0-offline-verification-logs
+          name: p0-offline-verification-evidence
           path: ${{ runner.temp }}/mia-brainos-verify.*/logs/
           if-no-files-found: ignore
           retention-days: 7

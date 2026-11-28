@@ -191,7 +191,7 @@ describe('release gate manifest and certification gaps', () => {
       expect(listed.filter(test => normalize(test.file) === file && test.name.split(' > ').join(' ') === item.fullName), `${item.file}: ${item.fullName}`).toHaveLength(1);
     }
     expect(files).not.toContain('server/test/joe.test.ts');
-    expect(gates.TEST_GATE_REQUIREMENTS.G09).toHaveLength(2);
+    expect(gates.TEST_GATE_REQUIREMENTS.G09).toHaveLength(2 + gates.P0_REQUIRED_TESTS.length);
     expect(gates.TEST_GATE_REQUIREMENTS.G09).toContainEqual({ file: 'server/test/api.test.ts', fullName: 'HTTP API (auth, permissions, release gate) risk-increasing actions require step-up; risk-reducing ones do not' });
   });
 

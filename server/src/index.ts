@@ -12,10 +12,18 @@ import { authMode } from './security/stepUp.js';
 import { seedStrategies } from './lab/lab.js';
 import { seedCatalog, resumeIngestion } from './knowledge/store.js';
 import { seedConcepts } from './knowledge/concepts.js';
+import { isShuttingDown } from './ops/shutdown.js';
 
 export async function buildApp() {
   openDb(); seedStrategies(); seedCatalog(); seedConcepts(); resumeIngestion();
   const app = Fastify({ genReqId: (req) => { const h = req.headers['x-request-id']; return typeof h === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(h) ? h : randomUUID(); }, logger: { level: process.env.MIA_LOG ?? 'info', redact: ['req.headers.cookie', 'req.headers.authorization', 'req.body.accessToken', 'req.body.password', 'req.body.current', 'req.body.next', 'req.body.otp', 'req.body.consoleCode'] }, bodyLimit: 256 * 1024 });
+  app.addHook('onRequest', async (req, reply) => {
+    const route = req.routeOptions.url;
+    if (isShuttingDown() && !((req.method === 'GET' || req.method === 'HEAD') &&
+      (route === '/api/ready' || route === '/api/health'))) {
+      return reply.code(503).header('connection', 'close').send({ error: 'process draining' });
+    }
+  });
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('x-request-id', req.id);
     reply.header('x-content-type-options', 'nosniff'); reply.header('x-frame-options', 'DENY'); reply.header('referrer-policy', 'no-referrer');
