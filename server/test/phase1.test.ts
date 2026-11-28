@@ -61,5 +61,10 @@ describe('Phase 1 workspaces API', () => {
   it('Copy trading reports its real blocked state, with no fabricated wallets', async () => {
     const c = (await app.inject({ url: '/api/copy', headers: { cookie } })).json();
     expect(c.status).toBe('BLOCKED'); expect(c.trackedWallets).toEqual([]); expect(c.requirements.every((r: any) => r.status === 'PENDING_CREDENTIALS')).toBe(true);
+    const { providers } = (await app.inject({ url: '/api/connections', headers: { cookie } })).json();
+    expect(providers).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'solana_rpc', status: 'PENDING_CREDENTIALS', requiresCredentials: true }),
+      expect.objectContaining({ id: 'solana_rpc_mint', requiresCredentials: false }),
+    ]));
   });
 });

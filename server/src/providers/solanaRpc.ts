@@ -1,7 +1,7 @@
 import { fetchProvider, ProviderError, registerProvider, setRateLimit } from './http.js';
 import { isSolanaAddress } from './solanaAddress.js';
 
-const SOURCE = 'solana_rpc';
+const SOURCE = 'solana_rpc_mint';
 const ENDPOINT = 'https://api.mainnet-beta.solana.com/';
 const MAX_RESPONSE_BYTES = 524_288;
 export const MAX_FAST_MINTS_PER_PASS = 8;

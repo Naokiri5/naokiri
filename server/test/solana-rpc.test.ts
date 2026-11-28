@@ -58,7 +58,7 @@ describe('finalized FAST mint observations', () => {
     expect(fetchRpc).not.toHaveBeenCalled();
     fetchRpc.mockResolvedValueOnce(reply([account(), account()]));
     await expect(fetchFinalizedMintObservations([mint])).rejects.toThrow('invalid finalized mint response');
-    expect(provider('solana_rpc')?.lastError).toContain('invalid finalized mint response');
+    expect(provider('solana_rpc_mint')?.lastError).toContain('invalid finalized mint response');
     fetchRpc.mockResolvedValueOnce(new Response('x'.repeat(525_000)));
     await expect(fetchFinalizedMintObservations([mint])).rejects.toThrow('exceeds byte limit');
     fetchRpc.mockResolvedValueOnce(Response.redirect('https://api.mainnet-beta.solana.com/redirect', 307));
