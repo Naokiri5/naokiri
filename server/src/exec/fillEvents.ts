@@ -9,6 +9,14 @@ import type { DecisionReport } from '../decision/engine.js';
 const TOPIC = 'fill.recorded.v1';
 const eventId = /^[A-Za-z0-9:_.-]{1,128}$/;
 
+/** Committed full PAPER exits advance this cursor even if the process stops before publishing the position update. */
+export function paperSettlementCursor(): number {
+  return get<{ id: number }>(`SELECT id FROM audit_log WHERE action='${TOPIC}' AND
+    CASE WHEN json_valid(detail) THEN json_extract(detail,'$.payload.side')='SELL'
+      AND json_type(detail,'$.payload.closed')='true' ELSE 0 END
+    ORDER BY id DESC LIMIT 1`)?.id ?? 0;
+}
+
 /** Append an envelope to the existing audit log in the transaction that owns the fill. */
 export function recordPaperFill(input: {
   fillId: string; orderId: string; positionId: string; instrumentId: string; decisionId: string | null; side: 'BUY' | 'SELL';

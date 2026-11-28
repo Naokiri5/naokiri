@@ -35,11 +35,11 @@ function report(id: string, last: number, over: Partial<DecisionReport> = {}): D
 }
 
 function seedSpotCheckpoint(fence: LeaseFence, startedAt: number, state: 'RUNNING' | 'CLOSING_DRAINING_ENTRIES') {
-  run(`INSERT INTO brainos_sessions (session_id, version, state, environment, mind, lease_holder, lease_acquired_at,
+  run(`INSERT INTO brainos_sessions (session_id, version, state, environment, mind, lease_holder, lease_acquired_at, lease_epoch,
     fence_epoch, suspend_reason, started_at, updated_at, market_scope, capital_ceiling, risk_policy_version, authorized_by,
     authorized_at, expires_at, strategy_config_version)
-    VALUES ('brainos-autopilot', 1, ?, 'PAPER', 'SPOT_PAPER', ?, ?, 1, ?, ?, ?, 'BINANCE_SPOT', 10000, ?, 'owner:test', ?, ?, ?)`,
-    state, fence.holder, fence.acquired_at, state === 'RUNNING' ? 'NONE' : 'OWNER_CLOSE_REQUESTED', startedAt, startedAt,
+    VALUES ('brainos-autopilot', 1, ?, 'PAPER', 'SPOT_PAPER', ?, ?, ?, 1, ?, ?, ?, 'BINANCE_SPOT', 10000, ?, 'owner:test', ?, ?, ?)`,
+    state, fence.holder, fence.acquired_at, fence.epoch, state === 'RUNNING' ? 'NONE' : 'OWNER_CLOSE_REQUESTED', startedAt, startedAt,
     currentPolicy()!.version, startedAt, startedAt + 86_400_000, strategyConfigVersion());
 }
 

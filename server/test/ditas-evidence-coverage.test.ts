@@ -29,11 +29,11 @@ describe('EVIDENCE Omega coverage', () => {
     fence = acquireOrRenewLease('engine', 'worker', 60_000)!;
     // One timestamp: a mandate binds only the exact session start it was authorized with (SESSION_MANDATE_NOT_BOUND).
     const startedAt = Date.now();
-    run(`INSERT INTO brainos_sessions (session_id, version, state, environment, mind, lease_holder, lease_acquired_at,
+    run(`INSERT INTO brainos_sessions (session_id, version, state, environment, mind, lease_holder, lease_acquired_at, lease_epoch,
       fence_epoch, suspend_reason, started_at, updated_at, market_scope, capital_ceiling, risk_policy_version, authorized_by,
       authorized_at, expires_at, strategy_config_version)
-      VALUES ('brainos-autopilot', 1, 'RUNNING', 'PAPER', 'SPOT_PAPER', ?, ?, 1, 'NONE', ?, ?, 'BINANCE_SPOT', 10000, ?, 'owner:test', ?, ?, ?)`,
-      fence.holder, fence.acquired_at, startedAt, startedAt, currentPolicy()!.version, startedAt, startedAt + 86_400_000, strategyConfigVersion());
+      VALUES ('brainos-autopilot', 1, 'RUNNING', 'PAPER', 'SPOT_PAPER', ?, ?, ?, 1, 'NONE', ?, ?, 'BINANCE_SPOT', 10000, ?, 'owner:test', ?, ?, ?)`,
+      fence.holder, fence.acquired_at, fence.epoch, startedAt, startedAt, currentPolicy()!.version, startedAt, startedAt + 86_400_000, strategyConfigVersion());
   });
 
   /** Store a decision as the engine does; optionally freeze it in DITAS, give it QCI packets, and trade it. */

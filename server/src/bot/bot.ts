@@ -5,6 +5,7 @@ import { runDualResearchPass } from '../choice/dualRuntime.js';
 import { recordShadowChoice } from '../ditas/memory.js';
 import { uid } from '../core/util.js';
 import { monitorPositions, expireApprovals, submitEntry, queueForApproval } from '../exec/oms.js';
+import { paperSettlementCursor } from '../exec/fillEvents.js';
 import { refreshNews } from '../news/news.js';
 import { scanPrints } from '../whales/prints.js';
 import { checkStrategyHealth } from '../lab/lab.js';
@@ -55,6 +56,7 @@ export const engineLeaseTtlMs = () => (config.offline && config.engineLeaseTtlMs
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 let activeLease: LeaseFence | null = null;
 let takeoverRefused = false;
+let lastScannedSettlementCursor = 0;
 
 function setEngineRole(role: 'LEADER' | 'STANDBY') {
   if (!botStatus.running || botStatus.role === role) return;
@@ -73,7 +75,10 @@ function holdEngine(): LeaseFence | null {
     const lease = acquireOrRenewLease(ENGINE_LEASE, botStatus.instanceId, engineLeaseTtlMs());
     if (lease) {
       // Reacquiring an expired lease starts a new generation even when this process was the previous holder.
-      if ((activeLease?.acquired_at !== lease.acquired_at || activeLease?.epoch !== lease.epoch) && !takeoverAllowed(lease)) return null;
+      if (activeLease?.acquired_at !== lease.acquired_at || activeLease?.epoch !== lease.epoch) {
+        if (!takeoverAllowed(lease)) return null;
+        lastScannedSettlementCursor = 0;
+      }
       activeLease = { name: lease.name, holder: lease.holder, acquired_at: lease.acquired_at, epoch: lease.epoch };
       setEngineRole('LEADER');
       return activeLease;
@@ -181,20 +186,18 @@ function onDecision(r: DecisionReport, lease: LeaseFence | null = activeLease) {
 }
 
 /**
- * Continuous multi-trade: a settled position frees a slot and capital, so opportunities are re-evaluated now rather
- * than at the next scheduled scan (up to MIA_SCAN_INTERVAL_MS later). Bounded to one early scan per window; the scan
- * runs on its own lane, never inside protection, and every entry still passes the full risk gate.
+ * Wake the existing scan lane when a committed settlement is newer than its last completed scan. A settlement
+ * during the cooldown remains due unless an ordinary scan catches up first. The scan still applies the full risk gate.
  */
 export const SETTLEMENT_RESCAN_MIN_MS = 10_000;
-function requestSettlementRescan(nowTs = Date.now()) {
-  if (nowTs - botStatus.lastSettlementRescanAt < SETTLEMENT_RESCAN_MIN_MS) return false;
+function wakeScanForSettlement(lease: LeaseFence, nowTs = Date.now()) {
+  if (!botStatus.lastTickerAt || nowTs - botStatus.lastSettlementRescanAt < SETTLEMENT_RESCAN_MIN_MS ||
+      paperSettlementCursor() <= lastScannedSettlementCursor || !stillLeader(lease)) return;
   botStatus.lastSettlementRescanAt = nowTs; botStatus.settlementRescans++;
-  setImmediate(() => { void scanLane(); });
-  return true;
+  setImmediate(() => { if (stillLeader(lease)) void scanLane(); });
 }
 
 const protectionLane = () => runLane('protection', (lease) => {
-  const openBefore = openPositions().length;
   try {
     monitorPositions(undefined, lease);
     botStatus.lastMonitorAt = Date.now();
@@ -203,7 +206,6 @@ const protectionLane = () => runLane('protection', (lease) => {
     if (!(error instanceof LeaseLostError)) botStatus.monitorFailing = true;
     throw error;
   }
-  if (openPositions().length < openBefore && stillLeader(lease)) requestSettlementRescan();
   // An expired mandate revokes entry authority without the owner present; exits keep running.
   // Contained so a clock regression cannot skip the drain completion or the watchdog below; entries stay denied.
   try {
@@ -219,6 +221,7 @@ const protectionLane = () => runLane('protection', (lease) => {
     }
   }
   try { checkScanStall(botStatus); } catch (error) { botStatus.lastError = `watchdog: ${errorText(error)}`; }
+  wakeScanForSettlement(lease);
 });
 
 const booksLane = () => runLane('positionBooks', async () => {
@@ -258,12 +261,13 @@ function scanPass() {
     const startedAt = Date.now(), control = getControl(), policy = currentPolicy()?.version;
     const observed: ReturnType<typeof freezeChoiceEvidence>[] = [];
     let totalReportsObserved = 0;
-    await scanOnce((report, snapshotId) => {
+    const { settlementCursor } = await scanOnce((report, snapshotId) => {
       totalReportsObserved++;
       if (shadowEnabled && observed.length < MAX_SHADOW_CANDIDATES) observed.push(freezeChoiceEvidence(report, snapshotId));
       onDecision(report, lease);
     }, () => stillLeader(lease));
     if (!stillLeader(lease)) return;
+    lastScannedSettlementCursor = settlementCursor;
     if (shadowEnabled) {
       const completedAt = Date.now();
       const currentControl = getControl();
@@ -434,4 +438,4 @@ export function botStatusView(acct = accountState()) {
     state: ctl.emergency ? 'EMERGENCY' : ctl.pausedNewOrders ? 'PAUSED' : ctl.mode === 'OBSERVE' ? 'OBSERVING' : ctl.mode === 'PAPER' ? 'PAPER_TRADING' : ctl.mode === 'APPROVAL' ? 'AWAITING_APPROVAL' : 'BOUNDED_LIVE',
   };
 }
-export const _test = { requestSettlementRescan, onDecision, holdEngine: () => !!holdEngine(), hotLane, protectionLane, scanLane, scanDirty: () => scanDirty, backgroundLane, resetTakeoverRefusal: () => { takeoverRefused = false; } };
+export const _test = { onDecision, holdEngine: () => !!holdEngine(), hotLane, protectionLane, scanLane, scanDirty: () => scanDirty, backgroundLane, resetTakeoverRefusal: () => { takeoverRefused = false; } };

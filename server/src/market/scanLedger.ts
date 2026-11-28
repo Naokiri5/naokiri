@@ -14,7 +14,6 @@
  * This only changes when the full decision pipeline runs again; it never relaxes a gate.
  */
 import { all, get } from '../db/db.js';
-import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import type { RiskDecision } from '../risk/gate.js';
 
 /** Risk denial prefixes that a settlement can clear. Everything else is terminal for the candle. */
@@ -40,11 +39,6 @@ export function isCapacityOnlyDenial(risk: Pick<RiskDecision, 'decision' | 'reas
   if (!risk.reasonCodes.every((c) => typeof c === 'string')) return false;
   return risk.reasonCodes.some((c) => matches(CAPACITY_CODES, c))
     && risk.reasonCodes.every((c) => matches(CAPACITY_CODES, c) || matches(CAPACITY_CONSEQUENCE_CODES, c));
-}
-
-/** Changes whenever a paper position settles (closes), which is what frees slots, cash and open risk. */
-export function capacityEpoch(): number {
-  return get<{ n: number }>("SELECT COUNT(*) AS n FROM positions WHERE account=? AND status='CLOSED'", PAPER_ACCOUNT)?.n ?? 0;
 }
 
 export interface WaitingCandidate { key: string; instrumentId: string; strategyId: string; epoch: number; expiresAt: number; reasons: string[]; since: number; evaluations: number }

@@ -8,7 +8,7 @@ import { all, get, run } from '../src/db/db.js';
 import { config } from '../src/config.js';
 import { currentLease, tryAcquireLease } from '../src/ops/lease.js';
 import { readiness, protectionIntervalMs, _resetWatchdog } from '../src/ops/readiness.js';
-import { botStatus, botStatusView, startBot, stopBot, ENGINE_LEASE, engineLeaseTtlMs, _test } from '../src/bot/bot.js';
+import { botStatus, botStatusView, startBot, stopBot, ENGINE_LEASE, SETTLEMENT_RESCAN_MIN_MS, engineLeaseTtlMs, _test } from '../src/bot/bot.js';
 import * as lab from '../src/lab/lab.js';
 import * as oms from '../src/exec/oms.js';
 import { setCrashHook } from '../src/exec/crashpoint.js';
@@ -45,6 +45,9 @@ function report(id: string, last: number): DecisionReport {
 }
 const steal = () => run('UPDATE runtime_leases SET holder=?, expires_at=? WHERE name=?', 'other-host:1:x', Date.now() + 600_000, ENGINE_LEASE);
 const count = (t: string) => get<{ n: number }>(`SELECT COUNT(*) n FROM ${t}`)!.n;
+const settleScan = async () => {
+  for (let i = 0; i < 20; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+};
 
 describe('engine lease hardening (additive to holdEngine)', () => {
   let id = ''; let last = 0;
@@ -52,7 +55,8 @@ describe('engine lease hardening (additive to holdEngine)', () => {
   beforeEach(() => {
     freshDb(); market.reset(); ({ inst: { id }, last } = seedInstrument('ETHUSDT', { seed: 2 }) as any);
     acceptPolicy('owner', DEFAULT_POLICY); updateControl('owner', { mode: 'PAPER' }); ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
-    Object.assign(botStatus, { running: true, role: 'STOPPED', lastError: null, lastMonitorAt: 0, monitorFailing: false, startedAt: Date.now() });
+    Object.assign(botStatus, { running: true, role: 'STOPPED', lastError: null, lastMonitorAt: 0, lastTickerAt: 0,
+      lastSettlementRescanAt: 0, monitorFailing: false, startedAt: Date.now() });
     hooks.duringAwait = () => {};
     hooks.tickers = async () => {};
     hooks.books = async () => {};
@@ -93,7 +97,7 @@ describe('engine lease hardening (additive to holdEngine)', () => {
   });
 
   it('re-evaluates opportunities right after a position settles, at most once per window', async () => {
-    botStatus.lastSettlementRescanAt = 0;
+    await _test.hotLane();
     const before = botStatus.settlementRescans;
     await _test.protectionLane(); // nothing open: nothing settles, no early scan
     expect(botStatus.settlementRescans).toBe(before);
@@ -102,14 +106,57 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     await _test.protectionLane();
     expect(openPositions()).toHaveLength(0);
     expect(botStatus.settlementRescans).toBe(before + 1);
-    expect(_test.requestSettlementRescan()).toBe(false); // bounded: a second request inside the window is refused
-    expect(_test.requestSettlementRescan(botStatus.lastSettlementRescanAt + 10_000)).toBe(true);
+    await settleScan();
+  });
+
+  it('retries settlements during the cooldown, including a committed close with no post-commit notification', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    await _test.hotLane();
+    await _test.protectionLane();
+    let passes = 0;
+    hooks.deep = async () => { passes++; };
+    const before = botStatus.settlementRescans;
+
+    expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+    expect(oms.closePosition('owner', openPositions()[0].id).closed).toBe(true);
+    await _test.protectionLane();
+    await settleScan();
+    expect(passes).toBe(1);
+    expect(botStatus.settlementRescans).toBe(before + 1);
+
+    const firstWakeAt = botStatus.lastSettlementRescanAt;
+    const next = seedInstrument('SOLUSDT', { seed: 3 });
+    expect(oms.submitEntry(report(next.inst.id, next.last), 'bot').ok).toBe(true);
+    setCrashHook((point) => { if (point === 'exit.committed') throw new Error('crash after commit'); });
+    expect(() => oms.closePosition('owner', openPositions()[0].id)).toThrow('crash after commit');
+    setCrashHook(null);
+    expect(openPositions()).toHaveLength(0);
+    expect(count('fills')).toBe(4);
+
+    vi.setSystemTime(firstWakeAt + SETTLEMENT_RESCAN_MIN_MS - 1);
+    await _test.protectionLane();
+    await settleScan();
+    expect(passes).toBe(1);
+    vi.setSystemTime(firstWakeAt + SETTLEMENT_RESCAN_MIN_MS);
+    await _test.protectionLane();
+    await settleScan();
+    expect(passes).toBe(2);
+    expect(botStatus.settlementRescans).toBe(before + 2);
+
+    vi.setSystemTime(firstWakeAt + 2 * SETTLEMENT_RESCAN_MIN_MS);
+    await _test.protectionLane();
+    await settleScan();
+    expect(passes).toBe(2);
   });
 
   describe('coalescing scan scheduler', () => {
     let passes = 0; let release!: () => void; let entered!: () => void;
-    const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
-    const settle = async () => { for (let i = 0; i < 20; i++) await tick(); };
+    const settle = settleScan;
+    const settlePosition = async () => {
+      expect(oms.submitEntry(report(id, last), 'bot').ok).toBe(true);
+      expect(oms.closePosition('owner', openPositions()[0].id).closed).toBe(true);
+      await _test.protectionLane();
+    };
     /** Blocks the first scan pass on a promise; later passes return at once. */
     const blockFirstPass = () => {
       const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -122,8 +169,8 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     it('a settlement rescan during a pass causes exactly one extra pass after it finishes', async () => {
       const started = blockFirstPass();
       const first = _test.scanLane(); await started;
-      botStatus.lastSettlementRescanAt = 0; const before = botStatus.settlementRescans;
-      expect(_test.requestSettlementRescan()).toBe(true);
+      const before = botStatus.settlementRescans;
+      await settlePosition();
       await settle();
       expect(botStatus.settlementRescans).toBe(before + 1);
       expect(passes).toBe(1); expect(_test.scanDirty()).toBe(true);
@@ -162,7 +209,7 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     it('no extra pass after the lease is lost', async () => {
       const started = blockFirstPass();
       const first = _test.scanLane(); await started;
-      _test.requestSettlementRescan(botStatus.lastSettlementRescanAt + 10_000);
+      await settlePosition();
       await settle(); expect(_test.scanDirty()).toBe(true);
       steal();
       release(); await first; await settle();

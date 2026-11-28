@@ -17,8 +17,7 @@ describe('migration 13 exact ledger units', () => {
     const ins = raw.prepare("INSERT INTO ledger_entries(id,account,ts,kind,amount) VALUES (?,'paper-bot',1,?,?)");
     ins.run('a', 'DEPOSIT', 10000); ins.run('b', 'BUY', -123.45678912); ins.run('c', 'FEE', -0.1); ins.run('d', 'SELL', 0.30000000000000004);
     migrate(raw);
-    expect((raw.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number }).v).toBe(13);
-    expect(SCHEMA_VERSION).toBe(13);
+    expect((raw.prepare('SELECT MAX(version) v FROM schema_migrations').get() as { v: number }).v).toBe(SCHEMA_VERSION);
     const rows = raw.prepare('SELECT id, amount, amount_units u FROM ledger_entries ORDER BY id').all() as { id: string; amount: number; u: number }[];
     expect(rows.map((r) => [r.id, r.amount, r.u])).toEqual([['a', 10000, 1000000000000], ['b', -123.45678912, -12345678912], ['c', -0.1, -10000000], ['d', 0.30000000000000004, 30000000]]);
     raw.close();

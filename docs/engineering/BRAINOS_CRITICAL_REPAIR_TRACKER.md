@@ -53,10 +53,11 @@ work still grows with the number of acknowledged mismatch records.
 
 ## Continuous multi-trade: settlement-triggered re-evaluation
 
-When the protection lane closes a position, the bot starts an opportunity scan immediately instead of waiting for
-the next scheduled scan (`MIA_SCAN_INTERVAL_MS`, default 60 s), so freed capital and slots are reconsidered at once.
-At most one early scan per 10 s; it runs on the scan lane, never inside protection, and every entry still passes the
-full risk gate (`bot/bot.ts` `requestSettlementRescan`; test in `ops-lease-hardening.test.ts`, mutation-checked).
+After any full PAPER exit commits, the protection lane can wake the existing scan lane using the OMS's durable fill
+event. This also covers owner closes and a missing post-commit notification. An exit during the 10 s cooldown remains
+due until a scan observes it. Scheduled scans continue at `MIA_SCAN_INTERVAL_MS` (default 60 s). Entries still pass the
+full risk gate. The [institutional integration audit](BRAINOS_V2_INSTITUTIONAL_INTEGRATION_AUDIT.md) records the
+recovery regressions and related release gates.
 
 Scanner repair (roadmap 27 Nov, CT01-04 "capacity-blocked candidate revalidated after confirmed settlement"): the
 scanner used to mark an instrument/strategy/candle as processed whatever the outcome, so a signal denied only for

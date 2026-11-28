@@ -1,4 +1,4 @@
-import { fetchProvider, registerProvider, setRateLimit } from './http.js';
+import { fetchProvider, ProviderError, registerProvider, setRateLimit } from './http.js';
 import { INTERVAL_MS, type Candle, type Interval } from '../market/types.js';
 
 /** Binance public market-data mirror (data-api.binance.vision). Read-only, no key. */
@@ -57,11 +57,32 @@ export async function klines(symbol: string, interval: string, limit = 300): Pro
 }
 /** ts is stamped when the request STARTS (age is never understated by latency); lastUpdateId orders snapshots. */
 export interface Book { bids: [number, number][]; asks: [number, number][]; ts: number; lastUpdateId?: number }
+
+const DEPTH_DECIMAL = /^\d+(?:\.\d+)?$/;
+function parseDepthSide(rows: unknown): Book['bids'] {
+  if (!Array.isArray(rows)) return [];
+  const levels: Book['bids'] = [];
+  for (const row of rows) {
+    if (!Array.isArray(row) || row.length !== 2 ||
+        !row.every((value) => typeof value === 'string' && DEPTH_DECIMAL.test(value))) return [];
+    const price = Number(row[0]), quantity = Number(row[1]);
+    if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(quantity) || quantity <= 0) return [];
+    levels.push([price, quantity]);
+  }
+  return levels;
+}
+
 export async function depth(symbol: string, limit = 100): Promise<Book> {
   const ts = Date.now();
-  const raw = await fetchProvider('binance', `${BASE}/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
-  const side = (xs: string[][]) => xs.map((x) => [+x[0], +x[1]] as [number, number]).filter(([p, q]) => Number.isFinite(p) && Number.isFinite(q) && p > 0 && q > 0);
-  return { bids: side(raw.bids ?? []), asks: side(raw.asks ?? []), ts, lastUpdateId: Number.isFinite(+raw.lastUpdateId) ? +raw.lastUpdateId : undefined };
+  const raw: { bids?: unknown; asks?: unknown; lastUpdateId?: unknown } | null =
+    await fetchProvider('binance', `${BASE}/depth?symbol=${encodeURIComponent(symbol)}&limit=${limit}`);
+  const lastUpdateId = raw?.lastUpdateId;
+  if (typeof lastUpdateId !== 'number' || !Number.isSafeInteger(lastUpdateId) || lastUpdateId < 0) {
+    throw new ProviderError('binance', 'invalid depth snapshot sequence');
+  }
+  // An empty side makes the entire snapshot non-executable. Keep the snapshot's ordering metadata so a
+  // malformed response cannot create an executable partial book or be replaced by an older in-flight response.
+  return { bids: parseDepthSide(raw?.bids), asks: parseDepthSide(raw?.asks), ts, lastUpdateId };
 }
 export interface AggTrade { id: number; price: number; qty: number; ts: number; buyerIsMaker: boolean }
 export async function aggTrades(symbol: string, limit = 500): Promise<AggTrade[]> {

@@ -40,11 +40,11 @@ const SCOPE: Record<Lane, string> = { SPOT_PAPER: 'BINANCE_SPOT', FAST: 'SOLANA_
 function seedSession(fence: LeaseFence, opts: { mind?: Lane; environment?: string; ceiling?: number; startedAt?: number } = {}) {
   const startedAt = opts.startedAt ?? Date.now();
   const mind = opts.mind ?? 'SPOT_PAPER';
-  run(`INSERT INTO brainos_sessions (session_id, version, state, environment, mind, lease_holder, lease_acquired_at,
+  run(`INSERT INTO brainos_sessions (session_id, version, state, environment, mind, lease_holder, lease_acquired_at, lease_epoch,
     fence_epoch, suspend_reason, started_at, updated_at, market_scope, capital_ceiling, risk_policy_version, authorized_by,
     authorized_at, expires_at, strategy_config_version)
-    VALUES ('brainos-autopilot', 1, 'RUNNING', ?, ?, ?, ?, 1, 'NONE', ?, ?, ?, ?, ?, 'owner:test', ?, ?, ?)`,
-  opts.environment ?? 'PAPER', mind, fence.holder, fence.acquired_at, startedAt, startedAt, SCOPE[mind],
+    VALUES ('brainos-autopilot', 1, 'RUNNING', ?, ?, ?, ?, ?, 1, 'NONE', ?, ?, ?, ?, ?, 'owner:test', ?, ?, ?)`,
+  opts.environment ?? 'PAPER', mind, fence.holder, fence.acquired_at, fence.epoch, startedAt, startedAt, SCOPE[mind],
   opts.ceiling ?? 10_000, currentPolicy()!.version, startedAt, startedAt + DAY, strategyConfigVersion());
 }
 

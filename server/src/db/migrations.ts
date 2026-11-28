@@ -188,6 +188,14 @@ const MIGRATIONS: string[] = [
   ALTER TABLE ledger_entries ADD COLUMN amount_units INTEGER;
   UPDATE ledger_entries SET amount_units = CAST(ROUND(amount * 100000000) AS INTEGER);
   `,
+  /* 14 - Bind new owner authorizations to the engine lease generation. Existing sessions have no proof of it. */ `
+  ALTER TABLE brainos_sessions ADD COLUMN lease_epoch INTEGER;
+  `,
+  /* 15 - Bound PAPER fill cursor queries to fill events in the existing audit log. */ `
+  CREATE INDEX audit_log_paper_settlement_cursor ON audit_log(id) WHERE action='fill.recorded.v1' AND
+    CASE WHEN json_valid(detail) THEN json_extract(detail,'$.payload.side')='SELL'
+      AND json_type(detail,'$.payload.closed')='true' ELSE 0 END;
+  `,
 ];
 
 /** `target` lets upgrade tests stop at an older schema version; production always migrates to the latest. */

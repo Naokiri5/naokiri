@@ -10,7 +10,8 @@ import { _test as scheduler, botStatus, stopBot } from '../src/bot/bot.js';
 import { config } from '../src/config.js';
 import { updateControl } from '../src/core/mode.js';
 import { buildApp } from '../src/index.js';
-import { acquireOrRenewLease, currentLease } from '../src/ops/lease.js';
+import { acquireOrRenewLease, currentLease, releaseLease } from '../src/ops/lease.js';
+import { inspectLeaseWitness } from '../src/ops/leaseWitness.js';
 import {
   drainExpiredMandate, durableEntryPermission, durableSessionStatus, finishDurableClose,
   authorizePaperSpotSession, openDurablePaperSession, openPaperSpotSession, paperSpotEntryDenial,
@@ -47,7 +48,7 @@ beforeEach(() => {
 });
 afterEach(() => { config.offline = offline; vi.useRealTimers(); closeDb(); rmSync(dir, { recursive: true, force: true }); });
 
-function prepareSpotSession() {
+function prepareSpotSession(leaseAt = NOW - 1) {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(NOW - 1);
   config.offline = false;
@@ -55,7 +56,7 @@ function prepareSpotSession() {
   acceptPolicy('owner', DEFAULT_POLICY);
   ledger(PAPER_ACCOUNT, 'DEPOSIT', 10_000);
   updateControl('owner', { mode: 'PAPER' });
-  return acquireOrRenewLease('engine', 'leader-a', 1_000, NOW - 1)!;
+  return acquireOrRenewLease('engine', 'leader-a', 1_000, leaseAt)!;
 }
 
 function pendingApproval(id: string, at: number, venue = 'binance-paper') {
@@ -220,6 +221,23 @@ describe('durable Binance spot paper authorization', () => {
     expect(durableEntryPermission(engine, fence, NOW)).toMatchObject({ allowFastNewEntries: false, allowDeepNewEntries: false });
   });
 
+  it('blocks a new lease generation from reusing a same-millisecond owner authorization', () => {
+    const fence = prepareSpotSession(NOW);
+    vi.setSystemTime(NOW);
+    openPaperSpotSession(engine, fence, MANDATE, NOW);
+    expect(paperSpotEntryDenial(fence, NOW, NOW)).toBeNull();
+    expect(inspectLeaseWitness(file, NOW).session).toBe('BOUND');
+    expect(releaseLease(fence.name, fence.holder, fence.acquired_at, fence.epoch)).toBe(true);
+    const successor = acquireOrRenewLease(fence.name, fence.holder, 1_000, NOW)!;
+    expect(successor.acquired_at).toBe(fence.acquired_at);
+    expect(successor.epoch).toBeGreaterThan(fence.epoch);
+
+    expect(paperSpotEntryDenial(successor, NOW, NOW)).toBe('STALE_OR_LOST_ENGINE_FENCE');
+    expect(inspectLeaseWitness(file, NOW).session).toBe('UNBOUND');
+    expect(recoverDurableSessionAfterTakeover(successor, NOW)).toMatchObject({ state: 'ENTRY_SUSPENDED_RISK_HALT' });
+    expect(paperSpotEntryDenial(successor, NOW, NOW)).toBe('SESSION_NOT_RUNNING');
+  });
+
   it('rolls the session opening back when its audit record cannot be written', () => {
     const fence = prepareSpotSession();
     pendingApproval('kept-approval', NOW);
@@ -380,5 +398,30 @@ describe('durable trading mandate', () => {
     expect(upgraded).toMatchObject({ version: 3, state: 'RUNNING', fence_epoch: 2, capital_ceiling: null, market_scope: null });
     expect(mandateEntryDenial(upgraded, NOW)).toBe('SESSION_MANDATE_MISSING');
     expect(paperSpotEntryDenial(null, NOW)).toBe('SESSION_MANDATE_MISSING');
+  });
+
+  it('requires fresh authorization after upgrading an unbound mandate and allows it to drain', () => {
+    closeDb();
+    const upgradeFile = join(dir, 'v13.sqlite');
+    const raw = new DatabaseSync(upgradeFile);
+    try {
+      migrate(raw, 13);
+      raw.prepare(`INSERT INTO brainos_sessions(session_id,version,state,environment,mind,lease_holder,lease_acquired_at,
+        fence_epoch,suspend_reason,started_at,updated_at,market_scope,capital_ceiling,risk_policy_version,authorized_by,
+        authorized_at,expires_at,strategy_config_version) VALUES ('brainos-autopilot',1,'RUNNING','PAPER','SPOT_PAPER',
+        'leader-a',?,1,'NONE',?,?,'BINANCE_SPOT',5000,1,'owner:test',?,?,?)`)
+        .run(NOW - 1, NOW, NOW, NOW, NOW + HOUR, strategyConfigVersion());
+    } finally { raw.close(); }
+    openDb(upgradeFile);
+    const fence = prepareSpotSession();
+    expect(paperSpotEntryDenial(fence, NOW, NOW)).toBe('STALE_OR_LOST_ENGINE_FENCE');
+    expect(inspectLeaseWitness(upgradeFile, NOW).session).toBe('UNBOUND');
+    expect(durableSessionStatus()).toMatchObject({ state: 'RUNNING', lease_epoch: null, fence_epoch: 1, capital_ceiling: 5_000 });
+
+    expect(requestPaperSpotClose(NOW)?.state).toBe('CLOSING_DRAINING_ENTRIES');
+    expect(recoverDurableSessionAfterTakeover(fence, NOW)?.state).toBe('CLOSING_DRAINING_ENTRIES');
+    expect(finishDurableClose(NOW, fence).state).toBe('CLOSED');
+    expect(openPaperSpotSession(engine, fence, MANDATE, NOW)).toMatchObject({ state: 'RUNNING', lease_epoch: fence.epoch, fence_epoch: 2 });
+    expect(paperSpotEntryDenial(fence, NOW, NOW)).toBeNull();
   });
 });

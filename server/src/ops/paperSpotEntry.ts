@@ -20,6 +20,7 @@ export interface DurableBrainosSession extends MandateColumns {
   mind: SessionMind | 'SPOT_PAPER';
   lease_holder: string | null;
   lease_acquired_at: number | null;
+  lease_epoch: number | null;
   fence_epoch: number;
   suspend_reason: BrainosSuspendReason;
   started_at: number | null;
@@ -32,6 +33,12 @@ export const BRAINOS_SESSION_ID = 'brainos-autopilot';
 /** A read never creates an authorizing session or mutates the financial ledger. */
 export function durableSessionStatus(): DurableBrainosSession | null {
   return get<DurableBrainosSession>('SELECT * FROM brainos_sessions WHERE session_id=?', BRAINOS_SESSION_ID) ?? null;
+}
+
+/** Compare a checkpoint's recorded engine generation. Callers verify that the lease is current separately. */
+export function sessionBoundToLease(session: DurableBrainosSession, fence: LeaseFence): boolean {
+  return fence.name === 'engine' && session.lease_holder === fence.holder &&
+    session.lease_acquired_at === fence.acquired_at && session.lease_epoch === fence.epoch;
 }
 
 /** The market and strategy of a specific entry, checked against the session's trading mandate. */
@@ -49,8 +56,7 @@ export function paperSpotEntryDenial(fence: LeaseFence | null, at: number, entry
   if (session.environment !== 'PAPER' || session.mind !== 'SPOT_PAPER') return 'SESSION_NOT_SPOT_PAPER';
   const mandate = mandateEntryDenial(session, at, entry);
   if (mandate) return mandate;
-  if (!fence || fence.name !== 'engine' || session.lease_holder !== fence.holder ||
-      session.lease_acquired_at !== fence.acquired_at || !ownsLease(fence, at)) return 'STALE_OR_LOST_ENGINE_FENCE';
+  if (!fence || !sessionBoundToLease(session, fence) || !ownsLease(fence, at)) return 'STALE_OR_LOST_ENGINE_FENCE';
   const started = session.started_at;
   if (started === null || !Number.isSafeInteger(started) || started <= 0 || started > at) return 'SESSION_INVALID_START_TIME';
   const control = getControl();

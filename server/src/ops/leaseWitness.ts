@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { verifyAuditChain } from '../core/audit.js';
 import { validLeaseAt, type Lease } from './lease.js';
-import type { DurableBrainosSession } from './paperSpotEntry.js';
+import { sessionBoundToLease, type DurableBrainosSession } from './paperSpotEntry.js';
 
 export type LeaseObservation = 'ABSENT' | 'CURRENT' | 'EXPIRED' | 'INVALID';
 export interface LeaseWitness {
@@ -33,8 +33,7 @@ export function inspectLeaseWitness(file: string, at = Date.now()): LeaseWitness
     const lease: LeaseObservation = !row ? 'ABSENT' : !validLeaseAt(row, at) ? 'INVALID' :
       row.expires_at < at ? 'EXPIRED' : 'CURRENT';
     const session = !checkpoint ? 'ABSENT' : checkpoint.state !== 'RUNNING' ? 'NOT_RUNNING' :
-      lease === 'CURRENT' && row && checkpoint.lease_holder === row.holder &&
-      checkpoint.lease_acquired_at === row.acquired_at ? 'BOUND' : 'UNBOUND';
+      lease === 'CURRENT' && row && sessionBoundToLease(checkpoint, row) ? 'BOUND' : 'UNBOUND';
     const audit = verifyAuditChain(db.prepare('SELECT * FROM audit_log ORDER BY id').all());
     db.exec('COMMIT');
     return { observedAt: at, lease, session, audit, tradingAuthority: false };

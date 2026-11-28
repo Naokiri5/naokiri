@@ -20,7 +20,8 @@ import { strategyStats } from '../lab/lab.js';
 import { readIndicators } from '../workers/indicators.js';
 import { getControl } from '../core/mode.js';
 import { uid } from '../core/util.js';
-import { ScanLedger, capacityEpoch, storedDecisionsEndKey } from './scanLedger.js';
+import { ScanLedger, storedDecisionsEndKey } from './scanLedger.js';
+import { paperSettlementCursor } from '../exec/fillEvents.js';
 import { INTERVAL_MS } from './types.js';
 import { timed, record } from '../core/latency.js';
 import { bus } from '../core/bus.js';
@@ -82,13 +83,13 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
   const session = duringOnlinePaper ? durableSessionStatus() : null;
   const awaitingPaperSession = duringOnlinePaper && (session?.state !== 'RUNNING' || session.environment !== 'PAPER' || session.mind !== 'SPOT_PAPER');
   let candidates = 0;
-  const epoch = capacityEpoch();
+  const settlementCursor = paperSettlementCursor();
   ledger.beginScan();
   for (const id of market.universe) {
     // Scheduled scans give due protection timers a turn between instruments.
     if (continueScan) {
       await nextTurn();
-      if (!continueScan()) return { candidates, universe: market.universe.length };
+      if (!continueScan()) return { candidates, universe: market.universe.length, settlementCursor };
     }
     const inst = market.instruments.get(id); const d = market.deep.get(id); const t = market.tickers.get(id);
     if (!inst || !d || !t) continue;
@@ -107,7 +108,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
     for (const s of STRATEGIES) {
       if (ctl.disabledStrategies.includes(s.id)) continue;
       const key = `${id}:${s.id}:${f1.t}`;
-      const verdict = ledger.verdict(key, Date.now(), epoch);
+      const verdict = ledger.verdict(key, Date.now(), settlementCursor);
       if (verdict !== 'EVALUATE') continue;
       // survive restarts: a terminal decision for this instrument/strategy after this candle closed already exists
       // (a capacity-only denial is not terminal; it is re-evaluated once and then waits for a settlement)
@@ -130,7 +131,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
       const proposalMemory = recordOpportunity({ kind: 'PROPOSAL', instrumentId: id, strategyId: s.id, dedupeKey: `proposal:${cand.id}`, reason: sig.reasons.join('; '), candidate: cand, ctx });
       ctx.memorySnapshotId = proposalMemory.snapshotId ?? undefined;
       const qci = await runConsensus(ctx);
-      if (continueScan && !continueScan()) return { candidates, universe: market.universe.length };
+      if (continueScan && !continueScan()) return { candidates, universe: market.universe.length, settlementCursor };
       const correlatedOpen = openPositions().filter((p) => { const c = correlation(p.instrument, id); return c == null || c >= (currentPolicy()?.policy ?? DEFAULT_POLICY).correlationThreshold; }).length;
       const rep = decide(cand, ctx, qci, ctx.strategyStats, correlatedOpen);
       record('pipeline.candidate_to_decision', Date.now() - cand.createdAt);
@@ -138,7 +139,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
       if (rep.decision === 'REJECTED' || rep.decision === 'INSUFFICIENT_DATA') rejectLog(inst.symbol, 'decision', `${s.id}: ${rep.decision} — ${[...qci.reason_codes, ...(rep.risk?.reasonCodes ?? [])].slice(0, 3).join('; ')}`);
       lastDecisions.push(rep); if (lastDecisions.length > 300) lastDecisions.shift();
       // A capacity-only denial waits for a settlement; any other outcome ends this key for the candle.
-      ledger.record(key, { instrumentId: id, strategyId: s.id }, rep.risk, epoch, f1.t + 2 * INTERVAL_MS['1h'], Date.now());
+      ledger.record(key, { instrumentId: id, strategyId: s.id }, rep.risk, settlementCursor, f1.t + 2 * INTERVAL_MS['1h'], Date.now());
       onDecision?.(rep, ctx.memorySnapshotId);
       } catch (e: any) {
         // One failing candidate must not abort the scan for the rest of the universe; it is retried next cycle.
@@ -150,7 +151,7 @@ export async function scanOnce(onDecision?: (r: DecisionReport, snapshotId?: str
   record('scan.cycle', performance.now() - t0);
   market.lastScanAt = Date.now();
   bus.publish('scan', { at: market.lastScanAt, universe: market.universe.length, candidates });
-  return { candidates, universe: market.universe.length };
+  return { candidates, universe: market.universe.length, settlementCursor };
 }
 
 /** Manual "analyze now" for any instrument & strategy (Trader Joe / Scanner button). Runs the full pipeline even with no live signal → evaluation only. */

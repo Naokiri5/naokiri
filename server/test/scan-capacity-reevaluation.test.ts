@@ -8,13 +8,14 @@ vi.mock('../src/qci/coordinator.js', () => ({ runConsensus: vi.fn(async () => ({
 vi.mock('../src/decision/engine.js', () => ({ decide: decideMock }));
 
 import { freshDb, seedInstrument } from './helpers.js';
-import { all, run, J } from '../src/db/db.js';
+import { all, run, tx, J } from '../src/db/db.js';
 import { market } from '../src/market/store.js';
 import { config } from '../src/config.js';
 import { BRAINOS_SESSION_ID } from '../src/ops/paperSpotEntry.js';
 import { STRATEGIES } from '../src/lab/strategies.js';
 import { scanOnce, waitingCandidates, _scanTest } from '../src/market/scanner.js';
-import { ScanLedger, capacityEpoch, isCapacityOnlyDenial, storedDecisionsEndKey, MAX_WAITING, MAX_REEVALUATIONS_PER_SCAN } from '../src/market/scanLedger.js';
+import { ScanLedger, isCapacityOnlyDenial, storedDecisionsEndKey, MAX_WAITING, MAX_REEVALUATIONS_PER_SCAN } from '../src/market/scanLedger.js';
+import { paperSettlementCursor, recordPaperFill } from '../src/exec/fillEvents.js';
 import { evaluateRisk } from '../src/risk/gate.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
@@ -24,6 +25,12 @@ import { PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
 const risk = (decision: RiskDecision['decision'], reasonCodes: string[]): RiskDecision =>
   ({ decision, reasonCodes, evaluated: {}, sizing: null, policyVersion: 1, ts: '', traceId: 't' });
 const meta = { instrumentId: 'crypto:binance:AUSDT', strategyId: 's1' };
+const recordFill = (id: string, side: 'BUY' | 'SELL', closed: boolean) => recordPaperFill({
+  fillId: `fill-${id}`, orderId: `order-${id}`, positionId: `position-${id}`, instrumentId: meta.instrumentId,
+  decisionId: null, side, qty: 1, price: 100, fee: 0, impactBps: 0, at: 10_000, closed,
+  strategy: meta.strategyId, netPnlAfterFill: 0,
+});
+const settle = (id: string) => tx(() => recordFill(id, 'SELL', true));
 
 describe('capacity-only denial classification', () => {
   it('accepts only denials made entirely of capacity codes', () => {
@@ -117,11 +124,20 @@ describe('restart guard and capacity epoch', () => {
     storeDecision('ALLOW', { risk: risk('ALLOW', []) });
     expect(storedDecisionsEndKey('I', 'S', 1000)).toBe(true);
   });
-  it('advances the capacity epoch when a paper position closes', () => {
-    const before = capacityEpoch();
-    run(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,planned_risk)
-      VALUES ('p1',?,'I','crypto','long','S',1,100,95,95,'[]','CLOSED',1,2,5)`, PAPER_ACCOUNT);
-    expect(capacityEpoch()).toBe(before + 1);
+  it('advances only for a committed full paper exit', () => {
+    const before = paperSettlementCursor();
+    tx(() => recordFill('entry', 'BUY', false));
+    tx(() => recordFill('partial', 'SELL', false));
+    expect(() => tx(() => {
+      recordFill('rollback', 'SELL', true);
+      throw new Error('rollback fixture');
+    })).toThrow('rollback fixture');
+    expect(paperSettlementCursor()).toBe(before);
+    settle('first');
+    const first = paperSettlementCursor();
+    expect(first).toBeGreaterThan(before);
+    settle('same-execution-time');
+    expect(paperSettlementCursor()).toBeGreaterThan(first);
   });
 });
 
@@ -144,8 +160,6 @@ describe('scanOnce re-evaluates a capacity-blocked signal after a settlement (CT
     for (const o of originals) { (o.s as any).generate = o.generate; (o.s as any).suitableRegimes = o.regimes; }
   });
   const report = (r: RiskDecision | null) => ({ id: `rep${Math.random()}`, decision: r?.decision === 'ALLOW' ? 'PAPER_TRADE' : 'REJECTED', opportunity: { score: 1 }, risk: r });
-  const settle = (pid: string) => run(`INSERT INTO positions(id,account,instrument,market,direction,strategy,qty,entry_price,stop_price,initial_stop,targets,status,opened_at,closed_at,planned_risk)
-    VALUES (?,?,'X','crypto','long','S',1,100,95,95,'[]','CLOSED',1,2,5)`, pid, PAPER_ACCOUNT);
 
   it('waits without re-running the pipeline, then re-evaluates once a position settles and ends on approval', async () => {
     decideMock.mockReturnValueOnce(report(risk('DENY', ['MAX_CONCURRENT_POSITIONS 4'])));

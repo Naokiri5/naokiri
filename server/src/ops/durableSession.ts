@@ -9,7 +9,7 @@ import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { reconcile } from '../portfolio/calendar.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import {
-  BRAINOS_SESSION_ID, durableSessionStatus,
+  BRAINOS_SESSION_ID, durableSessionStatus, sessionBoundToLease,
   type BrainosSessionState, type DurableBrainosSession,
 } from './paperSpotEntry.js';
 import {
@@ -31,7 +31,7 @@ export interface EntryPermissionVerdict {
 function baseline(at: number): DurableBrainosSession {
   return {
     session_id: BRAINOS_SESSION_ID, version: 0, state: 'CLOSED', environment: 'PAPER',
-    mind: 'FAST', lease_holder: null, lease_acquired_at: null,
+    mind: 'FAST', lease_holder: null, lease_acquired_at: null, lease_epoch: null,
     fence_epoch: 0, suspend_reason: 'NONE', started_at: null, closed_at: null, updated_at: at,
     ...NO_MANDATE,
   };
@@ -48,14 +48,14 @@ function persist(
     throw new Error('SESSION_CLOCK_REGRESSION');
   const next = { ...old, ...patch, version: old.version + 1, state: nextState, updated_at: at };
   const outcome = run(`INSERT INTO brainos_sessions (
-    session_id,version,state,environment,mind,lease_holder,lease_acquired_at,fence_epoch,
+    session_id,version,state,environment,mind,lease_holder,lease_acquired_at,lease_epoch,fence_epoch,
     suspend_reason,started_at,closed_at,updated_at,
     market_scope,capital_ceiling,risk_policy_version,authorized_by,authorized_at,expires_at,strategy_config_version
-  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   ON CONFLICT(session_id) DO UPDATE SET
     version=excluded.version,state=excluded.state,environment=excluded.environment,
     mind=excluded.mind,lease_holder=excluded.lease_holder,
-    lease_acquired_at=excluded.lease_acquired_at,fence_epoch=excluded.fence_epoch,
+    lease_acquired_at=excluded.lease_acquired_at,lease_epoch=excluded.lease_epoch,fence_epoch=excluded.fence_epoch,
     suspend_reason=excluded.suspend_reason,started_at=excluded.started_at,
     closed_at=excluded.closed_at,updated_at=excluded.updated_at,
     market_scope=excluded.market_scope,capital_ceiling=excluded.capital_ceiling,
@@ -64,7 +64,7 @@ function persist(
     strategy_config_version=excluded.strategy_config_version
   WHERE brainos_sessions.version=?`,
   BRAINOS_SESSION_ID, next.version, next.state, next.environment, next.mind, next.lease_holder,
-  next.lease_acquired_at, next.fence_epoch, next.suspend_reason,
+  next.lease_acquired_at, next.lease_epoch, next.fence_epoch, next.suspend_reason,
   next.started_at, next.closed_at, next.updated_at,
   next.market_scope, next.capital_ceiling, next.risk_policy_version, next.authorized_by,
   next.authorized_at, next.expires_at, next.strategy_config_version, old.version);
@@ -115,7 +115,7 @@ export function openPaperSpotSession(
     cancelPaperPendingApprovals('approval predates the new spot paper session', now);
     return persist(old, 'RUNNING', 'OWNER_OPEN_SPOT_PAPER_SESSION', now, {
       environment: 'PAPER', mind: 'SPOT_PAPER', lease_holder: fence.holder,
-      lease_acquired_at: fence.acquired_at, fence_epoch: old.fence_epoch + 1,
+      lease_acquired_at: fence.acquired_at, lease_epoch: fence.epoch, fence_epoch: old.fence_epoch + 1,
       suspend_reason: 'NONE', started_at: now, closed_at: null, ...mandate,
     });
   });
@@ -164,7 +164,7 @@ export function openDurablePaperSession(engine: EngineView, mind: SessionMind, f
     // FAST and DEEP mandates are not designed yet; never inherit the previous session's mandate.
     return persist(old, 'RUNNING', 'OWNER_OPEN_SESSION', at, {
       environment: 'PAPER', mind, lease_holder: fence.holder,
-      lease_acquired_at: fence.acquired_at, fence_epoch: old.fence_epoch + 1,
+      lease_acquired_at: fence.acquired_at, lease_epoch: fence.epoch, fence_epoch: old.fence_epoch + 1,
       suspend_reason: 'NONE', started_at: at, closed_at: null, ...NO_MANDATE,
     });
   });
@@ -178,16 +178,16 @@ export function recoverDurableSessionAfterTakeover(fence: LeaseFence, clock?: nu
     const old = durableSessionStatus();
     if (!old || !['RUNNING','CLOSING_DRAINING_ENTRIES','RECOVERING_ON_BOOT'].includes(old.state))
       return old;
-    if (old.state !== 'RECOVERING_ON_BOOT' && old.lease_holder === fence.holder && old.lease_acquired_at === fence.acquired_at)
+    if (old.state !== 'RECOVERING_ON_BOOT' && sessionBoundToLease(old, fence))
       return old;
     if (old.state === 'CLOSING_DRAINING_ENTRIES') {
       return persist(old, old.state, 'DRAIN_RECOVERY_FENCED', at, {
-        lease_holder: fence.holder, lease_acquired_at: fence.acquired_at,
+        lease_holder: fence.holder, lease_acquired_at: fence.acquired_at, lease_epoch: fence.epoch,
       });
     }
     const recovering = old.state === 'RECOVERING_ON_BOOT' ? old
       : persist(old, 'RECOVERING_ON_BOOT', 'BOOT_RECOVERY_STARTED', at, {
-        suspend_reason: 'LEASE_FENCING_LOST', lease_holder: null, lease_acquired_at: null,
+        suspend_reason: 'LEASE_FENCING_LOST', lease_holder: null, lease_acquired_at: null, lease_epoch: null,
       });
     // A recovered session is ALWAYS suspended; a fresh, explicit owner action and a
     // certified execution lane are required to resume (not presently exposed).
@@ -247,7 +247,7 @@ export function finishDurableClose(at?: number, fence?: LeaseFence) {
     if (positions || pending || unreconciledPaperOrders() || !reconcile().ok)
       throw new Error('SESSION_DRAIN_RECONCILIATION_INCOMPLETE');
     return persist(old, 'CLOSED', 'DRAIN_COMPLETE', now,
-      { suspend_reason: 'NONE', closed_at: now, lease_holder: null, lease_acquired_at: null });
+      { suspend_reason: 'NONE', closed_at: now, lease_holder: null, lease_acquired_at: null, lease_epoch: null });
   });
 }
 
@@ -263,8 +263,7 @@ export function durableEntryPermission(engine: EngineView, fence: LeaseFence | n
   });
   const state = durableSessionStatus();
   if (!state || state.state !== 'RUNNING') return no('SESSION_NOT_RUNNING');
-  if (!fence || fence.name !== 'engine' || fence.holder !== state.lease_holder
-    || fence.acquired_at !== state.lease_acquired_at || !ownsLease(fence, at))
+  if (!fence || !sessionBoundToLease(state, fence) || !ownsLease(fence, at))
     return no('STALE_OR_LOST_ENGINE_FENCE');
   if (state.environment !== 'PAPER') return no('LIVE_EXECUTION_NOT_CERTIFIED');
   if (state.mind === 'SPOT_PAPER') return no('PAPER_SPOT_SESSION_ONLY');
