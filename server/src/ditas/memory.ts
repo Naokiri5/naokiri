@@ -11,8 +11,9 @@ import { STRATEGIES, strategyById } from '../lab/strategies.js';
 import { fingerprint } from './fingerprint.js';
 import type { ChoiceShadowRound } from '../choice/arbitration.js';
 import { assertWriteFence, type LeaseFence } from '../ops/lease.js';
+import type { DirectionForecast } from './directionForecast.js';
 
-export type MemoryKind = 'NO_SIGNAL' | 'REJECTED' | 'PROPOSAL' | 'DECISION' | 'CORRECTION' | 'CHOICE_SHADOW';
+export type MemoryKind = 'NO_SIGNAL' | 'REJECTED' | 'PROPOSAL' | 'DECISION' | 'CORRECTION' | 'CHOICE_SHADOW' | 'DIRECTION_FORECAST';
 export interface MemoryEvent {
   id: string; kind: MemoryKind; instrumentId: string; strategyId: string | null; decisionId: string | null;
   createdAt: number; snapshotId: string | null; parentEventId: string | null; payload: any; hash: string;
@@ -43,7 +44,7 @@ function hashEvent(r: any) {
   return sha256(J([r.id, r.dedupe_key, r.created_at, r.kind, r.instrument, r.strategy, r.decision_id, r.snapshot_id, r.parent_event_id, r.payload, r.prev_hash]));
 }
 
-export function recordOpportunity(input: { kind: Exclude<MemoryKind, 'CORRECTION' | 'CHOICE_SHADOW'>; instrumentId: string; strategyId?: string; interval?: Interval; dedupeKey: string; reason: string; candidate?: Candidate; ctx?: WorkerContext; report?: DecisionReport; snapshotId?: string }) {
+export function recordOpportunity(input: { kind: Exclude<MemoryKind, 'CORRECTION' | 'CHOICE_SHADOW' | 'DIRECTION_FORECAST'>; instrumentId: string; strategyId?: string; interval?: Interval; dedupeKey: string; reason: string; candidate?: Candidate; ctx?: WorkerContext; report?: DecisionReport; snapshotId?: string }) {
   return atomic(() => {
     const exists = get<any>('SELECT * FROM ditas_events WHERE dedupe_key=?', input.dedupeKey);
     if (exists) return eventRow(exists);
@@ -69,22 +70,29 @@ export function recordOpportunity(input: { kind: Exclude<MemoryKind, 'CORRECTION
 export function recordShadowChoice(round: ChoiceShadowRound, fence?: LeaseFence): MemoryEvent {
   return atomic(() => {
     assertWriteFence(fence);
-    const key = 'choice-shadow:' + round.roundId;
-    const existing = get<any>('SELECT * FROM ditas_events WHERE dedupe_key=?', key);
-    if (existing) return eventRow(existing);
-    const ts = Date.now(), id = uid('evt');
-    const payload = J({ reason: round.noTradeReason ?? 'SHADOW_RANKING_ONLY', comparison: round });
-    const prevHash = get<any>('SELECT hash FROM ditas_events ORDER BY seq DESC LIMIT 1')?.hash ?? 'GENESIS';
-    const row = {
-      id, dedupe_key: key, created_at: ts, kind: 'CHOICE_SHADOW',
-      instrument: 'portfolio:choice', strategy: null, decision_id: null,
-      snapshot_id: null, parent_event_id: null, payload, prev_hash: prevHash,
-    };
-    const hash = hashEvent(row);
-    run('INSERT INTO ditas_events(id,dedupe_key,created_at,kind,instrument,strategy,decision_id,snapshot_id,parent_event_id,payload,prev_hash,hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-      id, key, ts, row.kind, row.instrument, null, null, null, null, payload, prevHash, hash);
-    return eventRow({ ...row, hash });
+    return appendResearchEvent('CHOICE_SHADOW', 'choice-shadow:' + round.roundId, 'portfolio:choice',
+      { reason: round.noTradeReason ?? 'SHADOW_RANKING_ONLY', comparison: round }, Date.now());
   });
+}
+
+export function recordDirectionForecast(forecast: DirectionForecast, key: string, at: number, fence: LeaseFence): MemoryEvent {
+  assertWriteFence(fence);
+  return appendResearchEvent('DIRECTION_FORECAST', 'direction:' + key, forecast.instrumentId,
+    { reason: 'PROSPECTIVE_RESEARCH_FORECAST', forecast }, at);
+}
+
+function appendResearchEvent(kind: 'CHOICE_SHADOW' | 'DIRECTION_FORECAST', key: string, instrument: string,
+  evidence: object, at: number): MemoryEvent {
+  const existing = get<any>('SELECT * FROM ditas_events WHERE dedupe_key=?', key);
+  if (existing) return eventRow(existing);
+  const id = uid('evt'), payload = J(evidence);
+  const prevHash = get<{ hash: string }>('SELECT hash FROM ditas_events ORDER BY seq DESC LIMIT 1')?.hash ?? 'GENESIS';
+  const row = { id, dedupe_key: key, created_at: at, kind, instrument, strategy: null, decision_id: null,
+    snapshot_id: null, parent_event_id: null, payload, prev_hash: prevHash };
+  const hash = hashEvent(row);
+  run('INSERT INTO ditas_events(id,dedupe_key,created_at,kind,instrument,strategy,decision_id,snapshot_id,parent_event_id,payload,prev_hash,hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+    id, key, at, kind, instrument, null, null, null, null, payload, prevHash, hash);
+  return eventRow({ ...row, hash });
 }
 /** Only committed, source-linked shadow rounds, never projected live orders. */
 export function recentChoiceShadows(limit = 20): ChoiceShadowRound[] {

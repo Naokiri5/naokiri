@@ -92,6 +92,76 @@ test('FAST and DEEP inspect existing research without changing execution mode', 
   await expect(page.getByText('Market candles unavailable')).toBeVisible();
 });
 
+test('DEEP switches between instrument evidence without granting execution authority', async () => {
+  const statusPath = '**/api/choice/dual/status';
+  const snapshot = (symbol: string, funding: number, openInterest: number, bullish: number, stale = false) => {
+    const asOf = Date.now() - (stale ? 25 * 60_000 : 10_000);
+    return {
+      instrumentId: 'futures:binance-usdm:' + symbol, symbol, stale, error: null,
+      attemptAt: asOf, successAt: asOf, consecutiveFailures: 0,
+      result: {
+        symbol, asOf, market: 'CRYPTO_PERPETUAL_FUTURES', tradingAuthority: false,
+        source: 'binance-usdm-public-klines', state: 'NO_TRADE', reason: 'MULTI_TIMEFRAME_TREND_CONFLICT', plan: null,
+        chartEvidence: { '15m': { trend: 'BULLISH' }, '1h': { trend: 'RANGING' }, '4h': { trend: 'BEARISH' } },
+        marketContext: { funding: { rate: funding, localAt: asOf }, openInterest: { quantity: openInterest, localAt: asOf } },
+        scenarioAnalysis: { calibration: 'UNCALIBRATED', tradingAuthority: false,
+          relativeWeights: { bullish, sideways: 0.2, bearish: 0.8 - bullish } },
+        directionForecasts: { '15m': {
+          targetAt: asOf + 15 * 60_000, deadbandBps: 10, probabilities: { BULLISH: bullish - 0.1, SIDEWAYS: 0.2, BEARISH: 0.9 - bullish },
+          empiricalPriceRange: { lower: 100, upper: 120 }, calibrationStatus: 'MEASURED_NOT_CERTIFIED', tradingAuthority: false,
+          historicalEvaluation: { sampleCount: 31, model: { brierScore: 0.5, logLoss: 0.9 }, uniform: { brierScore: 0.667, logLoss: 1.099 } },
+        } },
+      },
+    };
+  };
+  const mutations: string[] = [];
+  const trackRequest = (request: { method(): string; url(): string }) => {
+    if (request.url().includes('/api/') && request.method() !== 'GET') mutations.push(request.url());
+  };
+  await page.route(statusPath, (route) => {
+    const btc = snapshot('BTCUSDT', 0, 100, 0.7);
+    const eth = snapshot('ETHUSDT', -0.0002, 40, 0.3);
+    return route.fulfill({ json: {
+      tradingAuthority: false, fast: { stale: true, result: null }, deep: eth,
+      deepInstruments: [btc, eth, snapshot('SOLUSDT', 0.001, 999, 0.2, true)],
+    } });
+  });
+  page.on('request', trackRequest);
+  try {
+    await page.goto('/autopilot');
+    await page.getByRole('button', { name: 'DEEP' }).click();
+    const strategy = page.getByRole('region', { name: 'Strategy architect' });
+    await strategy.getByText('Perpetual futures research').click();
+    const futures = strategy.getByRole('combobox', { name: 'Futures instrument' });
+    await expect(futures.getByRole('option')).toHaveCount(3);
+    await expect(strategy).toContainText('BTCUSDT perpetual');
+    await expect(strategy).toContainText('0.0000%');
+    await expect(strategy).toContainText('15m direction forecast · Measured, uncertified');
+    await expect(strategy).toContainText('Bullish 60.0%');
+    await expect(strategy).toContainText('0.500 model / 0.667 uniform · 31 observations');
+    await expect(strategy).toContainText('Bullish 70%');
+    await expect(strategy).toContainText('Uncalibrated');
+
+    await futures.selectOption({ label: 'ETHUSDT' });
+    await expect(strategy).toContainText('ETHUSDT perpetual');
+    await expect(strategy).toContainText('-0.0200%');
+    await expect(strategy).toContainText('Bullish 20.0%');
+    await expect(strategy).toContainText('Bullish 30%');
+    await expect(strategy).not.toContainText('BTCUSDT perpetual');
+    await expect(page.getByRole('combobox', { name: 'Spot market' })).toHaveValue('BTCUSDT');
+
+    await futures.selectOption({ label: 'SOLUSDT' });
+    await expect(strategy).toContainText('Futures evidence is stale or expired.');
+    await expect(strategy).not.toContainText('SOLUSDT perpetual');
+    await expect(strategy).not.toContainText('ETHUSDT perpetual');
+    await expect(page.locator('.mode')).toHaveText('READ-ONLY');
+    expect(mutations).toEqual([]);
+  } finally {
+    page.off('request', trackRequest);
+    await page.unroute(statusPath);
+  }
+});
+
 test('server readiness explains the disabled session controls and the Live lock', async () => {
   await page.goto('/app');
   const session = page.getByRole('region', { name: 'MIA Autopilot' });

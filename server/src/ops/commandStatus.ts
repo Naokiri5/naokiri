@@ -9,14 +9,15 @@ import { unreconciledPaperOrders } from '../exec/recovery.js';
 import { reconcile } from '../portfolio/calendar.js';
 import { PAPER_ACCOUNT } from '../portfolio/ledger.js';
 import { providers } from '../providers/http.js';
-import { FUTURES_CONTEXT_MAX_AGE_MS } from '../providers/binanceFuturesResearch.js';
 import { readiness, type EngineView } from './readiness.js';
 
 /** Read-only operational view for the owner session. Existing services supply each reading. */
 export function commandStatus(engine: EngineView, at = Date.now()) {
   const research = dualResearchStatus(at);
-  const context = research.deep.result?.marketContext;
-  const fresh = (stamp: number) => stamp <= at && at - stamp <= FUTURES_CONTEXT_MAX_AGE_MS;
+  const freshFutures = research.deepInstruments.filter((instrument) => !instrument.stale && !instrument.error);
+  const deep = freshFutures.reduce<typeof research.deep>((latest, instrument) =>
+    instrument.successAt > latest.successAt ? instrument : latest, freshFutures[0] ?? research.deep);
+  const context = deep.result?.marketContext;
   const protection = protectPositions().positions;
   const ledger = reconcile();
   const choice = recentChoiceShadows(1)[0];
@@ -47,10 +48,10 @@ export function commandStatus(engine: EngineView, at = Date.now()) {
     research: {
       fast: { checkedAt: research.fast.checkedAt, stale: research.fast.stale,
         count: research.fast.result?.candidates.length ?? null, launchIntake: research.fast.launchIntake },
-      deep: { checkedAt: research.deep.attemptAt, stale: research.deep.stale, symbol: research.deep.symbol,
-        error: research.deep.error !== null, state: research.deep.result?.state ?? null,
-        fundingRate: context?.funding && fresh(context.funding.localAt) ? context.funding.rate : null,
-        openInterest: context?.openInterest && fresh(context.openInterest.localAt) ? context.openInterest.quantity : null },
+      deep: { checkedAt: deep.attemptAt, stale: deep.stale, symbol: deep.symbol,
+        error: deep.error !== null, state: deep.result?.state ?? null,
+        freshInstruments: freshFutures.length, trackedInstruments: research.deepInstruments.length,
+        fundingRate: context?.funding?.rate ?? null, openInterest: context?.openInterest?.quantity ?? null },
     },
     choice: choice ? {
       at: choice.completedAt, observed: choice.totalReportsObserved,

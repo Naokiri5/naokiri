@@ -11,23 +11,25 @@ import {
 } from '../src/choice/dualRuntime.js';
 import { buildApp } from '../src/index.js';
 import { all, closeDb } from '../src/db/db.js';
+import { sessionPreflight } from '../src/ops/sessionPreflight.js';
 import { freshDb } from './helpers.js';
+import type { MintObservation } from '../src/providers/solanaRpc.js';
 
 const NOW = Date.UTC(2026, 10, 23, 12, 0, 5);
 const pair: DexPair = {
-  chainId: 'solana', dexId: 'fixture', pairAddress: 'test-pair',
+  chainId: 'solana', dexId: 'fixture', pairAddress: '11111111111111111111111111111111',
   url: 'https://example.invalid/pair', baseSymbol: 'NEW', baseName: 'New Token',
-  baseAddress: 'test-mint', quoteSymbol: 'SOL', priceUsd: 0.01,
+  baseAddress: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', quoteSymbol: 'SOL', priceUsd: 0.01,
   liquidityUsd: 100000, fdv: 1000000, marketCap: 800000,
   volume24h: 100000, volume1h: 9000, buys24h: 50, sells24h: 25,
   buys1h: 8, sells1h: 4, change1h: 1, change24h: 5,
   pairCreatedAt: NOW - 60_000, hasSocials: true, hasWebsite: true,
 };
 
-function bars(interval: Interval): Candle[] {
+function bars(interval: Interval, asOf = NOW): Candle[] {
   const period = INTERVAL_MS[interval];
   // Every interval ends strictly before the shared snapshot cutoff.
-  const lastOpen = Math.floor((NOW - period) / period) * period;
+  const lastOpen = Math.floor((asOf - period) / period) * period;
   return Array.from({ length: 45 }, (_, i) => {
     const t = lastOpen - (44 - i) * period;
     const price = 100 + i * 0.5;
@@ -37,9 +39,9 @@ function bars(interval: Interval): Candle[] {
 }
 
 type Snapshot = Awaited<ReturnType<typeof fetchFuturesResearchSnapshot>>;
-const snapshot = (symbol: FuturesResearchSymbol): Snapshot => ({
+const snapshot = (symbol: FuturesResearchSymbol, asOf = NOW): Snapshot => ({
   symbol, market: 'CRYPTO_PERPETUAL_FUTURES', source: 'binance-usdm-public-klines',
-  asOf: NOW, candles: { '15m': bars('15m'), '1h': bars('1h'), '4h': bars('4h') },
+  asOf, candles: { '15m': bars('15m', asOf), '1h': bars('1h', asOf), '4h': bars('4h', asOf) },
 });
 
 beforeEach(() => {
@@ -67,6 +69,47 @@ describe('running dual-intelligence background research', () => {
     expect(reader).toHaveBeenCalledTimes(1);
   });
 
+  it('prepares a Solana snapshot once and persists finalized mint restrictions in its existing candidate', async () => {
+    freshDb(false);
+    try {
+      const listed = { ...pair, quoteAddress: 'So11111111111111111111111111111111111111112' };
+      market.dex = [listed, { ...listed, chainId: 'ethereum' }];
+      const observation: MintObservation = { mintAddress: pair.baseAddress, commitment: 'finalized',
+        slot: 1234, checkedAt: NOW, program: 'SPL_TOKEN', status: 'BLOCKED', reasons: ['ACTIVE_FREEZE_AUTHORITY'] };
+      const mintReader = vi.fn(async () => [observation]);
+      const reader = async (symbol: FuturesResearchSymbol) => snapshot(symbol);
+      const state = await runDualResearchPass(reader, NOW, () => true, mintReader);
+      expect(mintReader).toHaveBeenCalledExactlyOnceWith([pair.baseAddress]);
+      expect(state.fast.result).toMatchObject({ mintSourceStatus: 'OBSERVED', tradingAuthority: false, candidates: [
+        { mintObservation: observation, knownQuote: true, safetyStatus: 'REJECTED', eligibleForAutomation: false },
+      ] });
+      expect(all<{ state: string; evidence_json: string }>('SELECT state,evidence_json FROM flin_launch_candidates')).toEqual([
+        { state: 'REJECTED', evidence_json: expect.stringContaining('ACTIVE_FREEZE_AUTHORITY') },
+      ]);
+      await runDualResearchPass(reader, NOW + 30_000, () => true, mintReader);
+      expect(mintReader).toHaveBeenCalledTimes(1);
+      expect(dualResearchStatus(NOW + 240_001).fast.stale).toBe(true);
+      expect(all('SELECT id FROM orders')).toHaveLength(0);
+    } finally { closeDb(); }
+  });
+
+  it('does not persist a FAST cohort that expires during the mint read', async () => {
+    freshDb(false);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const start = NOW + 240_000 - 1;
+    vi.setSystemTime(start);
+    try {
+      market.dex = [{ ...pair, quoteAddress: 'So11111111111111111111111111111111111111112' }];
+      const state = await runDualResearchPass(async (symbol) => snapshot(symbol), start, () => true, async () => {
+        vi.setSystemTime(start + 2);
+        return [];
+      });
+      expect(state.fast).toMatchObject({ stale: true, launchIntake: { status: 'STALE_SOURCE' },
+        result: { candidates: [], mintSourceStatus: 'NOT_CHECKED' } });
+      expect(all('SELECT candidate_id FROM flin_launch_candidates')).toHaveLength(0);
+    } finally { vi.useRealTimers(); closeDb(); }
+  });
+
   it('bounds futures requests and rotates known supported symbols only', async () => {
     const reader = vi.fn(async (symbol: FuturesResearchSymbol) => snapshot(symbol));
     await runDualResearchPass(reader, NOW);
@@ -76,6 +119,53 @@ describe('running dual-intelligence background research', () => {
     expect(next.deep.symbol).toBe('ETHUSDT');
     expect(reader).toHaveBeenCalledTimes(2);
     expect(FUTURES_RESEARCH_SYMBOLS).toContain(next.deep.symbol);
+  });
+
+  it('retains one result per contract and isolates a failed refresh from the other instruments', async () => {
+    const poll = 5 * 60_000;
+    const reader = vi.fn(async (symbol: FuturesResearchSymbol, cutoff = NOW) => snapshot(symbol, cutoff));
+    expect(dualResearchStatus(NOW).deepInstruments).toMatchObject(FUTURES_RESEARCH_SYMBOLS.map((symbol) => ({
+      instrumentId: `futures:binance-usdm:${symbol}`, symbol, result: null, stale: true,
+    })));
+    await runDualResearchPass(reader, NOW);
+    await runDualResearchPass(reader, NOW + poll);
+    const ready = await runDualResearchPass(reader, NOW + 2 * poll);
+    expect(reader.mock.calls.map(([symbol]) => symbol)).toEqual(FUTURES_RESEARCH_SYMBOLS);
+    expect(ready.deepInstruments).toMatchObject(FUTURES_RESEARCH_SYMBOLS.map((symbol) => ({
+      symbol, result: { symbol, tradingAuthority: false }, stale: false, error: null,
+    })));
+
+    reader.mockRejectedValueOnce(new Error('BTC unavailable'));
+    const partial = await runDualResearchPass(reader, NOW + 3 * poll);
+    expect(partial.deep).toMatchObject({ symbol: 'BTCUSDT', result: null, stale: true, error: 'BTC unavailable' });
+    expect(partial.deepInstruments).toMatchObject([
+      { symbol: 'BTCUSDT', attemptAt: NOW + 3 * poll, successAt: NOW, result: null, stale: true, consecutiveFailures: 1 },
+      { symbol: 'ETHUSDT', attemptAt: NOW + poll, successAt: NOW + poll, result: { symbol: 'ETHUSDT' }, stale: false },
+      { symbol: 'SOLUSDT', attemptAt: NOW + 2 * poll, successAt: NOW + 2 * poll, result: { symbol: 'SOLUSDT' }, stale: false },
+    ]);
+    expect(dualResearchStatus(NOW + 7 * poll).deepInstruments.every((instrument) => instrument.stale)).toBe(true);
+
+    freshDb(false);
+    try {
+      const at = NOW + 3 * poll;
+      const preflight = sessionPreflight({ running: false, role: 'STOPPED', startedAt: 0, lastTickerAt: 0,
+        lastScanAt: 0, lastMonitorAt: 0, monitorFailing: false }, 'DEEP', 'PAPER', at);
+      expect(preflight.checks).toContainEqual(expect.objectContaining({ id: 'market-data', status: 'PASS' }));
+      expect(preflight.canRun).toBe(false);
+    } finally { closeDb(); }
+  });
+
+  it('rejects wrong-symbol and future snapshots without poisoning another instrument', async () => {
+    const poll = 5 * 60_000;
+    await runDualResearchPass(async (symbol) => snapshot(symbol), NOW);
+    await runDualResearchPass(async () => snapshot('BTCUSDT'), NOW + poll);
+    const status = await runDualResearchPass(async (symbol) => snapshot(symbol, NOW + 2 * poll + 1), NOW + 2 * poll);
+    expect(status.deepInstruments).toMatchObject([
+      { symbol: 'BTCUSDT', stale: false, result: { symbol: 'BTCUSDT' } },
+      { symbol: 'ETHUSDT', stale: true, error: 'FUTURES_SNAPSHOT_IDENTITY_MISMATCH', result: null },
+      { symbol: 'SOLUSDT', stale: true, error: 'FUTURES_SNAPSHOT_IDENTITY_MISMATCH', result: null },
+    ]);
+    expect(dualResearchStatus(NOW - 1).deepInstruments.every((instrument) => instrument.stale)).toBe(true);
   });
 
   it('fails closed on provider outage, rather than reusing old DEEP plans', async () => {
@@ -99,6 +189,25 @@ describe('running dual-intelligence background research', () => {
     release(snapshot('BTCUSDT'));
     expect((await first).backgroundRunning).toBe(false);
   });
+
+  it('discards a completed provider request after its lease check fails', async () => {
+    const at = NOW + 5 * 60_000;
+    await runDualResearchPass(async (symbol) => snapshot(symbol), NOW);
+    let release!: (value: Snapshot) => void;
+    let stillLeader = true;
+    const reader = vi.fn((_symbol: FuturesResearchSymbol) => new Promise<Snapshot>((resolve) => { release = resolve; }));
+    const pending = runDualResearchPass(reader, at, () => stillLeader);
+    expect(reader).toHaveBeenCalledWith('ETHUSDT', at - 2000);
+    stillLeader = false;
+    release(snapshot('ETHUSDT', at - 2000));
+
+    const status = await pending;
+    expect(status.backgroundRunning).toBe(false);
+    expect(status.deep).toMatchObject({ symbol: 'BTCUSDT', successAt: NOW, stale: false });
+    expect(status.deepInstruments.find(({ symbol }) => symbol === 'ETHUSDT')).toMatchObject({
+      attemptAt: 0, successAt: 0, stale: true, result: null,
+    });
+  });
 });
 
 describe('authenticated background research status', () => {
@@ -121,6 +230,11 @@ describe('authenticated background research status', () => {
         version: 'dual-runtime-v1', tradingAuthority: false,
         fast: { result: { lane: 'FAST_MEMECOIN', tradingAuthority: false } },
         deep: { result: { lane: 'DEEP_FUTURES', tradingAuthority: false } },
+        deepInstruments: [
+          { symbol: 'BTCUSDT', instrumentId: 'futures:binance-usdm:BTCUSDT', result: { tradingAuthority: false } },
+          { symbol: 'ETHUSDT', instrumentId: 'futures:binance-usdm:ETHUSDT', result: null },
+          { symbol: 'SOLUSDT', instrumentId: 'futures:binance-usdm:SOLUSDT', result: null },
+        ],
       });
       for (const table of ['orders', 'fills', 'positions', 'ledger_entries'])
         expect(all('SELECT * FROM ' + table)).toHaveLength(0);

@@ -17,8 +17,8 @@ vi.mock('../src/providers/binanceFuturesResearch.js', async (importOriginal) => 
 
 const NOW = Math.floor(Date.now() / INTERVAL_MS['4h']) * INTERVAL_MS['4h'];
 const dexPair: DexPair = {
-  chainId: 'solana', dexId: 'test', pairAddress: 'test-pair', url: 'https://example.invalid/pair',
-  baseSymbol: 'TEST', baseName: 'Test Token', baseAddress: 'test-mint', quoteSymbol: 'SOL',
+  chainId: 'solana', dexId: 'test', pairAddress: '11111111111111111111111111111111', url: 'https://example.invalid/pair',
+  baseSymbol: 'TEST', baseName: 'Test Token', baseAddress: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', quoteSymbol: 'SOL',
   priceUsd: 0.01, liquidityUsd: 200000, fdv: 2500000, marketCap: 2000000,
   volume24h: 100000, volume1h: 15000, buys24h: 50, sells24h: 30,
   buys1h: 8, sells1h: 6, change1h: 3, change24h: 5,
@@ -61,6 +61,9 @@ describe('Dual-intelligence market-specific research', () => {
     expect(result.plan?.requiredMissing).toContain('FUTURES_FUNDING');
     expect(result.plan?.volatilityScenarios).toHaveLength(2);
     expect(result.tradingAuthority).toBe(false);
+    expect(result.directionForecasts['15m']).toMatchObject({ instrumentId: 'futures:binance-usdm:BTCUSDT',
+      calibrationStatus: 'MEASURED_NOT_CERTIFIED', tradingAuthority: false });
+    expect(result.scenarioAnalysis?.calibration).toBe('UNCALIBRATED');
     expect(reconstructDeepFuturesResearch(snapshot).plan?.planId).toBe(result.plan?.planId);
     const context = parseFuturesMarketContext('BTCUSDT',
       { symbol: 'BTCUSDT', time: NOW - 1_000, markPrice: '115', lastFundingRate: '0.0001' },

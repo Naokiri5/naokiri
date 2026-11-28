@@ -7,9 +7,10 @@ import { config } from '../src/config.js';
 import { acquireOrRenewLease } from '../src/ops/lease.js';
 import { market } from '../src/market/store.js';
 import { seedInstrument } from './helpers.js';
-import { recordOpportunity } from '../src/ditas/memory.js';
-import { addForecast, addOutcome, sourceVerifiedCalibration } from '../src/ditas/service.js';
+import { recordOpportunity, verifyMemory } from '../src/ditas/memory.js';
+import { addForecast, addOutcome, registerDirectionForecast, sourceVerifiedCalibration } from '../src/ditas/service.js';
 import { verifyDueForecasts } from '../src/ditas/forecastVerifier.js';
+import { buildDirectionForecast } from '../src/ditas/directionForecast.js';
 import type { Candidate } from '../src/workers/types.js';
 const H=3_600_000, T=Date.UTC(2026,10,10,0,0,1), target=Math.ceil(T/H)*H;
 let dir:string, file:string, offline:boolean;
@@ -20,6 +21,13 @@ function forecast(suffix:string) {
   return addForecast(event.id,.75,target,100,'model-'+suffix,'prompt-v1');
 }
 function response(closeTime=target-1) { return new Response(JSON.stringify([[target-H,'100','115','90','110','5',closeTime]])); }
+function directionForecast(symbol: 'BTCUSDT' | 'ETHUSDT') {
+  const bars = Array.from({ length: 49 }, (_, index) => {
+    const t = target - (50 - index) * H;
+    return { t, o: 100, h: 110, l: 90, c: 100, v: 1, closeTime: t + H - 1 };
+  });
+  return buildDirectionForecast(`futures:binance-usdm:${symbol}`, '1h', bars, T)!;
+}
 beforeEach(()=>{
   vi.useFakeTimers({toFake:['Date']}); vi.setSystemTime(T);
   offline=config.offline;config.offline=false;
@@ -27,6 +35,53 @@ beforeEach(()=>{
 });
 afterEach(()=>{ closeDb();rmSync(dir,{recursive:true,force:true});config.offline=offline;market.reset();vi.unstubAllGlobals();vi.useRealTimers(); });
 describe('canonical DITAS source forecast settlement',()=>{
+  it('freezes exact futures cohorts once and independently settles the realized direction after close', async () => {
+    const lease = acquireOrRenewLease('engine', 'leader', H * 2)!;
+    const btc = registerDirectionForecast(directionForecast('BTCUSDT'), lease)!;
+    const eth = registerDirectionForecast(directionForecast('ETHUSDT'), lease)!;
+    expect(btc.cohort).not.toBe(eth.cohort);
+    expect(registerDirectionForecast(directionForecast('BTCUSDT'), lease)).toEqual(btc);
+    expect(get('SELECT COUNT(*) n FROM ditas_events WHERE kind=?', 'DIRECTION_FORECAST')).toMatchObject({ n: 2 });
+    expect(verifyMemory().ok).toBe(true);
+    const fetch = vi.fn(async (url: string) => new Response(JSON.stringify([[target-H,'100','115','90',
+      url.includes('symbol=ETHUSDT') ? '100.1' : '110','5',target-1]])));
+    vi.stubGlobal('fetch', fetch);
+    expect(await verifyDueForecasts(lease)).toMatchObject({ settled: 0 });
+    expect(fetch).not.toHaveBeenCalled();
+    vi.setSystemTime(target + 2_001);
+    expect(registerDirectionForecast(directionForecast('BTCUSDT'), lease)).toBeNull();
+    expect(() => addOutcome(btc.id, 90, target, 'owner fixture')).toThrow('independent venue settlement');
+    expect(await verifyDueForecasts(lease)).toMatchObject({ settled: 2 });
+    expect(fetch.mock.calls.map(([url]) => new URL(url).hostname)).toEqual(['fapi.binance.com', 'fapi.binance.com']);
+    expect(fetch.mock.calls.map(([url]) => new URL(url).searchParams.get('symbol')).sort()).toEqual(['BTCUSDT','ETHUSDT']);
+    const btcOutcome = get<{ outcome: number; payload: string }>('SELECT outcome,payload FROM ditas_outcomes WHERE forecast_id=?', btc.id)!;
+    const ethOutcome = get<{ outcome: number; payload: string }>('SELECT outcome,payload FROM ditas_outcomes WHERE forecast_id=?', eth.id)!;
+    expect(btcOutcome.outcome).toBe(1);
+    expect(JSON.parse(btcOutcome.payload)).toMatchObject({ realizedClass: 'BULLISH', provenance: 'BINANCE_USDM_PUBLIC_CLOSED_BAR' });
+    expect(ethOutcome.outcome).toBe(0);
+    expect(JSON.parse(ethOutcome.payload)).toMatchObject({ realizedClass: 'SIDEWAYS' });
+    closeDb(); openDb(file);
+    const report = sourceVerifiedCalibration(btc.cohort);
+    expect(report).toMatchObject({ sample: 1, binaryProjection: 'BULLISH', direction: { sample: 1 } });
+    expect(report.direction?.brierScore).toBeCloseTo((50 ** 2 + 49 ** 2 + 1) / 51 ** 2);
+    expect(report.direction?.logLoss).toBeCloseTo(Math.log(51));
+    expect(await verifyDueForecasts(lease)).toMatchObject({ settled: 0 });
+    expect(all('SELECT * FROM orders')).toHaveLength(0);
+  });
+
+  it('cannot register a futures claim with an expired lease or settle an inexact candle', async () => {
+    const old = acquireOrRenewLease('engine', 'old', 5)!;
+    vi.setSystemTime(T + 6);
+    const current = acquireOrRenewLease('engine', 'next', H * 2)!;
+    const claim = directionForecast('ETHUSDT');
+    expect(() => registerDirectionForecast(claim, old)).toThrow('engine lease lost');
+    registerDirectionForecast(claim, current);
+    vi.setSystemTime(target + 3_000);
+    vi.stubGlobal('fetch', vi.fn(async () => response(target)));
+    expect(await verifyDueForecasts(current)).toMatchObject({ settled: 0, deferred: 1 });
+    expect(all('SELECT * FROM ditas_outcomes')).toHaveLength(0);
+  });
+
   it('persists provider-backed outcomes across restart without trading or duplicate settlement',async()=>{
     const f=forecast('restart');vi.setSystemTime(target+3000);
     const lease=acquireOrRenewLease('engine','leader',60_000)!;

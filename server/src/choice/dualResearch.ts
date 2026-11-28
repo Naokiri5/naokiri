@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto';
 import { analyzeChart, type ChartReport } from '../chart/analysis.js';
 import { analyzeDeepScenarios, type DeepScenarioAnalysis } from '../chart/scenarios.js';
+import { buildDirectionForecast, type DirectionForecast } from '../ditas/directionForecast.js';
 import { FeatureEngine } from '../features/indicators.js';
+import { FLIN_SOURCE_MAX_AGE_MS, prepareFlinDexSnapshot, type FlinPreparation } from '../market/flinQueue.js';
 import { INTERVAL_MS } from '../market/types.js';
 import type { DexPair } from '../providers/dexscreener.js';
-import type { FuturesMarketContext, FuturesResearchSnapshot } from '../providers/binanceFuturesResearch.js';
-import { assessDexPair } from '../safety/safety.js';
+import { futuresResearchInstrumentId, type FuturesMarketContext, type FuturesResearchSnapshot } from '../providers/binanceFuturesResearch.js';
+import type { MintObservation } from '../providers/solanaRpc.js';
 
 export const DUAL_RESEARCH_VERSION = 'mia-dual-research-v1';
-export const FAST_RESEARCH_MAX_AGE_MS = 4 * 60_000; // DEX data refreshes every three minutes.
+export const FAST_RESEARCH_MAX_AGE_MS = FLIN_SOURCE_MAX_AGE_MS;
 type MissingFuturesEvidence = 'FUTURES_FUNDING' | 'OPEN_INTEREST' | 'MARGIN' | 'LIQUIDATION_STRESS' | 'EXECUTABLE_BOOK' | 'VALIDATED_STRATEGY_EDGE';
 
 export interface FastResearchResult {
@@ -19,38 +21,41 @@ export interface FastResearchResult {
   status: 'NO_TRADE';
   reason: string;
   sourceAsOf: number;
+  expiresAt: number;
+  mintSourceStatus: 'NOT_CHECKED' | 'OBSERVED' | 'UNAVAILABLE';
   candidates: Array<{
     chainId: string; pairAddress: string; mintAddress: string; symbol: string;
     ageMs: number | null; liquidityUsd: number; safetyStatus: string;
+    knownQuote: boolean; mintObservation: MintObservation | null;
     eligibleForAutomation: false; reasons: string[];
   }>;
 }
 
 /** Actual DEX discovery state + canonical safety function. Not a new scanner or signer. */
 export function assessFastMemecoinResearch(pairs: readonly DexPair[], sourceAsOf: number, nowTs = Date.now()): FastResearchResult {
-  if (!Number.isSafeInteger(nowTs) || nowTs < 0) throw new Error('INVALID_RESEARCH_TIME');
-  const stale = !Number.isSafeInteger(sourceAsOf) || sourceAsOf <= 0
-    || sourceAsOf > nowTs || nowTs - sourceAsOf > FAST_RESEARCH_MAX_AGE_MS;
-  const candidates = stale ? [] : [...pairs]
-    .filter((p) => p.pairCreatedAt !== null && Number.isSafeInteger(p.pairCreatedAt)
-      && p.pairCreatedAt <= nowTs && nowTs - p.pairCreatedAt <= 24 * 60 * 60_000)
-    .sort((a, b) => (b.pairCreatedAt ?? 0) - (a.pairCreatedAt ?? 0)
-      || a.pairAddress.localeCompare(b.pairAddress))
-    .slice(0, 200).map((p) => {
-      const safety = assessDexPair(p, nowTs);
-      return {
-        chainId: p.chainId, pairAddress: p.pairAddress, mintAddress: p.baseAddress,
-        symbol: p.baseSymbol, ageMs: nowTs - p.pairCreatedAt!, liquidityUsd: p.liquidityUsd,
-        safetyStatus: safety.status, eligibleForAutomation: false as const,
-        reasons: [...safety.reasons, 'UNVERIFIED_SELL_EXECUTION_AND_CONTRACT_PERMISSIONS'],
-      };
-    });
+  return describeFastPreparation(prepareFlinDexSnapshot(pairs, sourceAsOf, nowTs), new Map(), 'NOT_CHECKED');
+}
+
+export function describeFastPreparation(prepared: FlinPreparation, mints: ReadonlyMap<string, MintObservation>,
+  mintSourceStatus: FastResearchResult['mintSourceStatus']): FastResearchResult {
+  const candidates = prepared.candidates.slice(0, 200).map(({ pair, knownQuote, safety }) => {
+    const mintObservation = mints.get(pair.baseAddress) ?? null;
+    return {
+      chainId: pair.chainId, pairAddress: pair.pairAddress, mintAddress: pair.baseAddress,
+      symbol: pair.baseSymbol, ageMs: prepared.observedAt - pair.pairCreatedAt!, liquidityUsd: pair.liquidityUsd,
+      knownQuote, mintObservation, safetyStatus: mintObservation?.status === 'BLOCKED' ? 'REJECTED' : safety.status,
+      eligibleForAutomation: false as const,
+      reasons: [...safety.reasons, ...(mintObservation?.reasons ?? []),
+        ...(!knownQuote ? ['SOLANA_QUOTE_MINT_UNVERIFIED'] : []),
+        'UNVERIFIED_SELL_EXECUTION_AND_CONTRACT_PERMISSIONS'],
+    };
+  });
   return {
     version: DUAL_RESEARCH_VERSION, lane: 'FAST_MEMECOIN', rolloutMode: 'RESEARCH_ONLY',
     tradingAuthority: false, status: 'NO_TRADE',
-    reason: stale ? 'DEX_SOURCE_STALE_OR_MISSING'
+    reason: prepared.status === 'STALE_SOURCE' ? 'DEX_SOURCE_STALE_OR_MISSING'
       : candidates.length ? 'ONCHAIN_SECURITY_AND_SELL_ROUTE_NOT_VERIFIED' : 'NO_RECENT_DEX_PAIRS',
-    sourceAsOf, candidates,
+    sourceAsOf: prepared.sourceAsOf, expiresAt: prepared.expiresAt, candidates, mintSourceStatus,
   };
 }
 
@@ -68,6 +73,7 @@ export interface DeepFuturesResearchResult {
   marketContext: FuturesMarketContext;
   chartEvidence: Record<'15m' | '1h' | '4h', ChartReport>;
   scenarioAnalysis: DeepScenarioAnalysis | null;
+  directionForecasts: Partial<Record<'15m' | '1h' | '4h', DirectionForecast>>;
   plan: null | {
     planId: string;
     strategyId: 'multi_timeframe_structure_research';
@@ -92,19 +98,25 @@ export interface DeepFuturesResearchResult {
 export function reconstructDeepFuturesResearch(snapshot: FuturesResearchSnapshot): DeepFuturesResearchResult {
   if (snapshot.market !== 'CRYPTO_PERPETUAL_FUTURES' || snapshot.source !== 'binance-usdm-public-klines'
       || !Number.isSafeInteger(snapshot.asOf)) throw new Error('INVALID_FUTURES_SNAPSHOT_IDENTITY');
-  const id = 'futures:binance-usdm:' + snapshot.symbol;
+  const id = futuresResearchInstrumentId(snapshot.symbol);
   const chartEvidence = {
     '15m': analyzeChart(id, '15m', snapshot.candles['15m'], snapshot.asOf),
     '1h': analyzeChart(id, '1h', snapshot.candles['1h'], snapshot.asOf),
     '4h': analyzeChart(id, '4h', snapshot.candles['4h'], snapshot.asOf),
   };
   const marketContext = snapshot.context ?? { funding: null, openInterest: null };
+  const directionForecasts: DeepFuturesResearchResult['directionForecasts'] = {};
+  for (const interval of ['15m', '1h', '4h'] as const) {
+    const forecast = buildDirectionForecast(id, interval, snapshot.candles[interval], snapshot.asOf);
+    if (forecast) directionForecasts[interval] = forecast;
+  }
   const common = {
     version: DUAL_RESEARCH_VERSION as typeof DUAL_RESEARCH_VERSION, lane: 'DEEP_FUTURES' as const,
     rolloutMode: 'RESEARCH_ONLY' as const, tradingAuthority: false as const,
     market: 'CRYPTO_PERPETUAL_FUTURES' as const, symbol: snapshot.symbol,
     source: snapshot.source, asOf: snapshot.asOf, chartEvidence, marketContext,
     scenarioAnalysis: analyzeDeepScenarios(chartEvidence),
+    directionForecasts,
   };
   if (Object.values(chartEvidence).some((x) => x.status !== 'VALID'))
     return { ...common, state: 'NO_TRADE', reason: 'INVALID_OR_INSUFFICIENT_CLOSED_CANDLES', plan: null };

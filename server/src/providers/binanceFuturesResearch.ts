@@ -6,6 +6,9 @@ import { INTERVAL_MS, type Candle, type Interval } from '../market/types.js';
 const BASE = 'https://fapi.binance.com/fapi/v1';
 export const FUTURES_RESEARCH_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'] as const;
 export type FuturesResearchSymbol = typeof FUTURES_RESEARCH_SYMBOLS[number];
+export const futuresResearchInstrumentId = (symbol: FuturesResearchSymbol) => `futures:binance-usdm:${symbol}` as const;
+export const futuresResearchSymbol = (instrumentId: string) =>
+  FUTURES_RESEARCH_SYMBOLS.find(symbol => futuresResearchInstrumentId(symbol) === instrumentId);
 type Frame = '15m' | '1h' | '4h';
 export const FUTURES_CONTEXT_MAX_AGE_MS = 5 * 60_000;
 export interface FuturesMarketContext {
@@ -38,12 +41,8 @@ setRateLimit('binance-usdm-research', 30);
 export function parseFuturesResearchCandles(raw: unknown, interval: Interval, cutoff: number): Candle[] {
   if (!Array.isArray(raw) || raw.length > 90 || !Number.isSafeInteger(cutoff)) throw new Error('INVALID_FUTURES_PAYLOAD');
   const parsed: Candle[] = raw.map((item: unknown) => {
-    if (!Array.isArray(item) || item.length < 7) throw new Error('INVALID_FUTURES_ROW');
-    const row: Candle = { t: Number(item[0]), o: Number(item[1]), h: Number(item[2]),
-      l: Number(item[3]), c: Number(item[4]), v: Number(item[5]), closeTime: Number(item[6]) };
-    if (![row.t, row.o, row.h, row.l, row.c, row.v, row.closeTime].every(Number.isFinite)
-        || !Number.isSafeInteger(row.t) || !Number.isSafeInteger(row.closeTime)
-        || row.closeTime! !== row.t + INTERVAL_MS[interval] - 1) throw new Error('INVALID_FUTURES_ROW');
+    const row = decodeFuturesKline(item, INTERVAL_MS[interval]);
+    if (!row) throw new Error('INVALID_FUTURES_ROW');
     return row;
   });
   if (parsed.some((c, i) => i > 0 && c.t - parsed[i - 1].t !== INTERVAL_MS[interval])) throw new Error('FUTURES_GAP_OR_REPLAY');
@@ -65,6 +64,29 @@ function observation(raw: unknown, symbol: FuturesResearchSymbol, receivedAt: nu
 
 const decimal = (value: unknown) =>
   typeof value === 'number' || (typeof value === 'string' && /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(value)) ? Number(value) : NaN;
+
+function decodeFuturesKline(item: unknown, width: number): Candle | null {
+  if (!Array.isArray(item) || item.length < 7 || typeof item[0] !== 'number' || typeof item[6] !== 'number') return null;
+  const t = item[0], closeTime = item[6];
+  const [o, h, l, c, v] = item.slice(1, 6).map(decimal);
+  if (!Number.isSafeInteger(t) || !Number.isSafeInteger(closeTime) || closeTime !== t + width - 1 ||
+      ![o, h, l, c, v].every(Number.isFinite)) return null;
+  return { t, o, h, l, c, v, closeTime };
+}
+
+/** An independent observation of the exact settlement bar on the same symbol and venue. */
+export async function closedFuturesKlineAt(symbol: FuturesResearchSymbol, interval: Interval, targetAt: number): Promise<Candle | null> {
+  const width = INTERVAL_MS[interval];
+  if (!FUTURES_RESEARCH_SYMBOLS.includes(symbol) || !Number.isSafeInteger(width) || !Number.isSafeInteger(targetAt) ||
+      targetAt < width || targetAt % width !== 0 || targetAt > Date.now() - 2000) return null;
+  const start = targetAt - width;
+  const raw: unknown = await fetchProvider('binance-usdm-research',
+    `${BASE}/klines?symbol=${symbol}&interval=${interval}&startTime=${start}&endTime=${targetAt - 1}&limit=1`,
+    { timeoutMs: 5000 });
+  if (!Array.isArray(raw) || raw.length !== 1) return null;
+  const bar = decodeFuturesKline(raw[0], width);
+  return bar?.t === start && !validateCandles([bar], interval, targetAt).length ? bar : null;
+}
 
 export function parseFuturesMarketContext(symbol: FuturesResearchSymbol, premium: unknown, interest: unknown, receivedAt: number, serverTime?: unknown): FuturesMarketContext {
   const exchangeTime = typeof serverTime === 'number' && Number.isSafeInteger(serverTime) && Math.abs(serverTime - receivedAt) <= 30_000

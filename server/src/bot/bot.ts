@@ -16,7 +16,7 @@ import { notify } from '../notify/notify.js';
 import { journal } from '../journal/journal.js';
 import { refreshBrainSnapshot } from '../knowledge/brain.js';
 import { recordAutonomicObservation, recordLearningEvidence, resetInternalProcesses } from '../knowledge/cognitive/internalProcesses.js';
-import { recentInternalLearningEvidence } from '../ditas/service.js';
+import { recentInternalLearningEvidence, registerDirectionForecast } from '../ditas/service.js';
 import { verifyDueForecasts } from '../ditas/forecastVerifier.js';
 import { linkClosedTrades } from '../ditas/tradeOutcomes.js';
 import { refreshOutcomeHashCheck } from '../ditas/evidenceIntegrity.js';
@@ -33,6 +33,7 @@ import { refreshRuntimeIntegrity, runtimeIntegrityDue, runtimeIntegrityStatus, s
 import { isShuttingDown } from '../ops/shutdown.js';
 import { drainExpiredMandate, durableSessionStatus, finishDurableClose, recoverDurableSessionAfterTakeover } from '../ops/durableSession.js';
 import { maybeScheduledBackup } from '../ops/backup.js';
+import { storageBlocksEntries, storageStatus } from '../ops/storage.js';
 import { compactConsensusEvidence } from '../qci/retention.js';
 import { record } from '../core/latency.js';
 import { hostname } from 'node:os';
@@ -306,9 +307,12 @@ function researchLane() {
     lanes.research.deferReason = autonomic.reason;
     return;
   }
-  return runLane('research', async () => {
+  return runLane('research', async (lease) => {
     lanes.research.deferReason = null;
-    await runDualResearchPass();
+    const startedAt = Date.now();
+    const { deep } = await runDualResearchPass(undefined, startedAt, () => stillLeader(lease));
+    if (!stillLeader(lease) || deep.successAt !== startedAt || !deep.result || storageBlocksEntries(storageStatus())) return;
+    for (const forecast of Object.values(deep.result.directionForecasts)) registerDirectionForecast(forecast, lease);
   });
 }
 

@@ -94,11 +94,37 @@ export function providerDestinationDenial(id: string, url: string | URL): string
   return null;
 }
 
+/** JSON-RPC observations may specify a byte limit before decoding untrusted response bodies. */
+async function readBoundedJson(response: Response, maxBytes: number, controller: AbortController): Promise<unknown> {
+  if (!response.body) throw new Error('missing JSON response body');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let bytes = 0;
+  let text = '';
+  try {
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+      bytes += chunk.value.byteLength;
+      if (bytes > maxBytes) {
+        controller.abort();
+        throw new Error('JSON response exceeds byte limit');
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    const json = text + decoder.decode();
+    try { return JSON.parse(json); } catch { throw new Error('invalid JSON response'); }
+  } finally { reader.releaseLock(); }
+}
+
 /** Fetch with timeout, rate limit, latency + health accounting. Never logs credentials. */
-export async function fetchProvider(id: string, url: string, opts: { timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string> } = {}): Promise<any> {
+export async function fetchProvider(id: string, url: string, opts: {
+  timeoutMs?: number; as?: 'json' | 'text'; headers?: Record<string, string>;
+  jsonRpc?: { request: object; maxResponseBytes: number; decode: (reply: unknown) => unknown };
+} = {}): Promise<any> {
   const info = registry.get(id);
   if (!info) throw new ProviderError(id, 'unregistered provider');
   if (config.offline) throw new ProviderError(id, 'offline mode');
+  if (opts.jsonRpc && (!Number.isSafeInteger(opts.jsonRpc.maxResponseBytes) || opts.jsonRpc.maxResponseBytes <= 0))
+    throw new ProviderError(id, 'invalid JSON-RPC byte limit');
   // Checked before rate limiting or health accounting: a refused destination is a code defect, not a provider outage.
   const denial = providerDestinationDenial(id, url);
   if (denial) throw new ProviderError(id, denial);
@@ -110,10 +136,16 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), opts.timeoutMs ?? 10_000);
   try {
-    const init = { signal: ctl.signal, redirect: 'manual' as const, headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json', ...opts.headers } };
+    const init: RequestInit = {
+      signal: ctl.signal, redirect: 'manual',
+      headers: { 'user-agent': 'MIA/4.1 (read-only market data client)', accept: opts.as === 'text' ? '*/*' : 'application/json',
+        ...opts.headers, ...(opts.jsonRpc ? { 'content-type': 'application/json' } : {}) },
+      ...(opts.jsonRpc ? { method: 'POST', body: JSON.stringify(opts.jsonRpc.request) } : {}),
+    };
     // Redirects are followed manually so every hop is checked against the same allowlist.
     let res = await fetch(url, init), target = new URL(url);
     for (let hop = 0; REDIRECT.has(res.status); hop++) {
+      if (opts.jsonRpc) throw new ProviderError(id, 'JSON-RPC redirect refused', res.status);
       const location = res.headers.get('location');
       if (!location || hop >= MAX_REDIRECTS) throw new ProviderError(id, 'redirect refused (missing location or too many hops)', res.status);
       target = new URL(location, target);
@@ -131,7 +163,8 @@ export async function fetchProvider(id: string, url: string, opts: { timeoutMs?:
       throw Object.assign(new ProviderError(id, 'HTTP 404 (resource not found)', 404), { resourceMiss: true });
     }
     if (!res.ok) throw new ProviderError(id, `HTTP ${res.status}`, res.status);
-    const body = opts.as === 'text' ? await res.text() : await res.json();
+    const body = opts.jsonRpc ? opts.jsonRpc.decode(await readBoundedJson(res, opts.jsonRpc.maxResponseBytes, ctl))
+      : opts.as === 'text' ? await res.text() : await res.json();
     const ms = performance.now() - t0;
     record(`provider.${id}`, ms);
     const prev = info.status;

@@ -371,7 +371,7 @@ export async function routes(app: FastifyInstance) {
   });
   app.get('/api/fx', async () => ({ series: market.fx, asOf: market.fxFetchedAt, note: 'ECB daily reference rates via Frankfurter — not tradeable quotes.' }));
   app.get('/api/bubbles', async (req) => bubbleMap(z.object({ limit: z.coerce.number().int().min(1).max(500).default(150), minVolume: z.coerce.number().min(0).default(1e6) }).parse(req.query ?? {})));
-  app.get('/api/dex', async () => ({ pairs: dexBoard(), asOf: market.dexFetchedAt, note: 'DEX tokens are never automation-eligible: contract-level honeypot checks require an on-chain provider (pending).' }));
+  app.get('/api/dex', async () => ({ pairs: dexBoard(), asOf: market.dexFetchedAt, note: 'DEX discovery is research only. Full contract, pool and sell-route verification remains required.' }));
 
   // ── scanner / decisions ──
   app.get('/api/scanner', async () => ({ board: [...board.values()].sort((a, b) => b.quoteVolume - a.quoteVolume), decisions: recentDecisions().map(slim), rejections: rejections.slice(-150).reverse(), waitingCapacity: waitingCandidates(), lastScanAt: market.lastScanAt, strategies: STRATEGIES.map((s) => ({ id: s.id, name: s.name, version: s.version, interval: s.interval, regimes: s.suitableRegimes, description: s.description })) }));
@@ -385,8 +385,11 @@ export async function routes(app: FastifyInstance) {
     return paperFillEvents(query.after, query.limit);
   });
   app.get('/api/choice/dual/status', async () => dualResearchStatus());
-  app.get('/api/choice/dual/fast', async () =>
-    assessFastMemecoinResearch(market.dex, market.dexFetchedAt));
+  app.get('/api/choice/dual/fast', async () => {
+    const { fast } = dualResearchStatus();
+    return !fast.stale && fast.result?.sourceAsOf === market.dexFetchedAt ? fast.result
+      : assessFastMemecoinResearch(market.dex, market.dexFetchedAt);
+  });
   app.get('/api/choice/dual/deep', async (req) => {
     limit(req, 'futuresResearch', 'futures chart research');
     const { symbol } = z.object({

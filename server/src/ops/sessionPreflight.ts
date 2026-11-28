@@ -69,7 +69,7 @@ function researchChecks(mind: SessionMind, at: number): PreflightCheck[] {
   const connectionStopped = source?.status === 'DOWN' || source?.status === 'DISABLED' || source?.status === 'DEGRADED';
   const fresh = mind === 'FAST'
     ? !research.fast.stale && research.fast.checkedAt <= at
-    : !research.deep.stale && research.deep.successAt <= at && research.deep.error === null;
+    : research.deepInstruments.some((instrument) => !instrument.stale && instrument.error === null);
   return [
     { id: 'connections', label: 'Research connection', status: connected ? 'PASS' : connectionStopped ? 'BLOCKED' : 'UNVERIFIED',
       detail: connected ? `${name} reports a recent successful connection.` : `${name} has no verified healthy connection on this server.` },

@@ -8,9 +8,11 @@ import {
 } from '../src/market/flinQueue.js';
 
 const NOW = Date.UTC(2026, 10, 23, 13, 0, 0);
+const alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const testPubkey = (n: number) => '1'.repeat(30) + alphabet[Math.floor((n + 256) / 58)] + alphabet[(n + 256) % 58];
 const pair = (n: number): DexPair => ({
-  chainId: 'solana', dexId: 'fixture', pairAddress: 'pool-address-' + n,
-  baseAddress: 'mint-address-' + n, url: 'https://example.invalid/launch/' + n,
+  chainId: 'solana', dexId: 'fixture', pairAddress: testPubkey(n + 1000),
+  baseAddress: testPubkey(n), url: 'https://example.invalid/launch/' + n,
   baseName: 'Fixture', baseSymbol: 'F' + n, quoteSymbol: 'SOL',
   priceUsd: 0.02, liquidityUsd: 200_000, fdv: 1_000_000, marketCap: 1_000_000,
   volume24h: 100_000, volume1h: 12_000, buys24h: 60, sells24h: 40,
@@ -57,6 +59,19 @@ describe('FLIN persisted continuous research, not order execution', () => {
     expect(ingestFlinDexSnapshot(batch, NOW + 1, NOW).status).toBe('STALE_SOURCE');
     expect(ingestFlinDexSnapshot([{ ...pair(999), chainId: 'ethereum' }], NOW, NOW).scanned).toBe(0);
     expect(ingestFlinDexSnapshot([{ ...pair(999), pairCreatedAt: NOW + 1 }], NOW, NOW).scanned).toBe(0);
+    expect(ingestFlinDexSnapshot([{ ...pair(999), pairAddress: 'pool-address-999' }], NOW, NOW).scanned).toBe(0);
+  });
+
+  it('keeps age risk visible while quarantining an otherwise observable new token', () => {
+    ingestFlinDexSnapshot([pair(1), { ...pair(2), liquidityUsd: 500 }], NOW, NOW);
+    expect(flinQueueStatus().recent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ mintAddress: pair(1).baseAddress, state: 'QUARANTINED' }),
+      expect.objectContaining({ mintAddress: pair(2).baseAddress, state: 'REJECTED' }),
+    ]));
+    const stored = all<{ evidence_json: string }>('SELECT evidence_json FROM flin_launch_candidates WHERE mint_address=?', pair(1).baseAddress);
+    expect(JSON.parse(stored[0].evidence_json)).toMatchObject({
+      expiresAt: NOW + FLIN_SOURCE_MAX_AGE_MS, safety: { status: 'HIGH_RISK', eligibleForAutomation: false },
+    });
   });
 
   it('does not replace safety evidence or refresh last-seen time on equal-timestamp replay', () => {

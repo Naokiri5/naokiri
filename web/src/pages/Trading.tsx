@@ -40,7 +40,8 @@ type CommandStatus = {
   providers: { live: number; total: number };
   research: {
     fast: { checkedAt: number; stale: boolean; count: number | null };
-    deep: { checkedAt: number; stale: boolean; symbol: string | null; error: boolean; state: string | null; fundingRate: number | null; openInterest: number | null };
+    deep: { checkedAt: number; stale: boolean; symbol: string | null; error: boolean; state: string | null; fundingRate: number | null; openInterest: number | null;
+      freshInstruments?: number; trackedInstruments?: number };
   };
   choice: null | {
     at: number; observed: number; reason: string | null; selected: string | null;
@@ -98,6 +99,7 @@ function CentralCommand({ command, lanes, mode }: { command?: CommandStatus; lan
             <span>DEEP futures</span><span>{command.research.deep.error ? 'Source unavailable' :
               command.research.deep.checkedAt ? `${command.research.deep.symbol ?? 'Futures'} · ${command.research.deep.stale ? 'Stale evidence' : command.research.deep.state ?? 'Awaiting data'}` :
               'Awaiting data'}</span>
+            {command.research.deep.trackedInstruments != null && <><span>Current futures observations</span><span>{command.research.deep.freshInstruments} / {command.research.deep.trackedInstruments}</span></>}
             <span>Funding / open interest</span><span>{fmt.pct(command.research.deep.fundingRate === null ? null : command.research.deep.fundingRate * 100, 4)} / {fmt.num(command.research.deep.openInterest, 1)}</span>
             <span>Shadow choice</span><span>{command.choice?.selected?.split(':').at(-1) ?? command.choice?.reason?.replaceAll('_', ' ') ?? 'Awaiting first comparison'}</span>
             <span>Recent risk denials</span><span>{command.activity.denials} / {command.activity.count} decisions</span>

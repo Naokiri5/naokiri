@@ -13,9 +13,11 @@ type Candidate = {
   ageMs: number | null;
   liquidityUsd: number;
   safetyStatus: string;
+  knownQuote?: boolean;
+  mintObservation?: { status: string; slot: number; checkedAt: number } | null;
   reasons: string[];
 };
-type FastResult = { sourceAsOf: number; candidates: Candidate[] };
+type FastResult = { sourceAsOf: number; candidates: Candidate[]; mintSourceStatus?: 'NOT_CHECKED' | 'OBSERVED' | 'UNAVAILABLE' };
 type DexSnapshot = {
   asOf: number;
   note: string;
@@ -28,13 +30,35 @@ type DexSnapshot = {
 type Timeframe = '15m' | '1h' | '4h';
 const timeframes: Timeframe[] = ['15m', '1h', '4h'];
 const intervalMs: Record<Timeframe, number> = { '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000 };
+type ForecastScore = { brierScore: number; logLoss: number };
+type DirectionForecast = {
+  targetAt: number;
+  deadbandBps: number;
+  probabilities: { BULLISH: number; SIDEWAYS: number; BEARISH: number };
+  empiricalPriceRange: { lower: number; upper: number };
+  historicalEvaluation: { sampleCount: number; model: ForecastScore; uniform: ForecastScore };
+  calibrationStatus: 'MEASURED_NOT_CERTIFIED';
+  tradingAuthority: false;
+};
 type DeepResult = {
   symbol: string;
+  market: 'CRYPTO_PERPETUAL_FUTURES';
+  tradingAuthority: false;
   source: string;
   asOf: number;
   state: string;
   reason: string;
   chartEvidence: Record<Timeframe, { status: string; trend: string }>;
+  marketContext?: {
+    funding: { rate: number; localAt: number } | null;
+    openInterest: { quantity: number; localAt: number } | null;
+  };
+  scenarioAnalysis?: {
+    calibration: 'UNCALIBRATED';
+    tradingAuthority: false;
+    relativeWeights: { bullish: number; sideways: number; bearish: number };
+  } | null;
+  directionForecasts?: Partial<Record<Timeframe, DirectionForecast>>;
   plan: {
     direction: string;
     entryTrigger: string;
@@ -43,19 +67,51 @@ type DeepResult = {
     requiredMissing: readonly string[];
   } | null;
 };
+type DeepStatus = { symbol: string | null; stale: boolean; error: string | null; result: DeepResult | null };
+type DeepInstrument = DeepStatus & { instrumentId: string; symbol: string };
 type ResearchSnapshot = {
   tradingAuthority: false;
   fast: { stale: boolean; result: FastResult | null };
-  deep: { stale: boolean; error: string | null; result: DeepResult | null };
+  deep: DeepStatus;
+  deepInstruments?: readonly DeepInstrument[];
 };
 const reasonText = (reason: string) => reason.replaceAll('_', ' ').toLowerCase();
 const pairKey = (item: { chainId: string; pairAddress: string }) => item.chainId + ':' + item.pairAddress;
+const percentage = (share: number, precision = 0) => `${fmt.num(share * 100, precision)}%`;
 
 function DeepEvidence({ result }: { result: DeepResult }) {
+  const [horizon, setHorizon] = useState<Timeframe>('15m');
   const plan = result.plan;
+  const funding = result.marketContext?.funding;
+  const openInterest = result.marketContext?.openInterest;
+  const scenario = result.scenarioAnalysis;
+  const weights = scenario?.calibration === 'UNCALIBRATED' && scenario.tradingAuthority === false ? scenario.relativeWeights : null;
+  const direction = result.directionForecasts?.[horizon];
+  const forecast = direction?.calibrationStatus === 'MEASURED_NOT_CERTIFIED' && direction.tradingAuthority === false
+    && direction.targetAt > Date.now() ? direction : null;
   return <div className="col mia-research-detail">
     <div className="row between"><strong>{result.symbol} perpetual</strong><Badge v={result.state} /></div>
     <div className="row">{timeframes.map((interval) => <Badge key={interval} v={interval + ' ' + result.chartEvidence[interval].trend} />)}</div>
+    <dl className="mia-facts">
+      <dt>Observed funding rate</dt><dd>{fmt.pct(funding ? funding.rate * 100 : null, 4)} {funding && <Freshness at={funding.localAt} />}</dd>
+      <dt>Observed open interest</dt><dd>{fmt.num(openInterest?.quantity, 1)} {openInterest && <Freshness at={openInterest.localAt} />}</dd>
+    </dl>
+    {!!result.directionForecasts && <label className="mia-network-filter">Forecast horizon
+      <select value={horizon} onChange={(event) => setHorizon(event.target.value as Timeframe)}>
+        {timeframes.map((interval) => <option key={interval}>{interval}</option>)}
+      </select>
+    </label>}
+    {forecast ? <dl className="mia-facts" aria-label={`${horizon} direction forecast`}>
+      <dt>{horizon} direction forecast · Measured, uncertified</dt>
+      <dd>Bullish {percentage(forecast.probabilities.BULLISH, 1)} · Sideways {percentage(forecast.probabilities.SIDEWAYS, 1)} · Bearish {percentage(forecast.probabilities.BEARISH, 1)}</dd>
+      <dt>10th–90th percentile price range</dt><dd>{fmt.px(forecast.empiricalPriceRange.lower)}–{fmt.px(forecast.empiricalPriceRange.upper)} · target {fmt.time(forecast.targetAt)}</dd>
+      <dt>Sideways threshold</dt><dd>±{forecast.deadbandBps} bps from the reference close</dd>
+      <dt>Historical Brier score</dt><dd>{fmt.num(forecast.historicalEvaluation.model.brierScore, 3)} model / {fmt.num(forecast.historicalEvaluation.uniform.brierScore, 3)} uniform · {forecast.historicalEvaluation.sampleCount} observations</dd>
+      <dt>Historical log loss</dt><dd>{fmt.num(forecast.historicalEvaluation.model.logLoss, 3)} model / {fmt.num(forecast.historicalEvaluation.uniform.logLoss, 3)} uniform</dd>
+    </dl> : <div className="hint">Awaiting a current {horizon} direction forecast.</div>}
+    {weights && <dl className="mia-facts">
+      <dt>Scenario weights · Uncalibrated</dt><dd>Bullish {percentage(weights.bullish)} · Sideways {percentage(weights.sideways)} · Bearish {percentage(weights.bearish)}</dd>
+    </dl>}
     {plan ? <>
       <dl className="mia-facts">
         <dt>Hypothesis</dt><dd>{plan.direction}</dd>
@@ -67,6 +123,30 @@ function DeepEvidence({ result }: { result: DeepResult }) {
     </> : <p className="muted">{reasonText(result.reason)}</p>}
     <div className="hint">{result.source} · <Freshness at={result.asOf} /></div>
   </div>;
+}
+
+function FuturesResearch({ research }: { research: ResearchSnapshot | null }) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  if (research?.tradingAuthority !== false) return null;
+  const instruments = research.deepInstruments;
+  const selection = instruments?.find((instrument) => instrument.instrumentId === selectedId) ?? instruments?.[0];
+  const row = instruments ? selection : research.deep;
+  const result = row?.result;
+  const now = Date.now();
+  const matchesMarket = result?.market === 'CRYPTO_PERPETUAL_FUTURES' && result.symbol === row?.symbol && result.tradingAuthority === false;
+  const stale = row?.stale || (result && (result.asOf > now || (result.plan && result.plan.expiresAt <= now)));
+  let status = 'Awaiting a futures research snapshot.';
+  if (row?.error) status = 'Futures research source unavailable.';
+  else if (result && !matchesMarket) status = 'Futures evidence unavailable for this instrument.';
+  else if (result && stale) status = 'Futures evidence is stale or expired.';
+  return <details className="mia-research-detail"><summary>Perpetual futures research</summary>
+    {instruments?.length && selection ? <label className="mia-network-filter">Futures instrument
+      <select value={selection.instrumentId} onChange={(event) => setSelectedId(event.target.value)}>
+        {instruments.map((instrument) => <option key={instrument.instrumentId} value={instrument.instrumentId}>{instrument.symbol}</option>)}
+      </select>
+    </label> : null}
+    {result && matchesMarket && !stale && !row?.error ? <DeepEvidence result={result} /> : <Empty>{status}</Empty>}
+  </details>;
 }
 
 function SpotEvidence({ snapshot, symbol, interval }: { snapshot: InstrumentSnapshot | null; symbol: string; interval: Timeframe }) {
@@ -133,7 +213,6 @@ function FastWorkspace({ source, positions, activity }: WorkspaceProps) {
   const command = useApi<ResearchSnapshot>(source === 'command' ? '/api/choice/dual/status' : null,
     { topics: ['bot', 'health'], every: 30_000 });
   const dex = useApi<DexSnapshot>(source ? '/api/dex' : null, { every: 45_000 });
-  const [chain, setChain] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
   const snapshot = !dex.error && dex.data && dexFresh(dex.data.asOf) ? dex.data : null;
@@ -141,16 +220,15 @@ function FastWorkspace({ source, positions, activity }: WorkspaceProps) {
   const fallback = snapshot && source === 'market' ? {
     sourceAsOf: snapshot.asOf,
     candidates: snapshot.pairs
-      .filter((pair) => pair.pairCreatedAt !== null && pair.pairCreatedAt <= snapshot.asOf && snapshot.asOf - pair.pairCreatedAt <= 24 * 60 * 60_000)
+      .filter((pair) => pair.chainId === 'solana' && pair.pairCreatedAt !== null && pair.pairCreatedAt <= snapshot.asOf && snapshot.asOf - pair.pairCreatedAt <= 24 * 60 * 60_000)
       .map((pair) => ({
         symbol: pair.baseSymbol, chainId: pair.chainId, pairAddress: pair.pairAddress, liquidityUsd: pair.liquidityUsd,
         ageMs: snapshot.asOf - pair.pairCreatedAt!, safetyStatus: pair.safety.status, reasons: pair.safety.reasons,
       }))
       .sort((a, b) => a.ageMs - b.ageMs).slice(0, 20),
   } : null;
-  const result = source === 'command' ? fast && !fast.stale ? fast.result : null : fallback;
-  const chains = [...new Set((result?.candidates ?? []).map((item) => item.chainId))].sort();
-  const candidates = (result?.candidates ?? []).filter((item) => !chain || item.chainId === chain);
+  const result: FastResult | null = source === 'command' ? fast && !fast.stale ? fast.result : null : fallback;
+  const candidates = (result?.candidates ?? []).filter((item) => item.chainId === 'solana');
   const candidate = follow ? candidates[0] : candidates.find((item) => pairKey(item) === selected);
   const pair = candidate ? snapshot?.pairs.find((item) => pairKey(item) === pairKey(candidate)) : undefined;
   return <>
@@ -169,6 +247,9 @@ function FastWorkspace({ source, positions, activity }: WorkspaceProps) {
         <dt>Liquidity at review</dt><dd>{fmt.usd(positive(candidate.liquidityUsd), 0)}</dd>
         <dt>Age at review</dt><dd>{candidate.ageMs === null ? '—' : `${Math.floor(candidate.ageMs / 60_000)} min`}</dd>
         <dt>Safety evidence</dt><dd><Badge v={candidate.safetyStatus} /></dd>
+        {candidate.mintObservation && <>
+          <dt>Finalized mint check</dt><dd><Badge v={candidate.mintObservation.status} /> · Slot {fmt.num(candidate.mintObservation.slot, 0)}</dd>
+        </>}
       </dl>}
       <div className="mia-chart-empty">
         <Icon name="chart" size={27} />
@@ -182,12 +263,7 @@ function FastWorkspace({ source, positions, activity }: WorkspaceProps) {
     <Card title="Deployment radar" className="mia-research" right={<Badge v="Research only" />}>
       <div role="region" aria-label="Deployment radar">
         <ErrorLine e={source === 'command' ? command.error : dex.error} />
-        {!!chains.length && <label className="mia-network-filter">Network
-          <select value={chain} onChange={(event) => { setChain(event.target.value); setFollow(true); }}>
-            <option value="">All networks</option>
-            {chains.map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
-        </label>}
+        {result?.mintSourceStatus === 'UNAVAILABLE' && <p className="hint">Solana mint checks are currently unavailable.</p>}
         {candidates.length ? <ul className="mia-candidate-list">
           {candidates.map((item) => <li key={pairKey(item)}>
             <button type="button" aria-pressed={item === candidate} onClick={() => { setSelected(pairKey(item)); setFollow(false); }}>
@@ -237,7 +313,6 @@ function DeepEvidenceWorkspace({ symbol, interval, positions, activity, research
 }) {
   const { data, loading, error } = useApi<InstrumentSnapshot>(`/api/instrument/${encodeURIComponent(symbol)}?interval=${interval}`,
     { topics: ['scan'], every: 30_000, isolatePath: true });
-  const deep = research?.tradingAuthority === false ? research.deep : null;
   const instrument = error ? undefined : data?.instrument?.id;
   const positionLevels = useMemo(() => instrument ? (paperPositions ?? [])
     .filter((position) => position.instrument === instrument)
@@ -259,10 +334,7 @@ function DeepEvidenceWorkspace({ symbol, interval, positions, activity, research
     <Card title="Strategy architect" className="mia-research" right={<Badge v="Research only" />}>
       <div role="region" aria-label="Strategy architect">
         <SpotEvidence snapshot={error ? null : data} symbol={symbol} interval={interval} />
-        {deep && <details className="mia-research-detail"><summary>Perpetual futures research</summary>
-          {deep.result && !deep.stale && !deep.error ? <DeepEvidence result={deep.result} />
-            : <Empty>{deep.result ? 'Futures evidence is stale or expired.' : 'Awaiting a futures research snapshot.'}</Empty>}
-        </details>}
+        <FuturesResearch research={research} />
       </div>
       <Link className="mia-panel-link" to="/ditas">Decision intelligence <Icon name="arrow" size={15} /></Link>
     </Card>

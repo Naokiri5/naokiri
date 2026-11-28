@@ -6,6 +6,15 @@ import { StepUp } from './Trading';
 
 const tabs = ['Overview', 'Decision ledger', 'Decision Twin', 'Strategy passports', 'Calibration', 'Execution quality', 'Intelligence evaluation', 'Foundation coverage'];
 const count = (v: unknown) => Array.isArray(v) ? v.length : typeof v === 'number' ? v : 0;
+function forecastCohortLabel(key: string) {
+  try {
+    const [target, instrument, model, horizon, deadband, lead] = JSON.parse(key);
+    if (target === 'DIRECTION_WITH_DEADBAND' && typeof instrument === 'string') {
+      return `${instrument.split(':').at(-1)} perpetual · ${horizon} · ±${deadband} bps · ${lead}/4 lead window · ${model}`;
+    }
+  } catch { /* Legacy cohort keys are displayed as stored. */ }
+  return key;
+}
 
 /** DITAS evidence. No strategy promotion, simulation or execution authority; the only action is the owner's step-up
  * acknowledgement of investigated evidence-integrity findings, which lets new paper entries resume. */
@@ -27,6 +36,7 @@ export function Ditas() {
   const reportedCalibration = data?.calibration;
   const pendingCalibration = (reportedCalibration?.cohort ?? '') !== cohort;
   const calibration = pendingCalibration ? undefined : reportedCalibration;
+  const direction = calibration?.sourceVerified?.direction;
   const calibrationStatus = pendingCalibration ? (error && !loading ? 'UNAVAILABLE' : 'LOADING') : calibration?.status ?? 'UNCALIBRATED';
   return <Page title="DITAS · Decision intelligence" sub="Inspect the evidence behind decisions, strategy health and hypothetical alternatives. Every result is tied to stored records."
     right={<><Badge v={data?.controls?.mode ?? 'OBSERVE'} /><Link className="pill" to="/risk">Risk & emergency controls</Link><button className="sm" onClick={() => { reload(); setRefreshKey((k) => k + 1); }} disabled={loading}>Refresh</button></>}>
@@ -79,10 +89,14 @@ export function Ditas() {
       <div className="col"><label className="col" style={{ minWidth: 0 }}>Forecast cohort
           <select aria-label="Forecast cohort" value={cohort} onChange={e => setCohort(e.target.value)} style={{ maxWidth: '100%', minWidth: 0 }}>
             <option value="">Select a cohort to evaluate</option>
-            {(reportedCalibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{c.cohort} · {c.n} forecasts</option>)}
+            {(reportedCalibration?.cohorts ?? []).map((c: any) => <option key={c.cohort} value={c.cohort}>{forecastCohortLabel(c.cohort)} · {c.n} forecasts</option>)}
           </select>
         </label>
         <div className="hint">Calibration evaluates stored probability forecasts against outcomes. It does not turn chart confidence, opportunity scores or votes into win probabilities.</div>
+        {direction && <>
+          <div className="kv"><span>Venue-verified direction outcomes</span><span>{direction.sample}</span><span>Three-way Brier score</span><span>{fmt.num(direction.brierScore, 4)}</span><span>Three-way log loss</span><span>{fmt.num(direction.logLoss, 4)}</span></div>
+          <div className="hint">The reliability bins below evaluate the bullish outcome against all other outcomes.</div>
+        </>}
         <div className="kv"><span>Matched outcomes</span><span>{calibration?.sample ?? calibration?.sampleSize ?? 0}</span><span>Brier score</span><span>{fmt.num(calibration?.brierScore, 4)}</span><span>Log loss</span><span>{fmt.num(calibration?.logLoss, 4)}</span><span>Expected calibration error</span><span>{fmt.num(calibration?.ece, 4)}</span></div>
         <div className="hint">{calibration?.note ?? 'An insufficient sample remains UNCALIBRATED. No production model is promoted automatically.'}</div>
         <div className="tablewrap"><table><thead><tr><th>Probability bin</th><th>Outcomes</th><th>Mean prediction</th><th>Observed frequency</th><th>95% Wilson interval</th><th>Evidence status</th></tr></thead><tbody>

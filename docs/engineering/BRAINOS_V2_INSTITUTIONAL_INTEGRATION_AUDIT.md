@@ -28,6 +28,18 @@ The implementation brief identifies `Naokiri5/naokiri`. The baseline examined he
 
 The increment uses the existing decision, risk, OMS, ledger, scheduler and worker registry. Migrations 14 and 15 append a nullable column and an index. An earlier application build may reject the newer schema during readiness and takeover. Verify a backup before upgrading. Once the upgraded system accepts financial writes, use a recovery plan that preserves those commits.
 
+## FAST preparation and multi-asset DEEP research
+
+This follow-up extends the existing research lane and authenticated Atelier views. The runtime retains separate `futures:binance-usdm` observations for BTCUSDT, ETHUSDT and SOLUSDT. It maintains the existing one-symbol-per-five-minute request budget. A failed or expired observation is scoped to its contract, and stale funding and open interest expire on their own source clock. The futures instrument and forecast horizon selectors are local to the research view.
+
+FAST uses the canonical FLIN queue and one prepared cohort per fresh DEX observation. Discovery validates Solana mint, pool and quote identities. Known quote mints rank before unknown quotes. The existing age warning remains visible while otherwise observable new pairs await evidence in quarantine. At most eight unique shortlisted mints receive one batched finalized `getMultipleAccounts` read through the allowlisted Solana public RPC. FLIN persists its source timestamps, mint restriction status and observed slot in the candidate evidence. A missing or unrecognized permission or extension remains unverified. The public endpoint operates under shared rate limits and provides research observations.
+
+DITAS uses `empirical-direction-v1` for the next closed 15m, 1h or 4h bar. The sideways bands are ±10, ±20 and ±40 basis points respectively. The baseline needs at least 49 contiguous closed bars and uses smoothed class frequencies and the empirical 10th–90th percentile return range. Historical scoring predicts with earlier returns before revealing each outcome and compares Brier score and log loss with a uniform forecast. The UI identifies these as measured, uncertified forecasts and keeps rule-based scenario weights separate.
+
+The leading engine registers fresh forecasts in the existing DITAS memory and forecast tables before their target closes. The existing bounded verifier requests the exact closed USD-M candle and appends the observed direction and scores once. Cohorts stay separate by instrument, model, horizon, deadband and remaining lead-time band. DITAS shows three-way scores for verified outcomes, plus reliability bins for the bullish probability. Prospective qualification still requires enough observations.
+
+The remaining input gates include authentic Solana swap streams, wallet clusters, pool and executable sell-route evidence and trace-verified FAST worker selection. Additional futures venues still require authoritative contract, margin and liquidation rules and separate PAPER qualification. Equity, ETF and spot FX execution require a separately authorized market scope and entitled integrations. The concurrent-instrument regression exercises the canonical Binance spot PAPER OMS and reconciliation. Release certification still requires strategy expectancy, venue execution, latency and unattended Railway evidence.
+
 ## Upstream capability decisions
 
 The revision links pin the default-branch commits inspected for license metadata on 28 November 2026. The reported licenses come from repository metadata or the linked license text. Production adoption would require checking the selected release and files, transitive dependencies, and any separate data, weights or service terms. Every decision below is **PROPOSED** or **DEFERRED**.

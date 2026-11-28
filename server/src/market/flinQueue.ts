@@ -1,5 +1,7 @@
 import { all, get, J, run, tx } from '../db/db.js';
 import type { DexPair } from '../providers/dexscreener.js';
+import { isKnownSolanaQuote, isSolanaAddress } from '../providers/solanaAddress.js';
+import type { MintObservation } from '../providers/solanaRpc.js';
 import { assessDexPair } from '../safety/safety.js';
 
 /**
@@ -39,37 +41,66 @@ export interface FlinPersistedCandidate {
 const validText = (s: string) => typeof s === 'string' && s.length >= 4 && s.length <= 200 && !/[\x00-\x1f]/.test(s);
 const validTs = (n: number) => Number.isSafeInteger(n) && n > 0;
 
-/** Reobserving the same pair updates its last-known evidence, not a second candidate or trade. */
-export function ingestFlinDexSnapshot(
+interface PreparedFlinCandidate {
+  id: string;
+  pair: DexPair;
+  safety: ReturnType<typeof assessDexPair>;
+  knownQuote: boolean;
+}
+export interface FlinPreparation {
+  sourceAsOf: number;
+  observedAt: number;
+  expiresAt: number;
+  status: FlinIntakeResult['status'];
+  candidates: PreparedFlinCandidate[];
+  truncated: boolean;
+}
+
+/** Prepare one bounded Solana cohort from the canonical discovery snapshot. */
+export function prepareFlinDexSnapshot(
   pairs: readonly DexPair[], sourceAsOf: number, now = Date.now(),
-): FlinIntakeResult {
+): FlinPreparation {
   if (!validTs(now)) throw new Error('INVALID_FLIN_CLOCK');
   if (!Array.isArray(pairs)) throw new Error('INVALID_FLIN_PAIRS');
-  const basic = { source: 'DEX_PROFILE_OBSERVATION' as const, tradingAuthority: false as const, sourceAsOf };
+  const source = { sourceAsOf, observedAt: now, expiresAt: sourceAsOf + FLIN_SOURCE_MAX_AGE_MS };
   if (!validTs(sourceAsOf) || sourceAsOf > now || now - sourceAsOf > FLIN_SOURCE_MAX_AGE_MS)
-    return { ...basic, scanned: 0, newCandidates: 0, updated: 0, rejected: 0, truncated: false, status: 'STALE_SOURCE' };
+    return { ...source, candidates: [], truncated: false, status: 'STALE_SOURCE' };
 
   // Limit work in one pass, deduplicate by chain+mint+pool, and make order deterministic.
   const eligible = pairs.filter(p => p.chainId === 'solana'
-    && validText(p.baseAddress) && validText(p.pairAddress)
+    && isSolanaAddress(p.baseAddress) && isSolanaAddress(p.pairAddress)
+    && Number.isFinite(p.liquidityUsd) && p.liquidityUsd >= 0
     && validTs(p.pairCreatedAt ?? 0) && p.pairCreatedAt! <= sourceAsOf
     && sourceAsOf - p.pairCreatedAt! <= FLIN_LAUNCH_WINDOW_MS);
   const unique = new Map<string, DexPair>();
   for (const p of eligible) {
     const id = 'solana:' + p.baseAddress + ':' + p.pairAddress;
-    if (!unique.has(id) || (p.liquidityUsd > (unique.get(id)?.liquidityUsd ?? -Infinity))) unique.set(id, p);
+    const previous = unique.get(id);
+    if (!previous || p.quoteAddress === previous.quoteAddress && p.liquidityUsd > previous.liquidityUsd) unique.set(id, p);
   }
-  const ordered = [...unique.entries()].sort(([a], [b]) => a.localeCompare(b));
-  const limited = ordered.slice(0, FLIN_MAX_BATCH);
+  const ordered = [...unique.entries()].sort(([a, x], [b, y]) =>
+    Number(isKnownSolanaQuote(y.quoteAddress)) - Number(isKnownSolanaQuote(x.quoteAddress)) ||
+    y.liquidityUsd - x.liquidityUsd || a.localeCompare(b));
+  const candidates = ordered.slice(0, FLIN_MAX_BATCH).map(([id, pair]) => ({
+    id, pair, safety: assessDexPair(pair, now), knownQuote: isKnownSolanaQuote(pair.quoteAddress),
+  }));
+  return { ...source, candidates, truncated: ordered.length > FLIN_MAX_BATCH, status: 'OK' };
+}
+
+export function persistFlinPreparation(prepared: FlinPreparation, mints: ReadonlyMap<string, MintObservation>,
+  stillCurrent: () => boolean = () => true): FlinIntakeResult {
+  const { sourceAsOf, observedAt, expiresAt, status, candidates, truncated } = prepared;
+  const basic = { source: 'DEX_PROFILE_OBSERVATION' as const, tradingAuthority: false as const, sourceAsOf, status, truncated };
   let newCandidates = 0, updated = 0, rejected = 0;
-  tx(() => {
-    for (const [id, pair] of limited) {
-      const safety = assessDexPair(pair, now);
-      const state: FlinResearchState = ['REJECTED','HIGH_RISK'].includes(safety.status) ? 'REJECTED' : 'QUARANTINED';
+  if (candidates.length) tx(() => {
+    if (!stillCurrent()) return;
+    for (const { id, pair, safety, knownQuote } of candidates) {
+      const mint = mints.get(pair.baseAddress) ?? null;
+      const state: FlinResearchState = safety.hardLaunchRisk || mint?.status === 'BLOCKED' ? 'REJECTED' : 'QUARANTINED';
       if (state === 'REJECTED') rejected++;
-      const reason = state === 'REJECTED'
-        ? 'DEX_HEURISTIC_RISK:' + safety.status
-        : 'ONCHAIN_PERMISSIONS_AND_EXECUTABLE_SELL_ROUTE_UNVERIFIED';
+      const reason = mint?.status === 'BLOCKED' ? 'ONCHAIN_MINT_RESTRICTION'
+        : safety.hardLaunchRisk ? 'DEX_HEURISTIC_RISK:' + safety.status
+          : 'HOLDERS_POOL_AND_EXECUTABLE_SELL_ROUTE_UNVERIFIED';
       const existing = get<{ source_as_of: number }>('SELECT source_as_of FROM flin_launch_candidates WHERE candidate_id=?', id);
       // A replay with the same source time is not fresh evidence and must not
       // overwrite a quarantine decision or refresh its apparent observation age.
@@ -80,14 +111,19 @@ export function ingestFlinDexSnapshot(
       ON CONFLICT(candidate_id) DO UPDATE SET
         last_seen_at=excluded.last_seen_at,source_as_of=excluded.source_as_of,
         state=excluded.state,reason=excluded.reason,evidence_json=excluded.evidence_json`,
-        id, pair.baseAddress, pair.pairAddress, pair.pairCreatedAt!, now, sourceAsOf,
-        state, reason, J({ source: 'DEX_PROFILE_OBSERVATION', safety, liquidityUsd: pair.liquidityUsd, volume1h: pair.volume1h }),
+        id, pair.baseAddress, pair.pairAddress, pair.pairCreatedAt!, observedAt, sourceAsOf,
+        state, reason, J({ source: 'DEX_PROFILE_OBSERVATION', safety, liquidityUsd: pair.liquidityUsd, volume1h: pair.volume1h,
+          quoteAddress: pair.quoteAddress ?? null, knownQuote, expiresAt, mint }),
       );
       if (existing) updated++; else newCandidates++;
     }
   });
-  return { ...basic, status: 'OK', scanned: limited.length, newCandidates, updated, rejected,
-    truncated: ordered.length > FLIN_MAX_BATCH };
+  return { ...basic, scanned: candidates.length, newCandidates, updated, rejected };
+}
+
+/** Reobserving the same source cannot replace evidence or refresh the age of a candidate. */
+export function ingestFlinDexSnapshot(pairs: readonly DexPair[], sourceAsOf: number, now = Date.now()): FlinIntakeResult {
+  return persistFlinPreparation(prepareFlinDexSnapshot(pairs, sourceAsOf, now), new Map());
 }
 
 export function flinQueueStatus(limit = 10) {

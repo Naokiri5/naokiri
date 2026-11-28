@@ -4,6 +4,7 @@ import { market } from '../src/market/store.js';
 import { acceptPolicy, DEFAULT_POLICY } from '../src/risk/policy.js';
 import { updateControl } from '../src/core/mode.js';
 import { ledger, openPositions, PAPER_ACCOUNT } from '../src/portfolio/ledger.js';
+import { reconcile } from '../src/portfolio/calendar.js';
 import { all, get, run } from '../src/db/db.js';
 import { config } from '../src/config.js';
 import { currentLease, tryAcquireLease } from '../src/ops/lease.js';
@@ -107,6 +108,24 @@ describe('engine lease hardening (additive to holdEngine)', () => {
     expect(openPositions()).toHaveLength(0);
     expect(botStatus.settlementRescans).toBe(before + 1);
     await settleScan();
+  });
+
+  it('manages protective exits for two concurrent PAPER instruments independently', async () => {
+    const next = seedInstrument('SOLUSDT', { seed: 3 });
+    await _test.protectionLane();
+    _test.onDecision(report(id, last));
+    _test.onDecision(report(next.inst.id, next.last));
+    expect(openPositions().map((position) => position.instrument)).toEqual(expect.arrayContaining([id, next.inst.id]));
+
+    setBook(id, last * 0.96);
+    await _test.protectionLane();
+    expect(openPositions().map((position) => position.instrument)).toEqual([next.inst.id]);
+
+    setBook(next.inst.id, next.last * 0.96);
+    await _test.protectionLane();
+    expect(openPositions()).toHaveLength(0);
+    expect(count('fills')).toBe(4);
+    expect(reconcile()).toMatchObject({ ok: true, closedPositions: 2 });
   });
 
   it('retries settlements during the cooldown, including a committed close with no post-commit notification', async () => {
