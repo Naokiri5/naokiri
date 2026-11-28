@@ -1,0 +1,191 @@
+.mia-joe-layout.mia-joe-workspace {
+  --joe-gutter: clamp(14px, 2vw, 24px);
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 300px);
+  gap: var(--joe-gutter);
+  margin-top: 16px;
+}
+
+.mia-joe-conversation .mia-chat {
+  padding: 0 var(--joe-gutter) var(--joe-gutter);
+}
+
+.mia-joe-conversation .mia-chat-header {
+  justify-content: space-between;
+  margin-inline: calc(-1 * var(--joe-gutter));
+  min-height: 52px;
+  padding-inline: var(--joe-gutter);
+}
+
+.mia-chat-mode {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mia-joe-conversation .mia-chat-transcript {
+  height: clamp(260px, 42vh, 520px);
+  padding: 12px 2px;
+}
+
+.mia-chat-transcript:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.mia-joe-conversation .mia-chat-transcript[data-empty='true'] {
+  height: auto;
+  min-height: 62px;
+}
+
+.mia-joe-conversation .mia-chat-empty {
+  align-items: flex-start;
+  padding: 4px 0;
+  text-align: start;
+}
+
+.mia-joe-conversation .mia-chat .msg {
+  font-size: 14px;
+  border-radius: 8px;
+}
+
+.mia-joe-conversation .mia-chat .msg.assistant {
+  padding-inline: 0;
+  background: transparent;
+  border: 0;
+}
+
+.mia-joe-conversation .mia-chat-author {
+  margin-bottom: 3px;
+  color: var(--text);
+}
+
+.mia-chat-composer {
+  display: grid;
+  gap: 8px;
+}
+
+.mia-joe-conversation .mia-chat-composer {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.mia-joe-conversation .mia-chat-prompts {
+  gap: 6px;
+}
+
+.mia-joe-conversation .mia-chat-prompts button {
+  min-height: 36px;
+  background: transparent;
+}
+
+.mia-joe-conversation .mia-chat-form :is(input, button) {
+  min-height: 44px;
+}
+
+.mia-joe-conversation .mia-chat-form button {
+  justify-content: center;
+  min-width: 68px;
+}
+
+.mia-joe-workspace .mia-joe-studio-panel > .bd {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.mia-joe-studio-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.mia-joe-studio-heading button {
+  min-height: 32px;
+}
+
+.mia-joe-studio-panel .mia-joe-stage {
+  aspect-ratio: 4 / 3;
+  max-height: 250px;
+  border-radius: 8px;
+  background: #161418;
+}
+
+.mia-joe-studio-panel .mia-joe-fallback {
+  grid-template-rows: minmax(0, 1fr);
+  position: absolute;
+  inset: 0;
+  padding: 6px;
+}
+
+.mia-joe-studio-panel .mia-joe-fallback img {
+  display: block;
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.mia-joe-studio-panel .mia-joe-studio-status .badge {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font-size: 12px;
+}
+
+.mia-joe-studio-panel .mia-joe-studio-status .badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.mia-joe-workspace-links {
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.mia-joe-workspace-links h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mia-joe-workspace-links ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mia-joe-workspace-links a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  gap: 8px;
+  color: var(--text);
+}
+
+.mia-joe-workspace-links a svg {
+  flex: none;
+  color: var(--muted);
+}
+
+@media (max-width: 760px) {
+  .mia-joe-layout.mia-joe-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mia-joe-conversation .mia-chat-transcript {
+    height: clamp(140px, 27svh, 250px);
+  }
+
+  .mia-joe-workspace-links a {
+    min-height: 44px;
+  }
+}

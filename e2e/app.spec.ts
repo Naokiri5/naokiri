@@ -94,13 +94,13 @@ test('FAST and DEEP inspect existing research without changing execution mode', 
 
 test('server readiness explains the disabled session controls and the Live lock', async () => {
   await page.goto('/app');
-  const session = page.getByRole('region', { name: 'MIA Autopilot' });
-  await expect(session.getByText('Preflight checked', { exact: true })).toBeVisible();
+  const session = page.getByRole('region', { name: 'Trading session' });
+  await expect(session.getByRole('status')).toContainText('Paper session blocked');
   // FAST and DEEP report server readiness; neither research pathway is presented as executable.
   const lanes = page.getByRole('group', { name: 'Intelligence view' });
   for (const lane of ['FAST', 'DEEP']) {
     await expect(lanes.getByRole('button', { name: lane })).toContainText('Research only');
-    await expect(lanes.getByRole('button', { name: lane })).toContainText('Execution is not certified.');
+    await expect(lanes.getByRole('button', { name: lane })).toHaveAccessibleDescription(/Execution is not certified\./);
   }
   await expect(session.getByText(/No active mandate\. Run Session asks you to authorize capital/)).toBeVisible();
   await expect(session.getByRole('button', { name: 'Run Session' })).toBeDisabled();
@@ -159,7 +159,7 @@ test('swipe authorization: Enter in a field, a repeated key or a plain click nev
   await page.route('**/api/session/paper-spot/run', (route) => { runs++; return route.fulfill({ json: { state: 'RUNNING' } }); });
   try {
     await page.goto('/autopilot');
-    const session = page.getByRole('region', { name: 'MIA Autopilot' });
+    const session = page.getByRole('region', { name: 'Trading session' });
     await session.getByRole('button', { name: 'Run Session' }).click();
     const sheet = page.getByRole('dialog');
     await expect(sheet.getByText('Withdrawal permission')).toBeVisible();
@@ -416,6 +416,15 @@ test('mobile layout has no horizontal overflow', async ({ browser }) => {
   for (const r of ['/', '/app', '/scanner', '/bot', '/risk', '/lab', '/intelligence', '/qhef', '/history', '/academy']) { await m.goto(r); await expect(m.locator('h1')).toBeVisible(); expect(await m.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), r).toBe(true); }
   await expect(m.getByRole('group', { name: 'Autopilot status' }).locator('[data-seg=live]')).toBeInViewport();
   await m.goto('/autopilot');
+  const environment = m.getByRole('group', { name: 'Execution environment' });
+  const paper = environment.getByRole('button', { name: 'Paper', exact: true });
+  const live = environment.getByRole('button', { name: 'Live locked' });
+  await expect(paper).toBeInViewport();
+  await expect(m.getByRole('button', { name: 'Run Session' })).toBeInViewport();
+  await expect(m.getByText('Market data is stale or disconnected')).toBeInViewport();
+  await paper.focus();
+  await m.keyboard.press('Tab');
+  await expect(live).toBeFocused();
   const chart = await m.getByRole('heading', { name: 'FAST market view' }).boundingBox();
   const positions = await m.getByRole('heading', { name: 'Open positions', exact: true }).boundingBox();
   const activity = await m.getByRole('heading', { name: 'MIA Activity' }).boundingBox();

@@ -91,6 +91,7 @@ test('mobile navigation exposes the same four destinations and command search wi
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 } });
   await login(mobile);
   const bar = mobile.getByRole('navigation', { name: 'Main' });
+  await expect(bar).toBeInViewport();
   await expect(bar.getByRole('link')).toHaveCount(4);
   for (const [name, path] of DESTINATIONS) {
     const link = bar.getByRole('link', { name, exact: true });
@@ -105,6 +106,29 @@ test('mobile navigation exposes the same four destinations and command search wi
   await expect(palette).toBeHidden();
   expect(await mobile.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await mobile.close();
+});
+
+test('asset search supports keyboard selection beyond the first result', async () => {
+  await page.route('**/api/markets/search?**', (route) => route.fulfill({ json: [
+    { id: 'btc', base: 'BTC', symbol: 'BTCUSDT' },
+    { id: 'eth', base: 'ETH', symbol: 'ETHUSDT' },
+  ] }));
+  try {
+    await page.goto('/app');
+    const search = page.getByRole('searchbox', { name: 'Search assets' });
+    await search.fill('usdt');
+    const results = page.getByRole('list', { name: 'Matching assets' });
+    const eth = results.getByRole('button', { name: /ETHUSDT/ });
+    await expect(eth).toBeVisible();
+    await search.press('Tab');
+    await page.keyboard.press('Tab');
+    await expect(eth).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/terminal\/ETHUSDT$/);
+    await expect(results).toBeHidden();
+  } finally {
+    await page.unroute('**/api/markets/search?**');
+  }
 });
 
 test('no uncaught frontend errors during navigation', async () => {

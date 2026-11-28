@@ -29,6 +29,6 @@ export function StatusRibbon({ shell }: { shell: ShellState }) {
 export function StaleBanner({ shell }: { shell: ShellState }) {
   const model = useRibbon(shell);
   if (!model.stale) return null;
-  return <div className="banner stale"><span role="alert">⚠ Lost contact with the MIA server. Everything on screen may be out of date until the link recovers.</span>
+  return <div className="banner stale"><span role="alert">Lost contact with the MIA server. Everything on screen may be out of date until the link recovers.</span>
     <span>Status last confirmed {model.lastConfirmedAgo ? `${model.lastConfirmedAgo} ago` : 'never'}.</span></div>;
 }
